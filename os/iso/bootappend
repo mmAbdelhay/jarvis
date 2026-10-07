@@ -1,1 +1,1 @@
-boot=live components quiet hostname=jarvis username=jarvis user-fullname=Jarvis user-default-groups=audio,video,render,input,cdrom,plugdev,netdev,sudo,systemd-journal,jarvis-admins locales=en_US.UTF-8 timezone=Etc/UTC
+boot=live components quiet splash hostname=jarvis username=jarvis user-fullname=Jarvis user-default-groups=audio,video,render,input,cdrom,plugdev,netdev,sudo,systemd-journal,jarvis-admins locales=en_US.UTF-8 timezone=Etc/UTC

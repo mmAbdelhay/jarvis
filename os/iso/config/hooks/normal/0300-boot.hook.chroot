@@ -1,0 +1,26 @@
+#!/bin/sh
+# Boot and login wiring baked into the image the installer copies
+# (design §6, §7). Runs after 0200-session.
+set -e
+
+# jarvis-branding's postinst made "jarvis" the Plymouth theme.
+[ "$(plymouth-set-default-theme)" = jarvis ]
+
+# Unlock the user's login keyring with the password typed in the greeter, so
+# provider keys in Secret Service open without a prompt on installed systems.
+pam=/etc/pam.d/greetd
+if ! grep -q pam_gnome_keyring "$pam"; then
+  printf '%s\n' '-auth optional pam_gnome_keyring.so' '-session optional pam_gnome_keyring.so auto_start' >> "$pam"
+fi
+
+# Initramfs with cryptsetup and the Plymouth theme (installed systems) and
+# live-boot (this ISO).
+update-initramfs -u -k all
+
+# The image must never autologin (Review Focus 1): the live session's config
+# is written at boot by live-config.
+if grep -q '^\[initial_session\]' /etc/greetd/config.toml; then
+  echo "0300-boot: /etc/greetd/config.toml in the image has an initial_session" >&2
+  exit 1
+fi
+grep -q 'cage -s -- jarvis-greeter' /etc/greetd/config.toml

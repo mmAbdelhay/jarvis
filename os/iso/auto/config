@@ -1,7 +1,9 @@
 #!/bin/sh
-# live-build configuration for the Jarvis OS M1 live ISO (design §9).
+# live-build configuration for the live/installer ISO (M2 design §2, §7, §11).
 # `lb config` runs this from the build directory, where build.sh has copied
-# os/iso/bootappend; do not run it directly.
+# os/iso/bootappend and os/branding/brand.env; do not run it directly.
+# UEFI only: GRUB (Debian-signed, behind Microsoft-signed shim) is the only
+# bootloader; no BIOS/isolinux entry.
 set -e
 # shellcheck source=../../branding/brand.env
 . ./brand.env
@@ -28,7 +30,8 @@ lb config noauto \
   --firmware-chroot false \
   --memtest none \
   --binary-images iso-hybrid \
-  --bootloaders "syslinux,grub-efi" \
+  --bootloaders grub-efi \
+  --uefi-secure-boot enable \
   --iso-application "$DISTRO_NAME" \
   --iso-publisher "$DISTRO_NAME" \
   --iso-volume "$ISO_VOLUME" \

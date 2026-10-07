@@ -13,7 +13,7 @@ check "auto/clean parses" sh -n "$ISO_DIR/auto/clean"
 check "trixie" grep -q -- '--distribution trixie' "$auto"
 check "amd64" grep -q -- '--architectures amd64' "$auto"
 check "archive areas" grep -q -- '--archive-areas "main contrib non-free-firmware"' "$auto"
-check "hybrid ISO" grep -q -- '--binary-images iso-hybrid' "$auto"
+check "ISO disk image" grep -q -- '--binary-images iso-hybrid' "$auto"
 check "apt indices kept (pkg.install needs them)" grep -q -- '--apt-indices true' "$auto"
 
 check "bootappend is one line" test "$(wc -l < "$ISO_DIR/bootappend")" -eq 1
@@ -62,5 +62,28 @@ assert u["Unit"]["StartLimitIntervalSec"] == "0"
 assert u["Install"]["WantedBy"] == "multi-user.target"
 PY
 check "session hook requires jarvis-admins" grep -q 'jarvis-admins' "$ISO_DIR/config/hooks/normal/0200-session.hook.chroot"
+
+# --- M2: UEFI only, Secure Boot, brand (design §2, §7, §11; contracts §9) ---
+check "UEFI only: grub-efi is the only bootloader" grep -q -- '--bootloaders grub-efi \\' "$auto"
+check "no syslinux/isolinux" bash -c "! grep -q syslinux '$auto'"
+check "secure boot via shim" grep -q -- '--uefi-secure-boot enable' "$auto"
+check "volume from the brand" grep -Fq -- '--iso-volume "$ISO_VOLUME"' "$auto"
+check "application from the brand" grep -Fq -- '--iso-application "$DISTRO_NAME"' "$auto"
+check "auto/config sources brand.env" grep -qx '. ./brand.env' "$auto"
+check "bootappend has splash (Plymouth)" grep -qw splash <<<"$append"
+for p in plymouth cryptsetup cryptsetup-initramfs grub-efi-amd64 grub-efi-amd64-signed shim-signed efibootmgr \
+  mokutil os-prober ntfs-3g gdisk dosfstools e2fsprogs squashfs-tools cage libpam-gnome-keyring \
+  jarvis-ui jarvis-greeter jarvis-installer jarvis-installer-backend jarvis-model-fetch jarvis-ollama \
+  jarvis-models-catalog jarvis-archive-keyring jarvis-branding; do
+  check "lists include $p" grep -qx "$p" <<<"$all_packages"
+done
+check "no grub-pc (BIOS) anywhere" bash -c "! grep -qx 'grub-pc' <<<\"\$1\"" _ "$all_packages"
+hook=$ISO_DIR/config/hooks/normal/0300-boot.hook.chroot
+check "boot hook rebuilds the initramfs" grep -q 'update-initramfs -u -k all' "$hook"
+check "boot hook requires the jarvis Plymouth theme" grep -q 'plymouth-set-default-theme' "$hook"
+check "boot hook wires gnome-keyring into greetd PAM" grep -q 'pam_gnome_keyring.so auto_start' "$hook"
+check "boot hook refuses an autologin in the image" grep -q 'initial_session' "$hook"
+
+check "daily APT lists refresh" grep -Fxq 'APT::Periodic::Update-Package-Lists "1";' "$ISO_DIR/config/includes.chroot_after_packages/etc/apt/apt.conf.d/20jarvis-periodic"
 
 finish

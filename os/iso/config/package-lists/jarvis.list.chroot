@@ -4,3 +4,12 @@ jarvis-shell
 jarvis-pkg
 jarvis-diag
 jarvis-helper
+jarvis-ui
+jarvis-greeter
+jarvis-installer
+jarvis-installer-backend
+jarvis-model-fetch
+jarvis-ollama
+jarvis-models-catalog
+jarvis-archive-keyring
+jarvis-branding

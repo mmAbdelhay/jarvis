@@ -1,12 +1,16 @@
 #!/bin/sh
-# Jarvis OS session autostart; labwc runs this with sh at start.
+# Session autostart; labwc runs this with sh at start, live and installed.
 
-# The live session autologins, so there is no password to unlock the login
-# keyring with: unlock (or create) it with an empty one, so provider keys can
-# be stored in Secret Service without a prompt (design §4). jarvisd reads keys
-# lazily and retries, because this runs after it starts (contracts §6 #12).
-printf '' | gnome-keyring-daemon --unlock --components=secrets >/dev/null 2>&1 &
+# Live session only: it autologins, so there is no password to unlock the
+# login keyring with; unlock (or create) it with an empty one (M1 design §4).
+# Installed systems unlock it with the login password via greetd's PAM
+# (hook 0300-boot) and must never get an empty-password keyring.
+if [ -d /run/live/medium ]; then
+  printf '' | gnome-keyring-daemon --unlock --components=secrets >/dev/null 2>&1 &
+fi
 
-# jarvis-shell and the loop that relaunches it when it exits (design §10).
-# The loop is Plan C's, installed by the jarvis-shell package (contracts §6 #20).
+# jarvis-shell and the loop that relaunches it (Plan C/E).
 . /usr/share/jarvis-shell/labwc/autostart
+
+# The installer exists only on the live ISO (removed on installed systems).
+if [ -x /usr/bin/jarvis-installer ]; then jarvis-installer & fi

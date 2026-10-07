@@ -1,0 +1,21 @@
+#!/bin/sh
+# live-config (runs on live boots only, before greetd): the live session
+# autologins user "jarvis" into labwc. Installed systems never run this:
+# the installer removes live-config, and the image's own greetd config is
+# jarvis-greeter's login screen (Review Focus 1).
+set -e
+root=${LIVE_ROOT:-}
+mkdir -p "$root/etc/greetd"
+cat > "$root/etc/greetd/config.toml" <<'EOF'
+# Live session (written at boot by /usr/lib/live/config/2000-jarvis-live-session).
+[terminal]
+vt = 7
+
+[initial_session]
+command = "labwc"
+user = "jarvis"
+
+[default_session]
+command = "agreety --cmd labwc"
+user = "_greetd"
+EOF
