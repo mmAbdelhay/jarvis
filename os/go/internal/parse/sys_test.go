@@ -13,6 +13,9 @@ func TestDf(t *testing.T) {
 	if got[0] != (Filesystem{"/", 4123459584, 987654144}) {
 		t.Errorf("root = %+v", got[0])
 	}
+	if got[1].Mount != "/run/live/medium" {
+		t.Errorf("full fs mount = %+v", got[1])
+	}
 	if got[3].Mount != "/media/jarvis/USB DISK" || got[3].UsedBytes != 2147483648 {
 		t.Errorf("mount with a space = %+v", got[3])
 	}

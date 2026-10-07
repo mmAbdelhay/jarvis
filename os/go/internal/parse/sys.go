@@ -33,7 +33,11 @@ func Df(out string) []Filesystem {
 		if err1 != nil || err2 != nil {
 			continue
 		}
-		mount := strings.TrimSpace(line[:strings.LastIndex(line, f[len(f)-2])])
+		rest := strings.TrimRight(line, " \t\r")
+		for k := 0; k < 2; k++ {
+			rest = strings.TrimRight(rest[:strings.LastIndexAny(rest, " \t")], " \t")
+		}
+		mount := strings.TrimSpace(rest)
 		res = append(res, Filesystem{Mount: mount, SizeBytes: size, UsedBytes: used})
 	}
 	return res
