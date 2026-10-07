@@ -8,3 +8,4 @@ export * from "./probe.js";
 export * from "./anthropic.js";
 export * from "./keyring.js";
 export * from "../mcp/stdio-client.js";
+export * from "./audit-log.js";
