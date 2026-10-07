@@ -1,0 +1,15 @@
+# Firmware and microcode for common laptops and desktops (non-free-firmware).
+# Chosen explicitly instead of --firmware-chroot, which installs every
+# firmware package and would blow the ~1.2 GB ISO target.
+firmware-linux-free
+firmware-misc-nonfree
+firmware-realtek
+firmware-iwlwifi
+firmware-atheros
+firmware-brcm80211
+firmware-mediatek
+firmware-amd-graphics
+firmware-intel-graphics
+firmware-intel-sound
+intel-microcode
+amd64-microcode

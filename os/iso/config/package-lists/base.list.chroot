@@ -1,0 +1,17 @@
+# Live-system plumbing. live-build adds the kernel for --linux-flavours amd64.
+# --apt-recommends false keeps the image small, so recommends we need are listed.
+live-boot
+live-boot-initramfs-tools
+live-config
+live-config-systemd
+user-setup
+systemd-sysv
+dbus-user-session
+sudo
+locales
+ca-certificates
+procps
+iproute2
+iputils-ping
+kmod
+less

@@ -1,0 +1,9 @@
+# What the Jarvis tools drive (design §6, contracts §6 #20).
+dbus-daemon
+network-manager
+network-manager-config-connectivity-debian
+wpasupplicant
+rfkill
+pciutils
+usbutils
+flatpak

@@ -1,0 +1,16 @@
+# The Wayland session (design §9): greetd autologin -> labwc -> jarvis-shell.
+greetd
+labwc
+foot
+xwayland
+qt6-wayland
+layer-shell-qt
+fonts-ibm-plex
+libgl1-mesa-dri
+pipewire
+pipewire-pulse
+wireplumber
+polkitd
+gnome-keyring
+# secret-tool, to inspect the keyring from the Ctrl+Alt+T terminal.
+libsecret-tools

@@ -1,0 +1,24 @@
+#!/bin/sh
+# Session wiring that needs the installed packages (design §9, contracts §4).
+set -e
+
+# Boot to the graphical target through greetd. The autologin itself is
+# /etc/greetd/config.toml from includes.chroot_after_packages.
+systemctl set-default graphical.target
+systemctl enable greetd.service
+
+# greetd's fallback greeter runs as this user (created by the greetd package).
+getent passwd _greetd >/dev/null
+
+# live-config adds the live user only to groups that exist (contracts §4).
+for group in systemd-journal netdev sudo; do
+  getent group "$group" >/dev/null || groupadd --system "$group"
+done
+# jarvis-admins comes from jarvis-helper's postinst; the polkit rule that
+# lets jarvisd's tools use the helper trusts it (contracts §6 #19).
+getent group jarvis-admins >/dev/null
+test -f /usr/share/polkit-1/rules.d/50-jarvis.rules
+
+# jarvisd's postinst enables the user unit for every user; stop the build
+# here if that did not happen, rather than shipping an ISO with no agent.
+test -L /etc/systemd/user/default.target.wants/jarvisd.service

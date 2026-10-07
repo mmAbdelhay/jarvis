@@ -1,0 +1,34 @@
+#!/bin/sh
+# live-build configuration for the Jarvis OS M1 live ISO (design §9).
+# `lb config` runs this from the build directory, where build.sh has copied
+# os/iso/bootappend; do not run it directly.
+set -e
+
+lb config noauto \
+  --mode debian \
+  --distribution trixie \
+  --architectures amd64 \
+  --linux-flavours amd64 \
+  --archive-areas "main contrib non-free-firmware" \
+  --mirror-bootstrap http://deb.debian.org/debian/ \
+  --mirror-chroot http://deb.debian.org/debian/ \
+  --mirror-binary http://deb.debian.org/debian/ \
+  --mirror-chroot-security http://deb.debian.org/debian-security/ \
+  --mirror-binary-security http://deb.debian.org/debian-security/ \
+  --security true \
+  --updates true \
+  --initsystem systemd \
+  --apt-recommends false \
+  --apt-indices true \
+  --cache true \
+  --cache-packages true \
+  --firmware-binary false \
+  --firmware-chroot false \
+  --memtest none \
+  --binary-images iso-hybrid \
+  --bootloaders "syslinux,grub-efi" \
+  --iso-application "Jarvis OS" \
+  --iso-publisher "Jarvis OS" \
+  --iso-volume "JARVIS_OS_M1" \
+  --bootappend-live "$(cat bootappend)" \
+  "${@}"

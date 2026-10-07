@@ -1,0 +1,19 @@
+# Fetch Flathub's appstream on boot when the ISO was built without it (the
+# build-time fetch in 0100-flathub.hook.chroot is a soft failure). Does
+# nothing when the appstream is present; otherwise retries every minute until
+# the network is up and Flathub answers.
+[Unit]
+Description=Fetch Flathub appstream data
+ConditionPathExists=!/var/lib/flatpak/appstream/flathub/x86_64/active
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/flatpak update --system --appstream flathub
+Restart=on-failure
+RestartSec=60
+
+[Install]
+WantedBy=multi-user.target
