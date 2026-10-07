@@ -5,6 +5,10 @@
 // Restart=on-failure brings jarvisd back after a crash (spec §10); the shell
 // shows "reconnecting" meanwhile. Exit 3 (another jarvisd) is not retried.
 //
+// ExecStart is unquoted on purpose: contracts §6 #16 fixes this exact line
+// and Plan D's packaging (os/packaging/jarvisd/stage.sh) refuses any other.
+// Both paths are constants with no spaces or specifiers, so no quoting is needed.
+//
 // No electron here (core/no-electron.test.ts).
 export const OS_NODE = "/usr/lib/jarvis/node/bin/node";
 export const OS_DAEMON_SCRIPT = "/usr/lib/jarvis/daemon/jarvisd.mjs";
@@ -16,7 +20,7 @@ StartLimitIntervalSec=300
 StartLimitBurst=5
 
 [Service]
-ExecStart="${OS_NODE}" "${OS_DAEMON_SCRIPT}" "run"
+ExecStart=${OS_NODE} ${OS_DAEMON_SCRIPT} run
 Environment=JARVISD_SUPERVISOR=systemd
 Restart=on-failure
 RestartSec=2

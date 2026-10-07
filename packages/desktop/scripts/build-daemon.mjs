@@ -21,7 +21,8 @@ await build({
   format: "esm",
   target: "node24",
   sourcemap: "linked",
-  legalComments: "linked",
+  // Inline, so dist-daemon holds exactly the four files of contracts §6 #16.
+  legalComments: "eof",
   // A CommonJS dependency that calls require() inside an ES module bundle needs one.
   banner: {
     js: 'import { createRequire as __jarvisRequire } from "node:module"; const require = __jarvisRequire(import.meta.url);',

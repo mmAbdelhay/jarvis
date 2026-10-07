@@ -5,8 +5,9 @@ describe("buildOsDaemonUnit", () => {
   const unit = buildOsDaemonUnit();
 
   it("runs the bundle with the bundled Node under systemd supervision", () => {
-    expect(unit).toContain(
-      'ExecStart="/usr/lib/jarvis/node/bin/node" "/usr/lib/jarvis/daemon/jarvisd.mjs" "run"',
+    // contracts §6 #16: the exact line Plan D's packaging checks for.
+    expect(unit.split("\n")).toContain(
+      "ExecStart=/usr/lib/jarvis/node/bin/node /usr/lib/jarvis/daemon/jarvisd.mjs run",
     );
     expect(unit).toContain("Environment=JARVISD_SUPERVISOR=systemd");
   });
