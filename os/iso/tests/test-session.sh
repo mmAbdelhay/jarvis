@@ -44,15 +44,22 @@ check "autostart sources C's relaunch loop" grep -qx '. /usr/share/jarvis-shell/
 check "environment is KEY=VALUE lines" bash -c "! grep -Ev '^(#.*|[A-Z_]+=.*|)$' '$inc/etc/xdg/labwc/environment'"
 check "Qt uses Wayland" grep -qx 'QT_QPA_PLATFORM=wayland' "$inc/etc/xdg/labwc/environment"
 
-# Review Focus 2: C's loop relaunches a shell that keeps exiting.
-if [ -f "$c_labwc/autostart" ]; then
-  mkdir -p "$tmp/bin"
-  printf '#!/bin/sh\necho run >> "%s/runs"\nexit 1\n' "$tmp" > "$tmp/bin/jarvis-shell"
+# Review Focus 2: C's loop relaunches a shell that keeps exiting, and stops
+# once the compositor's Wayland socket is gone (C's back-off loop).
+c_loop=$REPO_ROOT/os/shell/data/jarvis-shell-loop
+if [ -f "$c_labwc/autostart" ] && [ -f "$c_loop" ]; then
+  check "autostart backgrounds C's loop" grep -qx '/usr/share/jarvis-shell/jarvis-shell-loop &' "$c_labwc/autostart"
+  mkdir -p "$tmp/bin" "$tmp/xdg"
+  : > "$tmp/xdg/wayland-test"
+  # The fake shell exits at once; on its third run it removes the socket.
+  printf '#!/bin/sh\necho run >> "%s/runs"\n[ "$(wc -l < "%s/runs")" -ge 3 ] && rm -f "%s/xdg/wayland-test"\nexit 1\n' \
+    "$tmp" "$tmp" "$tmp" > "$tmp/bin/jarvis-shell"
   chmod +x "$tmp/bin/jarvis-shell"
-  PATH="$tmp/bin:$PATH" setsid sh -c '. "$1"; sleep 3.5; kill 0' sh "$c_labwc/autostart" 2>/dev/null || true
-  check "relaunch loop restarts the shell" test "$(wc -l < "$tmp/runs")" -ge 3
+  XDG_RUNTIME_DIR="$tmp/xdg" WAYLAND_DISPLAY=wayland-test JARVIS_SHELL_BIN="$tmp/bin/jarvis-shell" \
+    JARVIS_LOOP_SLEEP=true timeout 10 sh "$c_loop" || true
+  check "relaunch loop restarts the shell, then stops with the socket" test "$(wc -l < "$tmp/runs")" -eq 3
 else
-  echo "SKIP: Plan C's os/shell/data/labwc/autostart not landed yet" >&2
+  echo "SKIP: Plan C's os/shell/data/labwc/autostart or jarvis-shell-loop not landed yet" >&2
 fi
 
 finish
