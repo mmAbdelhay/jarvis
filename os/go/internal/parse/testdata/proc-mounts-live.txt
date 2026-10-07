@@ -1,0 +1,6 @@
+sysfs /sys sysfs rw,nosuid,nodev,noexec,relatime 0 0
+proc /proc proc rw,nosuid,nodev,noexec,relatime 0 0
+/dev/sdb1 /run/live/medium iso9660 ro,noatime 0 0
+/dev/loop0 /run/live/rootfs/filesystem.squashfs squashfs ro,noatime 0 0
+overlay / overlay rw,noatime 0 0
+/dev/nvme0n1p1 /media/user/My\040Files vfat rw 0 0
