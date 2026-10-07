@@ -27,4 +27,6 @@ test -x os/shell/build/stage/usr/bin/jarvis-shell
 test -f os/shell/build/stage/usr/share/jarvis-shell/labwc/rc.xml
 test -f os/shell/build/stage/usr/share/jarvis-shell/labwc/autostart
 test -x os/shell/build/stage/usr/share/jarvis-shell/jarvis-shell-loop
+# Jarvis.UI ships in its own package (jarvis-ui), never inside jarvis-shell.
+test -z "$(find os/shell/build/stage -path '*Jarvis/UI*' -print -quit)"
 echo "jarvis-shell: build, tests and install layout OK"

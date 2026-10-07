@@ -1,4 +1,5 @@
 import QtQuick
+import Jarvis.UI
 import QtQuick.Layouts
 import QtQuick.Controls.Basic
 
@@ -156,7 +157,7 @@ ColumnLayout {
     RowLayout {
         Layout.fillWidth: true
         spacing: 12
-        ShellButton {
+        ActionButton {
             objectName: "checkButton"
             visible: root.provider.probeState === "idle"
             variant: "ghost"
@@ -194,7 +195,7 @@ ColumnLayout {
                     color: Theme.text
                     wrapMode: Text.Wrap
                 }
-                ShellButton {
+                ActionButton {
                     visible: root.provider.probeState !== "probing" && root.provider.probeState !== "saving"
                     variant: "ghost"
                     implicitHeight: 36

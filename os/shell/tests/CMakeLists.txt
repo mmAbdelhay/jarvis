@@ -25,15 +25,16 @@ endforeach()
 # One QuickTest runner executes every tests/qml/tst_*.qml file.
 qt_add_executable(tst_qml qml/tst_qml.cpp)
 target_link_libraries(tst_qml PRIVATE jarvis_shell_core jarvis_shell_coreplugin Qt6::QuickTest)
-target_compile_definitions(tst_qml PRIVATE QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml")
+target_compile_definitions(tst_qml PRIVATE QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml" JARVIS_QML_DIR="${QT_QML_OUTPUT_DIRECTORY}")
+add_dependencies(tst_qml jarvis_ui)
 add_test(NAME tst_qml COMMAND tst_qml)
 set_tests_properties(tst_qml PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" LABELS qml TIMEOUT 120)
 
 # The published runtime QML module list must cover every import (contracts §6.18).
 add_test(NAME qml_imports_listed
   COMMAND ${CMAKE_COMMAND} -DQML_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../src/qml
-          -DMAP=${CMAKE_CURRENT_SOURCE_DIR}/../deps/qml-runtime.txt
-          -P ${CMAKE_CURRENT_SOURCE_DIR}/check_qml_imports.cmake)
+          -DMAP=${CMAKE_CURRENT_SOURCE_DIR}/../deps/qml-runtime.txt -DSKIP=Jarvis.Shell
+          -P ${CMAKE_CURRENT_SOURCE_DIR}/../../ui/cmake/check_qml_imports.cmake)
 set_tests_properties(qml_imports_listed PROPERTIES LABELS unit)
 
 # Design §3.1: the channels the shell hard-codes match @jarvis/wire's list.

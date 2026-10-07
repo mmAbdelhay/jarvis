@@ -1,4 +1,5 @@
 import QtQuick
+import Jarvis.UI
 import QtQuick.Layouts
 import QtQuick.Controls.Basic
 
@@ -47,14 +48,14 @@ Item {
 
             RowLayout {
                 Layout.fillWidth: true
-                ShellButton {
+                ActionButton {
                     visible: root.provider.probeState === "error" && root.doctorAvailable
                     variant: "ghost"
                     text: "Open Network doctor"
                     onClicked: root.doctorRequested()
                 }
                 Item { Layout.fillWidth: true }
-                ShellButton {
+                ActionButton {
                     objectName: "saveButton"
                     variant: "primary"
                     text: root.provider.probeState === "saving" ? "Saving…" : "Save"

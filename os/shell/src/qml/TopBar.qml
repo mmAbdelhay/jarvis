@@ -1,4 +1,5 @@
 import QtQuick
+import Jarvis.UI
 import QtQuick.Layouts
 
 // 44 px top bar: logo, active model pill, reachability, clock.

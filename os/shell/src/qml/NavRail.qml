@@ -1,4 +1,5 @@
 import QtQuick
+import Jarvis.UI
 import QtQuick.Layouts
 
 // 72 px rail: chat, activity log, settings; terminal pinned at the bottom.

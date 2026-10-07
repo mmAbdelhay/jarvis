@@ -1,4 +1,5 @@
 import QtQuick
+import Jarvis.UI
 import QtTest
 import Jarvis.Shell
 

@@ -1,4 +1,5 @@
 import QtQuick
+import Jarvis.UI
 import QtQuick.Layouts
 import QtQuick.Controls.Basic
 
@@ -31,7 +32,7 @@ Rectangle {
             color: Theme.warnBannerText
             elide: Text.ElideRight
         }
-        ShellButton {
+        ActionButton {
             objectName: "bannerDoctor"
             visible: root.showDoctor
             variant: "ghost"
@@ -39,7 +40,7 @@ Rectangle {
             text: "Network doctor"
             onClicked: root.doctorRequested()
         }
-        ShellButton {
+        ActionButton {
             objectName: "bannerSettings"
             visible: root.showSettings
             variant: "ghost"

@@ -1,4 +1,5 @@
 import QtQuick
+import Jarvis.UI
 import QtQuick.Layouts
 import QtQuick.Controls.Basic
 
@@ -214,7 +215,7 @@ Rectangle {
                 font.pixelSize: Theme.fontSmall
                 wrapMode: Text.Wrap
             }
-            ShellButton {
+            ActionButton {
                 id: denyButton
                 objectName: "denyButton"
                 variant: "quiet"
@@ -222,7 +223,7 @@ Rectangle {
                 enabled: root.card.active
                 onClicked: root.decided(false)
             }
-            ShellButton {
+            ActionButton {
                 id: approveButton
                 objectName: "approveButton"
                 variant: "approve"

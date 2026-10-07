@@ -21,6 +21,11 @@ endif()
 include(GNUInstallDirs)
 include(CTest)
 
+# Shared look (contracts §7 jarvis-ui): build Jarvis.UI next to us so tests and
+# qmlcachegen find it in <build>/qml; at runtime it comes from the jarvis-ui package.
+set(QT_QML_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/qml)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../ui ${CMAKE_BINARY_DIR}/jarvis-ui EXCLUDE_FROM_ALL)
+
 add_subdirectory(src)
 if(BUILD_TESTING)
   find_package(Qt6 6.8 REQUIRED COMPONENTS Test QuickTest)
