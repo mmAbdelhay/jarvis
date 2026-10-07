@@ -167,6 +167,23 @@ describe("createAnthropicProvider.chat", () => {
       expect((failure as ProviderError).message).not.toContain("sk-ant-");
     },
   );
+  it("caps in-stream error messages at 300 characters", async () => {
+    const message = "y".repeat(5000);
+    const { fetch } = recordingFetch([
+      streamResponse(`data: ${JSON.stringify({ type: "error", error: { message } })}\n\n`),
+    ]);
+    const provider = createAnthropicProvider({
+      baseUrl: "https://api.anthropic.com",
+      model: "m",
+      apiKey: "sk-ant-k",
+      fetch,
+    });
+    const failure = await collect(
+      provider.chat({ system: "", messages: [], tools: [], signal: new AbortController().signal }),
+    ).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(ProviderError);
+    expect((failure as ProviderError).message.length).toBeLessThanOrEqual(300);
+  });
 });
 
 describe("createAnthropicProvider.listModels", () => {

@@ -9,7 +9,7 @@ import {
   ProviderError,
   isRecord,
 } from "@jarvis/core";
-import { type FetchLike, readJson, request, scrubKey } from "./http.js";
+import { type FetchLike, readJson, request, streamErrorText } from "./http.js";
 import { probeProvider } from "./probe.js";
 import { readLines } from "./stream.js";
 
@@ -108,7 +108,7 @@ export function createOllamaProvider(options: OllamaOptions): ModelProvider {
         }
         if (!isRecord(chunk)) continue;
         if (typeof chunk["error"] === "string")
-          throw new ProviderError("http", scrubKey(chunk["error"], options.apiKey));
+          throw new ProviderError("http", streamErrorText(chunk["error"], options.apiKey));
         const message = chunk["message"];
         if (isRecord(message)) {
           if (typeof message["content"] === "string" && message["content"] !== "") {

@@ -14,6 +14,26 @@ async function collect(iterable: AsyncIterable<ModelEvent>): Promise<ModelEvent[
 }
 
 describe("createOpenAiCompatibleProvider.chat", () => {
+  it("scrubs the key from in-stream errors before capping them at 300 characters", async () => {
+    const apiKey = "sk-private-key";
+    const message = `${"x".repeat(285)}${apiKey} ${"z".repeat(5000)}`;
+    const { fetch } = recordingFetch([
+      streamResponse(`data: ${JSON.stringify({ error: { message } })}\n\n`),
+    ]);
+    const provider = createOpenAiCompatibleProvider({
+      baseUrl: "https://api.openai.com/v1",
+      model: "m",
+      apiKey,
+      fetch,
+    });
+    const failure = await collect(
+      provider.chat({ system: "", messages: [], tools: [], signal: new AbortController().signal }),
+    ).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).not.toContain("sk-");
+    expect((failure as Error).message.length).toBeLessThanOrEqual(300);
+  });
+
   it("streams text, assembles fragmented tool-call arguments per index, reads usage", async () => {
     const { fetch, calls } = recordingFetch([streamResponse(fixture("openai-tool-stream.sse"))]);
     const provider = createOpenAiCompatibleProvider({

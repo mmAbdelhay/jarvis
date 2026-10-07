@@ -10,7 +10,7 @@ import {
   ProviderError,
   isRecord,
 } from "@jarvis/core";
-import { type FetchLike, readJson, request } from "./http.js";
+import { type FetchLike, readJson, request, streamErrorText } from "./http.js";
 import { probeProvider } from "./probe.js";
 import { readSse } from "./stream.js";
 
@@ -119,7 +119,10 @@ export function createOpenAiCompatibleProvider(options: OpenAiCompatibleOptions)
         if (!isRecord(chunk)) continue;
         if (isRecord(chunk["error"])) {
           const message = chunk["error"]["message"];
-          throw new ProviderError("http", typeof message === "string" ? message : "stream error");
+          throw new ProviderError(
+            "http",
+            streamErrorText(typeof message === "string" ? message : "stream error", options.apiKey),
+          );
         }
         const usage = chunk["usage"];
         if (isRecord(usage)) {

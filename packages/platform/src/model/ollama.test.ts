@@ -29,6 +29,21 @@ describe("createOllamaProvider.chat", () => {
     ).rejects.toThrow("rejected [key]");
   });
 
+  it("caps in-stream error messages at 300 characters", async () => {
+    const { fetch } = recordingFetch([
+      streamResponse(`${JSON.stringify({ error: "e".repeat(5000) })}\n`),
+    ]);
+    const provider = createOllamaProvider({
+      baseUrl: "http://localhost:11434",
+      model: "big",
+      fetch,
+    });
+    const failure = await collect(
+      provider.chat({ system: "", messages: [], tools: [], signal: signal() }),
+    ).catch((error: unknown) => error);
+    expect((failure as Error).message.length).toBeLessThanOrEqual(300);
+  });
+
   it("numbers calls across requests without trusting wire ids", async () => {
     const chunk =
       '{"message":{"tool_calls":[{"id":"duplicate","function":{"name":"ping","arguments":{}}}]},"done":true}\n';

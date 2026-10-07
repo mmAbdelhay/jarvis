@@ -14,6 +14,12 @@ export function scrubKey(text: string, secret?: string): string {
   return secret === undefined || secret === "" ? text : text.replaceAll(secret, "[key]");
 }
 
+/** An error text a provider sent inside a stream: the key scrubbed first,
+ *  then cut to MAX_ERROR_CHARS, so it is safe for the shell and the logs. */
+export function streamErrorText(text: string, secret?: string): string {
+  return scrubKey(text, secret).slice(0, MAX_ERROR_CHARS);
+}
+
 export function isAbortError(error: unknown): boolean {
   return (
     typeof error === "object" &&

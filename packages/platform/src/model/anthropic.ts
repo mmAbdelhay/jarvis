@@ -9,7 +9,7 @@ import {
   ProviderError,
   isRecord,
 } from "@jarvis/core";
-import { type FetchLike, readJson, request, scrubKey } from "./http.js";
+import { type FetchLike, readJson, request, streamErrorText } from "./http.js";
 import { probeProvider } from "./probe.js";
 import { readSse } from "./stream.js";
 
@@ -194,7 +194,7 @@ export function createAnthropicProvider(options: AnthropicOptions): ModelProvide
               isRecord(error) && typeof error["message"] === "string"
                 ? error["message"]
                 : "stream error";
-            throw new ProviderError("http", scrubKey(message, options.apiKey));
+            throw new ProviderError("http", streamErrorText(message, options.apiKey));
           }
           default:
             break;
