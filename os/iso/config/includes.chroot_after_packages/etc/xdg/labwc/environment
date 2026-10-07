@@ -1,0 +1,8 @@
+# Read by labwc at start; exported to everything it launches.
+XDG_CURRENT_DESKTOP=labwc:wlroots
+QT_QPA_PLATFORM=wayland
+QT_WAYLAND_DISABLE_WINDOWDECORATION=1
+XKB_DEFAULT_LAYOUT=us
+# VMs and machines without a GPU driver render with llvmpipe; wlroots refuses
+# a software GL renderer unless told it is acceptable.
+WLR_RENDERER_ALLOW_SOFTWARE=1
