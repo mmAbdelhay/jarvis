@@ -46,6 +46,11 @@ var Patterns = []Pattern{
 
 const redactedPrefix = "[redacted:"
 
+// markerRe matches a value that is exactly one full redaction marker.
+const valueEnd = " \t\r\n&;,}])\"'"
+
+var markerRe = regexp.MustCompile(`^\[redacted:[A-Za-z0-9_]+\]$`)
+
 // String returns s with every secret replaced.
 func String(s string) string {
 	for _, p := range Patterns {
@@ -70,12 +75,19 @@ func replaceKeepingLabel(re *regexp.Regexp, s, repl string) string {
 	last := 0
 	for _, m := range matches {
 		valueStart := m[3] // end of group 1
-		if strings.HasPrefix(s[valueStart:m[1]], redactedPrefix) {
-			continue
+		end := m[1]
+		if markerRe.MatchString(s[valueStart:end]) {
+			if end == len(s) || strings.IndexByte(valueEnd, s[end]) >= 0 {
+				continue // already exactly a marker
+			}
+			// A marker with value characters glued on is not a marker: redact the whole token.
+			for end < len(s) && strings.IndexByte(valueEnd, s[end]) < 0 {
+				end++
+			}
 		}
 		b.WriteString(s[last:valueStart])
 		b.WriteString(repl)
-		last = m[1]
+		last = end
 	}
 	b.WriteString(s[last:])
 	return b.String()

@@ -129,3 +129,12 @@ func TestStringIsIdempotent(t *testing.T) {
 		}
 	}
 }
+
+func TestOnlyFullMarkerIsSkipped(t *testing.T) {
+	if got := String("password=[redacted:foo]bar"); strings.Contains(got, "bar") {
+		t.Fatalf("value merely starting with a marker leaked: %q", got)
+	}
+	if got := String("password=[redacted:foo]"); got != "password=[redacted:foo]" {
+		t.Fatalf("full marker was rewritten: %q", got)
+	}
+}
