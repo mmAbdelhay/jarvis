@@ -5,6 +5,9 @@ export default defineConfig({
   resolve: {
     alias: {
       "@jarvis/core": fileURLToPath(new URL("./packages/core/src/index.ts", import.meta.url)),
+      "@jarvis/platform/model": fileURLToPath(
+        new URL("./packages/platform/src/model/index.ts", import.meta.url),
+      ),
       "@jarvis/platform": fileURLToPath(
         new URL("./packages/platform/src/index.ts", import.meta.url),
       ),
