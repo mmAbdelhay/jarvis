@@ -2,7 +2,7 @@
 // packages/desktop/src/daemon/os/contract-types.test.ts asserts each type
 // here equals @jarvis/wire's; change both or neither.
 
-export const PROVIDER_KINDS = ["anthropic", "openai-compatible", "ollama"] as const;
+export const PROVIDER_KINDS = ["anthropic", "openai-compatible", "ollama", "gemini"] as const;
 export type ProviderKind = (typeof PROVIDER_KINDS)[number];
 export type ProviderConfig = {
   kind: ProviderKind;

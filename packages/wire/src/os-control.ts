@@ -30,7 +30,7 @@ export const OS_CONTROL_PUSHES = {
   sysSnapshot: "sys:snapshot",
 } as const;
 
-export const PROVIDER_KINDS = ["anthropic", "openai-compatible", "ollama"] as const;
+export const PROVIDER_KINDS = ["anthropic", "openai-compatible", "ollama", "gemini"] as const;
 export type ProviderKind = (typeof PROVIDER_KINDS)[number];
 
 export type ProviderConfig = {

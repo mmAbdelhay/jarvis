@@ -199,6 +199,34 @@ const installScript = parseFakeScript([
 ]);
 
 describe("createOsAgent", () => {
+  it("saves a gemini provider: key in the keyring under its own account, kind in jarvis.yaml", async () => {
+    const stub: ModelProvider = {
+      async *chat() {
+        yield { type: "done", usage: { inputTokens: 0, outputTokens: 0 } };
+      },
+      probe: async () => ({ ok: true, supportsTools: true, models: ["gemini-2.5-flash"] }),
+      listModels: async () => ["gemini-2.5-flash"],
+      reachable: async () => ({ ok: true }),
+    };
+    const h = harness({ makeProvider: () => stub });
+    await h.agent.start();
+    await expect(
+      h.agent.save({
+        kind: "gemini",
+        baseUrl: "https://generativelanguage.googleapis.com",
+        model: "gemini-2.5-flash",
+        apiKey: "AIza-k",
+      }),
+    ).resolves.toMatchObject({ ok: true });
+    await expect(
+      h.secrets.get(providerAccount("gemini", "https://generativelanguage.googleapis.com")),
+    ).resolves.toBe("AIza-k");
+    expect(h.files.get("/home/jarvis/.config/jarvis/jarvis.yaml")).toContain("kind: gemini");
+    await expect(h.agent.providerList()).resolves.toMatchObject({
+      active: { kind: "gemini", hasKey: true },
+    });
+  });
+
   it("runs a prompt through a card to the installed answer, and audits it", async () => {
     const h = harness({ fakeScript: installScript });
     await h.agent.start();
@@ -348,7 +376,7 @@ describe("createOsAgent", () => {
     await h.agent.start();
     await expect(h.agent.providerList()).resolves.toEqual({
       active: null,
-      kinds: ["anthropic", "openai-compatible", "ollama"],
+      kinds: ["anthropic", "openai-compatible", "ollama", "gemini"],
     });
     const draft = {
       kind: "anthropic",
@@ -374,7 +402,7 @@ describe("createOsAgent", () => {
         model: "claude-sonnet-4-5",
         hasKey: true,
       },
-      kinds: ["anthropic", "openai-compatible", "ollama"],
+      kinds: ["anthropic", "openai-compatible", "ollama", "gemini"],
     });
     // A probe without a key in the draft uses the stored one.
     await h.agent.probe({

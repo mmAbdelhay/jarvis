@@ -143,6 +143,27 @@ describe("parseBaseUrl", () => {
 });
 
 describe("parseProviderDraft", () => {
+  it("accepts the gemini kind (M2 contracts §3)", () => {
+    expect(
+      parseProviderDraft([
+        {
+          kind: "gemini",
+          baseUrl: "https://generativelanguage.googleapis.com",
+          model: "gemini-2.5-flash",
+          apiKey: "AIza-k",
+        },
+      ]),
+    ).toEqual({
+      ok: true,
+      value: {
+        kind: "gemini",
+        baseUrl: "https://generativelanguage.googleapis.com",
+        model: "gemini-2.5-flash",
+        apiKey: "AIza-k",
+      },
+    });
+  });
+
   it("parses each kind", () => {
     expect(
       parseProviderDraft([
@@ -171,7 +192,7 @@ describe("parseProviderDraft", () => {
     });
   });
   it("refuses unknown kinds, bad models, keys with whitespace", () => {
-    expect(parseProviderDraft([{ kind: "gemini", baseUrl: "https://x.dev", model: "m" }]).ok).toBe(
+    expect(parseProviderDraft([{ kind: "mistral", baseUrl: "https://x.dev", model: "m" }]).ok).toBe(
       false,
     );
     expect(

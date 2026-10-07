@@ -34,6 +34,30 @@ async function firstError(provider: ModelProvider): Promise<unknown> {
 }
 
 describe("buildProvider", () => {
+  it("builds gemini against models.list with the key in a header, and refuses it without a key", async () => {
+    const calls: { url: string; key: string | undefined }[] = [];
+    const fetch: FetchLike = async (url, init) => {
+      calls.push({ url, key: init.headers["x-goog-api-key"] });
+      return new Response('{"models":[]}', { status: 200 });
+    };
+    const section = {
+      kind: "gemini" as const,
+      baseUrl: "https://generativelanguage.googleapis.com",
+      model: "gemini-2.5-flash",
+      auth: "api-key" as const,
+      supportsTools: true,
+    };
+    await expect(buildProvider(section, "AIza-k", { fetch }).reachable()).resolves.toEqual({
+      ok: true,
+    });
+    expect(calls[0]).toEqual({
+      url: "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000",
+      key: "AIza-k",
+    });
+    const missing = await firstError(buildProvider(section, undefined, { fetch }));
+    expect(missing).toMatchObject({ kind: "auth", message: AGENT_TEXT.noKey });
+  });
+
   it("builds each kind against its own endpoint", async () => {
     for (const [kind, baseUrl, url] of [
       ["ollama", "http://localhost:11434", "http://localhost:11434/api/tags"],

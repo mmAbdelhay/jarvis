@@ -22,6 +22,30 @@ function memoryIo(initial?: string) {
 }
 
 describe("parseProviderSection", () => {
+  it("parses a gemini section; subscription stays anthropic-only", () => {
+    expect(
+      parseProviderSection({
+        kind: "gemini",
+        baseUrl: "https://generativelanguage.googleapis.com",
+        model: "gemini-2.5-flash",
+      }),
+    ).toEqual({
+      kind: "gemini",
+      baseUrl: "https://generativelanguage.googleapis.com",
+      model: "gemini-2.5-flash",
+      auth: "api-key",
+      supportsTools: true,
+    });
+    expect(() =>
+      parseProviderSection({
+        kind: "gemini",
+        baseUrl: "https://generativelanguage.googleapis.com",
+        model: "m",
+        auth: "subscription",
+      }),
+    ).toThrow(/subscription for anthropic/);
+  });
+
   it("parses a section and fills defaults", () => {
     expect(
       parseProviderSection({
@@ -49,7 +73,7 @@ describe("parseProviderSection", () => {
   it("answers null for no section and names the bad key otherwise", () => {
     expect(parseProviderSection(undefined)).toBeNull();
     expect(() =>
-      parseProviderSection({ kind: "gemini", baseUrl: "https://x.dev", model: "m" }),
+      parseProviderSection({ kind: "mistral", baseUrl: "https://x.dev", model: "m" }),
     ).toThrow(/provider.kind/);
     expect(() => parseProviderSection({ kind: "ollama", baseUrl: "ftp://x", model: "m" })).toThrow(
       /provider.baseUrl/,
