@@ -100,6 +100,16 @@ private slots:
         QVERIFY(model.canSave());
     }
 
+    void connectedWithNoModelsExplainsItself()
+    {
+        ProviderModel model;
+        model.setMode(u"local"_s);
+        model.probe();
+        model.applyProbeResult(probeResult(true, false, {}));
+        QCOMPARE(model.statusText(), u"Connected to Ollama, but no models are available. Pull or enter a model first."_s);
+        QVERIFY(!model.canSave());
+    }
+
     void errorsBlockSaving()
     {
         ProviderModel model;

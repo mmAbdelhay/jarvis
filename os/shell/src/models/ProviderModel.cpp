@@ -202,6 +202,8 @@ QString ProviderModel::statusText() const
         return u"Saving…"_s;
     if (m_probeState == u"ok")
         return u"Connected to %1. Tool calling works, so Jarvis can control this computer."_s.arg(displayName());
+    if (m_probeState == u"warn" && m_model.isEmpty())
+        return u"Connected to %1, but no models are available. Pull or enter a model first."_s.arg(displayName());
     if (m_probeState == u"warn")
         return u"Connected to %1, but %2 can't call tools: Jarvis can chat but can't control the OS."_s
             .arg(displayName(), m_model);
