@@ -22,3 +22,36 @@ add_test(NAME qml_imports_listed
           -DMAP=${CMAKE_CURRENT_SOURCE_DIR}/../deps/qml-runtime.txt -DSKIP=Jarvis.Installer
           -P ${CMAKE_CURRENT_SOURCE_DIR}/../../ui/cmake/check_qml_imports.cmake)
 set_tests_properties(qml_imports_listed PROPERTIES LABELS unit)
+
+if(JARVIS_UI_DBUS)
+  qt_wrap_cpp(JARVIS_DBUS_BACKEND_MOC "${CMAKE_CURRENT_SOURCE_DIR}/../src/backend/DBusInstallerBackend.h")
+  add_library(jarvis_installer_dbus_meta OBJECT ${JARVIS_DBUS_BACKEND_MOC})
+  target_link_libraries(jarvis_installer_dbus_meta PRIVATE Qt6::Core Qt6::DBus)
+  target_sources(jarvis_installer_core PRIVATE $<TARGET_OBJECTS:jarvis_installer_dbus_meta>)
+  find_program(DBUS_RUN_SESSION dbus-run-session)
+  if(DBUS_RUN_SESSION)
+    qt_add_executable(tst_dbusbackend dbus/tst_dbusbackend.cpp)
+    target_link_libraries(tst_dbusbackend PRIVATE jarvis_installer_core Qt6::DBus Qt6::Test)
+    set(JARVIS_DBUS_SESSION_ARGS)
+    if(APPLE)
+      # Homebrew's session config expects launchd; this test needs a private bus.
+      set(JARVIS_DBUS_TEST_CONFIG "${CMAKE_CURRENT_BINARY_DIR}/dbus-test.conf")
+      file(WRITE "${JARVIS_DBUS_TEST_CONFIG}" "<busconfig>
+  <type>session</type>
+  <listen>unix:path=${CMAKE_BINARY_DIR}/dbus-test.sock</listen>
+  <auth>EXTERNAL</auth>
+  <policy context=\"default\">
+    <allow send_destination=\"*\"/>
+    <allow receive_sender=\"*\"/>
+    <allow own=\"*\"/>
+  </policy>
+</busconfig>
+")
+      list(APPEND JARVIS_DBUS_SESSION_ARGS "--config-file=${JARVIS_DBUS_TEST_CONFIG}")
+    endif()
+    add_test(NAME tst_dbusbackend COMMAND ${DBUS_RUN_SESSION} ${JARVIS_DBUS_SESSION_ARGS} -- $<TARGET_FILE:tst_dbusbackend>)
+    set_tests_properties(tst_dbusbackend PROPERTIES LABELS dbus TIMEOUT 60)
+  else()
+    message(WARNING "dbus-run-session not found: D-Bus tests are not built (install dbus-daemon)")
+  endif()
+endif()
