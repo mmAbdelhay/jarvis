@@ -51,3 +51,16 @@ if(JARVIS_UI_DBUS)
     message(WARNING "dbus-run-session not found: D-Bus tests are not built (install dbus-daemon)")
   endif()
 endif()
+
+# One QuickTest runner executes every tests/qml/tst_*.qml file.
+qt_add_executable(tst_qml qml/tst_qml.cpp qml/TestHarness.h qml/TestHarness.cpp)
+target_include_directories(tst_qml PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/support ${CMAKE_CURRENT_SOURCE_DIR}/qml)
+target_link_libraries(tst_qml PRIVATE jarvis_installer_core jarvis_installer_coreplugin Qt6::QuickTest)
+target_compile_definitions(tst_qml PRIVATE
+  QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml"
+  JARVIS_QML_DIR="${QT_QML_OUTPUT_DIRECTORY}"
+  JARVIS_INSTALLER_TEST_DATA="${JARVIS_INSTALLER_TEST_DATA}"
+  JARVIS_TEST_OS_RELEASE="${CMAKE_CURRENT_SOURCE_DIR}/data/os-release")
+add_dependencies(tst_qml jarvis_ui)
+add_test(NAME tst_qml COMMAND tst_qml)
+set_tests_properties(tst_qml PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" LABELS qml TIMEOUT 180)
