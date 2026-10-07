@@ -38,11 +38,20 @@ QtObject {
     readonly property color failedChipText: "#FDBA8C"
     readonly property color tableHeader: "#11161B"
 
+    // Installer and login artboards.
+    readonly property color stepPending: "#3A434F"
+    readonly property color otherOs: "#2A3A55"
+    readonly property color otherOsText: "#D6E2F5"
+    readonly property color ringFaint: "#141B22"
+
     readonly property string sans: "IBM Plex Sans"
     readonly property string mono: "IBM Plex Mono"
-    readonly property int fontSize: 15
-    readonly property int fontSmall: 13
-    readonly property int fontTiny: 12
+    // Large-text mode (greeter accessibility) scales every token size.
+    property real textScale: 1.0
+    readonly property int fontSize: Math.round(15 * textScale)
+    readonly property int fontSmall: Math.round(13 * textScale)
+    readonly property int fontTiny: Math.round(12 * textScale)
+    readonly property int fontTitle: Math.round(32 * textScale)
 
     readonly property int radiusCard: 14
     readonly property int radiusControl: 10

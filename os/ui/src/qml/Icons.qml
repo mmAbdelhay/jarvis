@@ -13,4 +13,10 @@ QtObject {
     readonly property string send: "M12 19V5 M5 12l7-7 7 7"
     readonly property string check: "M20 6L9 17l-5-5"
     readonly property string stop: "M7 7h10v10H7z"
+    readonly property string power: "M12 3v9 M6.3 6.3a8 8 0 1 0 11.4 0"
+    readonly property string accessibility: "M10.5 4.5a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0 M5 8l7 1.5L19 8 M12 9.5V14l-3 6 M12 14l3 6"
+    readonly property string arrowRight: "M5 12h14 M12 5l7 7-7 7"
+    readonly property string done: "M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0 M8 12.5l3 3 5-6"
+    readonly property string download: "M12 4v11 M7 10l5 5 5-5 M5 20h14"
+    readonly property string rings: "M1 12a11 11 0 1 0 22 0a11 11 0 1 0 -22 0 M4 12a8 8 0 1 0 16 0a8 8 0 1 0 -16 0 M7 12a5 5 0 1 0 10 0a5 5 0 1 0 -10 0"
 }
