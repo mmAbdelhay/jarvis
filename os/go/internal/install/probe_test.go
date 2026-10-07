@@ -69,7 +69,9 @@ func windowsMachine(t *testing.T) (*execx.Fake, *files.OS, string) {
 
 func TestProbeWindowsMachine(t *testing.T) {
 	run, fs, _ := windowsMachine(t)
+	hits := 0
 	geo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits++
 		fmt.Fprint(w, `<Response><Ip>192.0.2.1</Ip><TimeZone>Africa/Cairo</TimeZone></Response>`)
 	}))
 	defer geo.Close()
@@ -77,8 +79,14 @@ func TestProbeWindowsMachine(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !p.UEFI || !p.SecureBoot || p.RAMBytes != 16113460*1024 || !p.Online || p.GeoTimezone == nil || *p.GeoTimezone != "Africa/Cairo" {
+	if !p.UEFI || !p.SecureBoot || p.RAMBytes != 16113460*1024 || !p.Online || p.GeoTimezone != nil {
 		t.Fatalf("machine = %+v", p)
+	}
+	if hits != 0 {
+		t.Fatal("Probe contacted the geo service without user consent")
+	}
+	if tz := (ProbeDeps{Files: fs, HTTP: geo.Client(), GeoURL: geo.URL}).DetectTimezone(context.Background()); tz == nil || *tz != "Africa/Cairo" || hits != 1 {
+		t.Fatalf("DetectTimezone = %v hits %d", tz, hits)
 	}
 	if p.GPU == nil || p.GPU.Name != "Intel Corporation Iris Xe Graphics" || p.GPU.VRAMBytes != nil {
 		t.Fatalf("gpu = %+v", p.GPU)
@@ -96,6 +104,13 @@ func TestProbeWindowsMachine(t *testing.T) {
 		Number: 3, Start: 239616, End: 132120542, TypeGUID: basicDataTypeGUID, UniqueGUID: "a73a742f-a408-4a07-88a7-c7983f8ceee3", Name: "Basic data partition"}
 	if !reflect.DeepEqual(win, want) {
 		t.Fatalf("windows\n got %+v %+v\nwant %+v %+v", win, *win.NTFS, want, *want.NTFS)
+	}
+	if d.WindowsPartition == nil || *d.WindowsPartition != "/dev/loop1p3" {
+		t.Fatalf("windowsPartition = %v", d.WindowsPartition)
+	}
+	// The fixture ESP is too small to share, so min adds a new ESP; max is Windows' size minus its shrink floor.
+	if b := d.AlongsideBounds; b == nil || b.MinBytes != MinRootBytes+ESPSizeBytes || b.MaxBytes != 67523034624-10_070_000_000 {
+		t.Fatalf("alongsideBounds = %+v", b)
 	}
 	if rec := d.Partitions[3]; rec.Flags != 1 || rec.TypeGUID != "de94bba4-06d1-4d40-a16a-bfd50179d6ac" {
 		t.Fatalf("recovery = %+v", rec)
@@ -139,6 +154,9 @@ func TestProbeDetectsHibernationDirtAndBitLocker(t *testing.T) {
 	}
 	if p.GeoTimezone != nil {
 		t.Fatal("no HTTP client: no lookup")
+	}
+	if d := p.Disks[0]; d.WindowsPartition == nil || *d.WindowsPartition != "/dev/loop1p3" || d.AlongsideBounds != nil {
+		t.Fatalf("hibernated Windows: partition %v bounds %+v", d.WindowsPartition, d.AlongsideBounds)
 	}
 }
 

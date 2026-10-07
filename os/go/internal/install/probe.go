@@ -33,11 +33,14 @@ const probeTimeout = 2 * time.Minute
 
 // ProbeDeps are Probe's side effects.
 type ProbeDeps struct {
-	Run       execx.Runner
-	Files     files.FS
-	HTTP      *http.Client // nil: no time zone lookup
-	GeoURL    string       // "" means DefaultGeoURL
-	AllowLoop bool         // offer loop devices (tests, the loop-device integration test)
+	Run   execx.Runner
+	Files files.FS
+	// HTTP is used only by DetectTimezone, which the UI calls after the user
+	// presses "Detect my time zone" (contracts §11.12). Probe never uses it,
+	// so no request leaves the machine without consent. nil: no lookup.
+	HTTP      *http.Client
+	GeoURL    string // "" means DefaultGeoURL
+	AllowLoop bool   // offer loop devices (tests, the loop-device integration test)
 	// Only, when set, limits the probe to these disks (the loop-device test
 	// must not touch other loop devices on the machine).
 	Only []string
@@ -64,9 +67,8 @@ func Probe(ctx context.Context, d ProbeDeps) (ProbeResult, error) {
 	if res, err := d.run(ctx, "nmcli", "-t", "networking", "connectivity", "check"); err == nil && res.ExitCode == 0 {
 		p.Online = strings.TrimSpace(string(res.Stdout)) == "full"
 	}
-	if p.Online {
-		p.GeoTimezone = d.geoTimezone(ctx)
-	}
+	// Contracts §11.12: Probe never touches the network for a time zone;
+	// p.GeoTimezone stays null. DetectTimezone is the user-triggered call.
 	disks, live, err := d.disks(ctx)
 	if err != nil {
 		return p, err
@@ -113,7 +115,10 @@ func (d ProbeDeps) gpu(ctx context.Context) *GPU {
 
 var geoTZRe = regexp.MustCompile(`<TimeZone>([^<]{1,64})</TimeZone>`)
 
-func (d ProbeDeps) geoTimezone(ctx context.Context) *string {
+// DetectTimezone asks DefaultGeoURL for the caller's time zone, which sends
+// the user's IP address to a third party. Call it only after an explicit
+// user action; nil on any failure or when HTTP is nil.
+func (d ProbeDeps) DetectTimezone(ctx context.Context) *string {
 	if d.HTTP == nil {
 		return nil
 	}
@@ -232,7 +237,38 @@ func (d ProbeDeps) disk(ctx context.Context, dev parse.BlockDevice, parts []pars
 	if esp != nil {
 		disk.ESP = &esp.Path
 	}
+	if win := windowsPartition(disk); win != nil && disk.GPT {
+		disk.WindowsPartition = &win.Path
+		disk.AlongsideBounds = alongsideBounds(disk, win)
+	}
 	return disk
+}
+
+// alongsideBounds is the range of Rafiq sizes planAlongside accepts, or nil
+// when Windows cannot be shrunk (BitLocker, hibernated, dirty, no room).
+func alongsideBounds(d Disk, win *Partition) *AlongsideBounds {
+	n := win.NTFS
+	if n == nil || n.Bitlocker || n.Hibernated || n.Dirty || win.FS == "BitLocker" || d.SectorBytes <= 0 {
+		return nil
+	}
+	min := int64(MinRootBytes)
+	if reusableESP(d) == nil {
+		min += ESPSizeBytes
+	}
+	limit := d.LastUsable
+	for _, p := range d.Partitions {
+		if p.Start > win.End && p.Start-1 < limit {
+			limit = p.Start - 1
+		}
+	}
+	max := win.SizeBytes - n.MinSizeBytes
+	if room := (limit-win.Start+1)*d.SectorBytes - n.MinSizeBytes; room < max {
+		max = room
+	}
+	if max < min {
+		return nil
+	}
+	return &AlongsideBounds{MinBytes: min, MaxBytes: max}
 }
 
 func (d ProbeDeps) partition(ctx context.Context, pd parse.BlockDevice, mountedAt string) Partition {
