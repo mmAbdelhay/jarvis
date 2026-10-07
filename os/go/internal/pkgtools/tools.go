@@ -22,7 +22,7 @@ const queryTimeout = 20 * time.Second
 
 // Tools returns every jarvis-pkg tool.
 func Tools(d Deps) []mcp.Tool {
-	return d.readTools()
+	return append(d.readTools(), d.changeTools()...)
 }
 
 func (d Deps) readTools() []mcp.Tool {
