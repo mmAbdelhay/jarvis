@@ -24,10 +24,6 @@ add_test(NAME qml_imports_listed
 set_tests_properties(qml_imports_listed PROPERTIES LABELS unit)
 
 if(JARVIS_UI_DBUS)
-  qt_wrap_cpp(JARVIS_DBUS_BACKEND_MOC "${CMAKE_CURRENT_SOURCE_DIR}/../src/backend/DBusInstallerBackend.h")
-  add_library(jarvis_installer_dbus_meta OBJECT ${JARVIS_DBUS_BACKEND_MOC})
-  target_link_libraries(jarvis_installer_dbus_meta PRIVATE Qt6::Core Qt6::DBus)
-  target_sources(jarvis_installer_core PRIVATE $<TARGET_OBJECTS:jarvis_installer_dbus_meta>)
   find_program(DBUS_RUN_SESSION dbus-run-session)
   if(DBUS_RUN_SESSION)
     qt_add_executable(tst_dbusbackend dbus/tst_dbusbackend.cpp)
