@@ -6,6 +6,7 @@ import {
   toModelName,
   TRUSTED_MCP_SERVERS,
 } from "./tool-registry.js";
+import { toolActivity } from "./messages.js";
 import type { McpCallResult, McpSession, McpTool } from "./types.js";
 
 const meta = (risk: unknown, extra: Record<string, unknown> = {}) => ({
@@ -250,5 +251,31 @@ describe("loadToolRegistry", () => {
       detail: '{"unit":"NetworkManager"}',
       source: "system",
     });
+  });
+});
+
+describe("updates tools (M2 contracts §2)", () => {
+  it("offers updates.list/updates.apply as updates_list/updates_apply and resolves both spellings", async () => {
+    const registry = await loadToolRegistry(
+      [
+        fakeSession("jarvis-pkg", [
+          tool("updates.list", meta("safe")),
+          tool("updates.apply", meta("confirm", { batch: "items" }), {
+            type: "object",
+            properties: { items: { type: "array", maxItems: 200 } },
+          }),
+        ]).session,
+      ],
+      { trusted, log: () => {} },
+    );
+    expect(registry.modelTools().map((t) => t.name)).toEqual(["updates_list", "updates_apply"]);
+    expect(registry.resolve("updates_apply")).toMatchObject({
+      name: "updates.apply",
+      risk: "confirm",
+      batchItems: true,
+    });
+    expect(registry.resolve("updates.apply")?.name).toBe("updates.apply");
+    expect(toolActivity("updates.list")).toBe("Checking for updates");
+    expect(toolActivity("updates.apply")).toBe("Installing updates");
   });
 });
