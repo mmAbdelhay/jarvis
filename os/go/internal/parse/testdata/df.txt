@@ -1,0 +1,6 @@
+Mounted on                   1B-blocks        Used
+/                           4123459584   987654144
+/run/live/medium            1287651328  1287651328
+/home                      62725623808 18234556416
+/media/jarvis/USB DISK      15997075456  2147483648
+/boot/efi                      535805952     6291456
