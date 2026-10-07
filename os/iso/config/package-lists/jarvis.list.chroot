@@ -1,0 +1,6 @@
+# From the local repository build.sh makes out of config/packages.chroot.
+jarvisd
+jarvis-shell
+jarvis-pkg
+jarvis-diag
+jarvis-helper

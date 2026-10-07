@@ -1,0 +1,10 @@
+[
+  {
+    "expectPromptContains": "internet",
+    "replies": [
+      { "toolCalls": [{ "name": "net.status", "input": {} }] },
+      { "toolCalls": [{ "name": "svc.restart", "input": { "unit": "NetworkManager" } }] },
+      { "text": "NetworkManager was stopped. I restarted it and the connection is back." }
+    ]
+  }
+]

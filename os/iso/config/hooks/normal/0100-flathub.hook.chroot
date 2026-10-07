@@ -1,0 +1,32 @@
+#!/bin/sh
+# Pre-add Flathub as a system remote, so pkg.install {source: "flatpak"} works
+# on first boot (design §9). The helper installs with --system from "flathub"
+# only (design §6.4).
+set -e
+attempt=1
+until flatpak remote-add --system --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo; do
+  if [ "$attempt" -ge 3 ]; then
+    echo "flathub hook: could not add the Flathub remote" >&2
+    exit 1
+  fi
+  attempt=$((attempt + 1))
+  sleep "${FLATHUB_RETRY_DELAY:-5}"
+done
+flatpak remotes --system --columns=name | grep -qx flathub
+
+# Fetch Flathub's appstream now, so pkg.search finds Flathub apps on first
+# boot without a refresh (contracts §6 #20). A soft failure: a Flathub outage
+# must not stop the ISO build. jarvis-flathub-appstream.service (enabled
+# below, a no-op when the appstream is already here) fetches it on boot once
+# the network is online. build.sh collects JARVIS-BUILD-WARNING lines for the
+# CI job summary.
+attempt=1
+until flatpak update --system --appstream flathub; do
+  if [ "$attempt" -ge 3 ]; then
+    echo "JARVIS-BUILD-WARNING: Flathub appstream not fetched after 3 tries; jarvis-flathub-appstream.service will fetch it on first boot when online" >&2
+    break
+  fi
+  attempt=$((attempt + 1))
+  sleep "${FLATHUB_RETRY_DELAY:-5}"
+done
+systemctl enable jarvis-flathub-appstream.service

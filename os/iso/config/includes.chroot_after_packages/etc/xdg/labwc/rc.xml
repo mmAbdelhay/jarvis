@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- labwc for Jarvis OS. <default/> keeps labwc's stock key binds. The
+     keybinds are jarvis-shell's (os/shell/data/labwc/rc.xml): Super alone,
+     on release, summons the chat (the shell is single-instance; a second
+     a second `jarvis-shell` with the focus flag hands focus to the running one, contracts §6 #14);
+     Ctrl+Alt+T opens foot even when an app has focus (design §8). -->
+<labwc_config>
+  <core>
+    <decoration>server</decoration>
+  </core>
+  <theme>
+    <cornerRadius>0</cornerRadius>
+  </theme>
+  <keyboard>
+    <default />
+    <keybind key="Super_L" onRelease="yes">
+      <action name="Execute" command="jarvis-shell --focus" />
+    </keybind>
+    <keybind key="C-A-t">
+      <action name="Execute" command="foot" />
+    </keybind>
+  </keyboard>
+</labwc_config>

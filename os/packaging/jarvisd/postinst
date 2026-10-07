@@ -1,0 +1,9 @@
+#!/bin/sh
+# Start jarvisd in every user session: links the user unit into
+# /etc/systemd/user/default.target.wants. Works offline, so it also works in
+# the live-build chroot, where no systemd runs.
+set -e
+if [ "$1" = configure ]; then
+  systemctl --global enable jarvisd.service
+fi
+exit 0

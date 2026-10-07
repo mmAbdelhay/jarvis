@@ -1,0 +1,13 @@
+Package: jarvis-pkg
+Version: @VERSION@
+Architecture: amd64
+Maintainer: Muhammad AbdElHay <mmAbdelhay@users.noreply.github.com>
+Installed-Size: @INSTALLED_SIZE@
+Depends: jarvis-helper (= @VERSION@), apt, flatpak
+Section: admin
+Priority: optional
+Homepage: https://github.com/mmAbdelhay/jarvis
+Description: Jarvis OS package tools (MCP server)
+ Package search, info and install/remove requests across APT and Flathub,
+ and disk usage, for the Jarvis agent. Installs and removals are carried out
+ by jarvis-helper after the user approves them.
