@@ -61,6 +61,9 @@ class TestIntegration : public QObject {
 private slots:
     void initTestCase()
     {
+#ifndef Q_OS_LINUX
+        QSKIP("jarvisd OS mode runs on Linux only (os-daemon-main refuses to start elsewhere)");
+#endif
         m_entry = qEnvironmentVariable("JARVISD_ENTRY");
         if (m_entry.isEmpty())
             QSKIP("JARVISD_ENTRY is not set: build jarvisd and point it at the jarvisd CLI script");
