@@ -1,0 +1,16 @@
+#!/bin/sh
+set -e
+case ${1:-} in
+  remove|purge)
+    # A running daemon must not survive deletion of its package or state.
+    # These commands fail harmlessly when packaging offline in a chroot.
+    systemctl stop ollama.service >/dev/null 2>&1 || true
+    systemctl disable ollama.service >/dev/null 2>&1 || true
+    if [ -d /run/systemd/system ]; then systemctl daemon-reload || true; fi
+    ;;
+esac
+if [ "$1" = purge ]; then
+  rm -rf /var/lib/ollama
+  getent passwd ollama >/dev/null && deluser --system ollama >/dev/null 2>&1 || true
+fi
+exit 0
