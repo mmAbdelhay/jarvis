@@ -88,6 +88,10 @@ type Helper interface {
 	FlatpakInstall(ctx context.Context, refs []string) (Outcome, error)
 	FlatpakRemove(ctx context.Context, refs []string) (Outcome, error)
 	RestartUnit(ctx context.Context, name string) (Outcome, error)
+	// AptUpgrade upgrades installed Debian packages only (M2 contracts §2).
+	AptUpgrade(ctx context.Context, names []string) (Outcome, error)
+	// FlatpakUpdate updates installed Flathub apps (M2 contracts §2).
+	FlatpakUpdate(ctx context.Context, refs []string) (Outcome, error)
 }
 
 // LooksOffline reports whether apt/flatpak stderr says the network is down,

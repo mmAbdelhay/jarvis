@@ -114,4 +114,12 @@ func (c *Client) RestartUnit(ctx context.Context, name string) (helperapi.Outcom
 	return c.call(ctx, restartCallTimeout, "RestartUnit", name)
 }
 
+func (c *Client) AptUpgrade(ctx context.Context, names []string) (helperapi.Outcome, error) {
+	return c.call(ctx, packageCallTimeout, "AptUpgrade", names)
+}
+
+func (c *Client) FlatpakUpdate(ctx context.Context, refs []string) (helperapi.Outcome, error) {
+	return c.call(ctx, packageCallTimeout, "FlatpakUpdate", refs)
+}
+
 var _ helperapi.Helper = (*Client)(nil)

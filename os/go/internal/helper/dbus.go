@@ -12,7 +12,8 @@ import (
 )
 
 // Object is what godbus exports. Every exported method here becomes a D-Bus
-// method, so it has exactly the five of contracts §2 and nothing else. The
+// method, so it has exactly the five of M1 contracts §2 plus AptUpgrade and
+// FlatpakUpdate (M2 contracts §2) and nothing else. The
 // dbus.Sender parameter is filled in by godbus and is not part of the
 // D-Bus signature.
 type Object struct{ Svc *Service }
@@ -31,6 +32,14 @@ func (o *Object) FlatpakInstall(sender dbus.Sender, refs []string) (bool, int32,
 
 func (o *Object) FlatpakRemove(sender dbus.Sender, refs []string) (bool, int32, string, *dbus.Error) {
 	return reply(o.Svc.FlatpakRemove(context.Background(), string(sender), refs))
+}
+
+func (o *Object) AptUpgrade(sender dbus.Sender, names []string) (bool, int32, string, *dbus.Error) {
+	return reply(o.Svc.AptUpgrade(context.Background(), string(sender), names))
+}
+
+func (o *Object) FlatpakUpdate(sender dbus.Sender, refs []string) (bool, int32, string, *dbus.Error) {
+	return reply(o.Svc.FlatpakUpdate(context.Background(), string(sender), refs))
 }
 
 func (o *Object) RestartUnit(sender dbus.Sender, name string) (bool, int32, string, *dbus.Error) {
@@ -54,6 +63,8 @@ const introspectXML = `<node>
   <method name="AptRemove"><arg name="names" type="as" direction="in"/><arg name="ok" type="b" direction="out"/><arg name="exitCode" type="i" direction="out"/><arg name="stderrTail" type="s" direction="out"/></method>
   <method name="FlatpakInstall"><arg name="refs" type="as" direction="in"/><arg name="ok" type="b" direction="out"/><arg name="exitCode" type="i" direction="out"/><arg name="stderrTail" type="s" direction="out"/></method>
   <method name="FlatpakRemove"><arg name="refs" type="as" direction="in"/><arg name="ok" type="b" direction="out"/><arg name="exitCode" type="i" direction="out"/><arg name="stderrTail" type="s" direction="out"/></method>
+  <method name="AptUpgrade"><arg name="names" type="as" direction="in"/><arg name="ok" type="b" direction="out"/><arg name="exitCode" type="i" direction="out"/><arg name="stderrTail" type="s" direction="out"/></method>
+  <method name="FlatpakUpdate"><arg name="refs" type="as" direction="in"/><arg name="ok" type="b" direction="out"/><arg name="exitCode" type="i" direction="out"/><arg name="stderrTail" type="s" direction="out"/></method>
   <method name="RestartUnit"><arg name="name" type="s" direction="in"/><arg name="ok" type="b" direction="out"/><arg name="exitCode" type="i" direction="out"/><arg name="stderrTail" type="s" direction="out"/></method>
  </interface>` + introspect.IntrospectDataString + `</node>`
 
