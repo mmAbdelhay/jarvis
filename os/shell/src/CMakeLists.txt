@@ -21,7 +21,8 @@ qt_add_qml_module(jarvis_shell_core
   SOURCES ${JARVIS_SHELL_CPP}
   QML_FILES ${JARVIS_SHELL_QML}
 )
-target_include_directories(jarvis_shell_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(jarvis_shell_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
+  ${CMAKE_CURRENT_SOURCE_DIR}/models)
 target_link_libraries(jarvis_shell_core PUBLIC
   Qt6::Core Qt6::Gui Qt6::Network Qt6::Qml Qt6::Quick Qt6::QuickControls2)
 if(JARVIS_SHELL_LAYERSHELL)
