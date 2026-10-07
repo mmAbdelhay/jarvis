@@ -1,0 +1,15 @@
+# Runtime packages jarvis-shell needs on the ISO (shared-library deps come from dh_shlibdeps).
+# QML modules (one per import in deps/qml-runtime.txt):
+qml6-module-qtqml
+qml6-module-qtqml-workerscript
+qml6-module-qtquick
+qml6-module-qtquick-window
+qml6-module-qtquick-layouts
+qml6-module-qtquick-shapes
+qml6-module-qtquick-templates
+qml6-module-qtquick-controls
+# Platform and session:
+qt6-wayland
+layer-shell-qt
+fonts-ibm-plex
+foot
