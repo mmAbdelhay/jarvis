@@ -144,12 +144,28 @@ func (s *Service) AptInstall(ctx context.Context, sender string, names []string)
 	s.refreshAptLists(ctx)
 	for _, n := range names {
 		res, err := s.Run.Run(ctx, execx.Cmd{Name: "apt-cache", Args: []string{"show", "--no-all-versions", "--", n}, Timeout: queryTimeout})
-		if err != nil || res.ExitCode != 0 || len(parse.AptShow(string(res.Stdout))) == 0 {
+		if err != nil || res.ExitCode != 0 || !showsPackage(string(res.Stdout), n) {
 			return helperapi.Outcome{}, refuse(helperapi.ErrNotFound, "%s is not available from Debian", n)
 		}
 	}
-	args := append([]string{"install", "-y", "--no-install-recommends", "--"}, names...)
+	// --no-remove: apt-get aborts rather than remove anything (a conflict
+	// could otherwise take network-manager or a jarvis-* package with it;
+	// contracts §6 #3 protects those).
+	args := append([]string{"install", "-y", "--no-install-recommends", "--no-remove", "--"}, names...)
 	return s.run(ctx, installTimeout, "apt-get", args...), nil
+}
+
+// showsPackage reports whether apt-cache show output holds a stanza for
+// exactly name. apt-get reads an operand it cannot resolve exactly as a regex
+// (and a trailing '-' as "remove"), and apt-cache show answers such operands
+// with other packages' stanzas, so "any stanza" is not "name exists".
+func showsPackage(out, name string) bool {
+	for _, p := range parse.AptShow(out) {
+		if p.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // AptRemove removes installed Debian packages, unless the removal would take

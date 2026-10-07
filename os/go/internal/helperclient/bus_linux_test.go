@@ -79,7 +79,7 @@ func TestHelperOverARealBus(t *testing.T) {
 	addr := privateBus(t)
 	run := (&execx.Fake{}).
 		On(execx.OK("Package: hello\nVersion: 2.10-3\n"), "apt-cache", "show", "--no-all-versions", "--", "hello").
-		On(execx.Result{ExitCode: 0, Stderr: []byte("done\n")}, "apt-get", "install", "-y", "--no-install-recommends", "--", "hello")
+		On(execx.Result{ExitCode: 0, Stderr: []byte("done\n")}, "apt-get", "install", "-y", "--no-install-recommends", "--no-remove", "--", "hello")
 	auth := &recordingAuth{}
 	svc := &helper.Service{Run: run, Auth: auth, Now: time.Now, ListsAge: func() (time.Duration, error) { return 0, nil }}
 	if err := helper.Export(connect(t, addr), &helper.Object{Svc: svc}); err != nil {

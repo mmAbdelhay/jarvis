@@ -53,7 +53,7 @@ const vlcShow = "Package: vlc\nVersion: 3.0.21-10\nDescription-en: multimedia pl
 func TestAptInstallHappyPath(t *testing.T) {
 	run := (&execx.Fake{}).
 		On(execx.OK(vlcShow), "apt-cache", "show", "--no-all-versions", "--", "vlc").
-		On(execx.Result{Stderr: []byte("W: something harmless\n")}, "apt-get", "install", "-y", "--no-install-recommends", "--", "vlc")
+		On(execx.Result{Stderr: []byte("W: something harmless\n")}, "apt-get", "install", "-y", "--no-install-recommends", "--no-remove", "--", "vlc")
 	auth := &fakeAuth{}
 	out, err := newService(run, auth).AptInstall(context.Background(), sender, []string{"vlc"})
 	if err != nil || !out.OK || out.ExitCode != 0 || out.StderrTail != "W: something harmless\n" {
@@ -71,7 +71,7 @@ func TestAptInstallRefreshesStaleLists(t *testing.T) {
 	run := (&execx.Fake{}).
 		On(execx.OK(""), "apt-get", "update", "-q").
 		On(execx.OK(vlcShow), "apt-cache", "show", "--no-all-versions", "--", "vlc").
-		On(execx.OK(""), "apt-get", "install", "-y", "--no-install-recommends", "--", "vlc")
+		On(execx.OK(""), "apt-get", "install", "-y", "--no-install-recommends", "--no-remove", "--", "vlc")
 	s := newService(run, &fakeAuth{})
 	s.ListsAge = func() (time.Duration, error) { return 0, ErrNoLists }
 	if _, err := s.AptInstall(context.Background(), sender, []string{"vlc"}); err != nil {
@@ -126,8 +126,39 @@ func TestAptInstallUnknownPackageIsNotFound(t *testing.T) {
 	if helperErr(t, err).Name != helperapi.ErrNotFound {
 		t.Fatalf("err = %v", err)
 	}
-	if run.Ran("apt-get", "install", "-y", "--no-install-recommends", "--", "nosuchpkg") {
+	if run.Ran("apt-get", "install", "-y", "--no-install-recommends", "--no-remove", "--", "nosuchpkg") {
 		t.Fatal("install ran for a package that does not exist")
+	}
+}
+
+// Review focus: apt-get reads an unknown operand as a regex, and a trailing
+// '-' as "remove". apt-cache show answers such a name with stanzas for other
+// packages; only a stanza whose Package is the name itself counts.
+func TestAptInstallRefusesNamesThatOnlyMatchAsARegex(t *testing.T) {
+	for _, n := range []string{"cur.-", "a..", "systemd-"} {
+		other := "Package: curl\nVersion: 8.14.1-2\n\nPackage: systemd\nVersion: 257.8-1\n\nPackage: aa\nVersion: 1\n"
+		run := (&execx.Fake{}).On(execx.OK(other), "apt-cache", "show", "--no-all-versions", "--", n)
+		_, err := newService(run, &fakeAuth{}).AptInstall(context.Background(), sender, []string{n})
+		if helperErr(t, err).Name != helperapi.ErrNotFound {
+			t.Errorf("%q: err = %v, want NotFound", n, err)
+		}
+		for _, c := range run.Calls {
+			if c.Name == "apt-get" {
+				t.Errorf("%q reached apt-get: %v", n, c)
+			}
+		}
+	}
+}
+
+func TestAptInstallNeverRemovesPackages(t *testing.T) {
+	run := (&execx.Fake{}).
+		On(execx.OK(vlcShow), "apt-cache", "show", "--no-all-versions", "--", "vlc").
+		On(execx.OK(""), "apt-get", "install", "-y", "--no-install-recommends", "--no-remove", "--", "vlc")
+	if _, err := newService(run, &fakeAuth{}).AptInstall(context.Background(), sender, []string{"vlc"}); err != nil {
+		t.Fatal(err)
+	}
+	if !run.Ran("apt-get", "install", "-y", "--no-install-recommends", "--no-remove", "--", "vlc") {
+		t.Fatalf("install ran without --no-remove: %v", run.Calls)
 	}
 }
 
@@ -135,7 +166,7 @@ func TestFailedRunReturnsRedactedStderrTail(t *testing.T) {
 	long := strings.Repeat("x", 6000) + "\nE: auth failed password=hunter2\n"
 	run := (&execx.Fake{}).
 		On(execx.OK(vlcShow), "apt-cache", "show", "--no-all-versions", "--", "vlc").
-		On(execx.Exit(100, long), "apt-get", "install", "-y", "--no-install-recommends", "--", "vlc")
+		On(execx.Exit(100, long), "apt-get", "install", "-y", "--no-install-recommends", "--no-remove", "--", "vlc")
 	out, err := newService(run, &fakeAuth{}).AptInstall(context.Background(), sender, []string{"vlc"})
 	if err != nil || out.OK || out.ExitCode != 100 {
 		t.Fatalf("got %+v, %v", out, err)
@@ -255,7 +286,7 @@ func TestOperationsAreSerialised(t *testing.T) {
 	br := &blockingRunner{release: make(chan struct{})}
 	for _, n := range []string{"vlc", "gimp"} {
 		br.On(execx.OK("Package: "+n+"\nVersion: 1\n"), "apt-cache", "show", "--no-all-versions", "--", n)
-		br.On(execx.OK(""), "apt-get", "install", "-y", "--no-install-recommends", "--", n)
+		br.On(execx.OK(""), "apt-get", "install", "-y", "--no-install-recommends", "--no-remove", "--", n)
 	}
 	s := &Service{Run: br, Auth: &fakeAuth{}, Now: time.Now, ListsAge: func() (time.Duration, error) { return 0, nil }}
 	var wg sync.WaitGroup
@@ -308,7 +339,7 @@ func TestAptInstallRefreshDecision(t *testing.T) {
 		run := (&execx.Fake{}).
 			On(execx.OK(""), "apt-get", "update", "-q").
 			On(execx.OK(vlcShow), "apt-cache", "show", "--no-all-versions", "--", "vlc").
-			On(execx.OK(""), "apt-get", "install", "-y", "--no-install-recommends", "--", "vlc")
+			On(execx.OK(""), "apt-get", "install", "-y", "--no-install-recommends", "--no-remove", "--", "vlc")
 		s := newService(run, &fakeAuth{})
 		s.ListsAge = AptListsAge(c.lists, func() time.Time { return built })
 		if _, err := s.AptInstall(context.Background(), sender, []string{"vlc"}); err != nil {
