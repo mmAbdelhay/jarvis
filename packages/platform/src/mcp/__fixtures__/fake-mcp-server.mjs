@@ -32,6 +32,13 @@ const TOOLS = [
     _meta: meta("confirm", { secrets: ["password"] }),
   },
   { name: "test.crash", description: "Exit", inputSchema: object(), _meta: meta("safe") },
+  { name: "updates.list", description: "List updates", inputSchema: object(), _meta: meta("safe") },
+  {
+    name: "updates.apply",
+    description: "Apply updates",
+    inputSchema: object({ items: { type: "array", maxItems: 200 } }, ["items"]),
+    _meta: meta("confirm", { batch: "items" }),
+  },
   {
     name: "jarvis.describe",
     description: "Describe a call",
@@ -63,6 +70,19 @@ function call(name, args) {
     case "net.wifi_connect":
       // Deliberately echoes the password so jarvisd's scrubbing is exercised.
       return result({ ssid: args.ssid, state: "activated", note: `used ${args.password ?? ""}` });
+    case "updates.list":
+      return result({
+        items: [
+          { source: "apt", id: "jarvis-shell", from: "0.1.0", to: "0.2.0", security: false },
+          { source: "apt", id: "openssl", from: "3.5.1-1", to: "3.5.1-1+deb13u1", security: true },
+        ],
+        checkedAt: "2026-10-08T09:00:00Z",
+      });
+    case "updates.apply":
+      return result({
+        upgraded: (args.items ?? []).map((i) => ({ ...i, version: "2.0" })),
+        failed: [],
+      });
     case "jarvis.describe":
       return result({
         title: `${args.tool} on ${serverName}`,

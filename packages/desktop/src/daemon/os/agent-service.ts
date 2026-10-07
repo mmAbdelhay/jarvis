@@ -19,8 +19,10 @@ import {
   type FakeTurn,
   GateError,
   loadToolRegistry,
+  modelDownloadFor,
   type McpSession,
   type ModelMessage,
+  type ModelState,
   type ModelProvider,
   PROVIDER_KINDS,
   parseNetStatus,
@@ -36,6 +38,7 @@ import {
   type ToolRegistry,
   TRUSTED_MCP_SERVERS,
   trimHistory,
+  type UpdatesCheckResult,
 } from "@jarvis/core";
 import { providerAccount, type SecretStore } from "@jarvis/platform/model";
 import { OS_CONTROL_PUSHES } from "@jarvis/wire";
@@ -48,10 +51,11 @@ import {
 import { createLazyKeyProvider, unavailableProvider } from "./provider-factory.js";
 import { createProviderMonitor } from "./provider-monitor.js";
 import { createSysMonitor } from "./sys-monitor.js";
+import { createUpdatesMonitor, UpdatesCheckError } from "./updates-monitor.js";
 
 export class OsAgentError extends Error {
   constructor(
-    readonly code: "bad-request" | "unsupported",
+    readonly code: "bad-request" | "unsupported" | "internal",
     message: string,
   ) {
     super(message);
@@ -68,6 +72,9 @@ export type OsAgentDeps = {
   /** Set only from JARVIS_FAKE_PROVIDER (contracts §5). */
   fakeScript?: readonly FakeTurn[];
   connectMcp(): Promise<McpSession[]>;
+  /** /var/lib/jarvis/model-state.json (M2 contracts §5); null when absent or
+   *  unreadable. Never throws (model-state-reader.ts). */
+  readModelState(): Promise<ModelState | null>;
   audit: {
     append(entry: AuditEntry): Promise<void>;
     list(query: AuditQuery): Promise<AuditEntry[]>;
@@ -94,6 +101,8 @@ export interface OsAgent {
   doctorStart(): DoctorState;
   doctorSkip(stepId: DoctorStepId): DoctorState;
   auditList(query: AuditQuery): Promise<AuditEntry[]>;
+  /** updates:check (M2 contracts §2). */
+  checkUpdates(): Promise<UpdatesCheckResult>;
   /** A shell (re)connected: re-push what a broadcast it missed would have said. */
   resync(): void;
   shutdown(): Promise<void>;
@@ -102,7 +111,15 @@ export interface OsAgent {
 const describeError = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 export function createOsAgent(deps: OsAgentDeps): OsAgent {
-  const emit = (event: AgentEvent) => deps.push(OS_CONTROL_PUSHES.agentEvents, event);
+  const emit = (event: AgentEvent) => {
+    deps.push(OS_CONTROL_PUSHES.agentEvents, event);
+    // An upgrade changes what is pending: refresh the badge (M2 contracts §2).
+    if (event.type === "tool" && event.name === "updates.apply" && event.status !== "running") {
+      updates.check().catch((error: unknown) => {
+        deps.log(`[updates] re-check after updates.apply failed: ${describeError(error)}`);
+      });
+    }
+  };
   let provider: ModelProvider = unavailableProvider(AGENT_TEXT.noProvider);
   let section: ProviderSection | null = null;
   let sessions: McpSession[] = [];
@@ -183,6 +200,7 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
       const failed = await tools.call("svc.list_failed", {});
       failedUnits = failed.ok ? parseFailedUnitNames(failed.data) : [];
     }
+    const modelState = await deps.readModelState();
     return buildSysSnapshot({
       ...(parsedHealth === undefined ? {} : { health: parsedHealth }),
       ...(parsedNet === undefined ? {} : { net: parsedNet }),
@@ -195,13 +213,24 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
               model: section.model,
               baseUrl: section.baseUrl,
               supportsTools: section.supportsTools,
+              download: modelDownloadFor(section, modelState),
             },
+      updates: updates.current(),
     });
   }
 
   const sys = createSysMonitor({
     collect: collectSnapshot,
     push: (snapshot) => deps.push(OS_CONTROL_PUSHES.sysSnapshot, snapshot),
+    timers: deps.timers,
+    log: deps.log,
+  });
+
+  // sys:snapshot.updates (M2 contracts §2): 2 min after start, then daily.
+  const updates = createUpdatesMonitor({
+    list: async () => (await ensureRegistry()).call("updates.list", {}),
+    onChange: () => void sys.refresh(),
+    now: deps.now,
     timers: deps.timers,
     log: deps.log,
   });
@@ -258,6 +287,7 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
       monitor.start();
       void ensureRegistry();
       sys.start();
+      updates.start();
     },
 
     prompt(text) {
@@ -387,6 +417,18 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
       return deps.audit.list(query);
     },
 
+    async checkUpdates() {
+      try {
+        const summary = await updates.check();
+        return { count: summary.count, security: summary.security };
+      } catch (error) {
+        if (error instanceof UpdatesCheckError && error.code === "not_found") {
+          throw new OsAgentError("unsupported", AGENT_TEXT.updatesUnavailable);
+        }
+        throw new OsAgentError("internal", AGENT_TEXT.updatesCheckFailed(describeError(error)));
+      }
+    },
+
     resync() {
       // Contracts §6 #7: on every new connection, re-push provider:status,
       // doctor:state, sys:snapshot and every open card (the shell de-dups
@@ -405,6 +447,7 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
       gate.closeAll();
       monitor.stop();
       sys.stop();
+      updates.stop();
       for (const open of sessions) open.close();
     },
   };

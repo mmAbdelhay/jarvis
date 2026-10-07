@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { type AgentEvent, type AuditEntry, parseFakeScript } from "@jarvis/core";
+import { type AgentEvent, type AuditEntry, parseFakeScript, type SysSnapshot } from "@jarvis/core";
 import {
   createAuditLog,
   createMemorySecretStore,
@@ -56,6 +56,7 @@ describe.skipIf(WINDOWS)("jarvisd OS mode over the real control socket", () => {
         writeFile: async () => {},
       },
       secrets: createMemorySecretStore(),
+      readModelState: async () => null,
       makeProvider: () => {
         throw new Error("the fake provider is active");
       },
@@ -115,8 +116,10 @@ describe.skipIf(WINDOWS)("jarvisd OS mode over the real control socket", () => {
     cleanups.push(() => client.close());
     const events: AgentEvent[] = [];
     const channels: string[] = [];
+    const snapshotsSeen: SysSnapshot[] = [];
     client.onPush((channel, payload) => {
       channels.push(channel);
+      if (channel === "sys:snapshot") snapshotsSeen.push(payload as SysSnapshot);
       if (channel !== "agent:events") return;
       const event = payload as AgentEvent;
       events.push(event);
@@ -171,11 +174,15 @@ describe.skipIf(WINDOWS)("jarvisd OS mode over the real control socket", () => {
     });
     // Contracts §6 #23: audit ts on the socket is epoch ms, a number.
     expect(typeof audit[0]?.ts).toBe("number");
+    // M2 contracts §2: updates:check runs updates.list over the real socket.
+    await expect(client.invoke("updates:check", [])).resolves.toEqual({ count: 2, security: 1 });
     // Contracts §6 #7/#8: the new connection got provider:status, doctor:state and sys:snapshot.
     // The control server pushes on connect, before this listener exists; ask again.
     agent.resync();
     await until(() =>
       ["provider:status", "doctor:state", "sys:snapshot"].every((c) => channels.includes(c)),
     );
+    // The check's refresh and the resync race; wait for the snapshot that carries it.
+    await until(() => snapshotsSeen.some((s) => s.updates.count === 2 && s.updates.security === 1));
   });
 });

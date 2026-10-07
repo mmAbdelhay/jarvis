@@ -43,8 +43,15 @@ import {
 } from "../log-file.js";
 import { createOsAgent } from "./agent-service.js";
 import { connectOsMcpServers } from "./mcp-servers.js";
+import { createModelStateReader } from "./model-state-reader.js";
 import { createOsBinding } from "./os-binding.js";
-import { buildStampCandidates, mcpDirFrom, osConfigPath, readOsBuildId } from "./os-paths.js";
+import {
+  buildStampCandidates,
+  MODEL_STATE_PATH,
+  mcpDirFrom,
+  osConfigPath,
+  readOsBuildId,
+} from "./os-paths.js";
 import { buildProvider } from "./provider-factory.js";
 
 const describe = (error: unknown) => (error instanceof Error ? error.message : String(error));
@@ -143,6 +150,11 @@ async function main(argv: readonly string[]): Promise<void> {
         clientVersion: build,
         log: info,
       }),
+    readModelState: createModelStateReader({
+      path: MODEL_STATE_PATH,
+      readFile: (path) => readFile(path, "utf8"),
+      log: info,
+    }),
     audit: createAuditLog({ path: auditLogPath(env, home), fs: nodeAuditFs }),
     now: Date.now,
     newId: () => randomBytes(8).toString("hex"),

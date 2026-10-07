@@ -284,16 +284,19 @@ the socket runs with the desktop's own origin.
 **Jarvis OS runs a second jarvisd entry.** `daemon/os/os-daemon-main.ts` is
 `jarvisd` without the desktop core: the same control server, handshake, lock,
 run directory and lifecycle, serving only the Jarvis OS channels
-(`agent:*`, `provider:*`, `doctor:*`, `audit:list`, defined in
+(`agent:*`, `provider:*`, `doctor:*`, `audit:list`, `updates:check`, defined in
 `@jarvis/wire`'s `os-control.ts`) through `daemon/os/os-binding.ts`. Behind
 them, `daemon/os/agent-service.ts` composes the provider-neutral agent from
 `@jarvis/core`'s `agent/` module (tool loop, risk gate, network doctor) with
-`@jarvis/platform/model` (provider adapters, MCP stdio client, keyring,
-audit log). It runs on Linux only, is built by
-`pnpm --filter @jarvis/desktop build:daemon` into one esbuild bundle in
-`packages/desktop/dist-daemon/`, and never loads Electron, node-pty, sqlite or
-the Agent SDK (`daemon/os/os-bundle-graph.test.ts`). The desktop app's
-`daemon-main.ts` and its orchestrator are untouched by it.
+`@jarvis/platform/model` (Anthropic, OpenAI-compatible, Ollama and Gemini
+adapters, MCP stdio client, keyring, audit log). Its `sys:snapshot` push
+also carries pending updates (`updates-monitor.ts`: `updates.list` 2 min
+after start, then daily) and the local model's download state
+(`model-state-reader.ts`, `/var/lib/jarvis/model-state.json`). It runs on
+Linux only, is built by `pnpm --filter @jarvis/desktop build:daemon` into one
+esbuild bundle in `packages/desktop/dist-daemon/`, and never loads Electron,
+node-pty, sqlite or the Agent SDK (`daemon/os/os-bundle-graph.test.ts`). The
+desktop app's `daemon-main.ts` and its orchestrator are untouched by it.
 
 See [Background daemon](../guide/background-daemon.md) for the user side.
 
