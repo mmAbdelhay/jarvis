@@ -80,7 +80,7 @@ func (d Deps) updatesList(ctx context.Context, raw json.RawMessage) (any, error)
 	if err := mcp.DecodeArgs(raw, &struct{}{}); err != nil {
 		return nil, err
 	}
-	res, err := d.run(ctx, listTimeout, "apt-get", "-s", "-o", "Debug::NoLocking=true", "upgrade")
+	res, err := d.run(ctx, listTimeout, "apt-get", "-s", "-o", "Debug::NoLocking=true", "--with-new-pkgs", "upgrade")
 	if err != nil {
 		return nil, mcp.Errorf(mcp.CodeFailed, "apt-get could not run: %v", err)
 	}

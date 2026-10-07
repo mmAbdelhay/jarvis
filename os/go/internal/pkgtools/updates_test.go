@@ -19,7 +19,7 @@ Inst libssl3t64 [3.5.1-1] (3.5.1-1+deb13u1 Debian:13.7/stable, Debian-Security:1
 Conf libssl3t64 (3.5.1-1+deb13u1 Debian:13.7/stable, Debian-Security:13/stable-security [amd64])
 `
 
-var simArgs = []string{"-s", "-o", "Debug::NoLocking=true", "upgrade"}
+var simArgs = []string{"-s", "-o", "Debug::NoLocking=true", "--with-new-pkgs", "upgrade"}
 
 func updatesDeps(run *execx.Fake, h *helperapi.Fake) Deps {
 	return Deps{Run: run, Helper: h, Now: func() time.Time { return time.Date(2026, 10, 8, 12, 0, 0, 0, time.FixedZone("x", 3600)) }}
@@ -42,6 +42,39 @@ func TestUpdatesListSecurityFirstFlathubOnly(t *testing.T) {
 		`{"source":"apt","id":"libssl3t64","from":"3.5.1-1","to":"3.5.1-1+deb13u1","security":true},` +
 		`{"source":"apt","id":"jarvis-shell","from":"0.1.0","to":"0.2.0","security":false},` +
 		`{"source":"flatpak","id":"org.videolan.VLC","from":"3.0.21","to":"3.0.22","security":false}]}`
+	if string(b) != want {
+		t.Fatalf("got  %s\nwant %s", b, want)
+	}
+}
+
+func TestUpdatesListIncludesKeptBackKernelMetapackage(t *testing.T) {
+	const keptBack = `Reading package lists...
+The following packages have been kept back:
+  linux-image-amd64
+0 upgraded, 0 newly installed, 0 to remove and 1 not upgraded.
+`
+	const withNewPkgs = `Reading package lists...
+The following NEW packages will be installed:
+  linux-image-6.12.64+deb13-amd64
+The following packages will be upgraded:
+  linux-image-amd64
+1 upgraded, 1 newly installed, 0 to remove and 0 not upgraded.
+Inst linux-image-6.12.64+deb13-amd64 (6.12.64-1 Debian-Security:13/stable-security [amd64])
+Inst linux-image-amd64 [6.12.63-1] (6.12.64-1 Debian-Security:13/stable-security [amd64])
+`
+	run := (&execx.Fake{}).
+		On(execx.OK(keptBack), "apt-get", "-s", "-o", "Debug::NoLocking=true", "upgrade").
+		On(execx.OK(withNewPkgs), "apt-get", simArgs...)
+	got, err := call(t, updatesDeps(run, &helperapi.Fake{}), "updates.list", `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"checkedAt":"2026-10-08T11:00:00Z","items":[` +
+		`{"source":"apt","id":"linux-image-amd64","from":"6.12.63-1","to":"6.12.64-1","security":true}]}`
 	if string(b) != want {
 		t.Fatalf("got  %s\nwant %s", b, want)
 	}
