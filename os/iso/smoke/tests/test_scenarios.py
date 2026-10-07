@@ -22,6 +22,7 @@ class CommandsTest(unittest.TestCase):
             scenarios.use_fake_provider(1000, None),
             scenarios.connectivity_setup(8099),
             scenarios.wait_connectivity_full(90),
+            scenarios.wait_for_user(150),
             scenarios.wait_for_session(150),
             scenarios.wait_for_socket(60),
             scenarios.mount_assets(),

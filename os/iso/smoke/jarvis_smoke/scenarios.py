@@ -41,6 +41,12 @@ def use_fake_provider(uid: int, script: str | None) -> str:
     )
 
 
+def wait_for_user(seconds: int) -> str:
+    """The serial debug shell comes up before live-config has created the
+    live user, so wait for it before anything asks for its uid."""
+    return f"for i in $(seq {seconds}); do id -u {USER} >/dev/null 2>&1 && exit 0; sleep 2; done; exit 1"
+
+
 def wait_for_session(seconds: int) -> str:
     """Criterion 1: labwc and jarvis-shell run as the autologin user."""
     return (

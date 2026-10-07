@@ -65,6 +65,7 @@ class Run:
 def run_checks(run: Run, args: argparse.Namespace) -> dict | None:
     sh = run.sh
     sh("dmesg -n 1")
+    sh(scenarios.wait_for_user(150), 320)
     uid = int(sh("id -u jarvis").strip())
     ctl = lambda a: scenarios.jarvisctl(uid, a)  # noqa: E731
 
