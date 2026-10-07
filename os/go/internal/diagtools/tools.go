@@ -35,5 +35,6 @@ func (d Deps) run(ctx context.Context, timeout time.Duration, name string, args 
 
 // Tools returns every jarvis-diag tool.
 func Tools(d Deps) []mcp.Tool {
-	return append(d.sysTools(), d.netTools()...)
+	tools := append(d.sysTools(), d.netTools()...)
+	return append(tools, d.actionTools()...)
 }
