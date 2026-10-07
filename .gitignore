@@ -43,3 +43,6 @@ packages/desktop/web/
 # `android.googleServicesFile` otherwise, so a build never fails for lacking
 # one — but it must never be committed.
 apps/mobile/google-services.json
+
+# Jarvis OS jarvisd bundle (pnpm --filter @jarvis/desktop build:daemon)
+packages/desktop/dist-daemon/
