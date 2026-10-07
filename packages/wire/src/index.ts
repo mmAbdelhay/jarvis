@@ -10,3 +10,4 @@ export * from "./render-chunk.js";
 export * from "./voice.js";
 export * from "./workspace-views.js";
 export * from "./transcript.js";
+export * from "./os-control.js";
