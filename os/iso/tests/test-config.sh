@@ -45,7 +45,10 @@ done
 check "flathub hook verifies the remote" grep -q 'flatpak remotes' "$ISO_DIR/config/hooks/normal/0100-flathub.hook.chroot"
 check "flathub hook fetches appstream (§6 #20)" grep -q 'flatpak update --system --appstream flathub' "$ISO_DIR/config/hooks/normal/0100-flathub.hook.chroot"
 check "flathub hook enables the first-boot fetch" grep -q 'systemctl enable jarvis-flathub-appstream.service' "$ISO_DIR/config/hooks/normal/0100-flathub.hook.chroot"
-check "first-boot appstream unit" python3 - "$ISO_DIR/config/includes.chroot/etc/systemd/system/jarvis-flathub-appstream.service" <<'PY'
+# live-build refuses both (E: You have files in includes.chroot and
+# includes.chroot_after_packages); hooks run after the latter anyway.
+check "no legacy includes.chroot beside includes.chroot_after_packages" test ! -e "$ISO_DIR/config/includes.chroot"
+check "first-boot appstream unit" python3 - "$ISO_DIR/config/includes.chroot_after_packages/etc/systemd/system/jarvis-flathub-appstream.service" <<'PY'
 import configparser, sys
 u = configparser.ConfigParser(strict=False, interpolation=None)
 u.optionxform = str
