@@ -109,6 +109,18 @@ func TestFlatpakDetailsInstalledInfo(t *testing.T) {
 	}
 }
 
+func TestFlatpakDetailsFirstRefAndOriginWin(t *testing.T) {
+	for name, out := range map[string]string{
+		"second origin": "Spotify - Music\n\n          ID: com.spotify.Client\n         Ref: app/com.spotify.Client/x86_64/stable\n      Origin: flathub\n     Subject: x\n      Origin: evil\n",
+		"second ref":    "Spotify - Music\n\n          ID: com.spotify.Client\n         Ref: app/com.spotify.Client/x86_64/stable\n      Origin: flathub\n     Subject: x\n         Ref: app/evil/x86_64/stable\n",
+	} {
+		info, err := FlatpakDetails(out)
+		if err != nil || info.Origin != "flathub" || info.Ref != "app/com.spotify.Client/x86_64/stable" {
+			t.Errorf("%s: got %+v, %v", name, info, err)
+		}
+	}
+}
+
 func TestHumanSize(t *testing.T) {
 	for in, want := range map[string]int64{"37.4 MB": 37_400_000, "980 bytes": 980, "1.2 GB": 1_200_000_000, "512 kB": 512_000} {
 		if got, err := HumanSize(in); err != nil || got != want {

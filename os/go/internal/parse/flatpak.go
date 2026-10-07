@@ -73,10 +73,14 @@ func FlatpakDetails(out string) (FlatpakInfo, error) {
 			switch k {
 			case "ID":
 				info.ID = v
-			case "Ref":
-				info.Ref = v
+			case "Ref": // first wins: later lines (e.g. Subject) are remote-controlled
+				if info.Ref == "" {
+					info.Ref = v
+				}
 			case "Origin":
-				info.Origin = v
+				if info.Origin == "" {
+					info.Origin = v
+				}
 			case "Version":
 				info.Version = v
 			case "Download":
