@@ -113,6 +113,19 @@ private slots:
         QCOMPARE(model.decision(true)["ticked"].toArray(), QJsonArray{"nm"});
     }
 
+    void secretForUntickedItemIsIgnored()
+    {
+        CardModel model;
+        model.setClockForTest(kNow);
+        QJsonArray items = wifi({u"home"_s});
+        items.append(item(u"nm"_s, u"svc.restart"_s, u"Restart NetworkManager"_s, u"system"_s));
+        QVERIFY(model.load(card(items)));
+        model.setTicked(0, false);
+        model.setSecret(0, u"password"_s, u"sneaky"_s); // unticked: must be dropped
+        model.setTicked(0, true);
+        QCOMPARE(model.decision(true)["secrets"].toObject(), QJsonObject());
+    }
+
     void untickingClearsThatItemsSecrets()
     {
         CardModel model;

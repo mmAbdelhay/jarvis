@@ -193,7 +193,7 @@ void CardModel::toggle(int row)
 
 void CardModel::setSecret(int row, const QString& field, const QString& value)
 {
-    if (row < 0 || row >= m_items.size())
+    if (row < 0 || row >= m_items.size() || !m_items[row].ticked)
         return;
     const QVariantList& fields = m_items[row].secretFields;
     const bool declared = std::any_of(fields.cbegin(), fields.cend(),
