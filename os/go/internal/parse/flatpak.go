@@ -10,6 +10,8 @@ import (
 // `flatpak search --columns=application,name,version,description,remotes`.
 type FlatpakHit struct {
 	ID, Name, Version, Summary string
+	Ref                        string // "app/<id>/<arch>/<branch>" or "runtime/..."
+	Origin                     string // remote it came from (`flatpak info` only)
 	Remotes                    []string
 }
 
@@ -51,6 +53,8 @@ func FlatpakList(out string) []FlatpakApp {
 // FlatpakInfo is `flatpak remote-info` or `flatpak info` output.
 type FlatpakInfo struct {
 	ID, Name, Version, Summary string
+	Ref                        string // "app/<id>/<arch>/<branch>" or "runtime/..."
+	Origin                     string // remote it came from (`flatpak info` only)
 	DownloadBytes              int64
 	InstalledBytes             int64
 }
@@ -69,6 +73,10 @@ func FlatpakDetails(out string) (FlatpakInfo, error) {
 			switch k {
 			case "ID":
 				info.ID = v
+			case "Ref":
+				info.Ref = v
+			case "Origin":
+				info.Origin = v
 			case "Version":
 				info.Version = v
 			case "Download":

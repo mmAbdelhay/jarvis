@@ -91,7 +91,7 @@ func TestFlatpakDetailsRemoteInfo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := FlatpakInfo{ID: "org.videolan.VLC", Name: "VLC", Version: "3.0.23",
+	want := FlatpakInfo{ID: "org.videolan.VLC", Ref: "app/org.videolan.VLC/x86_64/stable", Name: "VLC", Version: "3.0.23",
 		Summary: "VLC media player, the open-source multimedia player", DownloadBytes: 52_700_000, InstalledBytes: 139_400_000}
 	if info != want {
 		t.Fatalf("got %+v\nwant %+v", info, want)
@@ -100,7 +100,8 @@ func TestFlatpakDetailsRemoteInfo(t *testing.T) {
 
 func TestFlatpakDetailsInstalledInfo(t *testing.T) {
 	info, err := FlatpakDetails(fixture(t, "flatpak-info-spotify.txt"))
-	if err != nil || info.ID != "com.spotify.Client" || info.Version != "1.2.47.364.gf06e5b9b" || info.InstalledBytes != 6_100_000 {
+	if err != nil || info.ID != "com.spotify.Client" || info.Version != "1.2.47.364.gf06e5b9b" || info.InstalledBytes != 6_100_000 ||
+		info.Ref != "app/com.spotify.Client/x86_64/stable" || info.Origin != "flathub" {
 		t.Fatalf("got %+v, %v", info, err)
 	}
 	if _, err := FlatpakDetails("error: Nothing matches org.nope.App\n"); err == nil {

@@ -206,18 +206,47 @@ func TestAptRemoveHappyPathAndNotInstalled(t *testing.T) {
 	}
 }
 
+const (
+	spotifyRemoteInfo = "Spotify - Online music streaming service\n\n         ID: com.spotify.Client\n        Ref: app/com.spotify.Client/x86_64/stable\n    Version: 1.2.31\n"
+	spotifyInfo       = "Spotify - Online music streaming service\n\n          ID: com.spotify.Client\n         Ref: app/com.spotify.Client/x86_64/stable\n      Origin: flathub\nInstallation: system\n"
+)
+
 func TestFlatpakInstallUsesFlathubOnly(t *testing.T) {
 	run := (&execx.Fake{}).
-		On(execx.OK("ID: com.spotify.Client\n"), "flatpak", "remote-info", "--system", "flathub", "com.spotify.Client").
-		On(execx.OK(""), "flatpak", "install", "--system", "-y", "flathub", "com.spotify.Client")
+		On(execx.OK(spotifyRemoteInfo), "flatpak", "remote-info", "--system", "--app", "flathub", "com.spotify.Client").
+		On(execx.OK(""), "flatpak", "install", "--system", "-y", "--app", "flathub", "com.spotify.Client")
 	out, err := newService(run, &fakeAuth{}).FlatpakInstall(context.Background(), sender, []string{"com.spotify.Client"})
 	if err != nil || !out.OK {
 		t.Fatalf("got %+v %v", out, err)
 	}
 }
 
+func TestFlatpakInstallRefusesNonApps(t *testing.T) {
+	for _, tc := range []struct {
+		name, ref string
+		res       execx.Result
+	}{
+		// flatpak remote-info --app finds no app called org.gnome.Platform.
+		{"runtime ID", "org.gnome.Platform", execx.Exit(1, "error: Nothing matches org.gnome.Platform in remote flathub\n")},
+		// Belt and braces: an answer that names a runtime ref is refused too.
+		{"runtime ref in answer", "org.freedesktop.Sdk", execx.OK("         ID: org.freedesktop.Sdk\n        Ref: runtime/org.freedesktop.Sdk/x86_64/24.08\n")},
+		{"answer without a ref", "org.example.NoRef", execx.OK("         ID: org.example.NoRef\n")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			run := (&execx.Fake{}).On(tc.res, "flatpak", "remote-info", "--system", "--app", "flathub", tc.ref)
+			_, err := newService(run, &fakeAuth{}).FlatpakInstall(context.Background(), sender, []string{tc.ref})
+			if helperErr(t, err).Name != helperapi.ErrNotFound {
+				t.Fatalf("err = %v", err)
+			}
+			if len(run.CallsTo("flatpak")) != 1 {
+				t.Fatalf("ran %v, want only the remote-info check", run.CallsTo("flatpak"))
+			}
+		})
+	}
+}
+
 func TestFlatpakInstallOfflineIsAFailedRunNotNotFound(t *testing.T) {
-	run := (&execx.Fake{}).On(execx.Exit(1, "error: Unable to load summary from remote flathub: Could not resolve hostname\n"), "flatpak", "remote-info", "--system", "flathub", "com.spotify.Client")
+	run := (&execx.Fake{}).On(execx.Exit(1, "error: Unable to load summary from remote flathub: Could not resolve hostname\n"), "flatpak", "remote-info", "--system", "--app", "flathub", "com.spotify.Client")
 	out, err := newService(run, &fakeAuth{}).FlatpakInstall(context.Background(), sender, []string{"com.spotify.Client"})
 	if err != nil || out.OK || !helperapi.LooksOffline(out.StderrTail) {
 		t.Fatalf("got %+v %v", out, err)
@@ -226,10 +255,35 @@ func TestFlatpakInstallOfflineIsAFailedRunNotNotFound(t *testing.T) {
 
 func TestFlatpakRemove(t *testing.T) {
 	run := (&execx.Fake{}).
-		On(execx.OK("ID: com.spotify.Client\n"), "flatpak", "info", "--system", "com.spotify.Client").
-		On(execx.OK(""), "flatpak", "uninstall", "--system", "-y", "com.spotify.Client")
+		On(execx.OK(spotifyInfo), "flatpak", "info", "--system", "com.spotify.Client").
+		On(execx.OK(""), "flatpak", "uninstall", "--system", "-y", "--app", "com.spotify.Client")
 	if out, err := newService(run, &fakeAuth{}).FlatpakRemove(context.Background(), sender, []string{"com.spotify.Client"}); err != nil || !out.OK {
 		t.Fatalf("got %+v %v", out, err)
+	}
+}
+
+func TestFlatpakRemoveRefusals(t *testing.T) {
+	for _, tc := range []struct {
+		name, ref string
+		res       execx.Result
+		want      string
+	}{
+		{"not installed", "com.spotify.Client", execx.Exit(1, "error: com.spotify.Client not installed\n"), helperapi.ErrNotFound},
+		{"runtime ID", "org.gnome.Platform", execx.OK("          ID: org.gnome.Platform\n         Ref: runtime/org.gnome.Platform/x86_64/48\n      Origin: flathub\n"), helperapi.ErrNotAllowed},
+		{"app from another remote", "org.gnome.Calculator", execx.OK("          ID: org.gnome.Calculator\n         Ref: app/org.gnome.Calculator/x86_64/stable\n      Origin: fedora\n"), helperapi.ErrNotAllowed},
+		{"origin missing", "org.gnome.Calculator", execx.OK("          ID: org.gnome.Calculator\n         Ref: app/org.gnome.Calculator/x86_64/stable\n"), helperapi.ErrNotAllowed},
+		{"origin near miss", "org.gnome.Calculator", execx.OK("          ID: org.gnome.Calculator\n         Ref: app/org.gnome.Calculator/x86_64/stable\n      Origin: flathub-beta\n"), helperapi.ErrNotAllowed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			run := (&execx.Fake{}).On(tc.res, "flatpak", "info", "--system", tc.ref)
+			_, err := newService(run, &fakeAuth{}).FlatpakRemove(context.Background(), sender, []string{tc.ref})
+			if helperErr(t, err).Name != tc.want {
+				t.Fatalf("err = %v, want %s", err, tc.want)
+			}
+			if len(run.CallsTo("flatpak")) != 1 {
+				t.Fatalf("ran %v, want only the info check", run.CallsTo("flatpak"))
+			}
+		})
 	}
 }
 

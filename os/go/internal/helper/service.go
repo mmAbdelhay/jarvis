@@ -211,9 +211,14 @@ func (s *Service) FlatpakInstall(ctx context.Context, sender string, refs []stri
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, r := range refs {
-		res, err := s.Run.Run(ctx, execx.Cmd{Name: "flatpak", Args: []string{"remote-info", "--system", "flathub", r}, Timeout: queryTimeout})
+		// --app: a runtime ID (org.gnome.Platform) is not something the user
+		// installs; flatpak answers "Nothing matches" for it.
+		res, err := s.Run.Run(ctx, execx.Cmd{Name: "flatpak", Args: []string{"remote-info", "--system", "--app", flathubRemote, r}, Timeout: queryTimeout})
 		if err == nil && res.ExitCode == 0 {
-			continue
+			if info, perr := parse.FlatpakDetails(string(res.Stdout)); perr == nil && isAppRef(info.Ref, r) {
+				continue
+			}
+			return helperapi.Outcome{}, refuse(helperapi.ErrNotFound, "%s is not an app on Flathub", r)
 		}
 		if helperapi.LooksOffline(string(res.Stderr)) {
 			// Not "not found": the network is down. Report it as a failed
@@ -222,11 +227,20 @@ func (s *Service) FlatpakInstall(ctx context.Context, sender string, refs []stri
 		}
 		return helperapi.Outcome{}, refuse(helperapi.ErrNotFound, "%s is not available from Flathub", r)
 	}
-	args := append([]string{"install", "--system", "-y", "flathub"}, refs...)
+	args := append([]string{"install", "--system", "-y", "--app", flathubRemote}, refs...)
 	return s.run(ctx, installTimeout, "flatpak", args...), nil
 }
 
-// FlatpakRemove uninstalls system-wide Flatpak apps.
+// flathubRemote is the only Flatpak remote the helper installs from or
+// removes apps of.
+const flathubRemote = "flathub"
+
+// isAppRef reports whether ref (flatpak's "Ref:" line) is the app ref of id.
+func isAppRef(ref, id string) bool {
+	return strings.HasPrefix(ref, "app/"+id+"/")
+}
+
+// FlatpakRemove uninstalls system-wide Flatpak apps that came from Flathub.
 func (s *Service) FlatpakRemove(ctx context.Context, sender string, refs []string) (helperapi.Outcome, error) {
 	defer s.begin()()
 	if err := validate.FlatpakRefs(refs); err != nil {
@@ -242,8 +256,17 @@ func (s *Service) FlatpakRemove(ctx context.Context, sender string, refs []strin
 		if err != nil || res.ExitCode != 0 {
 			return helperapi.Outcome{}, refuse(helperapi.ErrNotFound, "%s is not installed system-wide", r)
 		}
+		// Only apps, and only ones Flathub gave us: a runtime, or an app
+		// from another remote, is not Jarvis's to remove.
+		info, perr := parse.FlatpakDetails(string(res.Stdout))
+		if perr != nil || !isAppRef(info.Ref, r) {
+			return helperapi.Outcome{}, refuse(helperapi.ErrNotAllowed, "%s is not an installed app", r)
+		}
+		if info.Origin != flathubRemote {
+			return helperapi.Outcome{}, refuse(helperapi.ErrNotAllowed, "%s was not installed from Flathub", r)
+		}
 	}
-	args := append([]string{"uninstall", "--system", "-y"}, refs...)
+	args := append([]string{"uninstall", "--system", "-y", "--app"}, refs...)
 	return s.run(ctx, installTimeout, "flatpak", args...), nil
 }
 
