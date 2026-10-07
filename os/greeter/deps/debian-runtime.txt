@@ -1,0 +1,15 @@
+# Runtime packages of jarvis-greeter (installed systems; shared-library deps come from dh_shlibdeps).
+# greetd runs it as `cage -s -- jarvis-greeter` (contracts §7; /etc/greetd/config.toml is Plan H's conffile).
+jarvis-ui
+greetd
+cage
+qml6-module-qtqml
+qml6-module-qtqml-workerscript
+qml6-module-qtquick
+qml6-module-qtquick-window
+qml6-module-qtquick-layouts
+qml6-module-qtquick-shapes
+qml6-module-qtquick-templates
+qml6-module-qtquick-controls
+qt6-wayland
+fonts-ibm-plex
