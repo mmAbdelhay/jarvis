@@ -39,6 +39,7 @@ mkdir -p "$out"
 rm -rf "$work"
 mkdir -p "$work"
 cp -a "$here/auto" "$here/config" "$here/bootappend" "$work/"
+cp "$here/../branding/brand.env" "$work/"
 mkdir -p "$work/config/packages.chroot"
 cp "$debs"/*.deb "$work/config/packages.chroot/"
 "$here/scripts/bootloader-timeouts.sh" "$work"
@@ -58,7 +59,10 @@ lb build 2>&1 | tee "$out/build.log"
 grep -o 'JARVIS-BUILD-WARNING: .*' "$out/build.log" | sort -u > "$out/warnings.txt" || true
 
 version=$(dpkg-deb -f "$(compgen -G "$debs/jarvisd_*_amd64.deb" | head -n1)" Version)
-name="jarvis-os-${version}-amd64.iso"
+# shellcheck source=../branding/lib/brand.sh
+. "$here/../branding/lib/brand.sh"
+brand_load
+name="${DISTRO_ID}-${version}-amd64.iso"
 mv "$work"/*.hybrid.iso "$out/$name"
 cp "$work"/*.packages "$out/$name.packages"
 (cd "$out" && sha256sum "$name" > "$name.sha256")

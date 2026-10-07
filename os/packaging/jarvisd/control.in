@@ -7,7 +7,7 @@ Depends: systemd, dbus-user-session, jarvis-pkg (= @VERSION@), jarvis-diag (= @V
 Section: admin
 Priority: optional
 Homepage: https://github.com/mmAbdelhay/jarvis
-Description: Jarvis daemon (agent brain) with bundled Node 24
+Description: Jarvis daemon (agent brain) for @DISTRO_NAME@, with bundled Node 24
  The Jarvis agent: model providers, the tool loop, the risk gate, the
  network doctor and the audit log, run as a systemd user service in every
  user session. Ships its own Node 24 runtime under /usr/lib/jarvis/node.

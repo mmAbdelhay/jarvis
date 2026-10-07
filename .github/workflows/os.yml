@@ -111,7 +111,7 @@ jobs:
       - run: pnpm --filter @jarvis/desktop build:daemon
       - uses: actions/cache@v4
         with:
-          path: ~/.cache/jarvis-os
+          path: ~/.cache/jarvis-build
           key: node-${{ hashFiles('os/packaging/jarvisd/node.env') }}
       - run: os/packaging/build.sh --out out/debs jarvisd
       - uses: actions/upload-artifact@v4
@@ -204,7 +204,7 @@ jobs:
       - run: os/iso/scripts/check-iso.sh "$RUNNER_TEMP"/iso/dist/*.iso
       - uses: actions/upload-artifact@v4
         with:
-          name: jarvis-os-iso
+          name: os-iso
           path: ${{ runner.temp }}/iso/dist/
           if-no-files-found: error
           compression-level: 0
@@ -230,7 +230,7 @@ jobs:
           echo "QEMU acceleration: **$accel**" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/download-artifact@v4
         with:
-          name: jarvis-os-iso
+          name: os-iso
           path: ${{ runner.temp }}/iso
       - run: |
           python3 os/iso/smoke/run_smoke.py \
@@ -251,14 +251,15 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: jarvis-os-iso
+          name: os-iso
           path: iso
       - env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft \
-            --title "Jarvis OS ${GITHUB_REF_NAME#os-v}" \
+            --title "$(. os/branding/brand.env && echo "$DISTRO_NAME") ${GITHUB_REF_NAME#os-v}" \
             --notes "Live ISO built and smoke-tested by run ${{ github.run_id }}." \
             iso/*.iso iso/*.iso.sha256

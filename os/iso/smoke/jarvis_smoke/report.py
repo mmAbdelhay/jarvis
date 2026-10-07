@@ -5,7 +5,7 @@ from __future__ import annotations
 
 def render_summary(results: list[dict], ram: dict | None, accel: str) -> str:
     lines = [
-        f"## Jarvis OS smoke tests ({accel})",
+        f"## Smoke tests ({accel})",
         "",
         "| Check | Result | Time |",
         "|---|---|---|",

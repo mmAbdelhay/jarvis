@@ -21,7 +21,7 @@ stub() { # stub NAME [SCRIPTS_DIR]
 Package: $name
 Version: @VERSION@
 Architecture: amd64
-Maintainer: Jarvis OS stub <stub@example.invalid>
+Maintainer: Stub package <stub@example.invalid>
 Installed-Size: @INSTALLED_SIZE@
 Section: misc
 Priority: optional

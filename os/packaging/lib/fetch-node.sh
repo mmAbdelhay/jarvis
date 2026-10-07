@@ -4,7 +4,7 @@
 #
 #   NODE_ENV_FILE   pin file (default: ../jarvisd/node.env)
 #   NODE_TARBALL    use this tarball instead of the cache/download (tests)
-#   NODE_CACHE_DIR  download cache (default: ~/.cache/jarvis-os; CI caches it)
+#   NODE_CACHE_DIR  download cache (default: ~/.cache/jarvis-build; CI caches it)
 #
 # A cached tarball that fails the check is deleted, so a poisoned or
 # truncated cache cannot fail every later build the same way.
@@ -14,7 +14,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 . "${NODE_ENV_FILE:-$here/../jarvisd/node.env}"
 dest=$1
 name="node-v${NODE_VERSION}-linux-x64.tar.xz"
-cache=${NODE_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/jarvis-os}
+cache=${NODE_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/jarvis-build}
 
 if [ -n "${NODE_TARBALL:-}" ]; then
   tarball=$NODE_TARBALL

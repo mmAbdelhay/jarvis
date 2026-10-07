@@ -61,6 +61,11 @@ size_kb=$(du -sk --exclude=DEBIAN "$root" | cut -f1)
 text=$(cat "$control")
 text=${text//@VERSION@/$version}
 text=${text//@INSTALLED_SIZE@/$size_kb}
+# Brand placeholders from os/branding/brand.env.
+# shellcheck source=../../branding/lib/brand.sh
+. "$(dirname "$0")/../../branding/lib/brand.sh"
+brand_load
+text=$(printf '%s' "$text" | brand_render_text)
 if grep -q '@[A-Z_]*@' <<<"$text"; then
   echo "build-deb: unfilled placeholder in $control:" >&2
   grep '@[A-Z_]*@' <<<"$text" >&2

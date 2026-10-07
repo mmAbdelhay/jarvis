@@ -7,7 +7,7 @@ Depends: dbus, dbus-bin, polkitd, systemd, apt, flatpak
 Section: admin
 Priority: optional
 Homepage: https://github.com/mmAbdelhay/jarvis
-Description: Jarvis OS privileged helper (system D-Bus os.jarvis.Helper1)
+Description: @DISTRO_NAME@ privileged helper (system D-Bus os.jarvis.Helper1)
  Runs a fixed set of validated operations as root for the Jarvis tools:
  APT and Flathub install/remove and restarts of allowlisted services.
  Started on demand by D-Bus activation; guarded by polkit.

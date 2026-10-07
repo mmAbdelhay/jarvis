@@ -7,6 +7,6 @@ Depends: jarvisd (= @VERSION@)
 Section: x11
 Priority: optional
 Homepage: https://github.com/mmAbdelhay/jarvis
-Description: Jarvis OS shell (Qt6/QML)
+Description: @DISTRO_NAME@ shell (Qt6/QML)
  The fullscreen Jarvis surface on labwc: chat, confirm cards, provider
  setup, the Network doctor and the audit log. Talks only to jarvisd.

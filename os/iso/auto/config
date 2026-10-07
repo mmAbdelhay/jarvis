@@ -3,6 +3,8 @@
 # `lb config` runs this from the build directory, where build.sh has copied
 # os/iso/bootappend; do not run it directly.
 set -e
+# shellcheck source=../../branding/brand.env
+. ./brand.env
 
 lb config noauto \
   --mode debian \
@@ -27,8 +29,8 @@ lb config noauto \
   --memtest none \
   --binary-images iso-hybrid \
   --bootloaders "syslinux,grub-efi" \
-  --iso-application "Jarvis OS" \
-  --iso-publisher "Jarvis OS" \
-  --iso-volume "JARVIS_OS_M1" \
+  --iso-application "$DISTRO_NAME" \
+  --iso-publisher "$DISTRO_NAME" \
+  --iso-volume "$ISO_VOLUME" \
   --bootappend-live "$(cat bootappend)" \
   "${@}"
