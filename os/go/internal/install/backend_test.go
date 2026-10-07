@@ -100,6 +100,9 @@ func TestBackendProbePlanExecute(t *testing.T) {
 	if _, err := b.Plan(context.Background(), ":1.5", erasePlanJSON); busName(t, err) != ErrBusy {
 		t.Fatal("Plan after Execute must be refused")
 	}
+	if _, err := b.Probe(context.Background(), ":1.5"); busName(t, err) != ErrBusy {
+		t.Fatal("Probe after Execute must be refused")
+	}
 	for _, s := range auth.seen {
 		if s != ":1.5 "+ActionRun {
 			t.Fatalf("authorization = %v", auth.seen)

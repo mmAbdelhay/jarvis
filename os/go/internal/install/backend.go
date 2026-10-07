@@ -79,11 +79,22 @@ func (b *Backend) Probe(ctx context.Context, sender string) (string, error) {
 	if err := b.authorize(ctx, sender); err != nil {
 		return "", err
 	}
+	// Probe may mount the Windows partition; never touch a disk Execute owns.
+	b.mu.Lock()
+	busy := b.state != ""
+	b.mu.Unlock()
+	if busy {
+		return "", &BusError{ErrBusy, "the installation has already started"}
+	}
 	p, err := b.ProbeFn(ctx)
 	if err != nil {
 		return "", &BusError{ErrFailed, "could not read the disks: " + err.Error()}
 	}
 	b.mu.Lock()
+	if b.state != "" {
+		b.mu.Unlock()
+		return "", &BusError{ErrBusy, "the installation has already started"}
+	}
 	b.probe = &p
 	b.mu.Unlock()
 	out, _ := json.Marshal(p)
