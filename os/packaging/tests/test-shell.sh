@@ -3,8 +3,15 @@
 source "$(dirname "$0")/lib.sh"
 tmp=$(mktmp); trap 'rm -rf "$tmp"' EXIT
 
+toolchain_hint='TRIXIE_PACKAGES="cmake gcc libc6-dev"'
 if ! command -v cmake >/dev/null || ! command -v cc >/dev/null; then
-  echo "SKIP test-shell.sh: needs cmake and a C compiler (TRIXIE_PACKAGES=\"cmake gcc\")" >&2
+  echo "SKIP test-shell.sh: needs cmake and a C compiler ($toolchain_hint)" >&2
+  exit 1
+fi
+# gcc alone cannot link on a bare trixie: crt1.o and libc come from libc6-dev.
+echo 'int main(void) { return 0; }' > "$tmp/probe.c"
+if ! cc "$tmp/probe.c" -o "$tmp/probe" 2>/dev/null; then
+  echo "SKIP test-shell.sh: the C compiler cannot link a program; install libc6-dev ($toolchain_hint)" >&2
   exit 1
 fi
 

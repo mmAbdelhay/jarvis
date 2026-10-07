@@ -4,7 +4,7 @@
 # packaging and ISO tests.
 #
 #   os/packaging/dev/trixie.sh 'os/packaging/tests/run.sh'
-#   TRIXIE_PACKAGES="cmake gcc" os/packaging/dev/trixie.sh '...'   extra apt packages
+#   TRIXIE_PACKAGES="cmake gcc libc6-dev" os/packaging/dev/trixie.sh '...'   extra apt packages
 #   TRIXIE_DOCKER_ARGS="--privileged" os/packaging/dev/trixie.sh '...'
 set -euo pipefail
 if [ $# -ne 1 ]; then
