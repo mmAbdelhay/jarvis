@@ -17,6 +17,8 @@ import { describe, expect, it } from "vitest";
 // in from. sdk-executable.ts is the same case: it names the Agent SDK's
 // per-platform binary package next to the SDK this process loaded, and its
 // pure parts take platform/arch as parameters and are tested for all of them.
+// os-daemon-main.ts is the Jarvis OS jarvisd entry, an impure edge like
+// daemon-main.ts: it reads the platform once (it runs on Linux only).
 const ALLOWED = new Set([
   "main.ts",
   "preload.cts",
@@ -24,6 +26,7 @@ const ALLOWED = new Set([
   "jarvisd.ts",
   "pty.ts",
   "sdk-executable.ts",
+  "os-daemon-main.ts",
 ]);
 
 const ROOTS = [
