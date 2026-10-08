@@ -1,7 +1,9 @@
 // voice:utterance / voice:state / voice:stop (Rafiq M3 §2). One recording in,
-// one decision out (core voice-intent.ts): answer the visible card, stop, or
-// send a prompt — and, for the computer's own push-to-talk, read the final
-// answer aloud with Piper. The phone's replies are never spoken here.
+// one decision out (core voice-intent.ts): approve/deny the visible card, stop,
+// or send a prompt — and, for the computer's own push-to-talk, read the final
+// answer aloud with Piper when the speak setting is on. approve/deny only
+// CLASSIFY (contracts §5 #10): jarvisd never answers the card, the shell sends
+// agent:confirm with its ticks. The phone's replies are never spoken here.
 // Transcripts are never logged.
 //
 // No electron here (core/no-electron.test.ts).
@@ -10,6 +12,7 @@ import {
   CONTROL_TEXT,
   type ConfirmFrom,
   decideVoiceAction,
+  type VoiceAvailability,
   type VoiceLang,
 } from "@jarvis/core";
 import {
@@ -33,19 +36,23 @@ export type OsVoice = {
     origin: VoiceOrigin,
   ): Promise<VoiceUtteranceResult>;
   stop(): null;
+  /** voice:setSpeak: read local replies aloud (needs an installed voice). */
+  setSpeak(on: boolean): null;
+  /** The io availability with `speak` = the user's setting. */
+  availability(): VoiceAvailability;
   state(): VoiceStatePush;
   resync(): void;
 };
 
 export function createOsVoice(deps: {
   io: VoiceIo;
-  agent: Pick<
-    OsAgent,
-    "prompt" | "confirm" | "stop" | "card" | "isLocked" | "onEvent" | "currentTurnId"
-  >;
+  agent: Pick<OsAgent, "prompt" | "stop" | "card" | "isLocked" | "onEvent" | "currentTurnId">;
   push(channel: string, payload: unknown): void;
   log(line: string): void;
+  /** Initial speak setting (default on). */
+  speak?: boolean;
 }): OsVoice {
+  let speakOn = deps.speak ?? true;
   let state: VoiceStatePush = { state: "idle" };
   /** The local voice prompt whose answer will be read aloud. */
   let reply: { turnId: string; lang: VoiceLang; text: string } | undefined;
@@ -89,21 +96,6 @@ export function createOsVoice(deps: {
     }
   });
 
-  function answer(
-    cardId: string,
-    approve: boolean,
-    ticked: string[],
-    from: ConfirmFrom,
-  ): "approve" | "deny" | "ignored" {
-    try {
-      deps.agent.confirm({ cardId, approve, ticked, secrets: {} }, from);
-      return approve ? "approve" : "deny";
-    } catch (error) {
-      if (error instanceof OsAgentError) return "ignored";
-      throw error;
-    }
-  }
-
   return {
     async utterance(meta, wav, origin) {
       if (!checkWav(wav).ok) throw new OsAgentError("bad-request", CONTROL_TEXT.badAudio);
@@ -135,13 +127,8 @@ export function createOsVoice(deps: {
       });
       switch (decision.action) {
         case "approve":
-          return {
-            text,
-            lang,
-            action: answer(decision.cardId, true, decision.ticked, origin.from),
-          };
         case "deny":
-          return { text, lang, action: answer(decision.cardId, false, [], origin.from) };
+          return { text, lang, action: decision.action };
         case "stop": {
           silence();
           const running = deps.agent.currentTurnId();
@@ -150,7 +137,7 @@ export function createOsVoice(deps: {
         }
         case "prompt": {
           const { turnId } = deps.agent.prompt(decision.text, origin.from);
-          if (origin.speakReply) reply = { turnId, lang, text: "" };
+          if (origin.speakReply && speakOn) reply = { turnId, lang, text: "" };
           return { text, lang, action: "prompt" };
         }
         case "ignored":
@@ -160,6 +147,15 @@ export function createOsVoice(deps: {
     stop() {
       silence();
       return null;
+    },
+    setSpeak(on) {
+      speakOn = on;
+      if (!on) silence();
+      return null;
+    },
+    availability() {
+      const io = deps.io.availability();
+      return { ...io, speak: speakOn && io.tts !== null };
     },
     state: () => state,
     resync() {

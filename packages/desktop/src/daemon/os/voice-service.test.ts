@@ -1,4 +1,4 @@
-import type { AgentEvent, Card, ConfirmAnswer, ConfirmFrom } from "@jarvis/core";
+import type { AgentEvent, Card, ConfirmFrom } from "@jarvis/core";
 import { describe, expect, it } from "vitest";
 import { makeWav } from "./__fixtures__/wav.js";
 import { OsAgentError } from "./agent-service.js";
@@ -26,10 +26,9 @@ const CARD: Card = {
 
 function harness(
   heard: { text: string; language: "en" | "ar" },
-  over: { locked?: boolean; confirmThrows?: OsAgentError } = {},
+  over: { locked?: boolean; speak?: boolean } = {},
 ) {
   const pushes: { channel: string; payload: unknown }[] = [];
-  const confirms: { answer: ConfirmAnswer; from?: ConfirmFrom }[] = [];
   const prompts: { text: string; from?: ConfirmFrom }[] = [];
   const stops: string[] = [];
   const spoken: string[] = [];
@@ -60,11 +59,6 @@ function harness(
         turn = "t1";
         return { turnId: "t1" };
       },
-      confirm: (answer, from) => {
-        if (over.confirmThrows !== undefined) throw over.confirmThrows;
-        confirms.push({ answer, ...(from === undefined ? {} : { from }) });
-        return null;
-      },
       stop: (turnId) => {
         stops.push(turnId);
         return null;
@@ -79,17 +73,18 @@ function harness(
     },
     push: (channel, payload) => pushes.push({ channel, payload }),
     log: () => {},
+    ...(over.speak === undefined ? {} : { speak: over.speak }),
   });
   const emit = (event: AgentEvent) => {
     for (const listener of listeners) listener(event);
   };
   const states = () => pushes.filter((p) => p.channel === "voice:state").map((p) => p.payload);
-  return { voice, confirms, prompts, stops, spoken, emit, states, speechStops: () => speechStops };
+  return { voice, prompts, stops, spoken, emit, states, speechStops: () => speechStops };
 }
 const WAV = makeWav(16_000);
 
 describe("createOsVoice (Rafiq M3 §2)", () => {
-  it("approves only the visible card, with who answered", async () => {
+  it("classifies approve for the visible card and never answers it", async () => {
     const h = harness({ text: "Yes.", language: "en" });
     await expect(
       h.voice.utterance({ lang: "auto", cardId: "c1" }, WAV, { from: LOCAL, speakReply: true }),
@@ -98,9 +93,6 @@ describe("createOsVoice (Rafiq M3 §2)", () => {
       lang: "en",
       action: "approve",
     });
-    expect(h.confirms).toEqual([
-      { answer: { cardId: "c1", approve: true, ticked: ["item-1"], secrets: {} }, from: LOCAL },
-    ]);
     expect(h.states()).toEqual([{ state: "transcribing" }, { state: "idle" }]);
   });
 
@@ -112,22 +104,31 @@ describe("createOsVoice (Rafiq M3 §2)", () => {
       action: "deny",
       lang: "ar",
     });
-    expect(h.confirms[0]).toEqual({
-      answer: { cardId: "c1", approve: false, ticked: [], secrets: {} },
-      from: PHONE,
-    });
   });
 
-  it("answers ignored when the agent refuses (locked meanwhile, or a phone and a password card)", async () => {
-    const h = harness(
-      { text: "yes", language: "en" },
-      { confirmThrows: new OsAgentError("locked", "locked") },
-    );
+  it("answers ignored for a yes while the screen is locked", async () => {
+    const h = harness({ text: "yes", language: "en" }, { locked: true });
     await expect(
       h.voice.utterance({ lang: "auto", cardId: "c1" }, WAV, { from: LOCAL, speakReply: true }),
-    ).resolves.toMatchObject({
-      action: "ignored",
-    });
+    ).resolves.toMatchObject({ action: "ignored" });
+    expect(h.prompts).toEqual([]);
+  });
+
+  it("does not speak replies when speak is off, and reports it in availability", async () => {
+    const h = harness({ text: "hello", language: "en" }, { speak: false });
+    expect(h.voice.availability()).toMatchObject({ speak: false });
+    await h.voice.utterance({ lang: "auto" }, WAV, { from: LOCAL, speakReply: true });
+    h.emit({ type: "text", turnId: "t1", delta: "Hi." });
+    h.emit({ type: "turn-end", turnId: "t1", reason: "done" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(h.spoken).toEqual([]);
+    expect(h.voice.setSpeak(true)).toBeNull();
+    expect(h.voice.availability()).toMatchObject({ speak: true });
+    await h.voice.utterance({ lang: "auto" }, WAV, { from: LOCAL, speakReply: true });
+    h.emit({ type: "text", turnId: "t1", delta: "Hi." });
+    h.emit({ type: "turn-end", turnId: "t1", reason: "done" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(h.spoken).toEqual(["Hi."]);
   });
 
   it("a yes for a card that already closed is ignored, never sent as a prompt", async () => {
@@ -138,7 +139,6 @@ describe("createOsVoice (Rafiq M3 §2)", () => {
       action: "ignored",
     });
     expect(h.prompts).toEqual([]);
-    expect(h.confirms).toEqual([]);
   });
 
   it("sends anything else as a prompt and reads the answer aloud for the computer", async () => {

@@ -23,6 +23,7 @@ import {
   parseProviderDraft,
   parseProviderSave,
   parseSetLocked,
+  parseSetSpeak,
   parseVoiceUtteranceMeta,
 } from "@jarvis/wire";
 import { ControlRequestError } from "../control/messages.js";
@@ -146,6 +147,14 @@ export function createOsRouter(services: OsServices): OsRouter {
       case OS_CONTROL_REQUESTS.voiceStop:
         value(parseNoArgs(args));
         return services.voice?.stop() ?? null;
+      case OS_CONTROL_REQUESTS.voiceSetSpeak: {
+        requireLocal(origin);
+        const { on } = value(parseSetSpeak(args));
+        if (services.voice === undefined) {
+          throw new ControlRequestError("unsupported", CONTROL_TEXT.voiceUnavailable);
+        }
+        return services.voice.setSpeak(on);
+      }
       default:
         throw new ControlRequestError("unknown-channel", `No handler for ${channel}`);
     }

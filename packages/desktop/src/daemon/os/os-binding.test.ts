@@ -417,16 +417,22 @@ describe("lock and undo channels (Rafiq M3 §2, §3)", () => {
 describe("voice channels (Rafiq M3 §2)", () => {
   function fakeVoice() {
     const calls: { meta: unknown; bytes: number; origin: unknown }[] = [];
+    const speaks: boolean[] = [];
     const voice: OsVoice = {
       utterance: async (meta, wav, origin) => {
         calls.push({ meta, bytes: wav.byteLength, origin });
         return { text: "yes", lang: "en", action: "approve" };
       },
       stop: () => null,
+      setSpeak: (on) => {
+        speaks.push(on);
+        return null;
+      },
+      availability: () => ({ available: true, stt: "ggml-base", tts: null, speak: false }),
       state: () => ({ state: "idle" }),
       resync: () => {},
     };
-    return { voice, calls };
+    return { voice, calls, speaks };
   }
 
   it("routes a local voice:utterance blob with speech on, a phone one with speech off", async () => {
@@ -451,6 +457,31 @@ describe("voice channels (Rafiq M3 §2)", () => {
         origin: { from: { via: "phone:Pixel 8", allowPassword: false }, speakReply: false },
       },
     ]);
+  });
+
+  it("routes voice:setSpeak for the computer only", async () => {
+    const { agent } = fakeAgent();
+    const { voice, speaks } = fakeVoice();
+    const router = createOsRouter({ agent, voice });
+    await expect(
+      router.invoke("voice:setSpeak", [{ on: false }], { kind: "local", connection }),
+    ).resolves.toBeNull();
+    expect(speaks).toEqual([false]);
+    await expect(
+      router.invoke("voice:setSpeak", [{ on: true }], {
+        kind: "phone",
+        device: { id: "d".repeat(32), name: "Pixel 8" },
+      }),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    await expect(
+      router.invoke("voice:setSpeak", [{ on: 1 }], { kind: "local", connection }),
+    ).rejects.toMatchObject({ code: "bad-request" });
+    await expect(
+      createOsRouter({ agent }).invoke("voice:setSpeak", [{ on: true }], {
+        kind: "local",
+        connection,
+      }),
+    ).rejects.toMatchObject({ code: "unsupported" });
   });
 
   it("refuses a bad header and answers unsupported without voice", async () => {
