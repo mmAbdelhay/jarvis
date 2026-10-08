@@ -20,7 +20,8 @@ Window {
     Connections {
         target: window.shell
         function onConnectionChanged() {
-            if (window.shell.connection === "open")
+            // Stay in the doctor across a reconnect: onOpened restarts it.
+            if (window.shell.connection === "open" && window.shell.view !== "doctor")
                 window.shell.showView("settings")
         }
     }

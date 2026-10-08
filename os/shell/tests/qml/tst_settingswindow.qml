@@ -55,6 +55,22 @@ TestCase {
         compare(phoneSpy.count, 2)
     }
 
+    function test_reconnectKeepsDoctorAndRestartsIt() {
+        const w = createTemporaryObject(windowComponent, this, {shell: testSettingsShell})
+        w.show()
+        testSettingsShell.openDoctor()
+        compare(testSettingsShell.view, "doctor")
+        const startSpy = createTemporaryObject(spyComponent, this,
+            {target: testSettingsShell.doctor, signalName: "startRequested"})
+
+        testSettingsClient.closed()
+        testSettingsClient.opened()
+        compare(testSettingsShell.connection, "open")
+        compare(testSettingsShell.view, "doctor")
+        compare(startSpy.count, 1)   // the reconnect restarts the doctor
+        testSettingsShell.showView("settings")
+    }
+
     function test_showsSettingsOnItsOwn() {
         const w = createTemporaryObject(windowComponent, this)
         w.show()
