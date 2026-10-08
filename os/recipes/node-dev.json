@@ -1,0 +1,27 @@
+{
+  "id": "node-dev",
+  "title": { "en": "Node.js development", "ar": "تطوير Node.js" },
+  "description": {
+    "en": "Node.js and npm from Debian, with Git and the build tools that native modules need.",
+    "ar": "بيئة Node.js مع npm من مستودعات دبيان، إضافةً إلى Git وأدوات البناء اللازمة للوحدات الأصلية."
+  },
+  "steps": [
+    {
+      "tool": "pkg.install",
+      "input": { "items": [
+        { "source": "apt", "id": "nodejs" },
+        { "source": "apt", "id": "npm" }
+      ] },
+      "title": { "en": "Install Node.js and npm", "ar": "تثبيت Node.js وnpm" }
+    },
+    {
+      "tool": "pkg.install",
+      "input": { "items": [
+        { "source": "apt", "id": "git" },
+        { "source": "apt", "id": "build-essential" }
+      ] },
+      "title": { "en": "Install Git and build tools", "ar": "تثبيت Git وأدوات البناء" }
+    }
+  ],
+  "requires": { "os": "rafiq" }
+}

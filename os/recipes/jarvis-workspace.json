@@ -1,0 +1,22 @@
+{
+  "id": "jarvis-workspace",
+  "title": { "en": "Jarvis Workspace", "ar": "مساحة عمل جارفس" },
+  "description": {
+    "en": "The Jarvis coding workspace: agents in real terminals, an editor, databases, an API client and cluster tabs in one window. It keeps its own settings.",
+    "ar": "مساحة عمل جارفس البرمجية: وكلاء يعملون في طرفيات حقيقية، ومحرّر، وقواعد بيانات، وعميل لواجهات البرمجة، وتبويبات للعناقيد، كلها في نافذة واحدة. ولها إعداداتها الخاصة."
+  },
+  "steps": [
+    {
+      "tool": "pkg.install",
+      "input": { "items": [{ "source": "apt", "id": "jarvis-workspace" }] },
+      "title": { "en": "Install Jarvis Workspace", "ar": "تثبيت مساحة عمل جارفس" }
+    },
+    {
+      "tool": "pkg.install",
+      "input": { "items": [{ "source": "apt", "id": "git" }] },
+      "title": { "en": "Install Git", "ar": "تثبيت Git" }
+    }
+  ],
+  "requires": { "os": "rafiq", "minRamGB": 8 },
+  "available": false
+}
