@@ -283,14 +283,6 @@ Rectangle {
                         text: modelData.name
                         checkable: true
                         checked: modelData.id === root.login.sessionId
-                        contentItem: Text {
-                            text: parent.text
-                            textFormat: Text.PlainText
-                            font: parent.font
-                            color: Theme.text
-                            elide: Text.ElideRight
-                            verticalAlignment: Text.AlignVCenter
-                        }
                         onTriggered: root.login.sessionId = modelData.id
                     }
                 }
