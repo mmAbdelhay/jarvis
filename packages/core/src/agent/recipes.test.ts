@@ -73,6 +73,15 @@ describe("recipe files (M4 §4)", () => {
     expect(recipeFits(recipe, { osId: "rafiq", memTotalBytes: 3.5 * 1024 ** 3 })).toBeDefined();
   });
 
+  it("parses available (default true) and refuses an unavailable recipe (contracts §6 #15)", () => {
+    const machine = { osId: "rafiq", memTotalBytes: 8 * 1024 ** 3 };
+    expect(parsed(PYTHON).available).toBe(true);
+    const off = parsed({ ...PYTHON, available: false });
+    expect(off.available).toBe(false);
+    expect(recipeFits(off, machine)).toBe(RECIPE_TEXT.notAvailable("python-dev"));
+    expect(parseRecipe({ ...PYTHON, available: "no" }).ok).toBe(false);
+  });
+
   it("checks the machine: os id and memory", () => {
     const recipe = parsed(PYTHON);
     expect(recipeFits(recipe, { osId: "rafiq", memTotalBytes: 8 * 1024 ** 3 })).toBeUndefined();

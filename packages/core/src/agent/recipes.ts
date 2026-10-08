@@ -27,6 +27,8 @@ export type Recipe = {
   description: RecipeText;
   steps: RecipeStep[];
   requires: { os: string; minRamGB?: number };
+  /** Contracts §6 #15: false means the recipe ships but must not run (default true). */
+  available: boolean;
 };
 export type ParsedRecipe = { ok: true; recipe: Recipe } | { ok: false; error: string };
 export type RecipeMachine = { osId: string | null; memTotalBytes: number | null };
@@ -121,6 +123,10 @@ export function parseRecipe(raw: unknown): ParsedRecipe {
   ) {
     return fail(`${where}: requires.minRamGB must be more than 0 and at most 1024`);
   }
+  const available = raw["available"];
+  if (available !== undefined && typeof available !== "boolean") {
+    return fail(`${where}: available must be true or false`);
+  }
   return {
     ok: true,
     recipe: {
@@ -129,6 +135,7 @@ export function parseRecipe(raw: unknown): ParsedRecipe {
       description: recipeDescription,
       steps: parsedSteps,
       requires: { os, ...(minRamGB === undefined ? {} : { minRamGB }) },
+      available: available !== false,
     },
   };
 }
@@ -136,6 +143,7 @@ export function parseRecipe(raw: unknown): ParsedRecipe {
 /** A model-facing reason the recipe cannot run here, or undefined. MemTotal
  *  is a little under the installed RAM; §6 #3 fits at 90%. */
 export function recipeFits(recipe: Recipe, machine: RecipeMachine): string | undefined {
+  if (!recipe.available) return RECIPE_TEXT.notAvailable(recipe.id);
   if (machine.osId !== recipe.requires.os) {
     return RECIPE_TEXT.wrongOs(recipe.id, recipe.requires.os);
   }

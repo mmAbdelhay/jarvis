@@ -465,6 +465,7 @@ export const CONTROL_TEXT: Localized<ControlText> = { en: CONTROL_EN, ar: CONTRO
 export const RECIPE_TEXT = {
   badId: "recipes.run needs {id}: the id of a recipe from recipes.list.",
   unknown: (id: string) => `There is no recipe "${id}". Call recipes.list to see the recipes.`,
+  notAvailable: (id: string) => `The recipe "${id}" is not available yet and cannot run.`,
   wrongOs: (id: string, os: string) =>
     `The recipe "${id}" is for ${os} and cannot run on this computer.`,
   tooLittleRam: (id: string, gb: number) => `The recipe "${id}" needs at least ${gb} GB of memory.`,
