@@ -1,0 +1,10 @@
+{
+  "id": "jarvis-web",
+  "name": "Web",
+  "description": "Fetch a web page as plain text (2 MB cap). Page content is treated as untrusted.",
+  "tier": "official",
+  "version": "0.1.0",
+  "artifact": { "runtime": "go-static" },
+  "permissions": { "network": true, "paths": [] },
+  "tools": [{ "name": "web.fetch", "risk": "safe" }]
+}
