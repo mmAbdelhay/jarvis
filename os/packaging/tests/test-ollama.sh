@@ -11,6 +11,9 @@ printf cpu > "$portable/lib/ollama/libggml-cpu-haswell.so"
 chmod 0755 "$portable/lib/ollama/libggml-cpu-haswell.so"
 printf base > "$portable/lib/ollama/libggml-base.so.1"
 ln -s libggml-base.so.1 "$portable/lib/ollama/libggml-base.so"
+printf '#!/bin/sh\nexit 0\n' > "$portable/lib/ollama/llama-server"
+chmod 0755 "$portable/lib/ollama/llama-server"
+printf lic > "$portable/lib/ollama/LLAMA_CPP_LICENSE"
 for gpu in cuda_v12 rocm vulkan; do printf gpu > "$portable/lib/ollama/$gpu/libgpu.so"; done
 printf gpu > "$portable/lib/ollama/libggml-cuda.so"
 tar -C "$portable" -czf "$tmp/portable.tgz" bin lib
@@ -21,6 +24,18 @@ check "CPU backend retained" test -f "$tmp/stage/usr/lib/ollama/libggml-cpu-hasw
 check "CPU libraries installed without executable bits" test ! -x "$tmp/stage/usr/lib/ollama/libggml-cpu-haswell.so"
 check "private library symlink preserved" test -L "$tmp/stage/usr/lib/ollama/libggml-base.so"
 check "private library symlink resolves" test -f "$tmp/stage/usr/lib/ollama/libggml-base.so"
+check "llama-server runner shipped executable" test -x "$tmp/stage/usr/lib/ollama/llama-server"
+check "upstream licences shipped" test -f "$tmp/stage/usr/share/doc/jarvis-ollama/licenses/LLAMA_CPP_LICENSE"
+check "licences not left in the library dir" test ! -e "$tmp/stage/usr/lib/ollama/LLAMA_CPP_LICENSE"
+# A release without the runner must not build (ollama cannot start models).
+rm "$portable/lib/ollama/llama-server"
+tar -C "$portable" -czf "$tmp/norunner.tgz" bin lib
+printf 'OLLAMA_VERSION=0.0.1\nOLLAMA_ASSET=ollama-linux-amd64.tgz\nOLLAMA_SHA256=%s\n' "$(sha256sum "$tmp/norunner.tgz" | cut -d' ' -f1)" > "$tmp/norunner.env"
+if env OLLAMA_ENV_FILE="$tmp/norunner.env" OLLAMA_TARBALL="$tmp/norunner.tgz" "$PACKAGING_DIR/jarvis-ollama/stage.sh" "$tmp/stage-norunner" 2>/dev/null; then
+  fail "missing llama-server rejected"
+else
+  pass "missing llama-server rejected"
+fi
 for gpu in cuda_v12 rocm vulkan libggml-cuda.so; do
   check "GPU runtime excluded: $gpu" test ! -e "$tmp/stage/usr/lib/ollama/$gpu"
 done
@@ -63,6 +78,7 @@ gcc -shared -fPIC -o "$up/lib/ollama/libggml-base.so" "$tmp/base.c"
 gcc -shared -fPIC -o "$up/lib/ollama/libggml-cpu-haswell.so" "$tmp/base.c"
 printf 'int ggml_base(void); int main(int c,char**v){(void)v; if(c>1) return 0; return ggml_base();}\n' > "$tmp/main.c"
 gcc -o "$up/bin/ollama" "$tmp/main.c" -L"$up/lib/ollama" -lggml-base -Wl,-rpath,'$ORIGIN/../lib/ollama'
+gcc -o "$up/lib/ollama/llama-server" "$tmp/main.c" -L"$up/lib/ollama" -lggml-base -Wl,-rpath,'$ORIGIN'
 echo cuda > "$up/lib/ollama/cuda_v12/libggml-cuda.so"; echo vk > "$up/lib/ollama/vulkan/libggml-vulkan.so"
 tar -C "$up" -czf "$tmp/ollama-linux-amd64.tgz" bin lib
 sum=$(sha256sum "$tmp/ollama-linux-amd64.tgz" | cut -d' ' -f1)
@@ -74,6 +90,8 @@ deb=$tmp/out/jarvis-ollama_${OS_VERSION}_amd64.deb
 check "ollama at /usr/bin" deb_has "$deb" usr/bin/ollama
 check "ollama 0755" test "$(deb_mode "$deb" usr/bin/ollama)" = "-rwxr-xr-x"
 check "CPU libs at /usr/lib/ollama" deb_has "$deb" usr/lib/ollama/libggml-cpu-haswell.so
+check "runner at /usr/lib/ollama/llama-server" deb_has "$deb" usr/lib/ollama/llama-server
+check "runner 0755" test "$(deb_mode "$deb" usr/lib/ollama/llama-server)" = "-rwxr-xr-x"
 check "no CUDA runtime" bash -c "! dpkg-deb -c '$deb' | grep -q cuda_v12"
 check "no Vulkan runtime" bash -c "! dpkg-deb -c '$deb' | grep -q /vulkan/"
 check "private libs not leaked into Depends" bash -c "! grep -q ggml <<<\"\$(dpkg-deb -f '$deb' Depends)\""

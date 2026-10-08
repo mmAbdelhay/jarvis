@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Stage jarvis-ollama: upstream binary + CPU backends only (GPU runtimes are
-# hundreds of MB and need drivers the ISO does not ship; see plan gaps).
+# Stage jarvis-ollama: upstream binary, runner (llama-server) + CPU backends
+# only (GPU runtimes are hundreds of MB and need drivers the ISO does not ship; see plan gaps).
 set -euo pipefail
 stage=$1
 here=$(cd "$(dirname "$0")" && pwd)
@@ -11,17 +11,30 @@ tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$stage/usr/bin" "$stage/usr/lib/systemd/system" "$stage/usr/libexec/jarvis"
 install -m0755 "$tmp/up/bin/ollama" "$stage/usr/bin/ollama"
 mkdir -p "$stage/usr/lib/ollama"
-# Preserve SONAME symlinks; GPU backends may also occur at the top level.
+# The upstream runner layout is load-bearing: ollama execs
+# /usr/lib/ollama/llama-server (plus llama-quantize) and dlopens the CPU
+# backends next to it. Copy every top-level file, preserving SONAME symlinks;
+# GPU backends live in subdirectories (skipped) but may also occur at the top.
 shopt -s nullglob
-for lib in "$tmp/up/lib/ollama/"*.so*; do
-  case ${lib##*/} in
+mkdir -p "$stage/usr/share/doc/jarvis-ollama/licenses"
+for f in "$tmp/up/lib/ollama/"*; do
+  name=${f##*/}
+  case $name in
     *cuda*|*rocm*|*hip*|*vulkan*|*cublas*|*nvrtc*|*nvidia*) continue ;;
   esac
-  [ -f "$lib" ] || continue
-  cp -a "$lib" "$stage/usr/lib/ollama/"
-  if [ ! -L "$lib" ]; then chmod 0644 "$stage/usr/lib/ollama/${lib##*/}"; fi
+  [ -d "$f" ] && [ ! -L "$f" ] && continue
+  if [ -L "$f" ]; then
+    cp -a "$f" "$stage/usr/lib/ollama/"
+  elif [ -f "$f" ]; then
+    case $name in
+      *LICENSE*|*NOTICE*) install -m0644 "$f" "$stage/usr/share/doc/jarvis-ollama/licenses/$name" ;;
+      *.so|*.so.*) install -m0644 "$f" "$stage/usr/lib/ollama/$name" ;;
+      *) if [ -x "$f" ]; then install -m0755 "$f" "$stage/usr/lib/ollama/$name"; else install -m0644 "$f" "$stage/usr/lib/ollama/$name"; fi ;;
+    esac
+  fi
 done
 compgen -G "$stage/usr/lib/ollama/libggml-cpu*.so*" >/dev/null || { echo "jarvis-ollama: no CPU backend in the tarball" >&2; exit 1; }
+[ -x "$stage/usr/lib/ollama/llama-server" ] || { echo "jarvis-ollama: no lib/ollama/llama-server runner in the tarball" >&2; exit 1; }
 echo usr/lib/ollama > "$stage/.shlibs-libdirs"
 install -m0644 "$here/ollama.service" "$stage/usr/lib/systemd/system/ollama.service"
 install -m0755 "$here/ollama-wait-ready" "$stage/usr/libexec/jarvis/ollama-wait-ready"
