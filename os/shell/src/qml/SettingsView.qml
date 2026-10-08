@@ -1,13 +1,17 @@
 import QtQuick
-import Jarvis.UI
 import QtQuick.Layouts
 import QtQuick.Controls.Basic
+import Jarvis.UI
 
-// Provider settings: the setup form, prefilled from the active provider.
+// Settings (Rafiq M2.5): model providers in failover order; later sections
+// (memory, tools) are added to `sections` and get one Loader each.
 Item {
     id: root
     required property ProviderModel provider
+    required property ProviderListModel providers
     property bool doctorAvailable: false // sys:snapshot says offline (contracts §6.8)
+    property string section: "providers"
+    readonly property var sections: [{ id: "providers", label: "Model providers" }]
     signal doctorRequested()
 
     Flickable {
@@ -18,15 +22,15 @@ Item {
 
         ColumnLayout {
             id: column
-            width: Math.min(760, root.width - 48)
+            width: Math.min(820, root.width - 48)
             x: (root.width - width) / 2
             y: 56
-            spacing: 28
+            spacing: 24
 
             ColumnLayout {
                 spacing: 6
                 Text {
-                    text: "Model provider"
+                    text: "Settings"
                     color: Theme.text
                     font.pixelSize: 30
                     font.weight: Font.DemiBold
@@ -41,27 +45,45 @@ Item {
                 }
             }
 
-            ProviderForm {
-                Layout.fillWidth: true
-                provider: root.provider
+            RowLayout {
+                spacing: 8
+                Repeater {
+                    model: root.sections
+                    delegate: AbstractButton {
+                        id: chip
+                        required property var modelData
+                        readonly property bool selected: root.section === modelData.id
+                        objectName: "section_" + modelData.id
+                        implicitHeight: 36
+                        implicitWidth: chipText.implicitWidth + 28
+                        Accessible.role: Accessible.PageTab
+                        Accessible.name: modelData.label
+                        contentItem: Text {
+                            id: chipText
+                            text: chip.modelData.label
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                            color: chip.selected ? Theme.accentTintText : Theme.textSoft
+                            font.pixelSize: 14
+                        }
+                        background: Rectangle {
+                            radius: 18
+                            color: chip.selected ? Theme.accentTint : "transparent"
+                            border.color: chip.selected ? Theme.accentTintBorder : Theme.border
+                        }
+                        onClicked: root.section = modelData.id
+                    }
+                }
             }
 
-            RowLayout {
+            ProvidersSection {
+                objectName: "providersSection"
                 Layout.fillWidth: true
-                ActionButton {
-                    visible: root.provider.probeState === "error" && root.doctorAvailable
-                    variant: "ghost"
-                    text: "Open Network doctor"
-                    onClicked: root.doctorRequested()
-                }
-                Item { Layout.fillWidth: true }
-                ActionButton {
-                    objectName: "saveButton"
-                    variant: "primary"
-                    text: root.provider.probeState === "saving" ? "Saving…" : "Save"
-                    enabled: root.provider.canSave
-                    onClicked: root.provider.save()
-                }
+                visible: root.section === "providers"
+                provider: root.provider
+                providers: root.providers
+                doctorAvailable: root.doctorAvailable
+                onDoctorRequested: root.doctorRequested()
             }
         }
     }
