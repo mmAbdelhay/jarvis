@@ -70,7 +70,8 @@ jobs:
       - name: shellcheck
         run: |
           {
-            git ls-files os/packaging os/iso os/branding os/repo | while read -r f; do
+            # tests/fixtures hold name-lint input data, not scripts.
+            git ls-files os/packaging os/iso os/branding os/repo | grep -v '/tests/fixtures/' | while read -r f; do
               head -n1 "$f" | grep -qE '^#!.*(/|env )(ba)?sh' && echo "$f"
             done
           } | xargs shellcheck -x -S warning
