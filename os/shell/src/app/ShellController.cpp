@@ -618,3 +618,17 @@ void ShellController::applyVoiceResult(const QJsonObject& result, const QString&
     // "prompt" (ruling R1): jarvisd already started the turn; its turn-start
     // event puts the words in the chat. Sending agent:prompt would run it twice.
 }
+
+bool ShellController::handleInstanceMessage(const QByteArray& message)
+{
+    if (message == "focus") {
+        requestComposerFocus();
+        return true;
+    }
+    if (message == "ptt") { // Super+Space (labwc) -> jarvis-shell --ptt
+        setSurfaceShown(true);
+        pushToTalk();
+        return true;
+    }
+    return false;
+}

@@ -10,9 +10,10 @@ Item {
     required property ProviderListModel providers
     property MemoryModel memory: null
     property RegistryModel registry: null
+    property VoiceModel voice: null
     property bool doctorAvailable: false // sys:snapshot says offline (contracts §6.8)
     property string section: "providers"
-    readonly property var sections: [{ id: "providers", label: "Model providers" }, { id: "memory", label: "Memory" }, { id: "tools", label: "Tools" }]
+    readonly property var sections: [{ id: "providers", label: "Model providers" }, { id: "memory", label: "Memory" }, { id: "tools", label: "Tools" }, { id: "voice", label: "Voice" }]
     signal doctorRequested()
 
     Flickable {
@@ -101,6 +102,14 @@ Item {
                 visible: root.section === "tools"
                 active: root.registry !== null
                 sourceComponent: ToolsSection { registry: root.registry }
+            }
+
+            Loader {
+                objectName: "voiceSection"
+                Layout.fillWidth: true
+                visible: root.section === "voice"
+                active: root.voice !== null
+                sourceComponent: VoiceSection { voice: root.voice }
             }
         }
     }

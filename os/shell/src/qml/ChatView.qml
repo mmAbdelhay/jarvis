@@ -16,6 +16,8 @@ Item {
 
     property bool undoAvailable: false
     signal undoRequested()
+    property VoiceModel voice: null
+    signal micRequested()
 
     function focusComposer() { composer.focusInput() }
 
@@ -178,6 +180,8 @@ Item {
             Layout.rightMargin: 40
             busy: root.conversation.busy
             undoAvailable: root.undoAvailable
+            voice: root.voice
+            onMicRequested: root.micRequested()
             onUndoRequested: root.undoRequested()
             onSubmit: (text) => root.submit(text)
             onStopRequested: root.stopRequested()

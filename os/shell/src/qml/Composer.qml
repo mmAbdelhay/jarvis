@@ -9,6 +9,8 @@ ColumnLayout {
     property bool busy: false
     property bool undoAvailable: false
     signal undoRequested()
+    property VoiceModel voice: null
+    signal micRequested()
     signal submit(string text)
     signal stopRequested()
 
@@ -22,6 +24,14 @@ ColumnLayout {
     }
 
     spacing: 8
+
+    Loader {
+        objectName: "voiceIndicator"
+        Layout.fillWidth: true
+        active: root.voice !== null
+        visible: active && root.voice.state !== "idle"
+        sourceComponent: VoiceIndicator { voice: root.voice }
+    }
 
     Rectangle {
         Layout.fillWidth: true
@@ -47,6 +57,17 @@ ColumnLayout {
                 background: null
                 Accessible.name: "Message Jarvis"
                 onAccepted: root.send()
+            }
+            IconButton {
+                objectName: "micButton"
+                visible: root.voice !== null && root.voice.available
+                implicitWidth: 44
+                implicitHeight: 44
+                text: root.voice && root.voice.recording ? "Send voice message" : "Talk to Jarvis (Super+Space)"
+                iconPath: Icons.mic
+                fill: root.voice && root.voice.recording ? Theme.accent : Theme.surfaceRaised
+                ink: root.voice && root.voice.recording ? Theme.accentInk : Theme.textSoft
+                onClicked: root.micRequested()
             }
             IconButton {
                 objectName: "undoButton"
@@ -84,9 +105,20 @@ ColumnLayout {
         }
     }
     Text {
+        objectName: "voiceHint"
+        Layout.fillWidth: true
+        visible: root.voice !== null && root.voice.hint.length > 0
+        text: root.voice ? root.voice.hint : ""
+        textFormat: Text.PlainText
+        horizontalAlignment: Text.AlignHCenter
+        wrapMode: Text.Wrap
+        color: Theme.muted
+        font.pixelSize: Theme.fontSmall
+    }
+    Text {
         Layout.fillWidth: true
         horizontalAlignment: Text.AlignHCenter
-        text: "Super focuses chat · Esc stops Jarvis · Ctrl+Alt+T opens a terminal"
+        text: "Super focuses chat · Super+Space talks · Esc stops Jarvis · Ctrl+Alt+T opens a terminal"
         color: Theme.mutedSoft
         font.pixelSize: Theme.fontTiny
     }

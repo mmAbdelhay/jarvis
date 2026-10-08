@@ -29,12 +29,13 @@ int main(int argc, char* argv[])
     parser.addVersionOption();
     const QCommandLineOption focusOption(u"focus"_s, u"Bring the shell to the front and focus the chat."_s);
     const QCommandLineOption windowedOption(u"windowed"_s, u"Run as an ordinary window, not a layer-shell surface."_s);
-    parser.addOptions({focusOption, windowedOption});
+    const QCommandLineOption pttOption(u"ptt"_s, u"Push-to-talk: start, or send, a voice message (Super+Space)."_s);
+    parser.addOptions({focusOption, windowedOption, pttOption});
     parser.process(app);
 
     // A shell is already running (Super keybind, or a second launch): hand over and exit.
     SingleInstance instance(SingleInstance::defaultName());
-    if (instance.forward("focus"))
+    if (instance.forward(parser.isSet(pttOption) ? "ptt" : "focus"))
         return 0;
     instance.listen();
 
@@ -58,10 +59,10 @@ int main(int argc, char* argv[])
 
     const bool layerShell = !parser.isSet(windowedOption) && QGuiApplication::platformName().startsWith(u"wayland"_s);
     ShellSurface surface(window, layerShell);
-    QObject::connect(&instance, &SingleInstance::messageReceived, &surface, [&surface, shell](const QByteArray&) {
+    QObject::connect(&instance, &SingleInstance::messageReceived, &surface, [&surface, shell](const QByteArray& message) {
         surface.summon();
         shell->setSurfaceShown(true);
-        shell->requestComposerFocus();
+        shell->handleInstanceMessage(message);
     });
     // Voice may answer a card only while the shell is on screen (design §3.2).
     QObject::connect(shell, &ShellController::dismissRequested, &surface, [&surface, shell] {
@@ -70,10 +71,10 @@ int main(int argc, char* argv[])
     });
 
     surface.show();
-    if (parser.isSet(focusOption)) {
+    if (parser.isSet(focusOption) || parser.isSet(pttOption)) {
         surface.summon();
         shell->setSurfaceShown(true);
-        shell->requestComposerFocus();
+        shell->handleInstanceMessage(parser.isSet(pttOption) ? "ptt" : "focus");
     }
     client->start();
     return app.exec();

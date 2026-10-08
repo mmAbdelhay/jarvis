@@ -89,6 +89,8 @@ Rectangle {
                     card: root.shell.chatCard
                     undoAvailable: root.shell.undoAvailable && !root.shell.undoing
                     onUndoRequested: root.shell.undo()
+                    voice: root.shell.voice
+                    onMicRequested: root.shell.pushToTalk()
                     onSubmit: (text) => root.shell.sendPrompt(text)
                     onStopRequested: root.shell.stop()
                     onDecided: (approve) => root.shell.decide(root.shell.chatCard, approve)
@@ -109,6 +111,7 @@ Rectangle {
                     providers: root.shell.providers
                     memory: root.shell.memory
                     registry: root.shell.registry
+                    voice: root.shell.voice
                     doctorAvailable: root.shell.system.known && !root.shell.system.online
                     onDoctorRequested: root.shell.openDoctor()
                 }

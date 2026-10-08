@@ -1,6 +1,7 @@
 #include <QQmlContext>
 #include <QQmlEngine>
 #include <QQuickStyle>
+#include <QStandardPaths>
 #include <QtQml/qqmlextensionplugin.h>
 #include <QtQuickTest>
 
@@ -15,6 +16,7 @@ class Setup : public QObject {
 public slots:
     void applicationAvailable()
     {
+        QStandardPaths::setTestModeEnabled(true);
         QQuickStyle::setStyle(QStringLiteral("Basic"));
         applyShellFont();
     }

@@ -72,6 +72,7 @@ public:
     RegistryModel* registry() const { return m_registry; }
     VoiceModel* voice() const { return m_voice; }
     Q_INVOKABLE void pushToTalk();
+    bool handleInstanceMessage(const QByteArray& message);
     Q_INVOKABLE void setSurfaceShown(bool shown) { m_surfaceShown = shown; }
     bool surfaceShown() const { return m_surfaceShown; }
     // Contracts §6.8: only when the provider is unreachable AND the machine is offline.
