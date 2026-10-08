@@ -14,7 +14,7 @@ m3_fixture() {
     "$c/usr/bin" "$c/etc/pam.d" "$c/usr/share/polkit-1/rules.d" "$c/usr/share/jarvis/voice" \
     "$c/usr/lib/jarvis/voice/bin" \
     "$c/etc/systemd/system/bluetooth.target.wants" "$c/var/lib/dpkg"
-  printf '<keybind key="W-l"><action name="Execute" command="loginctl lock-session" />\n<keybind key="W-space"><action name="Execute" command="jarvis-shell --voice" />\n' >> "$c/etc/xdg/labwc/rc.xml"
+  printf '<keybind key="W-l"><action name="Execute" command="jarvis-lock" />\n<keybind key="W-space"><action name="Execute" command="jarvis-shell --voice" />\n' >> "$c/etc/xdg/labwc/rc.xml"
   printf 'systemctl --user import-environment WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP\nmako &\n. /usr/share/jarvis-idle/labwc/autostart\n' >> "$c/etc/xdg/labwc/autostart"
   printf '#!/bin/sh\nexec /usr/bin/labwc --merge-config "$@"\n' > "$c/usr/local/bin/labwc"
   m3_elf "$c/usr/libexec/jarvis/jarvis-idle"

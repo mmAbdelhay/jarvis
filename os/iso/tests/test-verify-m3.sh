@@ -9,6 +9,13 @@ c=$tmp/c
 fresh() { rm -rf "$c"; m3_fixture "$c"; }
 caught() { ! "$v" "$c" >/dev/null 2>&1; }
 fresh; check "complete M3 chroot verifies" "$v" "$c"
+fresh
+session=$ISO_DIR/config/includes.chroot_after_packages
+cp "$session/etc/xdg/labwc/rc.xml" "$session/etc/xdg/labwc/autostart" "$c/etc/xdg/labwc/"
+cp "$session/usr/local/bin/labwc" "$c/usr/local/bin/labwc"
+check "shipped labwc session verifies" "$v" "$c"
+sed -i.bak 's/command="jarvis-lock"/command="loginctl lock-session"/' "$c/etc/xdg/labwc/rc.xml"
+check "Super+L without direct jarvis-lock is caught" caught
 fresh; printf '#!/bin/sh\nexec /usr/libexec/real "$@"\n' > "$c/usr/bin/jarvis-lock"; check "a script jarvis-lock is caught" caught
 fresh; rm "$c/usr/bin/jarvis-lock"; ln -s /bin/true "$c/usr/bin/jarvis-lock"; check "a symlinked jarvis-lock is caught" caught
 if [ "$(uname -s)" = Linux ]; then fresh; chmod u+s "$c/usr/bin/jarvis-lock"; check "a setuid jarvis-lock is caught" caught; else echo "CI-only, not run: lock privilege bits"; fi

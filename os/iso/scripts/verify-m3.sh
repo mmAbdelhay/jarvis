@@ -27,7 +27,7 @@ binding() {
     /<\/keybind>/ {active=0}
     END {exit !found}' "$rc"
 }
-binding W-l 'loginctl lock-session' || problems+=("labwc rc.xml lacks the Super+L -> loginctl lock-session bind")
+binding W-l 'jarvis-lock' || problems+=("labwc rc.xml lacks the Super+L -> jarvis-lock bind")
 binding W-space 'jarvis-shell --voice' || problems+=("labwc rc.xml lacks the Super+Space push-to-talk bind")
 as=$c/etc/xdg/labwc/autostart
 grep -qx '. /usr/share/jarvis-idle/labwc/autostart' "$as" 2>/dev/null || problems+=("labwc autostart does not start the idle lock")
