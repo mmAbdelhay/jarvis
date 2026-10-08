@@ -13,6 +13,7 @@
 #include "FakePower.h"
 #include "InstallerModel.h"
 #include "JarvisFont.h"
+#include "Language.h"
 #include "LiveKeyboard.h"
 #include "OsRelease.h"
 #ifdef JARVIS_HAVE_DBUS
@@ -42,6 +43,7 @@ int main(int argc, char* argv[])
 
     QQuickStyle::setStyle(u"Basic"_s);
     jarvis::ui::applyJarvisFont();
+    jarvis::ui::LanguageManager language({u"jarvis-ui"_s, u"jarvis-installer"_s});
 
     InstallerBackend* backend = nullptr;
     PowerActions* power = nullptr;
@@ -65,6 +67,8 @@ int main(int argc, char* argv[])
     auto* installer = new InstallerModel(backend, power, jarvis::ui::distroName(), QLocale::system().name(),
                                          QTimeZone::systemTimeZoneId(), &app);
 
+    installer->setLanguageApplier([&language](const QString& code) { return language.setLanguage(code); });
+
     // In the live labwc session the chosen keyboard applies at once, so the
     // password is typed with the target's layout (contracts §11.5).
     if (!parser.isSet(fake) && !qEnvironmentVariableIsEmpty("LABWC_PID")
@@ -77,6 +81,7 @@ int main(int argc, char* argv[])
     }
 
     QQmlApplicationEngine engine;
+    QObject::connect(&language, &jarvis::ui::LanguageManager::languageChanged, &engine, [&engine] { engine.retranslate(); });
     engine.setInitialProperties({{u"installer"_s, QVariant::fromValue(installer)}});
     engine.loadFromModule("Jarvis.Installer", "Main");
     auto* window = engine.rootObjects().isEmpty() ? nullptr : qobject_cast<QQuickWindow*>(engine.rootObjects().constFirst());

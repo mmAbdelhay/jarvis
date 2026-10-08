@@ -30,7 +30,7 @@ LoginModel* GreeterHarness::fresh(const QVariantMap& options)
     m_greetd->extraPrompt = options.value(u"extraPrompt"_s).toString();
     m_greetd->extraAnswer = u"123456"_s;
     m_greetd->startError = options.value(u"startError"_s).toString();
-    if (!m_greetd->listen())
+    if (!options.value(u"offline"_s).toBool() && !m_greetd->listen())
         qFatal("fake greetd cannot listen");
     m_power = new FakePower(this);
     m_client = new GreetdClient(m_greetd->socketPath(), this);
@@ -38,6 +38,9 @@ LoginModel* GreeterHarness::fresh(const QVariantMap& options)
     if (options.value(u"users"_s, true).toBool())
         users = {{u"mohamed"_s, u"Mohamed Abdelhay"_s, 1000}};
     m_login = new LoginModel(m_client, m_power, users, this);
+    m_login->setSessionExec(options.value(u"sessionExec"_s, u"labwc"_s).toString());
+    if (options.contains(u"sessionsDir"_s))
+        m_login->setSessions(readSessions(options.value(u"sessionsDir"_s).toString()));
     return m_login;
 }
 
@@ -67,3 +70,20 @@ QStringList GreeterHarness::requestTypes() const
 
 QStringList GreeterHarness::powerCalls() const { return m_power ? m_power->calls : QStringList{}; }
 void GreeterHarness::dropNextCreate() { m_greetd->dropOnCreate = true; }
+
+void GreeterHarness::setLanguageManager(jarvis::ui::LanguageManager* manager)
+{
+    m_language = new GreeterLanguage([manager](const QString& code) { return manager->setLanguage(code); }, manager->language(), this);
+    connect(manager, &jarvis::ui::LanguageManager::languageChanged, this, [this] {
+        if (m_login) m_login->retranslate();
+        if (m_status) m_status->retranslate();
+    });
+}
+
+QVariantMap GreeterHarness::startRequest() const
+{
+    if (m_greetd)
+        for (const auto& request : m_greetd->received)
+            if (request.value("type").toString() == u"start_session") return request.toVariantMap();
+    return {};
+}

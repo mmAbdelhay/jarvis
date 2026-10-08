@@ -13,8 +13,8 @@ ColumnLayout {
 
     ScreenTitle {
         Layout.fillWidth: true
-        title: "Your account"
-        subtitle: "This password unlocks the computer and approves high-risk changes, such as adding users or touching disks."
+        title: qsTr("Your account")
+        subtitle: qsTr("This password unlocks the computer and approves high-risk changes, such as adding users or touching disks.")
     }
 
     GridLayout {
@@ -26,7 +26,7 @@ ColumnLayout {
             objectName: "fullName"
             Layout.fillWidth: true
             Layout.preferredWidth: 1
-            label: "Your name"
+            label: qsTr("Your name")
             value: root.account.fullName
             onEdited: (v) => root.account.fullName = v
         }
@@ -34,7 +34,7 @@ ColumnLayout {
             objectName: "hostname"
             Layout.fillWidth: true
             Layout.preferredWidth: 1
-            label: "Computer name"
+            label: qsTr("Computer name")
             mono: true
             value: root.account.hostname
             onEdited: (v) => root.account.hostname = v
@@ -42,7 +42,7 @@ ColumnLayout {
         LabeledField {
             objectName: "username"
             Layout.fillWidth: true
-            label: "Username"
+            label: qsTr("Username")
             mono: true
             value: root.account.username
             onEdited: (v) => root.account.username = v
@@ -51,7 +51,7 @@ ColumnLayout {
         LabeledField {
             objectName: "password"
             Layout.fillWidth: true
-            label: "Password"
+            label: qsTr("Password")
             secret: true
             value: root.account.password
             onEdited: (v) => root.account.password = v
@@ -59,7 +59,7 @@ ColumnLayout {
         LabeledField {
             objectName: "confirm"
             Layout.fillWidth: true
-            label: "Confirm password"
+            label: qsTr("Confirm password")
             secret: true
             value: root.account.confirm
             onEdited: (v) => root.account.confirm = v
@@ -75,11 +75,8 @@ ColumnLayout {
         readonly property string typing: locale.keyboardName(locale.typingKeyboard)
         Layout.fillWidth: true
         text: locale.typingMatches
-            ? "You're typing with the " + chosen + " keyboard. Use the same layout to unlock the disk and sign in."
-            : "You're typing with the " + typing + " keyboard right now, but " + root.installer.distroName + " will use "
-              + chosen + ". Keys that differ between them will type different characters when you unlock the disk "
-              + "and sign in. Use only letters and digits that sit in the same place on both keyboards, or go back "
-              + "and choose " + typing + "."
+            ? qsTr("You're typing with the %1 keyboard. Use the same layout to unlock the disk and sign in.").arg(chosen)
+            : qsTr("You're typing with the %1 keyboard right now, but %2 will use %3. Keys that differ between them will type different characters when you unlock the disk and sign in. Use only letters and digits that sit in the same place on both keyboards, or go back and choose %1.").arg(typing).arg(Brand.distroName).arg(chosen)
         textFormat: Text.PlainText
         color: locale.typingMatches ? Theme.muted : Theme.warn
         font.pixelSize: Theme.fontSmall
@@ -108,7 +105,7 @@ ColumnLayout {
     CheckRow {
         objectName: "autologin"
         Layout.fillWidth: true
-        text: "Log in automatically (not recommended on a laptop)"
+        text: qsTr("Log in automatically (not recommended on a laptop)")
         checked: root.account.autologin
         onToggled: {
             root.account.autologin = checked
@@ -123,7 +120,7 @@ ColumnLayout {
         CheckRow {
             objectName: "diskSame"
             Layout.fillWidth: true
-            text: "Use this password to unlock the disk at start"
+            text: qsTr("Use this password to unlock the disk at start")
             checked: root.account.diskSameAsPassword
             onToggled: {
                 root.account.diskSameAsPassword = checked
@@ -139,7 +136,7 @@ ColumnLayout {
                 objectName: "diskPassphrase"
                 Layout.fillWidth: true
                 Layout.preferredWidth: 1
-                label: "Disk passphrase"
+                label: qsTr("Disk passphrase")
                 secret: true
                 value: root.account.diskPassphrase
                 onEdited: (v) => root.account.diskPassphrase = v
@@ -148,7 +145,7 @@ ColumnLayout {
                 objectName: "diskConfirm"
                 Layout.fillWidth: true
                 Layout.preferredWidth: 1
-                label: "Confirm disk passphrase"
+                label: qsTr("Confirm disk passphrase")
                 secret: true
                 value: root.account.diskConfirm
                 onEdited: (v) => root.account.diskConfirm = v

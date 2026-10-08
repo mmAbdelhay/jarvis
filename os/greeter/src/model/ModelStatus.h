@@ -27,6 +27,9 @@ public:
     QString text() const { return m_text; }
     Q_INVOKABLE void reload();
 
+public slots:
+    void retranslate();
+
 signals:
     void changed();
 

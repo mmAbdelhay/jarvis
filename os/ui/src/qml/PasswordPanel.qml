@@ -9,11 +9,11 @@ ColumnLayout {
     id: root
     property string initial: ""
     property string displayName: ""
-    property string prompt: "Password"
+    property string prompt: qsTr("Password")
     property bool busy: false
     property string errorText: ""
     property string infoText: ""
-    property string submitLabel: "Unlock"
+    property string submitLabel: qsTr("Unlock")
     signal submitted(string secret)
 
     function focusField() { passwordField.forceActiveFocus(Qt.OtherFocusReason) }
@@ -67,6 +67,7 @@ ColumnLayout {
             Layout.fillWidth: true
             implicitHeight: 48
             leftPadding: 16
+            rightPadding: 16
             enabled: !root.busy
             placeholderText: root.prompt
             placeholderTextColor: Theme.mutedSoft
@@ -102,7 +103,7 @@ ColumnLayout {
             Accessible.role: Accessible.Button
             onClicked: root.submit()
             contentItem: Item {
-                Icon { anchors.centerIn: parent; path: Icons.arrowRight; color: Theme.accentInk; strokeWidth: 2; size: 20 }
+                Icon { anchors.centerIn: parent; path: Icons.arrowRight; mirrorInRtl: true; color: Theme.accentInk; strokeWidth: 2; size: 20 }
             }
             background: Rectangle { radius: 12; color: Theme.accent; opacity: submitButton.enabled ? 1 : 0.5 }
         }

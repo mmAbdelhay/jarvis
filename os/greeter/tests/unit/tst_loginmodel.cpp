@@ -1,5 +1,8 @@
 #include <QJsonArray>
 #include <QSignalSpy>
+#include <QTemporaryFile>
+#include <QFile>
+#include <QScopeGuard>
 #include <QtTest>
 #include <memory>
 
@@ -22,6 +25,7 @@ struct Fixture {
             qFatal("fake greetd cannot listen");
         client = std::make_unique<GreetdClient>(greetd.socketPath());
         login = std::make_unique<LoginModel>(client.get(), &power, users);
+        login->setSessionExec(u"labwc"_s);
     }
     QStringList types() const
     {
@@ -36,6 +40,46 @@ struct Fixture {
 class TestLoginModel : public QObject {
     Q_OBJECT
 private slots:
+    void defaultSessionFallback_data()
+    {
+        QTest::addColumn<QByteArray>("desktop");
+        QTest::addColumn<bool>("explicitChoice");
+        QTest::addColumn<QStringList>("command");
+        QTest::newRow("missing-default") << QByteArray{} << false << QStringList{"labwc"};
+        QTest::newRow("malformed-default") << QByteArray{"invalid"} << false << QStringList{"labwc"};
+        QTest::newRow("invalid-exec-default") << QByteArray{"[Desktop Entry]\nType=Application\nName=Test\nExec=labwc %Z\n"} << false << QStringList{"labwc"};
+        QTest::newRow("missing-explicit") << QByteArray{} << true << QStringList{};
+        QTest::newRow("malformed-explicit") << QByteArray{"invalid"} << true << QStringList{};
+        QTest::newRow("valid-default") << QByteArray{"[Desktop Entry]\nType=Application\nName=Test\nExec=jarvis-classic --chat\n"} << false << QStringList{"jarvis-classic", "--chat"};
+        QTest::newRow("valid-explicit") << QByteArray{"[Desktop Entry]\nType=Application\nName=Test\nExec=jarvis-classic --chat\n"} << true << QStringList{"jarvis-classic", "--chat"};
+    }
+
+    void defaultSessionFallback()
+    {
+        QFETCH(QByteArray, desktop);
+        QFETCH(bool, explicitChoice);
+        QFETCH(QStringList, command);
+        QTemporaryFile file;
+        QVERIFY(file.open());
+        file.write(desktop);
+        file.close();
+        const QString path = file.fileName();
+        if (desktop.isEmpty()) QVERIFY(file.remove());
+        GreetdClient client(u"/nonexistent/greetd.sock"_s);
+        FakePower power;
+        LoginModel login(&client, &power, {{u"mohamed"_s, u"Mohamed"_s, 1000}});
+        login.setSessionFile(path, explicitChoice);
+        login.submit(u"right horse"_s);
+        if (command.isEmpty()) {
+            QCOMPARE(login.errorText(), u"The selected session is unavailable."_s);
+            QCOMPARE(login.state(), u"idle"_s);
+        } else {
+            // Reaching the offline login service proves session validation passed.
+            QCOMPARE(login.errorText(), u"The login service isn't running."_s);
+            QCOMPARE(login.failures(), 1);
+        }
+    }
+
     void defaultUserIsShown()
     {
         Fixture f;
@@ -58,8 +102,25 @@ private slots:
         QCOMPARE(f.greetd.received.at(0).value("username").toString(), u"mohamed"_s);
         QCOMPARE(f.greetd.received.at(1).value("response").toString(), u"right horse"_s);
         QCOMPARE(f.greetd.received.at(2).value("cmd").toArray(), QJsonArray{u"labwc"_s});
-        QCOMPARE(f.greetd.received.at(2).value("env").toArray(), QJsonArray{});
         QCOMPARE(f.login->state(), u"starting"_s);
+    }
+
+    void unchangedLanguagePassesEnvironmentLocaleWhenSystemFileIsAbsent()
+    {
+        if (QFile::exists(u"/etc/default/locale"_s))
+            QSKIP("System locale file takes precedence; covered by fixture locale tests.");
+        const QByteArray previous = qgetenv("LANG");
+        const bool wasSet = qEnvironmentVariableIsSet("LANG");
+        const auto restore = qScopeGuard([&] {
+            if (wasSet) qputenv("LANG", previous);
+            else qunsetenv("LANG");
+        });
+        qputenv("LANG", "en_GB.UTF-8");
+        Fixture f;
+        QSignalSpy started(f.login.get(), &LoginModel::sessionStarted);
+        f.login->submit(u"right horse"_s);
+        QTRY_COMPARE(started.size(), 1);
+        QCOMPARE(f.greetd.received.last().value("env").toArray(), QJsonArray{u"LANG=en_GB.UTF-8"_s});
     }
 
     void wrongPasswordShowsAnErrorThenRetryWorks()

@@ -41,8 +41,9 @@ qt_add_executable(tst_lock_qml qml/tst_qml.cpp ${JARVIS_LOCK_TEST_SUPPORT})
 target_include_directories(tst_lock_qml PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/support)
 target_link_libraries(tst_lock_qml PRIVATE jarvis_lock_core jarvis_lock_coreplugin Qt6::QuickTest)
 target_compile_definitions(tst_lock_qml PRIVATE
+  JARVIS_TEST_I18N_DIR="${CMAKE_BINARY_DIR}/i18n"
   QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml" JARVIS_QML_DIR="${QT_QML_OUTPUT_DIRECTORY}")
-add_dependencies(tst_lock_qml jarvis_ui)
+add_dependencies(tst_lock_qml jarvis_ui jarvis-ui_translations jarvis-lock_translations)
 add_test(NAME tst_lock_qml COMMAND tst_lock_qml)
 set_tests_properties(tst_lock_qml PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" LABELS qml TIMEOUT 120)
 

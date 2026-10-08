@@ -12,7 +12,7 @@ ColumnLayout {
 
     ScreenTitle {
         Layout.fillWidth: true
-        title: "Ready to install"
+        title: qsTr("Ready to install")
     }
 
     Rectangle {
@@ -61,7 +61,7 @@ ColumnLayout {
         Layout.fillWidth: true
         visible: root.installer.diskAfter.length > 0
         spacing: 4
-        Text { text: "Disk after install"; color: Theme.muted; font.pixelSize: Theme.fontSmall }
+        Text { text: qsTr("Disk after install"); color: Theme.muted; font.pixelSize: Theme.fontSmall }
         RowLayout {
             Layout.fillWidth: true
             spacing: 2
@@ -75,10 +75,11 @@ ColumnLayout {
                     radius: 6
                     color: modelData.encrypted ? Theme.accentTintBorder : Theme.otherOs
                     Text {
-                        x: 10
+                        anchors.left: parent.left
+                        anchors.leftMargin: 10
                         width: parent.width - 12
                         anchors.verticalCenter: parent.verticalCenter
-                        text: modelData.label + " · " + modelData.sizeText + (modelData.encrypted ? " · encrypted" : "")
+                        text: modelData.label + " · " + modelData.sizeText + (modelData.encrypted ? " · " + qsTr("encrypted") : "")
                         textFormat: Text.PlainText
                         color: modelData.encrypted ? Theme.accentTintText : Theme.otherOsText
                         font.pixelSize: Theme.fontTiny
@@ -103,7 +104,7 @@ ColumnLayout {
                 Text {
                     objectName: "noticeText"
                     Layout.fillWidth: true
-                    text: "Changes to the disk start when you press Install."
+                    text: qsTr("Changes to the disk start when you press Install.")
                     color: Theme.text
                     wrapMode: Text.Wrap
                 }

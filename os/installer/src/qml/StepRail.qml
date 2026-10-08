@@ -29,7 +29,7 @@ Rectangle {
             Icon { path: Icons.logo; color: Theme.accent; size: 26 }
             Text {
                 objectName: "railTitle"
-                text: "Install " + Brand.distroName
+                text: qsTr("Install %1").arg(Brand.distroName)
                 textFormat: Text.PlainText
                 color: Theme.text
                 font.weight: Font.DemiBold
@@ -41,7 +41,7 @@ Rectangle {
             Layout.fillWidth: true
             spacing: 4
             Accessible.role: Accessible.List
-            Accessible.name: "Install steps"
+            Accessible.name: qsTr("Install steps")
             Repeater {
                 model: root.labels
                 delegate: AbstractButton {
@@ -54,7 +54,7 @@ Rectangle {
                     Layout.fillWidth: true
                     implicitHeight: 46
                     enabled: done && !root.locked
-                    Accessible.name: modelData + (here ? ", current step" : done ? ", done" : "")
+                    Accessible.name: here ? qsTr("%1, current step").arg(modelData) : done ? qsTr("%1, done").arg(modelData) : modelData
                     onClicked: root.picked(index)
                     background: Rectangle {
                         radius: 10

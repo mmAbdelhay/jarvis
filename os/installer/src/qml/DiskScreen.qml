@@ -14,7 +14,7 @@ ColumnLayout {
 
     ScreenTitle {
         Layout.fillWidth: true
-        title: "Where should " + Brand.distroName + " go?"
+        title: qsTr("Where should %1 go?").arg(Brand.distroName)
         subtitle: root.disk.description
     }
 
@@ -22,7 +22,7 @@ ColumnLayout {
         objectName: "diskPicker"
         Layout.fillWidth: true
         visible: root.disk.disks.length > 1
-        label: "Disk"
+        label: qsTr("Disk")
         model: root.disk.disks
         value: root.disk.diskPath
         onPicked: (v) => root.disk.diskPath = v
@@ -32,7 +32,7 @@ ColumnLayout {
         Layout.fillWidth: true
         spacing: 10
         Accessible.role: Accessible.Grouping
-        Accessible.name: "Disk layout"
+        Accessible.name: qsTr("Disk layout")
         Repeater {
             model: root.disk.options
             delegate: ChoiceTile {
@@ -66,7 +66,7 @@ ColumnLayout {
             to: root.disk.alongsideMaxBytes
             stepSize: 1e9
             value: root.disk.alongsideBytes
-            Accessible.name: "Space for " + Brand.distroName
+            Accessible.name: qsTr("Space for %1").arg(Brand.distroName)
             onMoved: root.disk.alongsideBytes = value
         }
     }
@@ -76,7 +76,7 @@ ColumnLayout {
         Layout.fillWidth: true
         visible: root.disk.barVisible
         spacing: 4
-        Text { text: "After install"; color: Theme.muted; font.pixelSize: Theme.fontSmall }
+        Text { text: qsTr("After install"); color: Theme.muted; font.pixelSize: Theme.fontSmall }
         Rectangle {
             Layout.fillWidth: true
             implicitHeight: 28
@@ -85,12 +85,14 @@ ColumnLayout {
             color: Theme.accentTintBorder
             Rectangle {
                 id: otherPart
+                anchors.left: parent.left
                 width: parent.width * root.disk.otherFraction
                 height: parent.height
                 color: Theme.otherOs
                 visible: width > 0
                 Text {
-                    x: 10
+                    anchors.left: parent.left
+                    anchors.leftMargin: 10
                     width: parent.width - 12
                     anchors.verticalCenter: parent.verticalCenter
                     text: root.disk.otherLabel
@@ -101,7 +103,8 @@ ColumnLayout {
                 }
             }
             Text {
-                x: otherPart.width + 10
+                anchors.left: otherPart.right
+                anchors.leftMargin: 10
                 anchors.verticalCenter: parent.verticalCenter
                 text: root.disk.ourLabel
                 textFormat: Text.PlainText
@@ -143,13 +146,13 @@ ColumnLayout {
                     implicitWidth: 150
                     model: root.disk.mountPoints
                     currentIndex: root.disk.mountPoints.indexOf(modelData.mount)
-                    displayText: currentText.length > 0 ? currentText : "Not used"
-                    Accessible.name: "Use " + modelData.path + " as"
+                    displayText: currentText.length > 0 ? currentText : qsTr("Not used")
+                    Accessible.name: qsTr("Use %1 as").arg(modelData.path)
                     onActivated: (i) => root.disk.setManualMount(modelData.path, root.disk.mountPoints[i])
                 }
                 CheckRow {
                     objectName: "format_" + modelData.path
-                    text: "Format"
+                    text: qsTr("Format")
                     enabled: modelData.mount.length > 0 && modelData.mount !== "/"
                     checked: modelData.format
                     onToggled: root.disk.setManualFormat(modelData.path, checked)
@@ -159,7 +162,7 @@ ColumnLayout {
         Text {
             Layout.fillWidth: true
             objectName: "manualLimits"
-            text: "Manual mode makes no partition-table changes. / must be formatted; /boot/efi must be an existing EF00 partition of at least 300 MB. Encrypted installs use a swapfile, with no swap partition. LVM and RAID are not offered."
+            text: qsTr("Manual mode makes no partition-table changes. / must be formatted; /boot/efi must be an existing EF00 partition of at least 300 MB. Encrypted installs use a swapfile, with no swap partition. LVM and RAID are not offered.")
             color: Theme.mutedSoft
             font.pixelSize: Theme.fontSmall
             wrapMode: Text.Wrap
@@ -170,7 +173,7 @@ ColumnLayout {
         id: encrypt
         objectName: "encrypt"
         Layout.fillWidth: true
-        text: "Encrypt " + Brand.distroName + " (recommended). You'll type a passphrase at every start."
+        text: qsTr("Encrypt %1 (recommended). You'll type a passphrase at every start.").arg(Brand.distroName)
         checked: root.disk.encrypt
         onToggled: {
             root.disk.encrypt = checked

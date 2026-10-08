@@ -8,19 +8,38 @@ import Jarvis.UI
 // large-text toggle and power menu. All outside text is plain text.
 Rectangle {
     id: root
+    property GreeterLanguage language: null
+    LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft
+    LayoutMirroring.childrenInherit: true
     required property LoginModel login
     required property ModelStatus modelStatus
     property string keyboardCode: "EN"
-    property string keyboardName: "English (US)"
+    property string keyboardName: qsTr("English (US)")
 
     color: Theme.surfaceDeep
 
     function focusField() { passwordField.forceActiveFocus(Qt.OtherFocusReason) }
     Component.onCompleted: focusField()
     Connections {
+        property string previousState: ""
+        property string previousUsername: ""
+        property bool previousOtherUser: false
+        Component.onCompleted: {
+            previousState = root.login.state
+            previousUsername = root.login.username
+            previousOtherUser = root.login.otherUser
+        }
+        function onUserChanged() {
+            if (previousUsername !== root.login.username || previousOtherUser !== root.login.otherUser)
+                passwordField.clear()
+            previousUsername = root.login.username
+            previousOtherUser = root.login.otherUser
+        }
         target: root.login
         function onFailuresChanged() { passwordField.clear() } // H: cleared after a failed login
         function onStateChanged() {
+            if (previousState === root.login.state) return
+            previousState = root.login.state
             if (root.login.state === "prompt" || root.login.state === "idle") {
                 passwordField.clear()
                 Qt.callLater(root.focusField) // after `enabled` has been re-evaluated
@@ -46,7 +65,7 @@ Rectangle {
             id: clock
             objectName: "clock"
             Layout.alignment: Qt.AlignHCenter
-            text: Qt.formatTime(new Date(), "HH:mm")
+            text: UiLanguage.formatTime(new Date(), UiLanguage.code)
             color: Theme.text
             font.pixelSize: Math.round(96 * Theme.textScale)
             font.weight: Font.Light
@@ -56,7 +75,7 @@ Rectangle {
             id: dateText
             objectName: "date"
             Layout.alignment: Qt.AlignHCenter
-            text: Qt.formatDate(new Date(), "dddd, d MMMM")
+            text: UiLanguage.formatDate(new Date(), UiLanguage.code)
             color: Theme.muted
             font.pixelSize: Theme.fontSize
         }
@@ -65,8 +84,8 @@ Rectangle {
             running: true
             repeat: true
             onTriggered: {
-                clock.text = Qt.formatTime(new Date(), "HH:mm")
-                dateText.text = Qt.formatDate(new Date(), "dddd, d MMMM")
+                clock.text = UiLanguage.formatTime(new Date(), UiLanguage.code)
+                dateText.text = UiLanguage.formatDate(new Date(), UiLanguage.code)
             }
         }
     }
@@ -76,7 +95,7 @@ Rectangle {
         width: 360
         spacing: 16
         Accessible.role: Accessible.Form
-        Accessible.name: "Log in"
+        Accessible.name: qsTr("Log in")
 
         Rectangle {
             objectName: "avatar"
@@ -112,13 +131,14 @@ Rectangle {
             visible: root.login.otherUser
             implicitHeight: 48
             leftPadding: 16
-            placeholderText: "Username"
+            rightPadding: 16
+            placeholderText: qsTr("Username")
             placeholderTextColor: Theme.mutedSoft
             text: root.login.username
             color: Theme.text
             font.pixelSize: Theme.fontSize
             inputMethodHints: Qt.ImhNoAutoUppercase | Qt.ImhNoPredictiveText
-            Accessible.name: "Username"
+            Accessible.name: qsTr("Username")
             background: Rectangle { radius: 12; color: Theme.surface; border.color: Theme.borderStrong }
             onTextEdited: root.login.username = text
             Keys.onReturnPressed: passwordField.forceActiveFocus()
@@ -132,6 +152,7 @@ Rectangle {
                 Layout.fillWidth: true
                 implicitHeight: 48
                 leftPadding: 16
+                rightPadding: 16
                 enabled: root.login.state === "idle" || root.login.state === "prompt"
                 placeholderText: root.login.promptText
                 placeholderTextColor: Theme.mutedSoft
@@ -163,7 +184,7 @@ Rectangle {
                 implicitWidth: 48
                 implicitHeight: 48
                 enabled: passwordField.enabled
-                Accessible.name: "Log in"
+                Accessible.name: qsTr("Log in")
                 Accessible.role: Accessible.Button
                 onClicked: {
                     const secret = passwordField.text
@@ -171,7 +192,7 @@ Rectangle {
                     root.login.submit(secret)
                 }
                 contentItem: Item {
-                    Icon { anchors.centerIn: parent; path: Icons.arrowRight; color: Theme.accentInk; strokeWidth: 2; size: 20 }
+                    Icon { anchors.centerIn: parent; path: Icons.arrowRight; mirrorInRtl: true; color: Theme.accentInk; strokeWidth: 2; size: 20 }
                 }
                 background: Rectangle { radius: 12; color: Theme.accent; opacity: submitButton.enabled ? 1 : 0.5 }
             }
@@ -202,7 +223,7 @@ Rectangle {
             objectName: "otherUser"
             Layout.alignment: Qt.AlignHCenter
             visible: !root.login.otherUser || root.login.canSwitchUser
-            text: root.login.otherUser ? "Back to " + root.login.displayNameOfDefault : "Other user"
+            text: root.login.otherUser ? qsTr("Back to %1").arg(root.login.displayNameOfDefault) : qsTr("Other user")
             Accessible.name: text
             contentItem: Text { text: parent.text; textFormat: Text.PlainText; color: Theme.muted; font.pixelSize: 14 }
             background: null
@@ -238,13 +259,54 @@ Rectangle {
         }
         Item { Layout.fillWidth: true }
         ActionButton {
+            id: sessionButton
+            objectName: "sessionButton"
+            readonly property var current: root.login.sessions.find(s => s.id === root.login.sessionId)
+            visible: root.login.sessions.length > 1
+            enabled: root.login.state === "idle"
+            implicitHeight: 44
+            leftPadding: 14
+            rightPadding: 14
+            font.pixelSize: Theme.fontSmall
+            text: current ? current.name : ""
+            Accessible.name: qsTr("Session: %1").arg(text)
+            onClicked: sessionMenu.open()
+            Menu {
+                id: sessionMenu
+                objectName: "sessionMenu"
+                y: -implicitHeight - 8
+                Repeater {
+                    model: root.login.sessions
+                    delegate: MenuItem {
+                        required property var modelData
+                        objectName: "session_" + modelData.id
+                        text: modelData.name
+                        checkable: true
+                        checked: modelData.id === root.login.sessionId
+                        onTriggered: root.login.sessionId = modelData.id
+                    }
+                }
+            }
+        }
+        ActionButton {
+            objectName: "languageButton"
+            visible: root.language !== null
+            implicitHeight: 44
+            leftPadding: 14
+            rightPadding: 14
+            font.pixelSize: Theme.fontSmall
+            text: root.language ? root.language.otherLanguageName : ""
+            Accessible.name: qsTr("Language: %1").arg(text)
+            onClicked: root.language.toggle()
+        }
+        ActionButton {
             objectName: "keyboardButton"
             implicitHeight: 44
             leftPadding: 14
             rightPadding: 14
             font.pixelSize: Theme.fontSmall
             text: root.keyboardCode
-            Accessible.name: "Keyboard layout: " + root.keyboardName
+            Accessible.name: qsTr("Keyboard layout: %1").arg(root.keyboardName)
             focusPolicy: Qt.NoFocus // indicator only in M2
         }
         AbstractButton {
@@ -254,7 +316,7 @@ Rectangle {
             implicitHeight: 44
             checkable: true
             checked: Theme.textScale > 1
-            Accessible.name: "Large text"
+            Accessible.name: qsTr("Large text")
             onToggled: Theme.textScale = checked ? 1.25 : 1.0
             contentItem: Item { Icon { anchors.centerIn: parent; path: Icons.accessibility; color: Theme.textSoft; size: 18 } }
             background: Rectangle {
@@ -269,7 +331,7 @@ Rectangle {
             implicitWidth: 44
             implicitHeight: 44
             enabled: root.login.powerAvailable
-            Accessible.name: "Power"
+            Accessible.name: qsTr("Power")
             onClicked: powerMenu.open()
             contentItem: Item { Icon { anchors.centerIn: parent; path: Icons.power; color: Theme.textSoft; size: 18 } }
             background: Rectangle { radius: Theme.radiusControl; color: "transparent"; border.color: Theme.borderStrong }
@@ -277,8 +339,8 @@ Rectangle {
                 id: powerMenu
                 objectName: "powerMenu"
                 y: -implicitHeight - 8
-                MenuItem { objectName: "shutDown"; text: "Shut down"; onTriggered: root.login.powerOff() }
-                MenuItem { objectName: "restart"; text: "Restart"; onTriggered: root.login.reboot() }
+                MenuItem { objectName: "shutDown"; text: qsTr("Shut down"); onTriggered: root.login.powerOff() }
+                MenuItem { objectName: "restart"; text: qsTr("Restart"); onTriggered: root.login.reboot() }
             }
         }
     }

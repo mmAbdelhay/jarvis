@@ -1,6 +1,8 @@
 #include <QCommandLineParser>
 #include <QGuiApplication>
 #include <QLockFile>
+#include <QPointer>
+#include <QQmlEngine>
 #include <QQuickStyle>
 #include <QQuickView>
 #include <QStandardPaths>
@@ -9,6 +11,7 @@
 #include <cstdio>
 
 #include "JarvisFont.h"
+#include "Language.h"
 #include "app/LockSession.h"
 #include "auth/Authenticator.h"
 #include "auth/Wipe.h"
@@ -17,6 +20,7 @@
 #include "model/LockModel.h"
 #include "protocol/BuildId.h"
 #include "protocol/ControlPaths.h"
+#include "report/LanguageFollower.h"
 #include "report/LockReporter.h"
 #ifdef JARVIS_HAVE_PAM
 #include "auth/PamAuthenticator.h"
@@ -42,6 +46,8 @@ void say(const QString& line)
     std::fflush(stdout);
 }
 
+QList<QPointer<QQuickView>> g_views; // every lock surface, retranslated together
+
 QQuickView* makeView(LockModel* model, QScreen* screen, bool primary)
 {
     auto* view = new QQuickView();
@@ -50,6 +56,7 @@ QQuickView* makeView(LockModel* model, QScreen* screen, bool primary)
     view->setResizeMode(QQuickView::SizeRootObjectToView);
     view->setInitialProperties({{u"lock"_s, QVariant::fromValue(model)}, {u"primary"_s, primary}});
     view->loadFromModule("Jarvis.Lock", "LockScreen");
+    g_views.append(view);
     return view;
 }
 
@@ -88,6 +95,13 @@ int main(int argc, char* argv[])
 
     QQuickStyle::setStyle(u"Basic"_s);
     jarvis::ui::applyJarvisFont();
+    jarvis::ui::LanguageManager language({u"jarvis-ui"_s, u"jarvis-lock"_s});
+    language.setLanguage(jarvis::ui::languageFromEnvironment());
+    QObject::connect(&language, &jarvis::ui::LanguageManager::languageChanged, &app, [] {
+        for (const QPointer<QQuickView>& view : std::as_const(g_views))
+            if (view)
+                view->engine()->retranslate();
+    });
     const bool windowed = parser.isSet(windowedOption);
 
 #ifdef JARVIS_HAVE_PAM
@@ -96,6 +110,7 @@ int main(int argc, char* argv[])
     NoAuthenticator authenticator;
 #endif
     LockModel model(&authenticator, currentUser());
+    QObject::connect(&language, &jarvis::ui::LanguageManager::languageChanged, &model, &LockModel::retranslate);
 
     if (windowed) {
         QQuickView* view = makeView(&model, QGuiApplication::primaryScreen(), true);
@@ -131,6 +146,7 @@ int main(int argc, char* argv[])
     options.build = jarvis::protocol::readBuildId(jarvis::protocol::defaultBuildStampPath());
     ControlClient client(options);
     LockReporter reporter(&client);
+    LanguageFollower follower(&client, [&language](const QString& code) { return language.setLanguage(code); });
     WaylandLockBackend backend([&model](QScreen* screen, bool primary) -> QQuickWindow* {
         return makeView(&model, screen, primary);
     });

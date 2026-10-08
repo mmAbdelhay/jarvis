@@ -14,7 +14,7 @@ ColumnLayout {
         request.onreadystatechange = function() {
             if (request.readyState === XMLHttpRequest.DONE) {
                 if (request.status === 200) done(request.responseText)
-                else root.timezoneStatus = "Could not detect your time zone. Choose it above."
+                else root.timezoneStatus = qsTr("Could not detect your time zone. Choose it above.")
                 root.detectingTimezone = false
             }
         }
@@ -28,8 +28,8 @@ ColumnLayout {
 
     ScreenTitle {
         Layout.fillWidth: true
-        title: "Welcome"
-        subtitle: "These were guessed from your locale and keyboard. Change anything that's wrong."
+        title: qsTr("Welcome")
+        subtitle: qsTr("These were guessed from your locale and keyboard. Change anything that's wrong.")
     }
 
     GridLayout {
@@ -41,7 +41,7 @@ ColumnLayout {
             objectName: "language"
             Layout.fillWidth: true
             Layout.preferredWidth: 1
-            label: "Language"
+            label: qsTr("Language")
             model: root.installer.locale.languages
             value: root.installer.locale.language
             onPicked: (v) => root.installer.locale.language = v
@@ -50,7 +50,7 @@ ColumnLayout {
             objectName: "keyboard"
             Layout.fillWidth: true
             Layout.preferredWidth: 1
-            label: "Keyboard"
+            label: qsTr("Keyboard")
             model: root.installer.locale.keyboards
             value: root.installer.locale.keyboard
             onPicked: (v) => root.installer.locale.keyboard = v
@@ -59,7 +59,7 @@ ColumnLayout {
             objectName: "timezone"
             Layout.fillWidth: true
             Layout.preferredWidth: 1
-            label: "Time zone"
+            label: qsTr("Time zone")
             model: root.installer.locale.timezones
             value: root.installer.locale.timezone
             onPicked: (v) => root.installer.locale.timezone = v
@@ -69,14 +69,14 @@ ColumnLayout {
     Text {
         objectName: "timezonePrivacy"
         Layout.fillWidth: true
-        text: "Detect my time zone contacts geoip.ubuntu.com and shares your IP address."
+        text: qsTr("Detect my time zone contacts geoip.ubuntu.com and shares your IP address.")
         textFormat: Text.PlainText
         color: Theme.muted
         wrapMode: Text.Wrap
     }
     ActionButton {
         objectName: "detectTimezone"
-        text: "Detect my time zone"
+        text: qsTr("Detect my time zone")
         variant: "quiet"
         enabled: !root.detectingTimezone
         onClicked: {
@@ -85,7 +85,7 @@ ColumnLayout {
             root.timezoneLookup("https://geoip.ubuntu.com/lookup", function(response) {
                 const match = /<TimeZone>\s*([^<]+)\s*<\/TimeZone>/.exec(response)
                 if (match) root.installer.locale.timezone = match[1].trim()
-                else root.timezoneStatus = "Could not detect your time zone. Choose it above."
+                else root.timezoneStatus = qsTr("Could not detect your time zone. Choose it above.")
                 root.detectingTimezone = false
             })
         }
@@ -131,7 +131,7 @@ ColumnLayout {
             visible: root.installer.canRetryProbe
             variant: "quiet"
             implicitHeight: 36
-            text: "Try again"
+            text: qsTr("Try again")
             onClicked: root.installer.start()
         }
     }

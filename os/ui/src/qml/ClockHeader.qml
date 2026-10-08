@@ -16,7 +16,7 @@ ColumnLayout {
     Text {
         objectName: "clock"
         Layout.alignment: Qt.AlignHCenter
-        text: Qt.formatTime(root.now, "HH:mm")
+        text: UiLanguage.formatTime(root.now, UiLanguage.code)
         color: Theme.text
         font.pixelSize: Math.round(96 * Theme.textScale)
         font.weight: Font.Light
@@ -25,7 +25,7 @@ ColumnLayout {
     Text {
         objectName: "date"
         Layout.alignment: Qt.AlignHCenter
-        text: Qt.formatDate(root.now, "dddd, d MMMM")
+        text: UiLanguage.formatDate(root.now, UiLanguage.code)
         color: Theme.muted
         font.pixelSize: Theme.fontSize
     }

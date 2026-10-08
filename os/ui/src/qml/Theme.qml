@@ -44,8 +44,8 @@ QtObject {
     readonly property color otherOsText: "#D6E2F5"
     readonly property color ringFaint: "#141B22"
 
-    readonly property string sans: "IBM Plex Sans"
-    readonly property string mono: "IBM Plex Mono"
+    readonly property string sans: UiLanguage.rightToLeft ? "IBM Plex Sans Arabic" : "IBM Plex Sans" // i18n: ignore
+    readonly property string mono: "IBM Plex Mono" // i18n: ignore
     // Large-text mode (greeter accessibility) scales every token size.
     property real textScale: 1.0
     readonly property int fontSize: Math.round(15 * textScale)

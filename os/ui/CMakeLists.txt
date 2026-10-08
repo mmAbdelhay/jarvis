@@ -27,6 +27,17 @@ option(JARVIS_UI_DBUS "Build the D-Bus parts (logind power, installer backend cl
 add_subdirectory(native)
 add_subdirectory(src)
 
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/JarvisI18n.cmake)
+if(PROJECT_IS_TOP_LEVEL)
+  jarvis_add_translations(jarvis-ui TS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/i18n TARGET jarvis_ui
+    SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/qml
+    LINT_QML ${CMAKE_CURRENT_SOURCE_DIR}/src/qml
+    INSTALL TESTS)
+else()
+  # Built for the including app's tests; the jarvis-ui package installs them.
+  jarvis_add_translations(jarvis-ui TS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/i18n TARGET jarvis_ui)
+endif()
+
 if(PROJECT_IS_TOP_LEVEL)
   # Contracts §7: /usr/lib/x86_64-linux-gnu/qt6/qml/Jarvis/UI/ with prefix /usr on Debian.
   set(JARVIS_UI_QML_INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/qt6/qml/Jarvis/UI" CACHE PATH "Install dir of Jarvis.UI")

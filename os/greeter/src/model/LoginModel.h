@@ -6,14 +6,16 @@
 #include <QtQml/qqmlregistration.h>
 
 #include "UserList.h"
+#include "SessionChoice.h"
+#include <QVariantList>
 
 class GreetdClient;
 class PowerActions;
 
 // The login conversation with greetd (contracts §8): create_session →
-// auth_message loop → start_session {cmd: ["labwc"], env: []}. The typed
+// auth_message loop → start_session with the chosen Exec argv and LANG. The typed
 // password is sent once and wiped; any error cancels the session so the next
-// try starts clean. sessionStarted() means: exit now, greetd starts labwc.
+// try starts clean. sessionStarted() means: exit now, greetd starts the selected session.
 class LoginModel : public QObject {
     Q_OBJECT
     QML_ELEMENT
@@ -32,6 +34,9 @@ class LoginModel : public QObject {
     Q_PROPERTY(bool powerAvailable READ powerAvailable CONSTANT)
     Q_PROPERTY(int failures READ failures NOTIFY failuresChanged)
 
+    Q_PROPERTY(QVariantList sessions READ sessions NOTIFY sessionsChanged)
+    Q_PROPERTY(QString sessionId READ sessionId WRITE setSessionId NOTIFY sessionsChanged)
+
 public:
     LoginModel(GreetdClient* client, PowerActions* power, QList<UserEntry> users, QObject* parent = nullptr);
     ~LoginModel() override;
@@ -44,13 +49,26 @@ public:
     bool canSwitchUser() const { return m_otherUser && !m_users.isEmpty(); }
     QString displayNameOfDefault() const { return m_users.isEmpty() ? QString() : m_users.first().displayName; }
     QString state() const { return m_state; }
-    QString promptText() const { return m_state == u"prompt" ? m_promptText : QStringLiteral("Password"); }
+    QString promptText() const { return m_state == u"prompt" && !m_promptText.isEmpty() ? m_promptText : tr("Password"); }
     bool promptSecret() const { return m_state == u"prompt" ? m_promptSecret : true; }
     QString errorText() const { return m_errorText; }
     QString infoText() const { return m_infoText; }
     bool powerAvailable() const;
     int failures() const { return m_failures; }
 
+    void setSessions(QList<SessionEntry> sessions);
+    QVariantList sessions() const;
+    QString sessionId() const { return m_sessionId; }
+    void setSessionId(const QString& id);
+
+    void setSessionExec(const QString& exec);
+    // Only an explicitly chosen unavailable session blocks login.
+    void setSessionFile(const QString& path, bool explicitChoice);
+
+public slots:
+    void retranslate();
+
+public:
     Q_INVOKABLE void submit(const QString& secret);
     Q_INVOKABLE void useOtherUser();
     Q_INVOKABLE void useDefaultUser();
@@ -62,9 +80,12 @@ signals:
     void stateChanged();
     void failuresChanged();
     void sessionStarted();
+    void sessionsChanged();
 
 private:
     enum class Phase { None, Creating, Answering, Starting, Cancelling };
+    QString translatedError(const char* source, const QString& argument = {});
+    void clearError();
     void onResponse(const QJsonObject& response);
     void onFailed(const QString& message);
     void fail(const QString& message);
@@ -74,6 +95,9 @@ private:
     GreetdClient* m_client;
     PowerActions* m_power;
     QList<UserEntry> m_users;
+    QList<SessionEntry> m_sessions;
+    QString m_sessionId;
+    QStringList m_sessionCommand{QStringLiteral("labwc")};
     QString m_username;
     bool m_otherUser = false;
     QString m_state = QStringLiteral("idle");
@@ -82,6 +106,9 @@ private:
     bool m_hasPending = false;
     QString m_promptText;
     bool m_promptSecret = true;
+    const char* m_errorSource = nullptr;
+    const char* m_errorContext = "LoginModel";
+    QString m_errorArgument;
     QString m_errorText, m_infoText;
     int m_failures = 0;
 };

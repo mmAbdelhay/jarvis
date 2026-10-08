@@ -1,5 +1,6 @@
 #include "InstallRules.h"
 
+#include <QCoreApplication>
 #include <QLocale>
 #include <QRegularExpression>
 #include <QSet>
@@ -14,12 +15,12 @@ QString formatSize(qint64 bytes)
     const qint64 b = std::max<qint64>(0, bytes);
     const double gb = double(b) / double(GB);
     if (gb >= 1000)
-        return QLocale::c().toString(gb / 1000, 'f', 1) + u" TB"_s;
+        return QCoreApplication::translate("InstallRules", "%1 TB").arg(QLocale::c().toString(gb / 1000, 'f', 1));
     if (gb >= 10)
-        return QString::number(qRound64(gb)) + u" GB"_s;
+        return QCoreApplication::translate("InstallRules", "%1 GB").arg(qRound64(gb));
     if (gb >= 1)
-        return QLocale::c().toString(gb, 'f', 1) + u" GB"_s;
-    return QString::number(qRound64(double(b) / 1e6)) + u" MB"_s;
+        return QCoreApplication::translate("InstallRules", "%1 GB").arg(QLocale::c().toString(gb, 'f', 1));
+    return QCoreApplication::translate("InstallRules", "%1 MB").arg(qRound64(double(b) / 1e6));
 }
 
 QString deriveUsername(const QString& fullName)
@@ -53,11 +54,11 @@ QString usernameProblem(const QString& username)
         u"messagebus"_s, u"polkitd"_s, u"systemd-network"_s, u"systemd-resolve"_s, u"systemd-timesync"_s,
         u"ollama"_s, u"greeter"_s};
     if (username.isEmpty())
-        return u"Choose a username."_s;
+        return QCoreApplication::translate("InstallRules", "Choose a username.");
     if (!valid.match(username).hasMatch())
-        return u"Use lowercase letters, digits, - and _, starting with a letter (32 at most)."_s;
+        return QCoreApplication::translate("InstallRules", "Use lowercase letters, digits, - and _, starting with a letter (32 at most).");
     if (reserved.contains(username))
-        return u"That name is used by the system. Pick another."_s;
+        return QCoreApplication::translate("InstallRules", "That name is used by the system. Pick another.");
     return {};
 }
 
@@ -65,9 +66,9 @@ QString hostnameProblem(const QString& hostname)
 {
     static const QRegularExpression valid(u"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"_s);
     if (hostname.isEmpty())
-        return u"Choose a computer name."_s;
+        return QCoreApplication::translate("InstallRules", "Choose a computer name.");
     if (!valid.match(hostname).hasMatch())
-        return u"Use lowercase letters, digits and - (not first or last), 63 at most."_s;
+        return QCoreApplication::translate("InstallRules", "Use lowercase letters, digits and - (not first or last), 63 at most.");
     return {};
 }
 
@@ -96,13 +97,13 @@ QString passwordStatus(const QString& password, const QString& confirm)
         return {};
     QStringList parts;
     switch (passwordStrength(password)) {
-    case Strength::Weak: parts << u"Too short: use at least 8 characters"_s; break;
-    case Strength::Fair: parts << u"Fair password"_s; break;
-    case Strength::Strong: parts << u"Strong password"_s; break;
+    case Strength::Weak: parts << QCoreApplication::translate("InstallRules", "Too short: use at least 8 characters"); break;
+    case Strength::Fair: parts << QCoreApplication::translate("InstallRules", "Fair password"); break;
+    case Strength::Strong: parts << QCoreApplication::translate("InstallRules", "Strong password"); break;
     case Strength::Empty: break;
     }
     if (!confirm.isEmpty())
-        parts << (password == confirm ? u"passwords match"_s : u"passwords don't match"_s);
+        parts << (password == confirm ? QCoreApplication::translate("InstallRules", "passwords match") : QCoreApplication::translate("InstallRules", "passwords don't match"));
     return parts.join(u" · "_s);
 }
 
@@ -208,28 +209,28 @@ std::pair<QString, QString> splitRefusal(const QString& message)
 QString refusalText(const QString& key, const QString& backendText, const QString& distro)
 {
     if (key == u"no-uefi")
-        return u"This computer started the USB stick in legacy BIOS mode. %1 needs UEFI. Turn on UEFI in the firmware settings, then start from the USB stick again."_s.arg(distro);
+        return QCoreApplication::translate("InstallRules", "This computer started the USB stick in legacy BIOS mode. %1 needs UEFI. Turn on UEFI in the firmware settings, then start from the USB stick again.").arg(distro);
     if (key == u"disk-too-small")
-        return u"This disk is too small for %1. Pick a bigger disk."_s.arg(distro);
+        return QCoreApplication::translate("InstallRules", "This disk is too small for %1. Pick a bigger disk.").arg(distro);
     if (key == u"ntfs-bitlocker")
-        return u"Windows on this disk is encrypted with BitLocker, so it can't be shrunk safely. Turn off BitLocker in Windows first, or erase the disk."_s;
+        return QCoreApplication::translate("InstallRules", "Windows on this disk is encrypted with BitLocker, so it can't be shrunk safely. Turn off BitLocker in Windows first, or erase the disk.");
     if (key == u"ntfs-hibernated")
-        return u"Windows is hibernated (Fast Startup), so its disk can't be shrunk safely. Start Windows and shut it down fully: hold Shift + Shut down."_s;
+        return QCoreApplication::translate("InstallRules", "Windows is hibernated (Fast Startup), so its disk can't be shrunk safely. Start Windows and shut it down fully: hold Shift + Shut down.");
     if (key == u"ntfs-dirty")
-        return u"Windows didn't shut down cleanly, so its disk can't be shrunk safely. Start Windows and shut it down fully: hold Shift + Shut down."_s;
+        return QCoreApplication::translate("InstallRules", "Windows didn't shut down cleanly, so its disk can't be shrunk safely. Start Windows and shut it down fully: hold Shift + Shut down.");
     if (key == u"alongside-too-small")
-        return u"There isn't enough free space in Windows to fit %1 next to it. Free up space in Windows, or erase the disk."_s.arg(distro);
+        return QCoreApplication::translate("InstallRules", "There isn't enough free space in Windows to fit %1 next to it. Free up space in Windows, or erase the disk.").arg(distro);
     if (key == u"alongside-no-windows")
-        return u"Installing alongside Windows needs a GPT disk with a Windows partition. Pick another disk or erase this disk."_s;
+        return QCoreApplication::translate("InstallRules", "Installing alongside Windows needs a GPT disk with a Windows partition. Pick another disk or erase this disk.");
     if (key == u"live-medium")
-        return u"That is the USB stick the installer is running from. Pick another disk."_s;
+        return QCoreApplication::translate("InstallRules", "That is the USB stick the installer is running from. Pick another disk.");
     if (key == u"manual-missing-root")
-        return u"Choose a partition for / (the system)."_s;
+        return QCoreApplication::translate("InstallRules", "Choose a partition for / (the system).");
     if (key == u"manual-missing-esp")
-        return u"Choose an EFI system partition for /boot/efi."_s;
+        return QCoreApplication::translate("InstallRules", "Choose an EFI system partition for /boot/efi.");
     if (key == u"model-does-not-fit")
-        return u"The chosen model doesn't fit in the space for %1. Pick a smaller model or give %1 more space."_s.arg(distro);
-    return backendText.isEmpty() ? u"The installer can't go ahead with these choices."_s : backendText;
+        return QCoreApplication::translate("InstallRules", "The chosen model doesn't fit in the space for %1. Pick a smaller model or give %1 more space.").arg(distro);
+    return backendText.isEmpty() ? QCoreApplication::translate("InstallRules", "The installer can't go ahead with these choices.") : backendText;
 }
 
 } // namespace jarvis::installer

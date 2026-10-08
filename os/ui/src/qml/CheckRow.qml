@@ -14,7 +14,7 @@ CheckBox {
     indicator: Rectangle {
         implicitWidth: 20
         implicitHeight: 20
-        x: control.leftPadding
+        x: control.mirrored ? control.width - width - control.rightPadding : control.leftPadding
         y: control.topPadding + (control.availableHeight - height) / 2
         radius: 4
         color: control.checked ? Theme.accent : Theme.surface
@@ -39,7 +39,9 @@ CheckBox {
         }
     }
     contentItem: Text {
-        leftPadding: control.indicator.width + control.spacing
+        leftPadding: control.mirrored ? 0 : control.indicator.width + control.spacing
+        rightPadding: control.mirrored ? control.indicator.width + control.spacing : 0
+        horizontalAlignment: Text.AlignLeft
         text: control.text
         textFormat: Text.PlainText
         font: control.font

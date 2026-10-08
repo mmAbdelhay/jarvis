@@ -10,5 +10,6 @@ QT_QPA_PLATFORM=offscreen ctest --test-dir os/greeter/build --output-on-failure
 rm -rf os/greeter/build/stage
 DESTDIR="$PWD/os/greeter/build/stage" cmake --install os/greeter/build
 test -x os/greeter/build/stage/usr/bin/jarvis-greeter
+test -f os/greeter/build/stage/usr/share/jarvis/i18n/jarvis-greeter_ar.qm
 test -z "$(find os/greeter/build/stage -path '*Jarvis/UI*' -print -quit)" # jarvis-ui ships separately
 echo "jarvis-greeter: build, tests and install layout OK"

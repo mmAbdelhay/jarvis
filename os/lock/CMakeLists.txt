@@ -21,8 +21,13 @@ option(JARVIS_LOCK_WAYLAND "Build the ext-session-lock-v1 client (QtWaylandClien
 # Shared look (M2 contracts §7 jarvis-ui), built next to us for tests; shipped by jarvis-ui.
 set(QT_QML_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/qml)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../ui ${CMAKE_BINARY_DIR}/jarvis-ui EXCLUDE_FROM_ALL)
+include(${CMAKE_CURRENT_SOURCE_DIR}/../ui/cmake/JarvisI18n.cmake)
 
 add_subdirectory(src)
+jarvis_add_translations(jarvis-lock TS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/i18n TARGET jarvis_lock_core
+  SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/model ${CMAKE_CURRENT_SOURCE_DIR}/src/qml
+  LINT_QML ${CMAKE_CURRENT_SOURCE_DIR}/src/qml LINT_CPP ${CMAKE_CURRENT_SOURCE_DIR}/src/model
+  INSTALL TESTS)
 if(BUILD_TESTING)
   find_package(Qt6 6.8 REQUIRED COMPONENTS Test QuickTest)
   add_subdirectory(tests)

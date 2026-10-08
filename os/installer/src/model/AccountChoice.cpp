@@ -114,22 +114,22 @@ bool AccountChoice::diskOk() const { return !m_encrypt || m_diskSame || password
 QString AccountChoice::blockText() const
 {
     if (m_fullName.trimmed().isEmpty())
-        return u"Enter your name."_s;
+        return tr("Enter your name.");
     if (const QString p = jarvis::installer::usernameProblem(m_username); !p.isEmpty())
         return p;
     if (const QString p = jarvis::installer::hostnameProblem(m_hostname); !p.isEmpty())
         return p;
     if (m_password.isEmpty())
-        return u"Choose a password."_s;
+        return tr("Choose a password.");
     if (passwordStrength(m_password) < Strength::Fair)
-        return u"Use at least 8 characters for the password."_s;
+        return tr("Use at least 8 characters for the password.");
     if (m_password != m_confirm)
-        return u"The passwords don't match."_s;
+        return tr("The passwords don't match.");
     if (m_encrypt && !m_diskSame) {
         if (passwordStrength(m_diskPassphrase) < Strength::Fair)
-            return u"Use at least 8 characters for the disk passphrase."_s;
+            return tr("Use at least 8 characters for the disk passphrase.");
         if (m_diskPassphrase != m_diskConfirm)
-            return u"The disk passphrases don't match."_s;
+            return tr("The disk passphrases don't match.");
     }
     return {};
 }

@@ -27,10 +27,11 @@ qt_add_executable(tst_qml qml/tst_qml.cpp qml/GreeterHarness.h qml/GreeterHarnes
 target_include_directories(tst_qml PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/support ${CMAKE_CURRENT_SOURCE_DIR}/qml)
 target_link_libraries(tst_qml PRIVATE jarvis_greeter_core jarvis_greeter_coreplugin Qt6::QuickTest)
 target_compile_definitions(tst_qml PRIVATE
+  JARVIS_TEST_I18N_DIR="${CMAKE_BINARY_DIR}/i18n"
   QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml"
   JARVIS_QML_DIR="${QT_QML_OUTPUT_DIRECTORY}"
   JARVIS_GREETER_TEST_DATA="${JARVIS_GREETER_TEST_DATA}")
-add_dependencies(tst_qml jarvis_ui)
+add_dependencies(tst_qml jarvis_ui jarvis-ui_translations jarvis-greeter_translations)
 add_test(NAME tst_qml COMMAND tst_qml)
 set_tests_properties(tst_qml PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" LABELS qml TIMEOUT 120)
 

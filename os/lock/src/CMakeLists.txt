@@ -33,7 +33,7 @@ add_dependencies(jarvis_lock_core jarvis_ui) # qmlcachegen reads Jarvis.UI's qml
 # qmltyperegistrations includes headers by basename, so model/ is on the path too.
 target_include_directories(jarvis_lock_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/model)
 target_link_libraries(jarvis_lock_core PUBLIC
-  Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::QuickControls2 jarvis_lock_control)
+  Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::QuickControls2 jarvis_lock_control jarvis_ui_native)
 if(JARVIS_LOCK_PAM)
   find_path(PAM_INCLUDE_DIR security/pam_appl.h REQUIRED)
   find_library(PAM_LIBRARY pam REQUIRED)

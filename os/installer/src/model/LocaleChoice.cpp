@@ -1,5 +1,6 @@
 #include "LocaleChoice.h"
 
+#include <QCoreApplication>
 #include <QTimeZone>
 #include <algorithm>
 #include <QVariantMap>
@@ -21,11 +22,12 @@ constexpr Language kLanguages[] = {
 };
 struct Keyboard {
     QStringView layout;
-    QStringView name;
+    const char* name;
 };
 constexpr Keyboard kKeyboards[] = {
-    {u"us", u"English (US)"}, {u"gb", u"English (UK)"}, {u"ara", u"Arabic"},
-    {u"fr", u"French"}, {u"de", u"German"}, {u"es", u"Spanish"},
+    {u"us", QT_TRANSLATE_NOOP("LocaleChoice", "English (US)")}, {u"gb", QT_TRANSLATE_NOOP("LocaleChoice", "English (UK)")},
+    {u"ara", QT_TRANSLATE_NOOP("LocaleChoice", "Arabic")},      {u"fr", QT_TRANSLATE_NOOP("LocaleChoice", "French")},
+    {u"de", QT_TRANSLATE_NOOP("LocaleChoice", "German")},       {u"es", QT_TRANSLATE_NOOP("LocaleChoice", "Spanish")},
 };
 
 QVariantMap option(const QString& value, const QString& text)
@@ -88,7 +90,7 @@ QVariantList LocaleChoice::keyboards() const
 {
     QVariantList out;
     for (const Keyboard& k : kKeyboards)
-        out.append(option(k.layout.toString(), k.name.toString()));
+        out.append(option(k.layout.toString(), QCoreApplication::translate("LocaleChoice", k.name)));
     return out;
 }
 
@@ -131,7 +133,7 @@ QString LocaleChoice::keyboardName(const QString& layout) const
 {
     for (const Keyboard& k : kKeyboards)
         if (k.layout == layout)
-            return k.name.toString();
+            return QCoreApplication::translate("LocaleChoice", k.name);
     return layout;
 }
 
