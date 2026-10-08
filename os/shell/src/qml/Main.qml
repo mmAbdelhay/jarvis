@@ -7,7 +7,7 @@ Window {
     id: window
     required property ShellController shell
 
-    title: "Jarvis"
+    title: qsTr("Jarvis")
     width: 1440
     height: 900
     color: Theme.bg

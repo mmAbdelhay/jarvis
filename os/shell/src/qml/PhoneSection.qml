@@ -8,20 +8,22 @@ import Jarvis.UI
 // Phone names are untrusted, so they render as plain text.
 ColumnLayout {
     id: root
+    LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft
+    LayoutMirroring.childrenInherit: true
     required property PhoneModel phone
 
     spacing: 14
 
     Text {
         Layout.fillWidth: true
-        text: "Let the Jarvis app on your phone reach this computer over your local network. Phones can ask and approve everyday changes; they can never approve anything that needs your password."
+        text: qsTr("Let the Jarvis app on your phone reach this computer over your local network. Phones can ask and approve everyday changes; they can never approve anything that needs your password.")
         wrapMode: Text.Wrap
         color: Theme.muted
     }
     CheckRow {
         objectName: "phoneEnabled"
         Layout.fillWidth: true
-        text: "Allow my phone to connect"
+        text: qsTr("Allow my phone to connect")
         enabled: root.phone.known
         checked: root.phone.enabled
         onToggled: root.phone.setEnabled(checked)
@@ -30,7 +32,7 @@ ColumnLayout {
         objectName: "phoneAddress"
         Layout.fillWidth: true
         visible: root.phone.enabled && root.phone.address !== ""
-        text: "Listening on " + root.phone.address + " · fingerprint " + root.phone.fingerprint
+        text: qsTr("Listening on %1 · fingerprint %2").arg(root.phone.address).arg(root.phone.fingerprint)
         textFormat: Text.PlainText
         wrapMode: Text.Wrap
         color: Theme.textSoft
@@ -71,7 +73,7 @@ ColumnLayout {
         ActionButton {
             objectName: "phonePair"
             visible: root.phone.pairingUri === ""
-            text: "Pair a phone"
+            text: qsTr("Pair a phone")
             onClicked: root.phone.openPairing()
         }
         TextEdit {
@@ -88,7 +90,7 @@ ColumnLayout {
         ActionButton {
             objectName: "phonePairCancel"
             visible: root.phone.pairingUri !== ""
-            text: "Stop pairing"
+            text: qsTr("Stop pairing")
             onClicked: root.phone.cancelPairing()
         }
     }
@@ -120,14 +122,14 @@ ColumnLayout {
                     color: Theme.text
                 }
                 Text {
-                    text: deviceRow.modelData.connected ? "Connected" : "Not connected"
+                    text: deviceRow.modelData.connected ? qsTr("Connected") : qsTr("Not connected")
                     color: Theme.mutedSoft
                     font.pixelSize: Theme.fontSmall
                 }
                 ActionButton {
                     objectName: "phoneRevoke_" + deviceRow.modelData.id
-                    text: "Remove"
-                    Accessible.name: "Remove " + deviceRow.modelData.name
+                    text: qsTr("Remove")
+                    Accessible.name: qsTr("Remove %1").arg(deviceRow.modelData.name)
                     onClicked: root.phone.revoke(deviceRow.modelData.id)
                 }
             }
@@ -138,7 +140,7 @@ ColumnLayout {
     Text {
         Layout.fillWidth: true
         Layout.topMargin: 8
-        text: root.phone.hasOwnerPassword ? "Change the owner password" : "Set an owner password"
+        text: root.phone.hasOwnerPassword ? qsTr("Change the owner password") : qsTr("Set an owner password")
         color: Theme.text
         font.weight: Font.DemiBold
     }
@@ -147,18 +149,18 @@ ColumnLayout {
         objectName: "phoneCurrentPassword"
         Layout.fillWidth: true
         visible: root.phone.hasOwnerPassword
-        label: "Current owner password"
+        label: qsTr("Current owner password")
     }
     SecretField {
         id: newPassword
         objectName: "phoneNewPassword"
         Layout.fillWidth: true
-        label: "New owner password"
+        label: qsTr("New owner password")
     }
     ActionButton {
         objectName: "phoneSavePassword"
         variant: "primary"
-        text: "Save password"
+        text: qsTr("Save password")
         enabled: newPassword.field.text !== ""
         onClicked: {
             root.phone.setOwnerPassword(currentPassword.field.text, newPassword.field.text)

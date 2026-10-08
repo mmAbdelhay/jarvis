@@ -6,6 +6,8 @@ import Jarvis.UI
 // wait for the transcript, or Jarvis speaking.
 Rectangle {
     id: root
+    LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft
+    LayoutMirroring.childrenInherit: true
     required property VoiceModel voice
     implicitHeight: 40
     radius: 20

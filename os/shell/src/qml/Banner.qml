@@ -7,6 +7,8 @@ import QtQuick.Controls.Basic
 // with the way out (spec §10: Network doctor, settings one tap away).
 Rectangle {
     id: root
+    LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft
+    LayoutMirroring.childrenInherit: true
     property string text
     property bool showDoctor: false   // ShellController.offerDoctor (contracts §6.8)
     property bool showSettings: false
@@ -37,7 +39,7 @@ Rectangle {
             visible: root.showDoctor
             variant: "ghost"
             implicitHeight: 36
-            text: "Network doctor"
+            text: qsTr("Network doctor")
             onClicked: root.doctorRequested()
         }
         ActionButton {
@@ -45,7 +47,7 @@ Rectangle {
             visible: root.showSettings
             variant: "ghost"
             implicitHeight: 36
-            text: "Settings"
+            text: qsTr("Settings")
             onClicked: root.settingsRequested()
         }
     }

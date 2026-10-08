@@ -31,6 +31,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/../ui/cmake/JarvisI18n.cmake)
 add_subdirectory(src)
 jarvis_add_translations(jarvis-shell TS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/i18n TARGET jarvis_shell_core
   SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/app ${CMAKE_CURRENT_SOURCE_DIR}/src/models ${CMAKE_CURRENT_SOURCE_DIR}/src/qml
+  LINT_QML ${CMAKE_CURRENT_SOURCE_DIR}/src/qml
   LINT_CPP ${CMAKE_CURRENT_SOURCE_DIR}/src/app ${CMAKE_CURRENT_SOURCE_DIR}/src/models
   INSTALL TESTS)
 if(BUILD_TESTING)

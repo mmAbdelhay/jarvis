@@ -8,6 +8,8 @@ import QtQuick.Controls.Basic
 // RiskGate; the model never sees it.
 ColumnLayout {
     id: root
+    LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft
+    LayoutMirroring.childrenInherit: true
     property string label
     readonly property alias field: input
     signal edited(string value)
@@ -41,7 +43,7 @@ ColumnLayout {
         onTextEdited: root.edited(text)
     }
     Text {
-        text: "Goes straight to the system. Jarvis's model never sees it."
+        text: qsTr("Goes straight to the system. Jarvis's model never sees it.")
         color: Theme.approvalMuted
         font.pixelSize: Theme.fontTiny
     }

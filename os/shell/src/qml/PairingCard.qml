@@ -7,6 +7,8 @@ import Jarvis.UI
 // device name and address come from the phone: plain text only.
 Rectangle {
     id: root
+    LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft
+    LayoutMirroring.childrenInherit: true
     required property PairingModel pairing
     objectName: "pairingCard"
 
@@ -16,7 +18,7 @@ Rectangle {
     color: Theme.approvalCard
     border.color: Theme.approval
     Accessible.role: Accessible.Grouping
-    Accessible.name: "A phone wants to connect to Jarvis"
+    Accessible.name: qsTr("A phone wants to connect to Jarvis")
     onVisibleChanged: if (visible) denyButton.forceActiveFocus(Qt.OtherFocusReason)
     Component.onCompleted: if (visible) denyButton.forceActiveFocus(Qt.OtherFocusReason)
 
@@ -31,7 +33,7 @@ Rectangle {
             Icon { path: Icons.phone; color: Theme.approval; strokeWidth: 2; size: 20 }
             Text {
                 Layout.fillWidth: true
-                text: "A phone wants to connect to Jarvis"
+                text: qsTr("A phone wants to connect to Jarvis")
                 color: Theme.text
                 font.weight: Font.DemiBold
             }
@@ -39,7 +41,7 @@ Rectangle {
         Text {
             objectName: "pairingDevice"
             Layout.fillWidth: true
-            text: "Device: " + root.pairing.deviceName
+            text: qsTr("Device: %1").arg(root.pairing.deviceName)
             textFormat: Text.PlainText
             elide: Text.ElideRight
             color: Theme.textSoft
@@ -48,7 +50,7 @@ Rectangle {
             objectName: "pairingAddress"
             Layout.fillWidth: true
             visible: root.pairing.address !== ""
-            text: "Address: " + root.pairing.address
+            text: qsTr("Address: %1").arg(root.pairing.address)
             textFormat: Text.PlainText
             elide: Text.ElideRight
             color: Theme.approvalMuted
@@ -58,8 +60,8 @@ Rectangle {
             objectName: "pairingHint"
             Layout.fillWidth: true
             text: root.pairing.locked
-                  ? "The screen is locked. Unlock it to allow this phone."
-                  : "Allow it only if you started pairing on this computer just now. It will be able to chat with Jarvis and answer cards that don't need a password. (" + root.pairing.secondsLeft + " s)"
+                  ? qsTr("The screen is locked. Unlock it to allow this phone.")
+                  : qsTr("Allow it only if you started pairing on this computer just now. It will be able to chat with Jarvis and answer cards that don't need a password. (%1 s)").arg(root.pairing.secondsLeft)
             textFormat: Text.PlainText
             wrapMode: Text.Wrap
             color: Theme.approvalMuted
@@ -72,13 +74,13 @@ Rectangle {
                 id: denyButton
                 objectName: "pairingDeny"
                 variant: "quiet"
-                text: "Don't allow"
+                text: qsTr("Don't allow")
                 onClicked: root.pairing.deny()
             }
             ActionButton {
                 objectName: "pairingApprove"
                 variant: "approve"
-                text: "Allow"
+                text: qsTr("Allow")
                 enabled: !root.pairing.locked
                 onClicked: root.pairing.approve()
             }

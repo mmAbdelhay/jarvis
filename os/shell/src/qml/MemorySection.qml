@@ -7,6 +7,8 @@ import Jarvis.UI
 // and forget everything behind a second click.
 ColumnLayout {
     id: root
+    LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft
+    LayoutMirroring.childrenInherit: true
     required property MemoryModel memory
     property bool confirmingClear: false
 
@@ -14,7 +16,7 @@ ColumnLayout {
 
     Text {
         Layout.fillWidth: true
-        text: "Jarvis keeps short summaries of your conversations and a few facts, encrypted on this computer. They only leave it inside your own messages to your model provider."
+        text: qsTr("Jarvis keeps short summaries of your conversations and a few facts, encrypted on this computer. They only leave it inside your own messages to your model provider.")
         wrapMode: Text.Wrap
         color: Theme.muted
     }
@@ -30,7 +32,7 @@ ColumnLayout {
     Text {
         objectName: "memoryEmpty"
         visible: root.memory.known && root.memory.count === 0 && root.memory.error === ""
-        text: "Jarvis hasn't remembered anything yet."
+        text: qsTr("Jarvis hasn't remembered anything yet.")
         color: Theme.muted
     }
 
@@ -74,8 +76,8 @@ ColumnLayout {
                 }
                 ActionButton {
                     objectName: "forget_" + memoryRow.memoryId
-                    text: "Forget"
-                    Accessible.name: "Forget this " + memoryRow.kindLabel.toLowerCase()
+                    text: qsTr("Forget")
+                    Accessible.name: qsTr("Forget this %1").arg(memoryRow.kindLabel)
                     onClicked: root.memory.remove(memoryRow.index)
                 }
             }
@@ -89,7 +91,7 @@ ColumnLayout {
         Text {
             Layout.fillWidth: true
             visible: root.confirmingClear
-            text: "Forget everything Jarvis remembers? This can't be undone."
+            text: qsTr("Forget everything Jarvis remembers? This can't be undone.")
             wrapMode: Text.Wrap
             color: Theme.warnBannerText
         }
@@ -97,20 +99,20 @@ ColumnLayout {
         ActionButton {
             objectName: "forgetAll"
             visible: !root.confirmingClear
-            text: "Forget everything"
+            text: qsTr("Forget everything")
             onClicked: root.confirmingClear = true
         }
         ActionButton {
             objectName: "cancelForgetAll"
             visible: root.confirmingClear
-            text: "Keep"
+            text: qsTr("Keep")
             onClicked: root.confirmingClear = false
         }
         ActionButton {
             objectName: "confirmForgetAll"
             visible: root.confirmingClear
             variant: "primary"
-            text: "Forget everything"
+            text: qsTr("Forget everything")
             onClicked: {
                 root.confirmingClear = false
                 root.memory.clearAll()

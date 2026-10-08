@@ -6,6 +6,8 @@ import QtQuick.Controls.Basic
 // 44 px top bar: logo, active model pill, reachability, clock.
 Rectangle {
     id: root
+    LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft
+    LayoutMirroring.childrenInherit: true
     required property ShellController shell
 
     implicitHeight: 44
@@ -19,7 +21,7 @@ Rectangle {
         spacing: 10
 
         Icon { path: Icons.logo; color: Theme.accent; size: 22 }
-        Text { text: "Jarvis"; color: Theme.text; font.weight: Font.DemiBold; font.letterSpacing: 0.6 }
+        Text { text: qsTr("Jarvis"); color: Theme.text; font.weight: Font.DemiBold; font.letterSpacing: 0.6 }
         Item { Layout.fillWidth: true }
 
         Rectangle {
@@ -57,7 +59,7 @@ Rectangle {
             text: root.shell.system.updatesText
             implicitHeight: 26
             implicitWidth: badgeRow.implicitWidth + 22
-            Accessible.name: "Updates available: " + text + ". Ask Jarvis to install them."
+            Accessible.name: qsTr("Updates available: %1. Ask Jarvis to install them.").arg(text)
             onClicked: root.shell.askForUpdates()
             background: Rectangle {
                 radius: 13
@@ -89,7 +91,7 @@ Rectangle {
             Icon { path: Icons.offline; color: Theme.warn; strokeWidth: 2; size: 16 }
             Text {
                 objectName: "reachText"
-                text: parent.offline ? "Offline" : "Model unreachable"
+                text: parent.offline ? qsTr("Offline") : qsTr("Model unreachable")
                 color: Theme.warn
                 font.pixelSize: Theme.fontSmall
             }

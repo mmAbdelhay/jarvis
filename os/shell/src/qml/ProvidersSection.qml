@@ -8,6 +8,8 @@ import Jarvis.UI
 // fallback from a local/network provider is opt-in (privacy ruling).
 ColumnLayout {
     id: root
+    LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft
+    LayoutMirroring.childrenInherit: true
     required property ProviderModel provider
     required property ProviderListModel providers
     property bool doctorAvailable: false
@@ -23,7 +25,7 @@ ColumnLayout {
 
     Text {
         Layout.fillWidth: true
-        text: "Jarvis tries these in order. If one can't answer, it moves to the next for that message, and starts from the top again on your next one."
+        text: qsTr("Jarvis tries these in order. If one can't answer, it moves to the next for that message, and starts from the top again on your next one.")
         wrapMode: Text.Wrap
         color: Theme.muted
     }
@@ -63,7 +65,7 @@ ColumnLayout {
                     }
                     Text {
                         visible: rowItem.active
-                        text: "In use now"
+                        text: qsTr("In use now")
                         color: Theme.accent
                         font.pixelSize: Theme.fontSmall
                     }
@@ -80,21 +82,21 @@ ColumnLayout {
                 }
                 ActionButton {
                     objectName: "moveUp_" + rowItem.providerId
-                    text: "Up"
-                    Accessible.name: "Try " + rowItem.modelName + " earlier"
+                    text: qsTr("Up")
+                    Accessible.name: qsTr("Try %1 earlier").arg(rowItem.modelName)
                     enabled: rowItem.index > 0 && !root.providers.saving
                     onClicked: root.providers.moveUp(rowItem.index)
                 }
                 ActionButton {
                     objectName: "moveDown_" + rowItem.providerId
-                    text: "Down"
-                    Accessible.name: "Try " + rowItem.modelName + " later"
+                    text: qsTr("Down")
+                    Accessible.name: qsTr("Try %1 later").arg(rowItem.modelName)
                     enabled: rowItem.index < root.providers.count - 1 && !root.providers.saving
                     onClicked: root.providers.moveDown(rowItem.index)
                 }
                 ActionButton {
                     objectName: "edit_" + rowItem.providerId
-                    text: "Edit"
+                    text: qsTr("Edit")
                     onClicked: {
                         root.provider.editProvider(root.providers.config(rowItem.index))
                         root.editing = true
@@ -102,7 +104,7 @@ ColumnLayout {
                 }
                 ActionButton {
                     objectName: "remove_" + rowItem.providerId
-                    text: "Remove"
+                    text: qsTr("Remove")
                     enabled: root.providers.count > 1 && !root.providers.saving
                     onClicked: root.providers.remove(rowItem.index)
                 }
@@ -113,7 +115,7 @@ ColumnLayout {
     CheckRow {
         objectName: "cloudFallback"
         Layout.fillWidth: true
-        text: "Allow cloud fallback"
+        text: qsTr("Allow cloud fallback")
         checked: root.providers.allowCloudFallback
         onToggled: root.providers.allowCloudFallback = checked
         Binding on checked {
@@ -123,7 +125,7 @@ ColumnLayout {
     }
     Text {
         Layout.fillWidth: true
-        text: "When a provider on this computer or your network fails, Jarvis may use a cloud provider from this list. Off keeps your messages on your own machines."
+        text: qsTr("When a provider on this computer or your network fails, Jarvis may use a cloud provider from this list. Off keeps your messages on your own machines.")
         wrapMode: Text.Wrap
         color: Theme.muted
         font.pixelSize: Theme.fontSmall
@@ -142,7 +144,7 @@ ColumnLayout {
         }
         ActionButton {
             objectName: "addProvider"
-            text: "Add a provider"
+            text: qsTr("Add a provider")
             onClicked: {
                 root.provider.startNew()
                 root.editing = true
@@ -151,7 +153,7 @@ ColumnLayout {
         ActionButton {
             objectName: "saveOrder"
             variant: "primary"
-            text: root.providers.saving ? "Saving…" : "Save changes"
+            text: root.providers.saving ? qsTr("Saving…") : qsTr("Save changes")
             enabled: root.providers.dirty && !root.providers.saving
             onClicked: root.providers.save()
         }
@@ -163,7 +165,7 @@ ColumnLayout {
         visible: root.editing
         spacing: 18
         Text {
-            text: root.provider.editingId === "" ? "Add a provider" : "Edit " + root.provider.editingId
+            text: root.provider.editingId === "" ? qsTr("Add a provider") : qsTr("Edit %1").arg(root.provider.editingId)
             textFormat: Text.PlainText
             color: Theme.text
             font.pixelSize: 22
@@ -177,19 +179,19 @@ ColumnLayout {
             Layout.fillWidth: true
             ActionButton {
                 visible: root.provider.probeState === "error" && root.doctorAvailable
-                text: "Open Network doctor"
+                text: qsTr("Open Network doctor")
                 onClicked: root.doctorRequested()
             }
             Item { Layout.fillWidth: true }
             ActionButton {
                 objectName: "cancelEdit"
-                text: "Cancel"
+                text: qsTr("Cancel")
                 onClicked: root.editing = false
             }
             ActionButton {
                 objectName: "saveButton"
                 variant: "primary"
-                text: root.provider.probeState === "saving" ? "Saving…" : "Save provider"
+                text: root.provider.probeState === "saving" ? qsTr("Saving…") : qsTr("Save provider")
                 enabled: root.provider.canSave
                 onClicked: root.provider.save()
             }

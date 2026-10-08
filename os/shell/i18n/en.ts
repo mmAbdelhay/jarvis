@@ -53,6 +53,96 @@
         </message>
     </context>
     <context>
+        <name>AuditView</name>
+        <message>
+            <source>← Chat</source>
+            <translation>← Chat</translation>
+        </message>
+        <message>
+            <source>Back to chat</source>
+            <translation>Back to chat</translation>
+        </message>
+        <message>
+            <source>Activity log</source>
+            <translation>Activity log</translation>
+        </message>
+        <message>
+            <source>Everything Jarvis asked to change, and what you decided.</source>
+            <translation>Everything Jarvis asked to change, and what you decided.</translation>
+        </message>
+        <message>
+            <source>All</source>
+            <translation>All</translation>
+        </message>
+        <message>
+            <source>Approved</source>
+            <translation>Approved</translation>
+        </message>
+        <message>
+            <source>Denied</source>
+            <translation>Denied</translation>
+        </message>
+        <message>
+            <source>Failed</source>
+            <translation>Failed</translation>
+        </message>
+        <message>
+            <source>Time</source>
+            <translation>Time</translation>
+        </message>
+        <message>
+            <source>Action</source>
+            <translation>Action</translation>
+        </message>
+        <message>
+            <source>Tool</source>
+            <translation>Tool</translation>
+        </message>
+        <message>
+            <source>Approved on</source>
+            <translation>Approved on</translation>
+        </message>
+        <message>
+            <source>Decision</source>
+            <translation>Decision</translation>
+        </message>
+        <message>
+            <source>Result</source>
+            <translation>Result</translation>
+        </message>
+        <message>
+            <source>Loading…</source>
+            <translation>Loading…</translation>
+        </message>
+        <message>
+            <source>Load older entries</source>
+            <translation>Load older entries</translation>
+        </message>
+        <message>
+            <source>Nothing yet. When Jarvis asks to change something, it shows up here.</source>
+            <translation>Nothing yet. When Jarvis asks to change something, it shows up here.</translation>
+        </message>
+        <message>
+            <source>Nothing matches this filter.</source>
+            <translation>Nothing matches this filter.</translation>
+        </message>
+        <message>
+            <source>Stored on this computer in %1. Passwords are never written here.</source>
+            <translation>Stored on this computer in %1. Passwords are never written here.</translation>
+        </message>
+    </context>
+    <context>
+        <name>Banner</name>
+        <message>
+            <source>Network doctor</source>
+            <translation>Network doctor</translation>
+        </message>
+        <message>
+            <source>Settings</source>
+            <translation>Settings</translation>
+        </message>
+    </context>
+    <context>
         <name>CardModel</name>
         <message>
             <source>Debian</source>
@@ -103,6 +193,76 @@
         </message>
     </context>
     <context>
+        <name>Composer</name>
+        <message>
+            <source>Ask Jarvis to do anything on this computer…</source>
+            <translation>Ask Jarvis to do anything on this computer…</translation>
+        </message>
+        <message>
+            <source>Message Jarvis</source>
+            <translation>Message Jarvis</translation>
+        </message>
+        <message>
+            <source>Send voice message</source>
+            <translation>Send voice message</translation>
+        </message>
+        <message>
+            <source>Talk to Jarvis (Super+Space)</source>
+            <translation>Talk to Jarvis (Super+Space)</translation>
+        </message>
+        <message>
+            <source>Undo the last change</source>
+            <translation>Undo the last change</translation>
+        </message>
+        <message>
+            <source>Send</source>
+            <translation>Send</translation>
+        </message>
+        <message>
+            <source>Stop Jarvis</source>
+            <translation>Stop Jarvis</translation>
+        </message>
+        <message>
+            <source>Super focuses chat · Super+Space talks · Esc stops Jarvis · Ctrl+Alt+T opens a terminal</source>
+            <translation>Super focuses chat · Super+Space talks · Esc stops Jarvis · Ctrl+Alt+T opens a terminal</translation>
+        </message>
+    </context>
+    <context>
+        <name>ConfirmCard</name>
+        <message>
+            <source>Approval needed</source>
+            <translation>Approval needed</translation>
+        </message>
+        <message>
+            <source>Select none</source>
+            <translation>Select none</translation>
+        </message>
+        <message>
+            <source>Select all</source>
+            <translation>Select all</translation>
+        </message>
+        <message>
+            <source>The screen is locked. Unlock it to answer.</source>
+            <translation>The screen is locked. Unlock it to answer.</translation>
+        </message>
+        <message>
+            <source>Pick one network.</source>
+            <translation>Pick one network.</translation>
+        </message>
+        <message>
+            <source>Untick anything you don't want. No answer in 5 minutes counts as Deny.</source>
+            <translation>Untick anything you don't want. No answer in 5 minutes counts as Deny.</translation>
+        </message>
+        <message>
+            <source>Cancel</source>
+            <translation>Cancel</translation>
+        </message>
+        <message>
+            <source>Deny</source>
+            <translation>Deny</translation>
+        </message>
+    </context>
+    <context>
         <name>Conversation</name>
         <message>
             <source>Lost the connection to Jarvis during this answer.</source>
@@ -126,6 +286,57 @@
         </message>
     </context>
     <context>
+        <name>DoctorView</name>
+        <message>
+            <source>Can't reach the model: %1. Network doctor works without a model.</source>
+            <translation>Can't reach the model: %1. Network doctor works without a model.</translation>
+        </message>
+        <message>
+            <source>Network doctor works without a model.</source>
+            <translation>Network doctor works without a model.</translation>
+        </message>
+        <message>
+            <source>Back to chat</source>
+            <translation>Back to chat</translation>
+        </message>
+        <message>
+            <source>Network doctor</source>
+            <translation>Network doctor</translation>
+        </message>
+        <message>
+            <source>Checks run one by one. Every fix asks you first.</source>
+            <translation>Checks run one by one. Every fix asks you first.</translation>
+        </message>
+        <message>
+            <source>Skip</source>
+            <translation>Skip</translation>
+        </message>
+        <message>
+            <source>NETWORKS IN RANGE</source>
+            <translation>NETWORKS IN RANGE</translation>
+        </message>
+        <message>
+            <source>open</source>
+            <translation>open</translation>
+        </message>
+        <message>
+            <source>saved</source>
+            <translation>saved</translation>
+        </message>
+        <message>
+            <source>The network works again.</source>
+            <translation>The network works again.</translation>
+        </message>
+        <message>
+            <source>Jarvis couldn't fix this automatically. Try an Ethernet cable or your phone's hotspot, then run the doctor again.</source>
+            <translation>Jarvis couldn't fix this automatically. Try an Ethernet cable or your phone's hotspot, then run the doctor again.</translation>
+        </message>
+        <message>
+            <source>Run the checks again</source>
+            <translation>Run the checks again</translation>
+        </message>
+    </context>
+    <context>
         <name>LanguageSection</name>
         <message>
             <source>Jarvis and every %1 screen switch at once. Earlier messages stay in the language they were written in.</source>
@@ -134,6 +345,76 @@
         <message>
             <source>Switching…</source>
             <translation>Switching…</translation>
+        </message>
+    </context>
+    <context>
+        <name>MachinePanel</name>
+        <message>
+            <source>THIS MACHINE</source>
+            <translation>THIS MACHINE</translation>
+        </message>
+        <message>
+            <source>Network</source>
+            <translation>Network</translation>
+        </message>
+        <message>
+            <source>Model</source>
+            <translation>Model</translation>
+        </message>
+        <message>
+            <source>Not set up</source>
+            <translation>Not set up</translation>
+        </message>
+        <message>
+            <source>Unreachable: %1</source>
+            <translation>Unreachable: %1</translation>
+        </message>
+        <message>
+            <source>Memory</source>
+            <translation>Memory</translation>
+        </message>
+        <message>
+            <source>Disk</source>
+            <translation>Disk</translation>
+        </message>
+        <message>
+            <source>Failed services</source>
+            <translation>Failed services</translation>
+        </message>
+        <message>
+            <source>Updates</source>
+            <translation>Updates</translation>
+        </message>
+        <message>
+            <source>Up to date</source>
+            <translation>Up to date</translation>
+        </message>
+        <message>
+            <source>Checking…</source>
+            <translation>Checking…</translation>
+        </message>
+        <message>
+            <source>Check for updates</source>
+            <translation>Check for updates</translation>
+        </message>
+        <message>
+            <source>RECENT ACTIONS</source>
+            <translation>RECENT ACTIONS</translation>
+        </message>
+        <message>
+            <source>Nothing yet.</source>
+            <translation>Nothing yet.</translation>
+        </message>
+        <message>
+            <source>Open activity log</source>
+            <translation>Open activity log</translation>
+        </message>
+    </context>
+    <context>
+        <name>Main</name>
+        <message>
+            <source>Jarvis</source>
+            <translation>Jarvis</translation>
         </message>
     </context>
     <context>
@@ -149,6 +430,87 @@
         <message>
             <source>Jarvis couldn't reach its memory.</source>
             <translation>Jarvis couldn't reach its memory.</translation>
+        </message>
+    </context>
+    <context>
+        <name>MemorySection</name>
+        <message>
+            <source>Jarvis keeps short summaries of your conversations and a few facts, encrypted on this computer. They only leave it inside your own messages to your model provider.</source>
+            <translation>Jarvis keeps short summaries of your conversations and a few facts, encrypted on this computer. They only leave it inside your own messages to your model provider.</translation>
+        </message>
+        <message>
+            <source>Jarvis hasn't remembered anything yet.</source>
+            <translation>Jarvis hasn't remembered anything yet.</translation>
+        </message>
+        <message>
+            <source>Forget</source>
+            <translation>Forget</translation>
+        </message>
+        <message>
+            <source>Forget this %1</source>
+            <translation>Forget this %1</translation>
+        </message>
+        <message>
+            <source>Forget everything Jarvis remembers? This can't be undone.</source>
+            <translation>Forget everything Jarvis remembers? This can't be undone.</translation>
+        </message>
+        <message>
+            <source>Forget everything</source>
+            <translation>Forget everything</translation>
+        </message>
+        <message>
+            <source>Keep</source>
+            <translation>Keep</translation>
+        </message>
+    </context>
+    <context>
+        <name>NavRail</name>
+        <message>
+            <source>Chat</source>
+            <translation>Chat</translation>
+        </message>
+        <message>
+            <source>Activity log</source>
+            <translation>Activity log</translation>
+        </message>
+        <message>
+            <source>Settings</source>
+            <translation>Settings</translation>
+        </message>
+        <message>
+            <source>Open terminal</source>
+            <translation>Open terminal</translation>
+        </message>
+    </context>
+    <context>
+        <name>PairingCard</name>
+        <message>
+            <source>A phone wants to connect to Jarvis</source>
+            <translation>A phone wants to connect to Jarvis</translation>
+        </message>
+        <message>
+            <source>Device: %1</source>
+            <translation>Device: %1</translation>
+        </message>
+        <message>
+            <source>Address: %1</source>
+            <translation>Address: %1</translation>
+        </message>
+        <message>
+            <source>The screen is locked. Unlock it to allow this phone.</source>
+            <translation>The screen is locked. Unlock it to allow this phone.</translation>
+        </message>
+        <message>
+            <source>Allow it only if you started pairing on this computer just now. It will be able to chat with Jarvis and answer cards that don't need a password. (%1 s)</source>
+            <translation>Allow it only if you started pairing on this computer just now. It will be able to chat with Jarvis and answer cards that don't need a password. (%1 s)</translation>
+        </message>
+        <message>
+            <source>Don't allow</source>
+            <translation>Don't allow</translation>
+        </message>
+        <message>
+            <source>Allow</source>
+            <translation>Allow</translation>
         </message>
     </context>
     <context>
@@ -179,6 +541,144 @@
         <message>
             <source>Something went wrong. Try again.</source>
             <translation>Something went wrong. Try again.</translation>
+        </message>
+    </context>
+    <context>
+        <name>PhoneSection</name>
+        <message>
+            <source>Let the Jarvis app on your phone reach this computer over your local network. Phones can ask and approve everyday changes; they can never approve anything that needs your password.</source>
+            <translation>Let the Jarvis app on your phone reach this computer over your local network. Phones can ask and approve everyday changes; they can never approve anything that needs your password.</translation>
+        </message>
+        <message>
+            <source>Allow my phone to connect</source>
+            <translation>Allow my phone to connect</translation>
+        </message>
+        <message>
+            <source>Listening on %1 · fingerprint %2</source>
+            <translation>Listening on %1 · fingerprint %2</translation>
+        </message>
+        <message>
+            <source>Pair a phone</source>
+            <translation>Pair a phone</translation>
+        </message>
+        <message>
+            <source>Stop pairing</source>
+            <translation>Stop pairing</translation>
+        </message>
+        <message>
+            <source>Not connected</source>
+            <translation>Not connected</translation>
+        </message>
+        <message>
+            <source>Connected</source>
+            <translation>Connected</translation>
+        </message>
+        <message>
+            <source>Remove</source>
+            <translation>Remove</translation>
+        </message>
+        <message>
+            <source>Remove %1</source>
+            <translation>Remove %1</translation>
+        </message>
+        <message>
+            <source>Change the owner password</source>
+            <translation>Change the owner password</translation>
+        </message>
+        <message>
+            <source>Set an owner password</source>
+            <translation>Set an owner password</translation>
+        </message>
+        <message>
+            <source>Current owner password</source>
+            <translation>Current owner password</translation>
+        </message>
+        <message>
+            <source>New owner password</source>
+            <translation>New owner password</translation>
+        </message>
+        <message>
+            <source>Save password</source>
+            <translation>Save password</translation>
+        </message>
+    </context>
+    <context>
+        <name>ProviderForm</name>
+        <message>
+            <source>Cloud</source>
+            <translation>Cloud</translation>
+        </message>
+        <message>
+            <source>Strongest models. Needs internet and an API key.</source>
+            <translation>Strongest models. Needs internet and an API key.</translation>
+        </message>
+        <message>
+            <source>This computer</source>
+            <translation>This computer</translation>
+        </message>
+        <message>
+            <source>Private and offline. Uses your memory and GPU.</source>
+            <translation>Private and offline. Uses your memory and GPU.</translation>
+        </message>
+        <message>
+            <source>Network server</source>
+            <translation>Network server</translation>
+        </message>
+        <message>
+            <source>A stronger PC at home or work runs the model.</source>
+            <translation>A stronger PC at home or work runs the model.</translation>
+        </message>
+        <message>
+            <source>Custom URL</source>
+            <translation>Custom URL</translation>
+        </message>
+        <message>
+            <source>Base URL (OpenAI-compatible)</source>
+            <translation>Base URL (OpenAI-compatible)</translation>
+        </message>
+        <message>
+            <source>API key</source>
+            <translation>API key</translation>
+        </message>
+        <message>
+            <source>Saved. Leave empty to keep it.</source>
+            <translation>Saved. Leave empty to keep it.</translation>
+        </message>
+        <message>
+            <source>Ollama address</source>
+            <translation>Ollama address</translation>
+        </message>
+        <message>
+            <source>Jarvis connects to an Ollama that is already running on this computer. Nothing leaves this machine.</source>
+            <translation>Jarvis connects to an Ollama that is already running on this computer. Nothing leaves this machine.</translation>
+        </message>
+        <message>
+            <source>Ollama</source>
+            <translation>Ollama</translation>
+        </message>
+        <message>
+            <source>OpenAI-compatible</source>
+            <translation>OpenAI-compatible</translation>
+        </message>
+        <message>
+            <source>Server address (Ollama, LM Studio or vLLM)</source>
+            <translation>Server address (Ollama, LM Studio or vLLM)</translation>
+        </message>
+        <message>
+            <source>Model</source>
+            <translation>Model</translation>
+        </message>
+        <message>
+            <source>Models load after the connection check</source>
+            <translation>Models load after the connection check</translation>
+        </message>
+        <message>
+            <source>Check connection</source>
+            <translation>Check connection</translation>
+        </message>
+        <message>
+            <source>Test again</source>
+            <translation>Test again</translation>
         </message>
     </context>
     <context>
@@ -284,6 +784,77 @@
         </message>
     </context>
     <context>
+        <name>ProvidersSection</name>
+        <message>
+            <source>Jarvis tries these in order. If one can't answer, it moves to the next for that message, and starts from the top again on your next one.</source>
+            <translation>Jarvis tries these in order. If one can't answer, it moves to the next for that message, and starts from the top again on your next one.</translation>
+        </message>
+        <message>
+            <source>In use now</source>
+            <translation>In use now</translation>
+        </message>
+        <message>
+            <source>Up</source>
+            <translation>Up</translation>
+        </message>
+        <message>
+            <source>Try %1 earlier</source>
+            <translation>Try %1 earlier</translation>
+        </message>
+        <message>
+            <source>Down</source>
+            <translation>Down</translation>
+        </message>
+        <message>
+            <source>Try %1 later</source>
+            <translation>Try %1 later</translation>
+        </message>
+        <message>
+            <source>Edit</source>
+            <translation>Edit</translation>
+        </message>
+        <message>
+            <source>Remove</source>
+            <translation>Remove</translation>
+        </message>
+        <message>
+            <source>Allow cloud fallback</source>
+            <translation>Allow cloud fallback</translation>
+        </message>
+        <message>
+            <source>When a provider on this computer or your network fails, Jarvis may use a cloud provider from this list. Off keeps your messages on your own machines.</source>
+            <translation>When a provider on this computer or your network fails, Jarvis may use a cloud provider from this list. Off keeps your messages on your own machines.</translation>
+        </message>
+        <message>
+            <source>Add a provider</source>
+            <translation>Add a provider</translation>
+        </message>
+        <message>
+            <source>Saving…</source>
+            <translation>Saving…</translation>
+        </message>
+        <message>
+            <source>Save changes</source>
+            <translation>Save changes</translation>
+        </message>
+        <message>
+            <source>Edit %1</source>
+            <translation>Edit %1</translation>
+        </message>
+        <message>
+            <source>Open Network doctor</source>
+            <translation>Open Network doctor</translation>
+        </message>
+        <message>
+            <source>Cancel</source>
+            <translation>Cancel</translation>
+        </message>
+        <message>
+            <source>Save provider</source>
+            <translation>Save provider</translation>
+        </message>
+    </context>
+    <context>
         <name>RegistryModel</name>
         <message>
             <source>Official</source>
@@ -331,10 +902,76 @@
         </message>
     </context>
     <context>
+        <name>SecretField</name>
+        <message>
+            <source>Goes straight to the system. Jarvis's model never sees it.</source>
+            <translation>Goes straight to the system. Jarvis's model never sees it.</translation>
+        </message>
+    </context>
+    <context>
         <name>SettingsView</name>
         <message>
             <source>Language</source>
             <translation>Language</translation>
+        </message>
+        <message>
+            <source>Model providers</source>
+            <translation>Model providers</translation>
+        </message>
+        <message>
+            <source>Memory</source>
+            <translation>Memory</translation>
+        </message>
+        <message>
+            <source>Tools</source>
+            <translation>Tools</translation>
+        </message>
+        <message>
+            <source>Voice</source>
+            <translation>Voice</translation>
+        </message>
+        <message>
+            <source>Phone</source>
+            <translation>Phone</translation>
+        </message>
+        <message>
+            <source>Settings</source>
+            <translation>Settings</translation>
+        </message>
+        <message>
+            <source>Now: %1 · %2. Changes apply to your next message.</source>
+            <translation>Now: %1 · %2. Changes apply to your next message.</translation>
+        </message>
+        <message>
+            <source>No provider yet.</source>
+            <translation>No provider yet.</translation>
+        </message>
+    </context>
+    <context>
+        <name>SetupView</name>
+        <message>
+            <source>Jarvis</source>
+            <translation>Jarvis</translation>
+        </message>
+        <message>
+            <source>Where should Jarvis think?</source>
+            <translation>Where should Jarvis think?</translation>
+        </message>
+        <message>
+            <source>Pick the model that runs Jarvis. You can change it any time in Settings.</source>
+            <translation>Pick the model that runs Jarvis. You can change it any time in Settings.</translation>
+        </message>
+        <message>
+            <source>No internet? Open Network doctor</source>
+            <translation>No internet? Open Network doctor</translation>
+        </message>
+        <message>
+            <source>Saving…</source>
+            <translation>Saving…</translation>
+        </message>
+        <message>
+            <source>Start using Jarvis</source>
+            <translation>Start using Jarvis</translation>
         </message>
     </context>
     <context>
@@ -501,6 +1138,17 @@
         </message>
     </context>
     <context>
+        <name>ShellRoot</name>
+        <message>
+            <source>Loading…</source>
+            <translation>Loading…</translation>
+        </message>
+        <message>
+            <source>Connecting to Jarvis…</source>
+            <translation>Connecting to Jarvis…</translation>
+        </message>
+    </context>
+    <context>
         <name>SystemModel</name>
         <message>
             <source>ready</source>
@@ -594,6 +1242,64 @@
         </message>
     </context>
     <context>
+        <name>ToolsSection</name>
+        <message>
+            <source>Tool servers give Jarvis new abilities. Installing or removing one happens in chat, with an approval card.</source>
+            <translation>Tool servers give Jarvis new abilities. Installing or removing one happens in chat, with an approval card.</translation>
+        </message>
+        <message>
+            <source>Search tools</source>
+            <translation>Search tools</translation>
+        </message>
+        <message>
+            <source>No tool servers are listed yet.</source>
+            <translation>No tool servers are listed yet.</translation>
+        </message>
+        <message>
+            <source>No tool matches that search.</source>
+            <translation>No tool matches that search.</translation>
+        </message>
+        <message>
+            <source>%1 → %2</source>
+            <translation>%1 → %2</translation>
+        </message>
+        <message>
+            <source>Tools: %1</source>
+            <translation>Tools: %1</translation>
+        </message>
+        <message>
+            <source>Update</source>
+            <translation>Update</translation>
+        </message>
+        <message>
+            <source>Install</source>
+            <translation>Install</translation>
+        </message>
+        <message>
+            <source>Remove</source>
+            <translation>Remove</translation>
+        </message>
+    </context>
+    <context>
+        <name>TopBar</name>
+        <message>
+            <source>Jarvis</source>
+            <translation>Jarvis</translation>
+        </message>
+        <message>
+            <source>Updates available: %1. Ask Jarvis to install them.</source>
+            <translation>Updates available: %1. Ask Jarvis to install them.</translation>
+        </message>
+        <message>
+            <source>Offline</source>
+            <translation>Offline</translation>
+        </message>
+        <message>
+            <source>Model unreachable</source>
+            <translation>Model unreachable</translation>
+        </message>
+    </context>
+    <context>
         <name>VoiceModel</name>
         <message>
             <source>Listening… press Super+Space or the mic again to send (%1 s left)</source>
@@ -630,6 +1336,33 @@
         <message>
             <source>The microphone stopped.</source>
             <translation>The microphone stopped.</translation>
+        </message>
+    </context>
+    <context>
+        <name>VoiceSection</name>
+        <message>
+            <source>Speech recognition: %1 · Voice: %2</source>
+            <translation>Speech recognition: %1 · Voice: %2</translation>
+        </message>
+        <message>
+            <source>ready</source>
+            <translation>ready</translation>
+        </message>
+        <message>
+            <source>Voice isn't installed on this computer.</source>
+            <translation>Voice isn't installed on this computer.</translation>
+        </message>
+        <message>
+            <source>Speak Jarvis's replies aloud</source>
+            <translation>Speak Jarvis's replies aloud</translation>
+        </message>
+        <message>
+            <source>Push-to-talk only: press Super+Space or the mic button, speak, then press again to send. There is no wake word, so the microphone is on only when you turn it on.</source>
+            <translation>Push-to-talk only: press Super+Space or the mic button, speak, then press again to send. There is no wake word, so the microphone is on only when you turn it on.</translation>
+        </message>
+        <message>
+            <source>While a card is on screen you can answer it by voice: say “yes” or “no” (نعم / لا). Cards that need a password or a typed secret can't be answered by voice, and nothing can be approved while the screen is locked.</source>
+            <translation>While a card is on screen you can answer it by voice: say “yes” or “no” (نعم / لا). Cards that need a password or a typed secret can't be answered by voice, and nothing can be approved while the screen is locked.</translation>
         </message>
     </context>
     <context>

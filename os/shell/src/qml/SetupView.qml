@@ -6,6 +6,8 @@ import QtQuick.Controls.Basic
 // First boot (design: Setup): pick and check a provider, then start.
 Item {
     id: root
+    LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft
+    LayoutMirroring.childrenInherit: true
     required property ProviderModel provider
     property bool doctorAvailable: false // sys:snapshot says offline (contracts §6.8)
     signal doctorRequested()
@@ -28,16 +30,16 @@ Item {
                 RowLayout {
                     spacing: 10
                     Icon { path: Icons.logo; color: Theme.accent; size: 28 }
-                    Text { text: "Jarvis"; color: Theme.text; font.weight: Font.DemiBold; font.letterSpacing: 0.6 }
+                    Text { text: qsTr("Jarvis"); color: Theme.text; font.weight: Font.DemiBold; font.letterSpacing: 0.6 }
                 }
                 Text {
-                    text: "Where should Jarvis think?"
+                    text: qsTr("Where should Jarvis think?")
                     color: Theme.text
                     font.pixelSize: 34
                     font.weight: Font.DemiBold
                 }
                 Text {
-                    text: "Pick the model that runs Jarvis. You can change it any time in Settings."
+                    text: qsTr("Pick the model that runs Jarvis. You can change it any time in Settings.")
                     color: Theme.muted
                 }
             }
@@ -54,7 +56,7 @@ Item {
                     objectName: "setupDoctor"
                     visible: root.provider.probeState === "error" && root.doctorAvailable
                     variant: "ghost"
-                    text: "No internet? Open Network doctor"
+                    text: qsTr("No internet? Open Network doctor")
                     onClicked: root.doctorRequested()
                 }
                 Item { Layout.fillWidth: true }
@@ -62,7 +64,7 @@ Item {
                     objectName: "startButton"
                     variant: "primary"
                     implicitHeight: 48
-                    text: root.provider.probeState === "saving" ? "Saving…" : "Start using Jarvis"
+                    text: root.provider.probeState === "saving" ? qsTr("Saving…") : qsTr("Start using Jarvis")
                     enabled: root.provider.canSave
                     onClicked: root.provider.save()
                 }

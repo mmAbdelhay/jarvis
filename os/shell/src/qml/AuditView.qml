@@ -7,6 +7,8 @@ import QtQuick.Controls.Basic
 // the user decided, newest first, from ~/.local/state/jarvis/audit.jsonl.
 Item {
     id: root
+    LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft
+    LayoutMirroring.childrenInherit: true
     required property AuditModel audit
     signal backRequested()
 
@@ -25,21 +27,21 @@ Item {
                 spacing: 6
                 AbstractButton {
                     objectName: "backLink"
-                    text: "← Chat"
-                    Accessible.name: "Back to chat"
-                    contentItem: Text { text: "← Chat"; color: Theme.accent; font.pixelSize: 14 }
+                    text: qsTr("← Chat")
+                    Accessible.name: qsTr("Back to chat")
+                    contentItem: Text { text: qsTr("← Chat"); color: Theme.accent; font.pixelSize: 14 }
                     background: null
                     onClicked: root.backRequested()
                 }
-                Text { text: "Activity log"; color: Theme.text; font.pixelSize: 30; font.weight: Font.DemiBold }
-                Text { text: "Everything Jarvis asked to change, and what you decided."; color: Theme.muted }
+                Text { text: qsTr("Activity log"); color: Theme.text; font.pixelSize: 30; font.weight: Font.DemiBold }
+                Text { text: qsTr("Everything Jarvis asked to change, and what you decided."); color: Theme.muted }
             }
             RowLayout {
                 Layout.alignment: Qt.AlignBottom
                 spacing: 8
                 Repeater {
-                    model: [{ id: "all", label: "All" }, { id: "approved", label: "Approved" },
-                            { id: "denied", label: "Denied" }, { id: "failed", label: "Failed" }]
+                    model: [{ id: "all", label: qsTr("All") }, { id: "approved", label: qsTr("Approved") },
+                            { id: "denied", label: qsTr("Denied") }, { id: "failed", label: qsTr("Failed") }]
                     delegate: AbstractButton {
                         id: chip
                         required property var modelData
@@ -91,12 +93,12 @@ Item {
                         anchors.leftMargin: 16
                         anchors.rightMargin: 16
                         spacing: 16
-                        Text { Layout.preferredWidth: 90; text: "Time"; color: Theme.mutedSoft; font.pixelSize: 14; font.weight: Font.Medium }
-                        Text { Layout.fillWidth: true; text: "Action"; color: Theme.mutedSoft; font.pixelSize: 14; font.weight: Font.Medium }
-                        Text { Layout.preferredWidth: 200; text: "Tool"; color: Theme.mutedSoft; font.pixelSize: 14; font.weight: Font.Medium }
-                        Text { Layout.preferredWidth: 110; text: "Approved on"; color: Theme.mutedSoft; font.pixelSize: 14; font.weight: Font.Medium }
-                        Text { Layout.preferredWidth: 120; text: "Decision"; color: Theme.mutedSoft; font.pixelSize: 14; font.weight: Font.Medium }
-                        Text { Layout.preferredWidth: 200; text: "Result"; color: Theme.mutedSoft; font.pixelSize: 14; font.weight: Font.Medium }
+                        Text { Layout.preferredWidth: 90; text: qsTr("Time"); color: Theme.mutedSoft; font.pixelSize: 14; font.weight: Font.Medium }
+                        Text { Layout.fillWidth: true; text: qsTr("Action"); color: Theme.mutedSoft; font.pixelSize: 14; font.weight: Font.Medium }
+                        Text { Layout.preferredWidth: 200; text: qsTr("Tool"); color: Theme.mutedSoft; font.pixelSize: 14; font.weight: Font.Medium }
+                        Text { Layout.preferredWidth: 110; text: qsTr("Approved on"); color: Theme.mutedSoft; font.pixelSize: 14; font.weight: Font.Medium }
+                        Text { Layout.preferredWidth: 120; text: qsTr("Decision"); color: Theme.mutedSoft; font.pixelSize: 14; font.weight: Font.Medium }
+                        Text { Layout.preferredWidth: 200; text: qsTr("Result"); color: Theme.mutedSoft; font.pixelSize: 14; font.weight: Font.Medium }
                     }
                 }
 
@@ -166,7 +168,7 @@ Item {
                             anchors.centerIn: parent
                             visible: root.audit.hasMore
                             variant: "ghost"
-                            text: root.audit.loading ? "Loading…" : "Load older entries"
+                            text: root.audit.loading ? qsTr("Loading…") : qsTr("Load older entries")
                             enabled: !root.audit.loading
                             onClicked: root.audit.loadMore()
                         }
@@ -179,14 +181,14 @@ Item {
                 anchors.centerIn: parent
                 visible: list.count === 0 && !root.audit.loading
                 text: root.audit.filter === "all"
-                      ? "Nothing yet. When Jarvis asks to change something, it shows up here."
-                      : "Nothing matches this filter."
+                      ? qsTr("Nothing yet. When Jarvis asks to change something, it shows up here.")
+                      : qsTr("Nothing matches this filter.")
                 color: Theme.muted
             }
         }
 
         Text {
-            text: "Stored on this computer in ~/.local/state/jarvis/audit.jsonl. Passwords are never written here."
+            text: qsTr("Stored on this computer in %1. Passwords are never written here.").arg("~/.local/state/jarvis/audit.jsonl")
             color: Theme.mutedSoft
             font.pixelSize: Theme.fontSmall
         }

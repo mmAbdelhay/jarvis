@@ -7,6 +7,8 @@ import QtQuick.Controls.Basic
 // networks in range and the current fix card on the right. Works with no model.
 Item {
     id: root
+    LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft
+    LayoutMirroring.childrenInherit: true
     required property DoctorModel doctor
     required property CardModel card
     property string providerError: ""
@@ -33,8 +35,8 @@ Item {
                 Text {
                     Layout.fillWidth: true
                     text: root.providerError.length > 0
-                          ? "Can't reach the model: " + root.providerError + ". Network doctor works without a model."
-                          : "Network doctor works without a model."
+                          ? qsTr("Can't reach the model: %1. Network doctor works without a model.").arg(root.providerError)
+                          : qsTr("Network doctor works without a model.")
                     textFormat: Text.PlainText
                     color: Theme.warnBannerText
                     wrapMode: Text.Wrap
@@ -43,7 +45,7 @@ Item {
                     objectName: "backButton"
                     variant: "ghost"
                     implicitHeight: 36
-                    text: "Back to chat"
+                    text: qsTr("Back to chat")
                     onClicked: root.backRequested()
                 }
             }
@@ -65,8 +67,8 @@ Item {
 
                 ColumnLayout {
                     spacing: 6
-                    Text { text: "Network doctor"; color: Theme.text; font.pixelSize: 30; font.weight: Font.DemiBold }
-                    Text { text: "Checks run one by one. Every fix asks you first."; color: Theme.muted }
+                    Text { text: qsTr("Network doctor"); color: Theme.text; font.pixelSize: 30; font.weight: Font.DemiBold }
+                    Text { text: qsTr("Checks run one by one. Every fix asks you first."); color: Theme.muted }
                 }
 
                 RowLayout {
@@ -139,7 +141,7 @@ Item {
                                         visible: stepRow.problem && !root.card.active
                                         variant: "ghost"
                                         implicitHeight: 36
-                                        text: "Skip"
+                                        text: qsTr("Skip")
                                         onClicked: root.doctor.skip(stepRow.stepId)
                                     }
                                 }
@@ -158,7 +160,7 @@ Item {
                             visible: root.doctor.networks.length > 0 && !(root.card.active && root.card.exclusive)
                             spacing: 16
                             Text {
-                                text: "NETWORKS IN RANGE"
+                                text: qsTr("NETWORKS IN RANGE")
                                 color: Theme.mutedSoft
                                 font.pixelSize: Theme.fontTiny
                                 font.weight: Font.DemiBold
@@ -192,8 +194,8 @@ Item {
                                                 elide: Text.ElideRight
                                             }
                                             Text {
-                                                text: (modelData.security.length > 0 ? modelData.security : "open") + " · " + modelData.strength
-                                                      + (modelData.known ? " · saved" : "")
+                                                text: (modelData.security.length > 0 ? modelData.security : qsTr("open")) + " · " + modelData.strength
+                                                      + (modelData.known ? " · " + qsTr("saved") : "")
                                                 textFormat: Text.PlainText
                                                 color: Theme.muted
                                                 font.pixelSize: Theme.fontSmall
@@ -216,8 +218,8 @@ Item {
                             Layout.fillWidth: true
                             visible: root.doctor.done.length > 0
                             text: root.doctor.done === "fixed"
-                                  ? "The network works again."
-                                  : "Jarvis couldn't fix this automatically. Try an Ethernet cable or your phone's hotspot, then run the doctor again."
+                                  ? qsTr("The network works again.")
+                                  : qsTr("Jarvis couldn't fix this automatically. Try an Ethernet cable or your phone's hotspot, then run the doctor again.")
                             color: root.doctor.done === "fixed" ? Theme.accent : Theme.warnBannerText
                             wrapMode: Text.Wrap
                         }
@@ -225,7 +227,7 @@ Item {
                             objectName: "runAgain"
                             visible: root.doctor.done === "unfixed"
                             variant: "ghost"
-                            text: "Run the checks again"
+                            text: qsTr("Run the checks again")
                             onClicked: root.doctor.start()
                         }
                     }

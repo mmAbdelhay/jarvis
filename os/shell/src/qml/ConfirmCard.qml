@@ -9,6 +9,8 @@ import QtQuick.Controls.Basic
 // the ticks behave like radio buttons.
 Rectangle {
     id: root
+    LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft
+    LayoutMirroring.childrenInherit: true
     required property CardModel card
     signal decided(bool approve)
 
@@ -24,7 +26,7 @@ Rectangle {
     border.width: 1
     clip: true
     Accessible.role: Accessible.Grouping
-    Accessible.name: "Approval needed"
+    Accessible.name: qsTr("Approval needed")
 
     function focusDeny() {
         denyButton.forceActiveFocus(Qt.OtherFocusReason)
@@ -76,7 +78,7 @@ Rectangle {
                 leftPadding: 12
                 rightPadding: 12
                 font.pixelSize: Theme.fontSmall
-                text: root.card.allTicked ? "Select none" : "Select all"
+                text: root.card.allTicked ? qsTr("Select none") : qsTr("Select all")
                 onClicked: root.card.setAllTicked(!root.card.allTicked)
             }
             Text {
@@ -136,7 +138,7 @@ Rectangle {
                         indicator: Rectangle {
                             implicitWidth: 20
                             implicitHeight: 20
-                            x: tick.leftPadding
+                            x: tick.mirrored ? tick.width - width - tick.rightPadding : tick.leftPadding
                             y: (tick.height - height) / 2
                             radius: root.card.exclusive ? 10 : 4
                             color: tick.checked ? Theme.approval : "transparent"
@@ -242,8 +244,8 @@ Rectangle {
             Text {
                 objectName: "cardHint"
                 Layout.fillWidth: true
-                text: root.card.locked ? "The screen is locked. Unlock it to answer."
-                    : root.card.exclusive ? "Pick one network." : "Untick anything you don't want. No answer in 5 minutes counts as Deny."
+                text: root.card.locked ? qsTr("The screen is locked. Unlock it to answer.")
+                    : root.card.exclusive ? qsTr("Pick one network.") : qsTr("Untick anything you don't want. No answer in 5 minutes counts as Deny.")
                 color: Theme.approvalMuted
                 font.pixelSize: Theme.fontSmall
                 wrapMode: Text.Wrap
@@ -252,7 +254,7 @@ Rectangle {
                 id: denyButton
                 objectName: "denyButton"
                 variant: "quiet"
-                text: root.card.exclusive ? "Cancel" : "Deny"
+                text: root.card.exclusive ? qsTr("Cancel") : qsTr("Deny")
                 enabled: root.card.active && !root.card.locked
                 onClicked: root.decided(false)
             }

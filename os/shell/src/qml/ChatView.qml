@@ -8,6 +8,8 @@ import QtQuick.Controls.Basic
 // the last message; the composer is pinned at the bottom.
 Item {
     id: root
+    LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft
+    LayoutMirroring.childrenInherit: true
     required property Conversation conversation
     required property CardModel card
     signal submit(string text)

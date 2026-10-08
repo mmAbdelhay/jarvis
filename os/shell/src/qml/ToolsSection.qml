@@ -8,20 +8,22 @@ import Jarvis.UI
 // the change itself arrives as an approval card.
 ColumnLayout {
     id: root
+    LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft
+    LayoutMirroring.childrenInherit: true
     required property RegistryModel registry
 
     spacing: 14
 
     Text {
         Layout.fillWidth: true
-        text: "Tool servers give Jarvis new abilities. Installing or removing one happens in chat, with an approval card."
+        text: qsTr("Tool servers give Jarvis new abilities. Installing or removing one happens in chat, with an approval card.")
         wrapMode: Text.Wrap
         color: Theme.muted
     }
     TextField {
         objectName: "toolFilter"
         Layout.fillWidth: true
-        placeholderText: "Search tools"
+        placeholderText: qsTr("Search tools")
         color: Theme.text
         placeholderTextColor: Theme.mutedSoft
         background: Rectangle { radius: Theme.radiusControl; color: Theme.surfaceDeep; border.color: Theme.border }
@@ -39,7 +41,7 @@ ColumnLayout {
     Text {
         objectName: "toolsEmpty"
         visible: root.registry.known && root.registry.count === 0 && root.registry.error === ""
-        text: root.registry.filter === "" ? "No tool servers are listed yet." : "No tool matches that search."
+        text: root.registry.filter === "" ? qsTr("No tool servers are listed yet.") : qsTr("No tool matches that search.")
         color: Theme.muted
     }
 
@@ -99,7 +101,7 @@ ColumnLayout {
                         }
                         Text {
                             text: toolRow.installState === "update"
-                                  ? toolRow.installedVersion + " → " + toolRow.version
+                                  ? qsTr("%1 → %2").arg(toolRow.installedVersion).arg(toolRow.version)
                                   : toolRow.version
                             textFormat: Text.PlainText
                             color: Theme.mutedSoft
@@ -135,7 +137,7 @@ ColumnLayout {
                     Text {
                         Layout.fillWidth: true
                         visible: toolRow.toolsText !== ""
-                        text: "Tools: " + toolRow.toolsText
+                        text: qsTr("Tools: %1").arg(toolRow.toolsText)
                         textFormat: Text.PlainText
                         wrapMode: Text.Wrap
                         color: Theme.mutedSoft
@@ -148,13 +150,13 @@ ColumnLayout {
                         objectName: "install_" + toolRow.entryId
                         visible: toolRow.installState !== "installed"
                         variant: "primary"
-                        text: toolRow.installState === "update" ? "Update" : "Install"
+                        text: toolRow.installState === "update" ? qsTr("Update") : qsTr("Install")
                         onClicked: root.registry.install(toolRow.index)
                     }
                     ActionButton {
                         objectName: "remove_" + toolRow.entryId
                         visible: toolRow.installState !== "available"
-                        text: "Remove"
+                        text: qsTr("Remove")
                         onClicked: root.registry.remove(toolRow.index)
                     }
                 }

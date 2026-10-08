@@ -8,6 +8,8 @@ import QtQuick.Controls.Basic
 // the spec requires (§4: diagnosis sends redacted log excerpts to the provider).
 ColumnLayout {
     id: root
+    LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft
+    LayoutMirroring.childrenInherit: true
     required property ProviderModel provider
 
     spacing: 24
@@ -17,9 +19,9 @@ ColumnLayout {
         spacing: 12
         Repeater {
             model: [
-                { id: "cloud", title: "Cloud", detail: "Strongest models. Needs internet and an API key." },
-                { id: "local", title: "This computer", detail: "Private and offline. Uses your memory and GPU." },
-                { id: "lan", title: "Network server", detail: "A stronger PC at home or work runs the model." }
+                { id: "cloud", title: qsTr("Cloud"), detail: qsTr("Strongest models. Needs internet and an API key.") },
+                { id: "local", title: qsTr("This computer"), detail: qsTr("Private and offline. Uses your memory and GPU.") },
+                { id: "lan", title: qsTr("Network server"), detail: qsTr("A stronger PC at home or work runs the model.") }
             ]
             delegate: ChoiceTile {
                 required property var modelData
@@ -51,7 +53,8 @@ ColumnLayout {
                     Layout.fillWidth: true
                     Layout.preferredWidth: 1
                     compact: true
-                    title: modelData
+                    // Preset IDs stay in English; only the custom option has a UI label.
+                    title: modelData === "Custom URL" ? qsTr("Custom URL") : modelData // i18n: ignore
                     selected: root.provider.preset === modelData
                     onClicked: root.provider.preset = modelData
                 }
@@ -60,8 +63,8 @@ ColumnLayout {
         LabeledField {
             objectName: "customUrl"
             Layout.fillWidth: true
-            visible: root.provider.preset === "Custom URL"
-            label: "Base URL (OpenAI-compatible)"
+            visible: root.provider.preset === "Custom URL" // i18n: ignore
+            label: qsTr("Base URL (OpenAI-compatible)")
             mono: true
             placeholder: "https://example.com/v1"
             value: root.provider.baseUrl
@@ -70,9 +73,9 @@ ColumnLayout {
         LabeledField {
             objectName: "apiKey"
             Layout.fillWidth: true
-            label: "API key"
+            label: qsTr("API key")
             secret: true
-            placeholder: root.provider.activeHasKey ? "Saved. Leave empty to keep it." : ""
+            placeholder: root.provider.activeHasKey ? qsTr("Saved. Leave empty to keep it.") : ""
             value: root.provider.apiKey
             onEdited: (v) => root.provider.apiKey = v
         }
@@ -85,14 +88,14 @@ ColumnLayout {
         LabeledField {
             objectName: "ollamaUrl"
             Layout.fillWidth: true
-            label: "Ollama address"
+            label: qsTr("Ollama address")
             mono: true
             value: root.provider.baseUrl
             onEdited: (v) => root.provider.baseUrl = v
         }
         Text {
             Layout.fillWidth: true
-            text: "Jarvis connects to an Ollama that is already running on this computer. Nothing leaves this machine."
+            text: qsTr("Jarvis connects to an Ollama that is already running on this computer. Nothing leaves this machine.")
             color: Theme.muted
             font.pixelSize: Theme.fontSmall
             wrapMode: Text.Wrap
@@ -109,7 +112,7 @@ ColumnLayout {
                 objectName: "lanKind_ollama"
                 compact: true
                 implicitWidth: 140
-                title: "Ollama"
+                title: qsTr("Ollama")
                 selected: root.provider.kind === "ollama"
                 onClicked: root.provider.kind = "ollama"
             }
@@ -117,7 +120,7 @@ ColumnLayout {
                 objectName: "lanKind_openai"
                 compact: true
                 implicitWidth: 200
-                title: "OpenAI-compatible"
+                title: qsTr("OpenAI-compatible")
                 selected: root.provider.kind === "openai-compatible"
                 onClicked: root.provider.kind = "openai-compatible"
             }
@@ -125,7 +128,7 @@ ColumnLayout {
         LabeledField {
             objectName: "lanUrl"
             Layout.fillWidth: true
-            label: "Server address (Ollama, LM Studio or vLLM)"
+            label: qsTr("Server address (Ollama, LM Studio or vLLM)")
             mono: true
             placeholder: "http://192.168.1.20:11434"
             value: root.provider.baseUrl
@@ -137,7 +140,7 @@ ColumnLayout {
         Layout.fillWidth: true
         spacing: 6
         Text {
-            text: "Model"
+            text: qsTr("Model")
             color: Theme.muted
             font.pixelSize: Theme.fontSmall
         }
@@ -148,9 +151,9 @@ ColumnLayout {
             implicitHeight: Theme.controlHeight
             model: root.provider.models
             enabled: count > 0
-            displayText: root.provider.model.length > 0 ? root.provider.model : "Models load after the connection check"
+            displayText: root.provider.model.length > 0 ? root.provider.model : qsTr("Models load after the connection check")
             onActivated: (i) => root.provider.model = root.provider.models[i]
-            Accessible.name: "Model"
+            Accessible.name: qsTr("Model")
         }
     }
 
@@ -161,7 +164,7 @@ ColumnLayout {
             objectName: "checkButton"
             visible: root.provider.probeState === "idle"
             variant: "ghost"
-            text: "Check connection"
+            text: qsTr("Check connection")
             onClicked: root.provider.probe()
         }
         Rectangle {
@@ -199,7 +202,7 @@ ColumnLayout {
                     visible: root.provider.probeState !== "probing" && root.provider.probeState !== "saving"
                     variant: "ghost"
                     implicitHeight: 36
-                    text: "Test again"
+                    text: qsTr("Test again")
                     onClicked: root.provider.probe()
                 }
             }

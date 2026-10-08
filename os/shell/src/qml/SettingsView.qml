@@ -17,7 +17,7 @@ Item {
     property PhoneModel phone: null
     property bool doctorAvailable: false // sys:snapshot says offline (contracts §6.8)
     property string section: "providers"
-    readonly property var sections: [{ id: "providers", label: "Model providers" }, { id: "memory", label: "Memory" }, { id: "tools", label: "Tools" }, { id: "voice", label: "Voice" }, { id: "phone", label: "Phone" }, { id: "language", label: qsTr("Language") }]
+    readonly property var sections: [{ id: "providers", label: qsTr("Model providers") }, { id: "memory", label: qsTr("Memory") }, { id: "tools", label: qsTr("Tools") }, { id: "voice", label: qsTr("Voice") }, { id: "phone", label: qsTr("Phone") }, { id: "language", label: qsTr("Language") }]
     signal doctorRequested()
 
     Flickable {
@@ -36,7 +36,7 @@ Item {
             ColumnLayout {
                 spacing: 6
                 Text {
-                    text: "Settings"
+                    text: qsTr("Settings")
                     color: Theme.text
                     font.pixelSize: 30
                     font.weight: Font.DemiBold
@@ -44,8 +44,8 @@ Item {
                 Text {
                     objectName: "currentProvider"
                     text: root.provider.hasActive
-                          ? "Now: " + root.provider.activeModel + " · " + root.provider.activeLabel + ". Changes apply to your next message."
-                          : "No provider yet."
+                          ? qsTr("Now: %1 · %2. Changes apply to your next message.").arg(root.provider.activeModel).arg(root.provider.activeLabel)
+                          : qsTr("No provider yet.")
                     textFormat: Text.PlainText
                     color: Theme.muted
                 }

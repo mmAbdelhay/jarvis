@@ -6,6 +6,8 @@ import QtQuick.Controls.Basic
 // The prompt box: Enter sends, the Send button turns into Stop while a turn runs.
 ColumnLayout {
     id: root
+    LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft
+    LayoutMirroring.childrenInherit: true
     property bool busy: false
     property bool undoAvailable: false
     signal undoRequested()
@@ -50,12 +52,12 @@ ColumnLayout {
                 id: input
                 objectName: "promptField"
                 Layout.fillWidth: true
-                placeholderText: "Ask Jarvis to do anything on this computer…"
+                placeholderText: qsTr("Ask Jarvis to do anything on this computer…")
                 placeholderTextColor: Theme.mutedSoft
                 color: Theme.text
                 maximumLength: 8000
                 background: null
-                Accessible.name: "Message Jarvis"
+                Accessible.name: qsTr("Message Jarvis")
                 onAccepted: root.send()
             }
             IconButton {
@@ -63,7 +65,7 @@ ColumnLayout {
                 visible: root.voice !== null && root.voice.available
                 implicitWidth: 44
                 implicitHeight: 44
-                text: root.voice && root.voice.recording ? "Send voice message" : "Talk to Jarvis (Super+Space)"
+                text: root.voice && root.voice.recording ? qsTr("Send voice message") : qsTr("Talk to Jarvis (Super+Space)")
                 iconPath: Icons.mic
                 fill: root.voice && root.voice.recording ? Theme.accent : Theme.surfaceRaised
                 ink: root.voice && root.voice.recording ? Theme.accentInk : Theme.textSoft
@@ -74,7 +76,7 @@ ColumnLayout {
                 visible: root.undoAvailable && !root.busy
                 implicitWidth: 44
                 implicitHeight: 44
-                text: "Undo the last change"
+                text: qsTr("Undo the last change")
                 iconPath: Icons.undo
                 fill: Theme.surfaceRaised
                 ink: Theme.textSoft
@@ -85,7 +87,7 @@ ColumnLayout {
                 visible: !root.busy
                 implicitWidth: 44
                 implicitHeight: 44
-                text: "Send"
+                text: qsTr("Send")
                 iconPath: Icons.send
                 fill: Theme.accent
                 ink: Theme.accentInk
@@ -96,7 +98,7 @@ ColumnLayout {
                 visible: root.busy
                 implicitWidth: 44
                 implicitHeight: 44
-                text: "Stop Jarvis"
+                text: qsTr("Stop Jarvis")
                 iconPath: Icons.stop
                 fill: Theme.surfaceRaised
                 ink: Theme.warn
@@ -118,7 +120,7 @@ ColumnLayout {
     Text {
         Layout.fillWidth: true
         horizontalAlignment: Text.AlignHCenter
-        text: "Super focuses chat · Super+Space talks · Esc stops Jarvis · Ctrl+Alt+T opens a terminal"
+        text: qsTr("Super focuses chat · Super+Space talks · Esc stops Jarvis · Ctrl+Alt+T opens a terminal")
         color: Theme.mutedSoft
         font.pixelSize: Theme.fontTiny
     }

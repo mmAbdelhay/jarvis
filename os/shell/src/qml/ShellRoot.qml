@@ -76,7 +76,7 @@ Rectangle {
                     Text {
                         objectName: "loadingText"
                         anchors.centerIn: parent
-                        text: root.shell.connection === "open" ? "Loading…" : "Connecting to Jarvis…"
+                        text: root.shell.connection === "open" ? qsTr("Loading…") : qsTr("Connecting to Jarvis…")
                         color: Theme.muted
                     }
                 }

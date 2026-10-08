@@ -3,11 +3,13 @@ import Jarvis.UI
 import QtQuick.Layouts
 import QtQuick.Controls.Basic
 
-// "This machine" side panel (design: Main), fed by the sys:snapshot push
+// qsTr("This machine") side panel (design: Main), fed by the sys:snapshot push
 // (contracts §6.8): network, model, memory, disk, failed services, then the
 // recent actions from the activity log.
 Rectangle {
     id: root
+    LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft
+    LayoutMirroring.childrenInherit: true
     required property ShellController shell
     readonly property SystemModel system: shell.system
 
@@ -73,7 +75,7 @@ Rectangle {
         spacing: 22
 
         Text {
-            text: "THIS MACHINE"
+            text: qsTr("THIS MACHINE")
             color: Theme.mutedSoft
             font.pixelSize: Theme.fontTiny
             font.weight: Font.DemiBold
@@ -82,19 +84,19 @@ Rectangle {
 
         Fact {
             objectName: "panelNetwork"
-            name: "Network"
+            name: qsTr("Network")
             value: root.system.known ? root.system.networkText : "…"
             warn: root.system.known && !root.system.online
             detail: root.system.known ? root.system.networkDetail : ""
         }
         Fact {
             objectName: "panelModel"
-            name: "Model"
+            name: qsTr("Model")
             value: root.system.hasModel ? root.system.modelName
-                 : root.shell.provider.hasActive ? root.shell.provider.activeModel : "Not set up"
+                 : root.shell.provider.hasActive ? root.shell.provider.activeModel : qsTr("Not set up")
             warn: !root.shell.providerReachable
             detail: !root.shell.providerReachable && root.shell.providerError.length > 0
-                    ? "Unreachable: " + root.shell.providerError
+                    ? qsTr("Unreachable: %1").arg(root.shell.providerError)
                     : root.system.modelDownloadText.length > 0 ? root.system.modelDownloadText
                     : root.system.hasModel ? root.system.modelDetail : root.shell.provider.activeLabel
             fraction: root.system.modelDownloadState === "downloading" ? root.system.modelDownloadPercent / 100 : -1
@@ -102,7 +104,7 @@ Rectangle {
         Fact {
             objectName: "panelMemory"
             visible: root.system.known
-            name: "Memory"
+            name: qsTr("Memory")
             mono: true
             value: root.system.memoryText
             fraction: root.system.memoryFraction
@@ -110,7 +112,7 @@ Rectangle {
         Fact {
             objectName: "panelDisk"
             visible: root.system.known
-            name: "Disk"
+            name: qsTr("Disk")
             mono: true
             value: root.system.diskText
             fraction: root.system.diskFraction
@@ -118,7 +120,7 @@ Rectangle {
         Fact {
             objectName: "panelFailed"
             visible: root.system.known
-            name: "Failed services"
+            name: qsTr("Failed services")
             value: String(root.system.failedUnits.length)
             warn: root.system.failedUnits.length > 0
             detail: root.system.failedUnits.join("\n")
@@ -126,8 +128,8 @@ Rectangle {
         Fact {
             objectName: "panelUpdates"
             visible: root.system.known
-            name: "Updates"
-            value: root.system.updatesCount > 0 ? root.system.updatesText : "Up to date"
+            name: qsTr("Updates")
+            value: root.system.updatesCount > 0 ? root.system.updatesText : qsTr("Up to date")
             warn: root.system.updatesSecurity > 0
         }
         RowLayout {
@@ -137,7 +139,7 @@ Rectangle {
             AbstractButton {
                 objectName: "checkUpdates"
                 enabled: !root.shell.updatesChecking
-                text: root.shell.updatesChecking ? "Checking…" : "Check for updates"
+                text: root.shell.updatesChecking ? qsTr("Checking…") : qsTr("Check for updates")
                 Accessible.name: text
                 contentItem: Text { text: parent.text; color: Theme.accent; font.pixelSize: Theme.fontSmall }
                 background: null
@@ -160,7 +162,7 @@ Rectangle {
             Layout.fillWidth: true
             spacing: 10
             Text {
-                text: "RECENT ACTIONS"
+                text: qsTr("RECENT ACTIONS")
                 color: Theme.mutedSoft
                 font.pixelSize: Theme.fontTiny
                 font.weight: Font.DemiBold
@@ -189,15 +191,15 @@ Rectangle {
             }
             Text {
                 visible: root.shell.audit.recent.length === 0
-                text: "Nothing yet."
+                text: qsTr("Nothing yet.")
                 color: Theme.mutedSoft
                 font.pixelSize: Theme.fontSmall
             }
             AbstractButton {
                 objectName: "openActivityLog"
-                text: "Open activity log"
+                text: qsTr("Open activity log")
                 Accessible.name: text
-                contentItem: Text { text: "Open activity log"; color: Theme.accent; font.pixelSize: Theme.fontSmall }
+                contentItem: Text { text: qsTr("Open activity log"); color: Theme.accent; font.pixelSize: Theme.fontSmall }
                 background: null
                 onClicked: root.shell.showView("audit")
             }
