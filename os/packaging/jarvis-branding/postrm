@@ -1,0 +1,9 @@
+#!/bin/sh
+set -e
+case "$1" in
+  remove|abort-install|disappear)
+    update-alternatives --remove default.plymouth /usr/share/plymouth/themes/jarvis/jarvis.plymouth 2>/dev/null || true
+    dpkg-divert --package jarvis-branding --remove --rename --divert /usr/lib/os-release.debian /usr/lib/os-release
+    ;;
+esac
+exit 0

@@ -1,0 +1,13 @@
+Package: jarvis-branding
+Version: @VERSION@
+Architecture: all
+Maintainer: Muhammad AbdElHay <mmAbdelhay@users.noreply.github.com>
+Installed-Size: @INSTALLED_SIZE@
+Depends: plymouth, plymouth-label, grub-common
+Section: misc
+Priority: optional
+Homepage: @HOME_URL@
+Description: @DISTRO_NAME@ look: logo, boot splash, boot menu, wallpaper
+ Ring logo and icons, the Plymouth theme "jarvis" with the disk unlock
+ prompt, the GRUB theme and menu defaults, the wallpaper, and the
+ @PRETTY_NAME@ /etc/os-release.
