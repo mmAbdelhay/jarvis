@@ -45,4 +45,9 @@ class MatrixTest(unittest.TestCase):
         # Under the size cap but needs 32 GB RAM: not on a 16 GB hosted runner.
         self.assertEqual(runners["qwen3-14b"], "skip")
         self.assertEqual(runners["qwen3-8b"], "ubuntu-24.04")
+
+    def test_only_tag(self):
+        out = matrix.build(json.loads(CATALOG.read_text()), max_hosted=12 << 30, large_runner="skip",
+                           only_tag="qwen3:1.7b")
+        self.assertEqual([row["id"] for row in out["include"]], ["qwen3-1.7b"])
         self.assertEqual(set(out["include"][0]), {"id", "tag", "sizeBytes", "runner"})

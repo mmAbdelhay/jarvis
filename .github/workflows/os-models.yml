@@ -1,6 +1,8 @@
 # The model catalog (M2 design §5.3, §13): sizes match the registry, and every
-# model passes the M1 tool-call probe. Scheduled, not per push (each probe
-# downloads gigabytes); PRs touching os/models run it too.
+# model passes the M1 tool-call probe. Each probe downloads gigabytes and runs
+# minutes on CPU, so the full catalog runs weekly and on demand only. A pull
+# request touching os/models/** runs the registry checks and probes just the
+# backup model (os/models/backup-model.lock.json), the one every install has.
 name: OS models
 
 on:
@@ -9,14 +11,17 @@ on:
   workflow_dispatch:
     inputs:
       large_runner:
-        description: "runs-on label for models over 12 GiB (empty: skip them)"
+        description: "runs-on label for models over 12 GiB or 16 GB RAM (empty: skip them)"
         required: false
         default: ""
   pull_request:
     paths:
       - "os/models/**"
-      - "os/packaging/jarvis-ollama/ollama.env"
-      - ".github/workflows/os-models.yml"
+
+# A newer push to the same ref makes the older run's answer moot.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -32,7 +37,12 @@ jobs:
       - run: python3 -m unittest discover -s os/models/tools/tests -v
       - run: python3 os/models/tools/check_registry.py
       - id: m
-        run: echo "matrix=$(python3 os/models/tools/matrix.py --large-runner '${{ inputs.large_runner || 'skip' }}')" >> "$GITHUB_OUTPUT"
+        run: |
+          only=""
+          if [ "${{ github.event_name }}" = pull_request ]; then
+            only=$(python3 -c 'import json; print(json.load(open("os/models/backup-model.lock.json"))["ollamaTag"])')
+          fi
+          echo "matrix=$(python3 os/models/tools/matrix.py --large-runner '${{ inputs.large_runner || 'skip' }}' --only-tag "$only")" >> "$GITHUB_OUTPUT"
 
   probe:
     needs: registry
