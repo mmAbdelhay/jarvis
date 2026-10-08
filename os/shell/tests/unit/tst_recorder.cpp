@@ -90,6 +90,33 @@ private slots:
         QCOMPARE(failed.size(), 0);
     }
 
+    void cancelThenImmediateStartIsRejected()
+    {
+        const QByteArray pcm(6400, '\x05');
+        QTemporaryFile file;
+        ProcessRecorder recorder({u"sh"_s, fakeRecorder(), pcmFile(file, pcm)});
+        QSignalSpy finished(&recorder, &Recorder::finished);
+        QSignalSpy failed(&recorder, &Recorder::failed);
+        QSignalSpy level(&recorder, &Recorder::level);
+        QVERIFY(recorder.start());
+        QTRY_VERIFY(!level.isEmpty());
+        recorder.cancel();
+        // No event processing between cancel and start: the old process
+        // has not delivered its finished signal yet.
+        QVERIFY(!recorder.start());
+        QTest::qWait(300);
+        QCOMPARE(finished.size(), 0);
+        QCOMPARE(failed.size(), 0);
+
+        level.clear();
+        QVERIFY(recorder.start());
+        QTRY_VERIFY(!level.isEmpty());
+        recorder.stop();
+        QTRY_COMPARE(finished.size(), 1);
+        QCOMPARE(finished[0][0].toByteArray(), pcm);
+        QCOMPARE(failed.size(), 0);
+    }
+
     void capStopsTheRecording()
     {
         QTemporaryFile file;

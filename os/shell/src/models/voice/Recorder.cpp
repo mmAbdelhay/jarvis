@@ -47,6 +47,10 @@ bool ProcessRecorder::start()
 {
     if (m_phase == Phase::Recording || m_phase == Phase::Stopping)
         return false;
+    if (m_process.state() != QProcess::NotRunning) {
+        m_error = u"The previous microphone recorder is still stopping."_s;
+        return false;
+    }
     if (m_command.isEmpty()) {
         m_error = u"No audio recorder is installed (pacat or pw-record)."_s;
         return false;
