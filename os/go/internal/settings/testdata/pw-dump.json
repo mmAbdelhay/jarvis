@@ -1,0 +1,14 @@
+[
+  {"id": 0, "type": "PipeWire:Interface:Core", "info": {"props": {"core.name": "pipewire-0"}}},
+  {"id": 34, "type": "PipeWire:Interface:Metadata", "props": {"metadata.name": "settings"}, "metadata": []},
+  {"id": 36, "type": "PipeWire:Interface:Metadata", "props": {"metadata.name": "default"},
+   "metadata": [
+     {"subject": 0, "key": "default.configured.audio.sink", "type": "Spa:String:JSON", "value": {"name": "alsa_output.pci-0000_00_1f.3.analog-stereo"}},
+     {"subject": 0, "key": "default.audio.sink", "type": "Spa:String:JSON", "value": {"name": "bluez_output.AA_BB_CC_DD_EE_FF.1"}},
+     {"subject": 0, "key": "default.audio.source", "type": "Spa:String:JSON", "value": {"name": "alsa_input.pci-0000_00_1f.3.analog-stereo"}}
+   ]},
+  {"id": 48, "type": "PipeWire:Interface:Node", "info": {"props": {"media.class": "Audio/Sink", "node.name": "alsa_output.pci-0000_00_1f.3.analog-stereo", "node.description": "Built-in Audio Analog Stereo"}}},
+  {"id": 49, "type": "PipeWire:Interface:Node", "info": {"props": {"media.class": "Audio/Source", "node.name": "alsa_input.pci-0000_00_1f.3.analog-stereo", "node.description": "Built-in Audio Analog Stereo"}}},
+  {"id": 77, "type": "PipeWire:Interface:Node", "info": {"props": {"media.class": "Audio/Sink", "node.name": "bluez_output.AA_BB_CC_DD_EE_FF.1", "node.description": "WH-1000XM4"}}},
+  {"id": 80, "type": "PipeWire:Interface:Node", "info": {"props": {"media.class": "Stream/Output/Audio", "node.name": "Firefox"}}}
+]

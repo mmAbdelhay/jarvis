@@ -3,7 +3,7 @@ Version: @VERSION@
 Architecture: amd64
 Maintainer: Muhammad AbdElHay <mmAbdelhay@users.noreply.github.com>
 Installed-Size: @INSTALLED_SIZE@
-Depends: dbus, dbus-bin, polkitd, systemd, apt, flatpak
+Depends: dbus, dbus-bin, polkitd, systemd, apt, flatpak, udisks2
 Section: admin
 Priority: optional
 Homepage: https://github.com/mmAbdelhay/jarvis

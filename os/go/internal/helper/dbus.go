@@ -12,8 +12,9 @@ import (
 )
 
 // Object is what godbus exports. Every exported method here becomes a D-Bus
-// method, so it has exactly the five of M1 contracts §2 plus AptUpgrade and
-// FlatpakUpdate (M2 contracts §2) and nothing else. The
+// method, so it has exactly the five of M1 contracts §2, AptUpgrade and
+// FlatpakUpdate (M2 contracts §2) and the three admin methods of Rafiq M3
+// contracts §1, and nothing else. The
 // dbus.Sender parameter is filled in by godbus and is not part of the
 // D-Bus signature.
 type Object struct{ Svc *Service }
@@ -46,6 +47,20 @@ func (o *Object) RestartUnit(sender dbus.Sender, name string) (bool, int32, stri
 	return reply(o.Svc.RestartUnit(context.Background(), string(sender), name))
 }
 
+// AddUser, RemoveUser and FormatRemovable are the admin methods (Rafiq M3
+// contracts §1, polkit os.jarvis.helper.admin).
+func (o *Object) AddUser(sender dbus.Sender, adminPassword, username, fullName, newPassword string) (bool, int32, string, *dbus.Error) {
+	return reply(o.Svc.AddUser(context.Background(), string(sender), adminPassword, username, fullName, newPassword))
+}
+
+func (o *Object) RemoveUser(sender dbus.Sender, adminPassword, username string, keepHome bool) (bool, int32, string, *dbus.Error) {
+	return reply(o.Svc.RemoveUser(context.Background(), string(sender), adminPassword, username, keepHome))
+}
+
+func (o *Object) FormatRemovable(sender dbus.Sender, adminPassword, device, fs, label string) (bool, int32, string, *dbus.Error) {
+	return reply(o.Svc.FormatRemovable(context.Background(), string(sender), adminPassword, device, fs, label))
+}
+
 func reply(out helperapi.Outcome, err error) (bool, int32, string, *dbus.Error) {
 	if err != nil {
 		var he *helperapi.Error
@@ -65,6 +80,9 @@ const introspectXML = `<node>
   <method name="FlatpakRemove"><arg name="refs" type="as" direction="in"/><arg name="ok" type="b" direction="out"/><arg name="exitCode" type="i" direction="out"/><arg name="stderrTail" type="s" direction="out"/></method>
   <method name="AptUpgrade"><arg name="names" type="as" direction="in"/><arg name="ok" type="b" direction="out"/><arg name="exitCode" type="i" direction="out"/><arg name="stderrTail" type="s" direction="out"/></method>
   <method name="FlatpakUpdate"><arg name="refs" type="as" direction="in"/><arg name="ok" type="b" direction="out"/><arg name="exitCode" type="i" direction="out"/><arg name="stderrTail" type="s" direction="out"/></method>
+  <method name="AddUser"><arg name="adminPassword" type="s" direction="in"/><arg name="username" type="s" direction="in"/><arg name="fullName" type="s" direction="in"/><arg name="newPassword" type="s" direction="in"/><arg name="ok" type="b" direction="out"/><arg name="exitCode" type="i" direction="out"/><arg name="stderrTail" type="s" direction="out"/></method>
+  <method name="RemoveUser"><arg name="adminPassword" type="s" direction="in"/><arg name="username" type="s" direction="in"/><arg name="keepHome" type="b" direction="in"/><arg name="ok" type="b" direction="out"/><arg name="exitCode" type="i" direction="out"/><arg name="stderrTail" type="s" direction="out"/></method>
+  <method name="FormatRemovable"><arg name="adminPassword" type="s" direction="in"/><arg name="device" type="s" direction="in"/><arg name="fs" type="s" direction="in"/><arg name="label" type="s" direction="in"/><arg name="ok" type="b" direction="out"/><arg name="exitCode" type="i" direction="out"/><arg name="stderrTail" type="s" direction="out"/></method>
   <method name="RestartUnit"><arg name="name" type="s" direction="in"/><arg name="ok" type="b" direction="out"/><arg name="exitCode" type="i" direction="out"/><arg name="stderrTail" type="s" direction="out"/></method>
  </interface>` + introspect.IntrospectDataString + `</node>`
 

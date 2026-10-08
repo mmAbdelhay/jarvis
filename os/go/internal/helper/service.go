@@ -57,6 +57,14 @@ type Service struct {
 	// ListsAge returns how long ago the APT lists were refreshed; an error
 	// (including ErrNoLists) counts as stale. See AptListsAge.
 	ListsAge func() (time.Duration, error)
+	// Admin methods (admin.go): who is calling, and /etc for passwd/group.
+	Callers CallerUIDs
+	Etc     fs.FS
+	// Pass checks the calling user's password (PAM, contracts §5.5).
+	Pass PasswordVerifier
+
+	failMu sync.Mutex
+	fails  map[string]*failState
 
 	mu       sync.Mutex // one apt/flatpak/systemctl operation at a time
 	busy     atomic.Int32
@@ -101,7 +109,12 @@ func (s *Service) authorize(ctx context.Context, sender, action string) error {
 // run executes one command and turns it into an Outcome. stderr is redacted
 // in full before it is cut to the tail, so a secret is never half-kept.
 func (s *Service) run(ctx context.Context, timeout time.Duration, name string, args ...string) helperapi.Outcome {
-	res, err := s.Run.Run(ctx, execx.Cmd{Name: name, Args: args, Timeout: timeout})
+	return s.runCmd(ctx, execx.Cmd{Name: name, Args: args, Timeout: timeout})
+}
+
+// runCmd is run for a full Cmd (with stdin).
+func (s *Service) runCmd(ctx context.Context, c execx.Cmd) helperapi.Outcome {
+	res, err := s.Run.Run(ctx, c)
 	if err != nil {
 		return helperapi.Outcome{OK: false, ExitCode: -1, StderrTail: tail(redact.String(err.Error()))}
 	}

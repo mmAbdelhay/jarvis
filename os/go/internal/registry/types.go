@@ -111,6 +111,9 @@ var (
 var reservedIDs = map[string]bool{
 	"jarvis-pkg": true, "jarvis-diag": true, "jarvis-helper": true,
 	"jarvis-installer-backend": true, "jarvis-model-fetch": true,
+	// Rafiq M3 built-ins. jarvis-files is not here: the official registry
+	// build keeps that id (M2.5 contracts §3); the built-in one shadows it.
+	"jarvis-settings": true, "jarvis-apps": true, "jarvis-wl": true,
 }
 
 // ValidID checks a registry id: also a folder and a file name.

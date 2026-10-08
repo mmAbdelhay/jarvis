@@ -32,9 +32,14 @@ func main() {
 	}
 	defer conn.Close()
 
+	run := &execx.OSRunner{Env: execx.HelperEnv()}
+	auth := helper.SystemAuthorizer{Bus: helper.ConnCaller{Conn: conn}}
 	svc := &helper.Service{
-		Run:      &execx.OSRunner{Env: execx.HelperEnv()},
-		Auth:     helper.SystemAuthorizer{Bus: helper.ConnCaller{Conn: conn}},
+		Run:      run,
+		Auth:     auth,
+		Callers:  auth,
+		Etc:      os.DirFS("/etc"),
+		Pass:     helper.PAMVerifier{Run: run},
 		Now:      time.Now,
 		ListsAge: helper.AptListsAge(os.DirFS("/var/lib/apt/lists"), time.Now),
 	}
