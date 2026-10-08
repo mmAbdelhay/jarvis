@@ -227,8 +227,7 @@ func (d Deps) registryRemove(ctx context.Context, raw json.RawMessage) (any, err
 
 // registryList backs the registry:list channel (contracts §7.8): installed
 // servers (index entry when known, else rebuilt from the registration) and
-// every other indexed entry, one per id (latest version listed last wins by
-// index order).
+// every indexed entry whose id is not installed (all versions, index order).
 func (d Deps) registryList(ctx context.Context, raw json.RawMessage) (any, error) {
 	var none struct{}
 	if err := mcp.DecodeArgs(raw, &none); err != nil {
