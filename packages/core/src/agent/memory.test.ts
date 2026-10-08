@@ -267,6 +267,33 @@ describe("settings channels", () => {
     await expect(memory.list(10)).resolves.toEqual([]);
   });
 
+  it("forget-all wins over a summary still being written and over queued jobs", async () => {
+    const backend = fakeBackend();
+    let release: (reply: string) => void = () => {};
+    const memory = createMemoryService({
+      enabled: () => true,
+      backend: async () => backend,
+      reset: async () => {},
+      summarize: () => new Promise<string>((resolve) => (release = resolve)),
+      embedder: null,
+      redact: redactSecrets,
+      now: () => NOW,
+      log: () => {},
+    });
+    memory.afterTurn(turn(1));
+    const ending = memory.endSession();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    memory.recordAudit(audit());
+    const cleared = memory.clear();
+    release('{"summary": "late summary", "facts": ["late fact"]}');
+    await Promise.all([cleared, ending]);
+    await memory.idle();
+    expect(backend.rows).toEqual([]);
+    memory.recordAudit(audit());
+    await memory.idle();
+    expect(backend.rows).toHaveLength(1);
+  });
+
   it("forget-all resets an unreadable store", async () => {
     const { memory, resets } = setup({ backend: null });
     await memory.clear();

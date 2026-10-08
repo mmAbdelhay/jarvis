@@ -171,14 +171,27 @@ export function createMemoryService(deps: {
   let transcript: ModelMessage[] = [];
   let turns = 0;
   let pending: Promise<void> = Promise.resolve();
+  // Bumped by clear(): queued or in-flight jobs from an older generation must
+  // not write after "Forget all".
+  let generation = 0;
+  let abortInFlight = new AbortController();
 
   const enqueue = (job: () => Promise<void>) => {
-    pending = pending.then(job).catch((error: unknown) => {
-      deps.log(`[memory] ${error instanceof Error ? error.message : String(error)}`);
-    });
+    const queuedIn = generation;
+    pending = pending
+      .then(() => (queuedIn === generation ? job() : undefined))
+      .catch((error: unknown) => {
+        deps.log(`[memory] ${error instanceof Error ? error.message : String(error)}`);
+      });
   };
 
-  async function store(backend: MemoryBackend, kind: MemoryKind, text: string): Promise<void> {
+  async function store(
+    backend: MemoryBackend,
+    kind: MemoryKind,
+    text: string,
+    queuedIn: number,
+  ): Promise<void> {
+    if (queuedIn !== generation) return;
     let embedding: Float32Array | null = null;
     let embeddingModel: string | null = null;
     if (deps.embedder !== null) {
@@ -189,21 +202,24 @@ export function createMemoryService(deps: {
         // Stored without a vector; recall finds it by keywords.
       }
     }
+    if (queuedIn !== generation) return;
     await backend.add({ kind, text, createdAt: deps.now(), embedding, embeddingModel });
   }
 
   async function writeSummary(batch: readonly ModelMessage[]): Promise<void> {
+    const queuedIn = generation;
     const backend = await deps.backend();
     if (backend === null) return;
     const reply = await deps.summarize(
       buildSystemPrompt(MEMORY_TEXT.summaryPrompt),
       renderTranscript(batch),
-      AbortSignal.timeout(SUMMARY_TIMEOUT_MS),
+      AbortSignal.any([AbortSignal.timeout(SUMMARY_TIMEOUT_MS), abortInFlight.signal]),
     );
+    if (queuedIn !== generation) return;
     const parsed = parseSummaryReply(reply, deps.redact);
     if (parsed === null) return;
-    if (parsed.summary !== "") await store(backend, "summary", parsed.summary);
-    for (const fact of parsed.facts) await store(backend, "fact", fact);
+    if (parsed.summary !== "") await store(backend, "summary", parsed.summary, queuedIn);
+    for (const fact of parsed.facts) await store(backend, "fact", fact, queuedIn);
   }
 
   function flush(): void {
@@ -265,9 +281,10 @@ export function createMemoryService(deps: {
       if (!deps.enabled()) return;
       const fact = factFromAudit(entry);
       if (fact === null) return;
+      const queuedIn = generation;
       enqueue(async () => {
         const backend = await deps.backend();
-        if (backend !== null) await store(backend, "fact", deps.redact(fact));
+        if (backend !== null) await store(backend, "fact", deps.redact(fact), queuedIn);
       });
     },
 
@@ -320,9 +337,18 @@ export function createMemoryService(deps: {
     async clear() {
       transcript = [];
       turns = 0;
-      const backend = await deps.backend();
-      if (backend === null) await deps.reset();
-      else await backend.clear();
+      generation++;
+      abortInFlight.abort();
+      abortInFlight = new AbortController();
+      // Runs after any in-flight job has finished or bailed, so nothing
+      // can add a row behind the wipe.
+      const wipe = pending.then(async () => {
+        const backend = await deps.backend();
+        if (backend === null) await deps.reset();
+        else await backend.clear();
+      });
+      pending = wipe.catch(() => undefined);
+      await wipe;
     },
 
     idle: () => pending,
