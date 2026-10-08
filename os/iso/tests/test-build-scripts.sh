@@ -2,6 +2,7 @@
 # bootloader-config.sh, release-guard.sh, verify-chroot.sh, stub-debs.sh.
 source "$(dirname "$0")/lib.sh"
 source "$(dirname "$0")/m3-fixture.sh"
+source "$(dirname "$0")/m4-fixture.sh"
 scripts=$ISO_DIR/scripts
 tmp=$(mktmp); trap 'rm -rf "$tmp"' EXIT
 
@@ -113,6 +114,7 @@ mkchroot() { # mkchroot DIR — every piece of session wiring present
     printf 'Package: %s\nStatus: install ok installed\n\n' "$p" >> "$c/var/lib/dpkg/status"
   done
   m3_fixture "$c"
+  m4_fixture "$c"
 }
 mkchroot "$tmp/c"
 check "complete chroot verifies" "$scripts/verify-chroot.sh" "$tmp/c"

@@ -13,5 +13,4 @@ for p in jarvis-settings jarvis-apps jarvis-wl jarvis-lock jarvis-idle jarvis-vo
   check "build.sh requires $p" grep -qw "$p" <<<"$(sed -n '/^required="/,/"$/p' "$ISO_DIR/build.sh")"
 done
 check "verify-chroot runs verify-m3" grep -qF '/verify-m3.sh" "$c"' "$ISO_DIR/scripts/verify-chroot.sh"
-check "ISO ceiling allows the voice models" grep -qF 'max_mb=${ISO_MAX_MB:-2600}' "$ISO_DIR/scripts/check-iso.sh"
 finish

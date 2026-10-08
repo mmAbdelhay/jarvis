@@ -21,3 +21,8 @@ wlsunset
 wlr-randr
 mako-notifier
 xdg-utils
+
+# M4 (contracts §2, §3): the classic desktop's file manager; Arabic fonts.
+pcmanfm-qt
+fonts-noto-core
+fonts-ibm-plex

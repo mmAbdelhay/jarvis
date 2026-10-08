@@ -9,8 +9,8 @@ here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=../../branding/lib/brand.sh
 . "$here/../../branding/lib/brand.sh"
 brand_load
-# M3 includes voice models and engines.
-max_mb=${ISO_MAX_MB:-2600}
+# M4 adds the backup model (~1.4 GB of weights that do not compress) to M3's voice models.
+max_mb=${ISO_MAX_MB:-4300}
 append=$(cat "$here/../bootappend")
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
@@ -18,6 +18,13 @@ problems=()
 
 size_mb=$(($(stat -c %s "$iso") / 1024 / 1024))
 [ "$size_mb" -le "$max_mb" ] || problems+=("ISO is $size_mb MB, over the $max_mb MB ceiling")
+# FAT32 copies of the image and ISO 9660 level 2 cannot hold a file of 4 GiB or more.
+sq=$(xorriso -indev "$iso" -lsl /live/filesystem.squashfs 2>/dev/null | awk 'NR == 1 {print $5}')
+if [ -z "$sq" ]; then
+  problems+=("/live/filesystem.squashfs missing")
+elif [ "$sq" -ge 4294967296 ]; then
+  problems+=("/live/filesystem.squashfs is $sq bytes; it must stay under 4 GiB")
+fi
 
 report=$(xorriso -indev "$iso" -report_el_torito plain 2>/dev/null || true)
 grep -Eq 'El Torito boot img : +[0-9]+ +UEFI' <<<"$report" || problems+=("no UEFI El Torito entry")

@@ -113,3 +113,25 @@ stub jarvis-voice-models
 install -D -m0755 /bin/true "$tmp/jarvis-voice-engines/usr/lib/jarvis/voice/bin/whisper-cli"
 install -D -m0755 /bin/true "$tmp/jarvis-voice-engines/usr/lib/jarvis/voice/bin/piper"
 stub jarvis-voice-engines
+
+# --- Rafiq M4 (Plan T) ---
+repo_root=$(cd "$packaging/../.." && pwd)
+# The arch-all packages are cheap: stage their real contents.
+for p in jarvis-session jarvis-fonts jarvis-recipes; do
+  mkdir -p "$tmp/$p"
+  REPO_ROOT=$repo_root "$packaging/$p/stage.sh" "$tmp/$p"
+  stub "$p"
+done
+install -D -m0755 /dev/null "$tmp/jarvis-classic/usr/bin/jarvis-classic"
+printf '#!/bin/sh\nexec foot\n' > "$tmp/jarvis-classic/usr/bin/jarvis-classic"
+stub jarvis-classic
+mkdir -p "$tmp/jarvis-i18n/usr/share/jarvis/i18n"
+for comp in shell installer greeter lock classic; do
+  for lang in en ar; do
+    printf '\x3c\xb8\x64\x18\xca\xef\x9c\x95\xcd\x21\x1c\xbf\x60\xa1\xbd\xdd' \
+      > "$tmp/jarvis-i18n/usr/share/jarvis/i18n/jarvis-${comp}_${lang}.qm"
+  done
+done
+stub jarvis-i18n
+# No weights (verify-m4 warns on a ~stub version); the real postinst is kept.
+stub jarvis-backup-model "$packaging/jarvis-backup-model"

@@ -13,7 +13,7 @@ t = open(sys.argv[1]).read()
 assert t.index('scripts/verify-chroot.sh" "$work/chroot"') < t.index('voice.py" scan'), "order"
 PY
 check "build.sh makes sure python3 exists" grep -qF 'command -v python3 >/dev/null ||' "$build"
-check "jarvis-cli is a required .deb" grep -qF 'jarvis-branding jarvis-cli"' "$build"
+check "jarvis-cli is a required .deb" grep -qF 'jarvis-branding jarvis-cli' "$build"
 check "jarvis-cli is in the ISO package list" grep -qx jarvis-cli "$ISO_DIR/config/package-lists/jarvis.list.chroot"
 
 # A chroot with only registered, redistributable models passes; the

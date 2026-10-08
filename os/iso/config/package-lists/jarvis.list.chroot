@@ -23,3 +23,11 @@ jarvis-lock
 jarvis-idle
 jarvis-voice-models
 jarvis-voice-engines
+
+# M4 (contracts §1-§4). jarvis-workspace is optional and never listed (§5).
+jarvis-backup-model
+jarvis-classic
+jarvis-session
+jarvis-fonts
+jarvis-i18n
+jarvis-recipes
