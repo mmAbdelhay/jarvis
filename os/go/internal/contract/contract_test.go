@@ -123,8 +123,12 @@ func check(t *testing.T, server string, tools []listedTool, contract map[string]
 			t.Errorf("%s %s: batch = %q, contract says %q", server, tl.Name, m.Batch, batchTools[tl.Name])
 		}
 		if tl.Name == mcp.DescribeTool {
-			if m.Risk != "safe" || !*m.Hidden || !eq(tl.InputSchema.Required, []string{"input", "tool"}) {
-				t.Errorf("%s jarvis.describe meta/schema wrong", server)
+			var props []string
+			for p := range tl.InputSchema.Properties {
+				props = append(props, p)
+			}
+			if m.Risk != "safe" || !*m.Hidden || !eq(tl.InputSchema.Required, []string{"input", "tool"}) || !eq(props, []string{"input", "lang", "tool"}) {
+				t.Errorf("%s jarvis.describe meta/schema wrong (Rafiq M4 contracts §3: optional lang)", server)
 			}
 			continue
 		}

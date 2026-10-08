@@ -121,4 +121,4 @@ func DecodeArgs(raw json.RawMessage, dst any) error {
 // EmptySchema is the input schema of a tool that takes no arguments.
 const EmptySchema = `{"type":"object","properties":{},"additionalProperties":false}`
 
-const describeSchema = `{"type":"object","properties":{"tool":{"type":"string","minLength":1},"input":{"type":"object"}},"required":["tool","input"],"additionalProperties":false}`
+const describeSchema = `{"type":"object","properties":{"tool":{"type":"string","minLength":1},"input":{"type":"object"},"lang":{"type":"string","enum":["en","ar"]}},"required":["tool","input"],"additionalProperties":false}`

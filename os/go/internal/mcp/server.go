@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/mmAbdelhay/jarvis/os/go/internal/i18n"
 	"io"
 	"sync"
 )
@@ -253,15 +254,20 @@ func (s *Server) describe(ctx context.Context, byName map[string]*Tool, args jso
 	var in struct {
 		Tool  string          `json:"tool"`
 		Input json.RawMessage `json:"input"`
+		Lang  string          `json:"lang"`
 	}
 	if err := DecodeArgs(args, &in); err != nil {
 		return nil, err
+	}
+	lang, ok := i18n.Parse(in.Lang)
+	if !ok {
+		return nil, Errorf(CodeInvalid, "lang must be \"en\" or \"ar\"")
 	}
 	t := byName[in.Tool]
 	if t == nil || t.Describe == nil {
 		return nil, Errorf(CodeInvalid, "no description for tool %q", in.Tool)
 	}
-	d, err := t.Describe(ctx, in.Input)
+	d, err := t.Describe(i18n.WithLang(ctx, lang), in.Input)
 	if err != nil {
 		return nil, err
 	}
