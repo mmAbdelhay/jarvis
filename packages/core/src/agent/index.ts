@@ -14,3 +14,4 @@ export * from "./model-state.js";
 export * from "./safety.js";
 export * from "./context-fit.js";
 export * from "./failover.js";
+export * from "./redact.js";
