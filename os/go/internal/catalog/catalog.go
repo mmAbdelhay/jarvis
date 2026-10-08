@@ -27,6 +27,8 @@ type Model struct {
 	ToolCalling    string   `json:"toolCalling"`
 	Languages      []string `json:"languages"`
 	RecommendedFor string   `json:"recommendedFor"`
+	// Role is "main" (the default when absent) or "backup" (M4 contracts §1).
+	Role string `json:"role,omitempty"`
 }
 
 var (
@@ -56,8 +58,16 @@ func (m Model) Valid() error {
 	return nil
 }
 
-// Parse decodes a catalog document and keeps the valid entries, in order,
-// first one wins on a duplicate id.
+// Offered reports whether a UI may offer the entry as a brain: role "main"
+// or absent. The backup (role "backup") is jarvisd's own fallback and is
+// hidden from installer and catalog UIs (M4 contracts §6.12); an unknown
+// role is not offered either.
+func (m Model) Offered() bool {
+	return m.Role == "" || m.Role == "main"
+}
+
+// Parse decodes a catalog document and keeps the valid entries a UI may
+// offer (see Offered), in order, first one wins on a duplicate id.
 func Parse(b []byte) ([]Model, error) {
 	var doc struct {
 		Version int     `json:"version"`
@@ -72,7 +82,7 @@ func Parse(b []byte) ([]Model, error) {
 	out := []Model{}
 	seen := map[string]bool{}
 	for _, m := range doc.Models {
-		if m.Valid() != nil || seen[m.ID] {
+		if m.Valid() != nil || !m.Offered() || seen[m.ID] {
 			continue
 		}
 		seen[m.ID] = true

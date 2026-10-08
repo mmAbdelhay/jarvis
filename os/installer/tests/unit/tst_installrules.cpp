@@ -124,6 +124,29 @@ private slots:
         QCOMPARE(modelsThatFit(probe, 2600000000 + kSystemReserveBytes - 1).size(), 0);
     }
 
+    void backupModelIsNeverOffered()
+    {
+        // Contracts §6.12: UIs hide role == "backup", even if a backend passes it
+        // through. Otherwise a low-RAM target where only the 1.7B backup fits
+        // would get it as its recommended (index 0) brain.
+        QJsonObject probe = loadFixture(u"probe-windows.json"_s);
+        QJsonArray catalog = probe.value("catalog").toArray();
+        catalog.prepend(QJsonObject{{"id", u"qwen3-1.7b"_s},       {"ollamaTag", u"qwen3:1.7b"_s},
+                                    {"displayName", u"Qwen3 1.7B"_s}, {"sizeBytes", qint64(1359293444)},
+                                    {"minRamGB", 4},                 {"tier", u"small"_s},
+                                    {"toolCalling", u"verified"_s},  {"role", u"backup"_s},
+                                    {"fits", true}});
+        QJsonObject main = catalog.at(1).toObject();
+        main.insert("role", u"main"_s);
+        catalog[1] = main;
+        probe.insert("catalog", catalog);
+        const QJsonArray fit = modelsThatFit(probe, 148000000000);
+        QCOMPARE(fit.size(), 2);
+        for (const QJsonValue& m : fit)
+            QVERIFY(m.toObject().value("role").toString() != u"backup"_s);
+        QCOMPARE(modelsThatFit(probe, 1359293444 + kSystemReserveBytes).size(), 0); // only the backup would fit
+    }
+
     void backendDecisionsAreAuthoritative()
     {
         QJsonObject probe = loadFixture(u"probe-windows.json"_s);

@@ -170,6 +170,12 @@ QJsonArray modelsThatFit(const QJsonObject& probe, qint64 targetBytes)
         const QJsonObject m = value.toObject();
         if (m.value("id").toString().isEmpty() || m.value("ollamaTag").toString().isEmpty())
             continue;
+        // Contracts §6.12: the backup model (role "backup") is jarvisd's own
+        // fallback, never a brain to pick. The backend drops it already; this
+        // is defence in depth. Role defaults to "main".
+        const QString role = m.value("role").toString(u"main"_s);
+        if (role != u"main"_s)
+            continue;
         const qint64 size = m.value("sizeBytes").toInteger();
         // Hardware eligibility is decided by the backend. Only target disk
         // capacity (including the UI system reserve) is filtered here.

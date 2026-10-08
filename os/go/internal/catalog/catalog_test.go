@@ -39,3 +39,36 @@ func TestLoadMissingIsEmpty(t *testing.T) {
 		t.Fatalf("got %v, %v", ms, err)
 	}
 }
+
+// Contracts §6.12: installer and catalog UIs hide role == "backup"; role
+// defaults to main. The backup is jarvisd's, never a brain to pick.
+func TestParseHidesTheBackupModel(t *testing.T) {
+	ms, err := Parse([]byte(`{"version":1,"models":[
+ {"id":"qwen3-1.7b","ollamaTag":"qwen3:1.7b","displayName":"Qwen3 1.7B","sizeBytes":1359293444,"minRamGB":4,"minVramGB":null,"tier":"small","toolCalling":"verified","languages":["en","ar"],"recommendedFor":"backup","role":"backup"},
+ {"id":"llama3.2-3b","ollamaTag":"llama3.2:3b","displayName":"Llama 3.2 3B","sizeBytes":2019393189,"minRamGB":8,"minVramGB":null,"tier":"small","toolCalling":"verified","languages":["en"],"recommendedFor":"8 GB","role":"main"},
+ {"id":"no-role","ollamaTag":"x:1","displayName":"x","sizeBytes":1,"minRamGB":1,"tier":"small","toolCalling":"verified","languages":[],"recommendedFor":""},
+ {"id":"odd-role","ollamaTag":"y:1","displayName":"y","sizeBytes":1,"minRamGB":1,"tier":"small","toolCalling":"verified","languages":[],"recommendedFor":"","role":"spare"}
+]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ms) != 2 || ms[0].ID != "llama3.2-3b" || ms[0].Role != "main" || ms[1].ID != "no-role" {
+		t.Fatalf("got %+v", ms)
+	}
+	if _, ok := Find(ms, "qwen3-1.7b"); ok {
+		t.Fatal("the backup must not be offered")
+	}
+}
+
+// The shipped catalog: its backup entry never reaches the installer.
+func TestShippedCatalogOffersNoBackup(t *testing.T) {
+	ms, err := Load(&files.OS{Root: "../../../models"}, "/catalog.json")
+	if err != nil || len(ms) == 0 {
+		t.Fatalf("got %v, %v", ms, err)
+	}
+	for _, m := range ms {
+		if m.Role == "backup" || m.ID == "qwen3-1.7b" {
+			t.Fatalf("backup offered: %+v", m)
+		}
+	}
+}
