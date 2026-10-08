@@ -73,6 +73,24 @@ describe("fitHistory", () => {
   });
 });
 
+describe("fitHistory with an oversized latest output or prompt", () => {
+  it("cuts the latest tool output and the prompt to the budget", () => {
+    const messages: ModelMessage[] = [
+      { role: "user", text: "p".repeat(40_000) },
+      { role: "assistant", text: "", toolCalls: [{ id: "a", name: "t", input: {} }] },
+      {
+        role: "tool",
+        results: [{ callId: "a", name: "t", content: "l".repeat(32_000), isError: false }],
+      },
+    ];
+    const fitted = fitHistory(messages, 3_000);
+    expect(fitted.reduce((sum, m) => sum + messageTokens(m), 0)).toBeLessThanOrEqual(3_000);
+    expect(fitted).toHaveLength(3);
+    const tool = fitted[2];
+    expect(tool?.role === "tool" && tool.results[0]?.callId).toBe("a");
+  });
+});
+
 describe("historyBudget", () => {
   it("subtracts the system text, the tool schemas and a reply reserve, with a floor", () => {
     expect(historyBudget(8_192, "s".repeat(4_000), [])).toBe(8_192 - 1_000 - 1 - 2_048);

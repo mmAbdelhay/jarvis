@@ -20,7 +20,36 @@ export const CONTEXT_TOKENS: Readonly<Record<ProviderKind, number>> = {
 export const RESPONSE_RESERVE_TOKENS = 2_048;
 export const MIN_HISTORY_TOKENS = 1_024;
 export const ELIDED_TOOL_OUTPUT = "[Earlier tool output removed to fit the model's context.]";
+export const CUT_NOTE = "\n[Cut to fit the model's context.]";
 const PER_MESSAGE_TOKENS = 4;
+/** What the latest tool output keeps at least, before the prompt is cut too. */
+const MIN_LATEST_OUTPUT_TOKENS = 256;
+
+/** `text` cut (from the end) so it is at most `maxTokens`, with a note. */
+function cutToTokens(text: string, maxTokens: number): string {
+  if (estimateTokens(text) <= maxTokens) return text;
+  const room = Math.max(0, maxTokens - estimateTokens(CUT_NOTE));
+  let low = 0;
+  let high = text.length;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (estimateTokens(text.slice(0, mid)) <= room) low = mid;
+    else high = mid - 1;
+  }
+  return `${text.slice(0, low)}${CUT_NOTE}`;
+}
+
+function cutToolMessage(message: ModelMessage, maxTokens: number): ModelMessage {
+  if (message.role !== "tool") return message;
+  const each = Math.max(1, Math.floor((maxTokens - PER_MESSAGE_TOKENS) / message.results.length));
+  return {
+    role: "tool",
+    results: message.results.map((result) => ({
+      ...result,
+      content: cutToTokens(result.content, each),
+    })),
+  };
+}
 
 export function messageTokens(message: ModelMessage): number {
   switch (message.role) {
@@ -94,6 +123,21 @@ export function fitHistory(messages: readonly ModelMessage[], budget: number): M
     };
     size -= messageTokens(message) - messageTokens(shorter);
     turn[i] = shorter;
+  }
+
+  // Still too big: the latest output, then the prompt itself, are cut so the
+  // request never overflows the context (the model would drop the rules).
+  if (size > budget && lastTool >= 0) {
+    const current = turn[lastTool] as ModelMessage;
+    const allowed = Math.max(MIN_LATEST_OUTPUT_TOKENS, messageTokens(current) - (size - budget));
+    const shorter = cutToolMessage(current, allowed);
+    size -= messageTokens(current) - messageTokens(shorter);
+    turn[lastTool] = shorter;
+  }
+  const first = turn[0];
+  if (size > budget && first?.role === "user") {
+    const allowed = Math.max(MIN_LATEST_OUTPUT_TOKENS, messageTokens(first) - (size - budget));
+    turn[0] = { role: "user", text: cutToTokens(first.text, allowed - PER_MESSAGE_TOKENS) };
   }
   return turn;
 }
