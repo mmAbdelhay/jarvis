@@ -1,6 +1,21 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi } from "vitest";
-import { createTerminalExplorer } from "./terminal-explorer.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createTerminalExplorer as create } from "./terminal-explorer.js";
+
+// Every view runs a poll interval (and may have a burst re-read pending)
+// until it is disposed. One left running outlives its test — and, on a slow
+// runner, the file: its re-read then lands after jsdom is torn down and
+// throws `document is not defined` as an unhandled rejection. So every view
+// a test makes is disposed after it, whether or not the test did so itself.
+const live: Array<ReturnType<typeof create>> = [];
+function createTerminalExplorer(...args: Parameters<typeof create>): ReturnType<typeof create> {
+  const view = create(...args);
+  live.push(view);
+  return view;
+}
+afterEach(() => {
+  for (const view of live.splice(0)) view.dispose();
+});
 
 const listing: Record<string, { name: string; directory: boolean }[]> = {
   "/proj": [
