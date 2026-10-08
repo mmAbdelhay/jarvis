@@ -8,7 +8,7 @@ import (
 )
 
 // packagedGreetd is jarvis-greeter's /etc/greetd/config.toml (Plan H).
-const packagedGreetd = "[terminal]\nvt = 7\n\n[default_session]\ncommand = \"cage -s -- jarvis-greeter\"\nuser = \"_greetd\"\n"
+const packagedGreetd = "[terminal]\nvt = 7\n\n[default_session]\ncommand = \"/usr/lib/jarvis-greeter/with-keyboard cage -s -- jarvis-greeter\"\nuser = \"_greetd\"\n"
 
 func TestGreetdAutologinEditsOnlyTheInitialSession(t *testing.T) {
 	live := packagedGreetd + "\n[initial_session]\ncommand = \"labwc\"\nuser = \"user\"\n"

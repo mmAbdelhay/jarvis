@@ -85,7 +85,7 @@ mkchroot() { # mkchroot DIR — every piece of session wiring present
   mkdir -p "$c/etc/greetd" "$c/etc/xdg/labwc" "$c/etc/systemd/user/default.target.wants" \
     "$c/etc/systemd/system/multi-user.target.wants" "$c/var/lib/flatpak/repo" "$c/var/lib/flatpak/appstream/flathub" \
     "$c/var/lib/dpkg" "$c/usr/share/polkit-1/rules.d" "$c/usr/share/jarvis-shell/labwc"
-  printf '[terminal]\nvt = 1\n[default_session]\ncommand = "cage -s -- jarvis-greeter"\nuser = "_greetd"\n' > "$c/etc/greetd/config.toml"
+  printf '[terminal]\nvt = 1\n[default_session]\ncommand = "/usr/lib/jarvis-greeter/with-keyboard cage -s -- jarvis-greeter"\nuser = "_greetd"\n' > "$c/etc/greetd/config.toml"
   mkdir -p "$c/usr/lib/live/config" "$c/etc/plymouth" "$c/boot" "$c/usr/share/keyrings" "$c/etc/apt/sources.list.d" \
     "$c/usr/share/jarvis/models" "$c/usr/lib/systemd/system" "$c/etc/pam.d" "$c/usr/share/grub/themes/jarvis"
   printf '#!/bin/sh\n' > "$c/usr/lib/live/config/2000-jarvis-live-session"; chmod 0755 "$c/usr/lib/live/config/2000-jarvis-live-session"
@@ -158,6 +158,7 @@ if command -v dpkg-deb >/dev/null; then
   done
   check "stub greeter ships the real greetd config" grep -q 'cage -s -- jarvis-greeter' \
     <<<"$(dpkg-deb --fsys-tarfile "$tmp/stubs/jarvis-greeter_0.0.0~stub1_amd64.deb" | tar -xO ./etc/greetd/config.toml)"
+  check "stub greeter ships the keyboard wrapper its config runs" bash -c 'dpkg-deb -c "$1" | grep -q "^-rwxr-xr-x .* ./usr/lib/jarvis-greeter/with-keyboard$"' _ "$tmp/stubs/jarvis-greeter_0.0.0~stub1_amd64.deb"
   check "stub greeter keeps the real diversion" grep -q 'dpkg-divert' \
     <<<"$(dpkg-deb --ctrl-tarfile "$tmp/stubs/jarvis-greeter_0.0.0~stub1_amd64.deb" | tar -xO ./preinst)"
   check "stub jarvisd still enables its unit" grep -q 'systemctl --global enable' \

@@ -1,5 +1,5 @@
 # Runtime packages of jarvis-greeter (installed systems; shared-library deps come from dh_shlibdeps).
-# greetd runs it as `cage -s -- jarvis-greeter` (contracts §7; /etc/greetd/config.toml is Plan H's conffile).
+# greetd runs it as `/usr/lib/jarvis-greeter/with-keyboard cage -s -- jarvis-greeter` (contracts §7; /etc/greetd/config.toml is Plan H's conffile).
 jarvis-ui
 greetd
 cage

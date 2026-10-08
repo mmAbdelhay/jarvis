@@ -64,6 +64,7 @@ mkdir -p "$tmp/jarvis-greeter/usr/bin" "$tmp/jarvis-greeter/etc/greetd"
 printf '#!/bin/sh\nexec foot -e agreety --cmd labwc\n' > "$tmp/jarvis-greeter/usr/bin/jarvis-greeter"
 chmod 0755 "$tmp/jarvis-greeter/usr/bin/jarvis-greeter"
 cp "$packaging/jarvis-greeter/config.toml" "$tmp/jarvis-greeter/etc/greetd/config.toml"
+install -D -m0755 "$packaging/jarvis-greeter/with-keyboard" "$tmp/jarvis-greeter/usr/lib/jarvis-greeter/with-keyboard"
 stub jarvis-greeter "$packaging/jarvis-greeter"
 stub jarvis-installer
 stub jarvis-installer-backend

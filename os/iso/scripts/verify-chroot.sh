@@ -46,7 +46,7 @@ for p in jarvisd jarvis-shell jarvis-pkg jarvis-diag jarvis-helper jarvis-ui jar
     "$c/var/lib/dpkg/status" || problems+=("package $p is not installed")
 done
 
-grep -q 'command = "cage -s -- jarvis-greeter"' "$c/etc/greetd/config.toml" 2>/dev/null ||
+grep -q 'command = "/usr/lib/jarvis-greeter/with-keyboard cage -s -- jarvis-greeter"' "$c/etc/greetd/config.toml" 2>/dev/null ||
   problems+=("greetd does not run jarvis-greeter in cage (contracts §7)")
 if grep -q '^\[initial_session\]' "$c/etc/greetd/config.toml" 2>/dev/null; then
   problems+=("the image autologins: an installed system would too (Review Focus 1)")

@@ -52,6 +52,10 @@ check "autostart parses" sh -n "$inc/etc/xdg/labwc/autostart"
 check "autostart sources C's relaunch loop" grep -qx '. /usr/share/jarvis-shell/labwc/autostart' "$inc/etc/xdg/labwc/autostart"
 check "environment is KEY=VALUE lines" bash -c "! grep -Ev '^(#.*|[A-Z_]+=.*|)$' '$inc/etc/xdg/labwc/environment'"
 check "Qt uses Wayland" grep -qx 'QT_QPA_PLATFORM=wayland' "$inc/etc/xdg/labwc/environment"
+# labwc applies this file with setenv(..., 1) after the /usr/local/bin/labwc
+# wrapper exported /etc/default/keyboard (contracts §11.5): any XKB line here
+# would silently force that layout on every installed system.
+check "environment leaves the keyboard to /etc/default/keyboard" bash -c "! grep -q '^XKB_' '$inc/etc/xdg/labwc/environment'"
 
 # Review Focus 2: C's loop relaunches a shell that keeps exiting, and stops
 # once the compositor's Wayland socket is gone (C's back-off loop).

@@ -10,3 +10,4 @@ stage_cmake "$1" "${GREETER_BUILD_DIR:-$REPO_ROOT/os/greeter/build}" \
 # Ours (contracts §7): greetd runs the greeter in cage. A template, not a
 # conffile: postinst puts it at greetd's (diverted) path, see preinst.
 install -D -m0644 "$here/config.toml" "$1/usr/share/jarvis-greeter/greetd-config.toml"
+install -D -m0755 "$here/with-keyboard" "$1/usr/lib/jarvis-greeter/with-keyboard"

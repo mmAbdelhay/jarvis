@@ -47,7 +47,23 @@ g=$(d jarvis-greeter)
 check "greeter binary" deb_has "$g" usr/bin/jarvis-greeter
 tpl=usr/share/jarvis-greeter/greetd-config.toml
 cfg=$(dpkg-deb --fsys-tarfile "$g" | tar -xO "./$tpl")
-check "greetd runs the greeter in cage (contracts §7)" grep -qx 'command = "cage -s -- jarvis-greeter"' <<<"$cfg"
+check "greetd runs the greeter in cage with the installed keyboard (contracts §7, §11.5)" grep -qx 'command = "/usr/lib/jarvis-greeter/with-keyboard cage -s -- jarvis-greeter"' <<<"$cfg"
+check "greeter ships the keyboard wrapper" bash -c 'dpkg-deb -c "$1" | grep -q "^-rwxr-xr-x .* ./usr/lib/jarvis-greeter/with-keyboard$"' _ "$g"
+# The wrapper exports /etc/default/keyboard for cage (contracts §11.5).
+wk=$PACKAGING_DIR/jarvis-greeter/with-keyboard
+printf 'XKBLAYOUT="fr"\nXKBVARIANT="azerty"\n' > "$tmp/keyboard"
+cat > "$tmp/show-xkb" <<'EOF'
+#!/bin/sh
+printf '%s:%s:%s\n' "$XKB_DEFAULT_LAYOUT" "$XKB_DEFAULT_VARIANT" "$*"
+EOF
+chmod +x "$tmp/show-xkb"
+check "greeter wrapper exports layout and variant, forwards the command" \
+  test "$(GREETER_KEYBOARD_FILE="$tmp/keyboard" sh "$wk" "$tmp/show-xkb" -s -- jarvis-greeter)" = 'fr:azerty:-s -- jarvis-greeter'
+printf 'XKBLAYOUT="de"\n' > "$tmp/keyboard"
+check "greeter wrapper clears a stale variant" \
+  test "$(GREETER_KEYBOARD_FILE="$tmp/keyboard" XKB_DEFAULT_VARIANT=stale sh "$wk" "$tmp/show-xkb")" = 'de::'
+check "greeter wrapper without a keyboard file runs the command" \
+  test "$(GREETER_KEYBOARD_FILE="$tmp/missing" XKB_DEFAULT_LAYOUT= sh "$wk" "$tmp/show-xkb" x)" = '::x'
 check "greetd greeter user" grep -qx 'user = "_greetd"' <<<"$cfg"
 check "no autologin in the package" bash -c '! grep -v "^[[:space:]]*#" <<<"$1" | grep -q initial_session' _ "$cfg"
 # A conffile over greetd's diverted conffile prompts (and fails unattended),
@@ -90,7 +106,7 @@ else
   install_greeter() { DEBIAN_FRONTEND=noninteractive dpkg --force-depends -i "$g" </dev/null; }
   check "greeter installs unattended" install_greeter
   check "greeter install diverts original greetd config" cmp "$orig" /etc/greetd/config.toml.greetd
-  check "greeter install activates packaged config" grep -qx 'command = "cage -s -- jarvis-greeter"' /etc/greetd/config.toml
+  check "greeter install activates packaged config" grep -qx 'command = "/usr/lib/jarvis-greeter/with-keyboard cage -s -- jarvis-greeter"' /etc/greetd/config.toml
   # The installer appends [initial_session] (contracts §10); upgrades keep it.
   printf '[initial_session]\ncommand = "x"\nuser = "u"\n' >> /etc/greetd/config.toml
   cp /etc/greetd/config.toml "$tmp/edited.toml"
