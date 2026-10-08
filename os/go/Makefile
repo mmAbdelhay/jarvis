@@ -8,7 +8,7 @@ DIST    := dist
 RECIPES ?= ../recipes
 BUILD   := CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) $(GO) build -trimpath -ldflags '-s -w -X main.version=$(VERSION)'
 
-.PHONY: all check test dist registry clean recipes-check
+.PHONY: all check test dist registry clean recipes-check i18n-check
 
 all: check test
 
@@ -18,12 +18,16 @@ check:
 	GOOS=linux $(GO) vet ./...
 	@if [ -d "$(RECIPES)" ]; then $(GO) run ./tools/recipecheck "$(RECIPES)"; fi
 
-test:
+test: i18n-check
 	$(GO) test -race ./...
 
 # Rafiq M4 contracts §4, §6: Plan T validates its recipe files with this.
 recipes-check:
 	$(GO) run ./tools/recipecheck "$(RECIPES)"
+
+# Rafiq M4 contracts §3 CI gate: every card table complete in en and ar.
+i18n-check:
+	$(GO) test ./internal/i18n/...
 
 # dist/ mirrors the target filesystem (M1 contracts §2, §4; M2 contracts §7);
 # the packaging plan splits it into packages by path.
