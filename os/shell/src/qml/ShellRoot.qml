@@ -113,6 +113,7 @@ Rectangle {
                     memory: root.shell.memory
                     registry: root.shell.registry
                     voice: root.shell.voice
+                    phone: root.shell.phone
                     doctorAvailable: root.shell.system.known && !root.shell.system.online
                     onDoctorRequested: root.shell.openDoctor()
                 }

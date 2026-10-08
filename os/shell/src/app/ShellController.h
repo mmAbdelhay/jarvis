@@ -18,6 +18,7 @@
 #include "models/voice/VoiceModel.h"
 #include "models/MemoryModel.h"
 #include "models/PairingModel.h"
+#include "models/PhoneModel.h"
 #include "models/RegistryModel.h"
 
 class ControlClient;
@@ -44,6 +45,7 @@ class ShellController : public QObject {
     Q_PROPERTY(MemoryModel* memory READ memory CONSTANT)
     Q_PROPERTY(VoiceModel* voice READ voice CONSTANT)
     Q_PROPERTY(PairingModel* pairing READ pairing CONSTANT)
+    Q_PROPERTY(PhoneModel* phone READ phone CONSTANT)
     Q_PROPERTY(RegistryModel* registry READ registry CONSTANT)
     Q_PROPERTY(bool offerDoctor READ offerDoctor NOTIFY providerStatusChanged)
     Q_PROPERTY(QString view READ view NOTIFY viewChanged)
@@ -74,6 +76,7 @@ public:
     RegistryModel* registry() const { return m_registry; }
     VoiceModel* voice() const { return m_voice; }
     PairingModel* pairing() const { return m_pairing; }
+    PhoneModel* phone() const { return m_phone; }
     Q_INVOKABLE void pushToTalk();
     bool handleInstanceMessage(const QByteArray& message);
     Q_INVOKABLE void setSurfaceShown(bool shown) { m_surfaceShown = shown; }
@@ -153,6 +156,7 @@ private:
     RegistryModel* m_registry;
     VoiceModel* m_voice;
     PairingModel* m_pairing;
+    PhoneModel* m_phone;
     bool m_surfaceShown = true;
     QString m_view = QStringLiteral("loading");
     QString m_connection = QStringLiteral("connecting");

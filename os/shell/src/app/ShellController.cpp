@@ -26,6 +26,7 @@ ShellController::ShellController(ControlClient* client, QObject* parent)
     , m_registry(new RegistryModel(this))
     , m_voice(new VoiceModel(this))
     , m_pairing(new PairingModel(this))
+    , m_phone(new PhoneModel(this))
     , m_launcher([](const QString& program) { return QProcess::startDetached(program, {}); })
 {
     connect(client, &ControlClient::opened, this, &ShellController::onOpened);
@@ -135,6 +136,52 @@ ShellController::ShellController(ControlClient* client, QObject* parent)
     });
     connect(m_registry, &RegistryModel::removeRequested, this, [this](const QString& id) {
         askJarvis(u"Remove the installed tool server %1."_s.arg(id));
+    });
+    // Settings → Phone (M3 contracts §5.9).
+    const auto phoneStatus = [this](const ControlResult& r) {
+        if (r.ok)
+            m_phone->applyStatus(r.value.toObject());
+        else
+            m_phone->applyError(r.text);
+    };
+    connect(m_phone, &PhoneModel::statusRequested, this, [this, phoneStatus] {
+        request(u"remote:status"_s, QJsonArray{}, phoneStatus);
+    });
+    connect(m_phone, &PhoneModel::configureRequested, this, [this, phoneStatus](bool enabled) {
+        request(u"remote:configure"_s, QJsonArray{QJsonObject{{"enabled", enabled}}}, phoneStatus);
+    });
+    connect(m_phone, &PhoneModel::ownerPasswordRequested, this, [this](const QString& current, const QString& next) {
+        QJsonObject args{{"next", next}};
+        if (!current.isEmpty())
+            args.insert("current", current);
+        request(u"remote:setOwnerPassword"_s, QJsonArray{args}, [this](const ControlResult& r) {
+            if (r.ok)
+                m_phone->applyOwnerPasswordResult(r.value.toObject());
+            else
+                m_phone->applyError(r.text);
+        });
+    });
+    connect(m_phone, &PhoneModel::pairingOpenRequested, this, [this] {
+        request(u"pairing:open"_s, QJsonArray{}, [this](const ControlResult& r) {
+            if (r.ok)
+                m_phone->applyPairingOpened(r.value.toObject());
+            else
+                m_phone->applyError(r.text);
+        });
+    });
+    connect(m_phone, &PhoneModel::pairingCancelRequested, this, [this] {
+        request(u"pairing:cancel"_s, QJsonArray{}, [this](const ControlResult& r) {
+            if (!r.ok)
+                m_phone->applyError(r.text);
+        });
+    });
+    connect(m_phone, &PhoneModel::revokeRequested, this, [this](const QString& deviceId) {
+        request(u"remote:revoke"_s, QJsonArray{QJsonObject{{"deviceId", deviceId}}}, [this](const ControlResult& r) {
+            if (r.ok)
+                m_phone->refresh();
+            else
+                m_phone->applyError(r.text);
+        });
     });
     connect(m_memory, &MemoryModel::setEnabledRequested, this, [this](bool enabled) {
         request(u"memory:setEnabled"_s, QJsonArray{QJsonObject{{"enabled", enabled}}}, [this](const ControlResult& r) {
@@ -270,6 +317,8 @@ void ShellController::onPush(const QString& channel, const QJsonValue& payload)
         return emit voiceStatePushed(payload.toObject());
     if (channel == u"pairing:pending")
         return emit pairingPushed(payload.toObject());
+    if (channel == u"remote:status")
+        return m_phone->applyStatus(payload.toObject());
     if (channel == u"provider:status") {
         const QJsonObject status = payload.toObject();
         m_providerReachable = status.value("reachable").toBool(true);
@@ -492,6 +541,7 @@ void ShellController::showView(const QString& view)
         refreshProviders();
         m_memory->refresh();
         m_registry->refresh();
+        m_phone->refresh();
     }
     setView(view);
 }

@@ -3,7 +3,7 @@ import QtQuick.Layouts
 import QtQuick.Controls.Basic
 import Jarvis.UI
 
-// Settings: model providers in failover order, memory, and tool servers.
+// Settings: model providers in failover order, memory, tool servers, voice and phone.
 Item {
     id: root
     required property ProviderModel provider
@@ -11,9 +11,10 @@ Item {
     property MemoryModel memory: null
     property RegistryModel registry: null
     property VoiceModel voice: null
+    property PhoneModel phone: null
     property bool doctorAvailable: false // sys:snapshot says offline (contracts §6.8)
     property string section: "providers"
-    readonly property var sections: [{ id: "providers", label: "Model providers" }, { id: "memory", label: "Memory" }, { id: "tools", label: "Tools" }, { id: "voice", label: "Voice" }]
+    readonly property var sections: [{ id: "providers", label: "Model providers" }, { id: "memory", label: "Memory" }, { id: "tools", label: "Tools" }, { id: "voice", label: "Voice" }, { id: "phone", label: "Phone" }]
     signal doctorRequested()
 
     Flickable {
@@ -110,6 +111,14 @@ Item {
                 visible: root.section === "voice"
                 active: root.voice !== null
                 sourceComponent: VoiceSection { voice: root.voice }
+            }
+
+            Loader {
+                objectName: "phoneSection"
+                Layout.fillWidth: true
+                visible: root.section === "phone"
+                active: root.phone !== null
+                sourceComponent: PhoneSection { phone: root.phone }
             }
         }
     }
