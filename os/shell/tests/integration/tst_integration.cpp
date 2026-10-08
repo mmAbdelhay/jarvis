@@ -118,11 +118,11 @@ private slots:
         QCOMPARE(jarvis::protocol::readBuildId(stamp), m_client->build());
     }
 
-    void providerListHasTheThreeKinds()
+    void providerListHasEveryKind()
     {
         const ControlResult r = call(*m_client, u"provider:list"_s, {});
         QVERIFY2(r.ok, qPrintable(r.text));
-        QCOMPARE(r.value.toObject()["kinds"].toArray(), (QJsonArray{"anthropic", "openai-compatible", "ollama"}));
+        QCOMPARE(r.value.toObject()["kinds"].toArray(), (QJsonArray{"anthropic", "openai-compatible", "ollama", "gemini"})); // M2 contracts §3 adds gemini
     }
 
     void promptStreamsTheFakeReply()
