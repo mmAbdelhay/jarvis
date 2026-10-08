@@ -119,6 +119,22 @@ void LocaleChoice::setKeyboard(const QString& layout)
     emit changed();
 }
 
+void LocaleChoice::setTypingKeyboard(const QString& layout)
+{
+    if (layout == m_typingKeyboard)
+        return;
+    m_typingKeyboard = layout;
+    emit changed();
+}
+
+QString LocaleChoice::keyboardName(const QString& layout) const
+{
+    for (const Keyboard& k : kKeyboards)
+        if (k.layout == layout)
+            return k.name.toString();
+    return layout;
+}
+
 void LocaleChoice::setTimezone(const QString& zone)
 {
     if (!m_timezoneIds.contains(zone))

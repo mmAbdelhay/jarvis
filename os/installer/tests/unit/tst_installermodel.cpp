@@ -9,6 +9,9 @@
 #include "Fixtures.h"
 #include "InstallProgress.h"
 #include "InstallerModel.h"
+#include "LiveKeyboard.h"
+
+#include <QTemporaryDir>
 
 using namespace Qt::StringLiterals;
 
@@ -307,6 +310,33 @@ private slots:
         Fixture f;
         emit f.power.failed(u"Not allowed"_s);
         QCOMPARE(f.model.errorText(), u"Couldn't restart: Not allowed"_s);
+    }
+
+    void liveSessionFollowsTheChosenKeyboard()
+    {
+        QTemporaryDir dir;
+        Fixture f;
+        LiveKeyboard live(dir.path(), dir.filePath(u"none"_s), {u"/bin/sh"_s, u"-c"_s, u"true"_s});
+        f.model.setLiveKeyboard(&live);
+        QFile env(dir.filePath(u"labwc/environment"_s));
+        QVERIFY(env.exists());
+        QVERIFY(f.model.locale()->typingMatches());
+        f.model.locale()->setKeyboard(u"fr"_s);
+        QCOMPARE(f.model.locale()->typingKeyboard(), u"fr"_s);
+        QVERIFY(f.model.locale()->typingMatches());
+        QVERIFY(env.open(QIODevice::ReadOnly));
+        QVERIFY(env.readAll().contains("XKB_DEFAULT_LAYOUT=fr\n"));
+    }
+
+    void keyboardMismatchWhenTheLiveSessionCannotFollow()
+    {
+        QTemporaryDir dir;
+        Fixture f;
+        LiveKeyboard live(dir.path(), dir.filePath(u"none"_s), {dir.filePath(u"no-such-labwc"_s)});
+        f.model.setLiveKeyboard(&live);
+        f.model.locale()->setKeyboard(u"fr"_s);
+        QCOMPARE(f.model.locale()->typingKeyboard(), u"us"_s);
+        QVERIFY(!f.model.locale()->typingMatches());
     }
 };
 

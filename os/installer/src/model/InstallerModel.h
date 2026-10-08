@@ -13,6 +13,7 @@
 #include "LocaleChoice.h"
 
 class InstallerBackend;
+class LiveKeyboard;
 class PowerActions;
 
 // The installer flow (design: Installer.dc.html, spec §5.1). Seven steps;
@@ -80,6 +81,10 @@ public:
     Q_INVOKABLE void back();
     Q_INVOKABLE void goTo(int step);
 
+    // Optional (live session only): makes the session type with the chosen
+    // keyboard now and whenever it changes (contracts §11.5).
+    void setLiveKeyboard(LiveKeyboard* live);
+
     QJsonObject choices() const; // contracts §1 Choices — never a secret
     QString planId() const { return m_planId; }
 
@@ -93,6 +98,7 @@ private:
 
     void setStep(int step);
     void clearNotices();
+    void applyLiveKeyboard();
     void clearPlan();
     void onProbed(const QJsonObject& result);
     void onPlanned(const QJsonObject& plan);
@@ -108,6 +114,8 @@ private:
     AccountChoice* m_account;
     BrainChoice* m_brain;
     InstallProgress* m_progress;
+    LiveKeyboard* m_liveKeyboard = nullptr;
+    QString m_liveApplied; // last keyboard handed to m_liveKeyboard
 
     int m_step = Welcome;
     Call m_call = Call::None;

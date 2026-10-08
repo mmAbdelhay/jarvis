@@ -21,6 +21,10 @@ class LocaleChoice : public QObject {
     Q_PROPERTY(QString language READ language WRITE setLanguage NOTIFY changed)
     Q_PROPERTY(QString keyboard READ keyboard WRITE setKeyboard NOTIFY changed)
     Q_PROPERTY(QString timezone READ timezone WRITE setTimezone NOTIFY changed)
+    // The layout the live session types with right now ("us" until
+    // LiveKeyboard applied the chosen one; contracts §11.5).
+    Q_PROPERTY(QString typingKeyboard READ typingKeyboard NOTIFY changed)
+    Q_PROPERTY(bool typingMatches READ typingMatches NOTIFY changed)
 
 public:
     LocaleChoice(const QString& systemLocale, const QByteArray& systemTimezone, QObject* parent = nullptr);
@@ -31,6 +35,10 @@ public:
     QString language() const { return m_language; }
     QString keyboard() const { return m_keyboard; }
     QString timezone() const { return m_timezone; }
+    QString typingKeyboard() const { return m_typingKeyboard; }
+    bool typingMatches() const { return m_typingKeyboard == m_keyboard; }
+    void setTypingKeyboard(const QString& layout);
+    Q_INVOKABLE QString keyboardName(const QString& layout) const;
     void setLanguage(const QString& locale);
     void setKeyboard(const QString& layout);
     void setTimezone(const QString& zone);
@@ -44,6 +52,7 @@ private:
     QStringList m_timezoneIds;
     QVariantList m_timezones;
     QString m_language, m_keyboard, m_timezone;
+    QString m_typingKeyboard = QStringLiteral("us");
     bool m_keyboardChosen = false;
     bool m_timezoneChosen = false;
 };

@@ -5,6 +5,7 @@
 
 #include "InstallRules.h"
 #include "InstallerBackend.h"
+#include "LiveKeyboard.h"
 #include "PowerActions.h"
 
 using namespace Qt::StringLiterals;
@@ -56,6 +57,29 @@ InstallerModel::InstallerModel(InstallerBackend* backend, PowerActions* power, c
     for (QObject* choice : {static_cast<QObject*>(m_locale), static_cast<QObject*>(m_account),
                             static_cast<QObject*>(m_brain), static_cast<QObject*>(m_progress)})
         connect(choice, SIGNAL(changed()), this, SIGNAL(stateChanged()));
+}
+
+void InstallerModel::setLiveKeyboard(LiveKeyboard* live)
+{
+    if (m_liveKeyboard)
+        disconnect(m_locale, &LocaleChoice::changed, this, &InstallerModel::applyLiveKeyboard);
+    m_liveKeyboard = live;
+    if (!live)
+        return;
+    connect(m_locale, &LocaleChoice::changed, this, &InstallerModel::applyLiveKeyboard);
+    applyLiveKeyboard();
+}
+
+void InstallerModel::applyLiveKeyboard()
+{
+    // LocaleChoice::changed also fires for language, time zone and our own
+    // setTypingKeyboard: only a new keyboard is applied.
+    const QString keyboard = m_locale->keyboard();
+    if (!m_liveKeyboard || keyboard == m_liveApplied)
+        return;
+    m_liveApplied = keyboard;
+    if (m_liveKeyboard->apply(keyboard))
+        m_locale->setTypingKeyboard(keyboard);
 }
 
 QStringList InstallerModel::stepLabels() const

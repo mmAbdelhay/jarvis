@@ -1,4 +1,5 @@
 #include <QCommandLineParser>
+#include <QDir>
 #include <QGuiApplication>
 #include <QLocale>
 #include <QQmlApplicationEngine>
@@ -12,6 +13,7 @@
 #include "FakePower.h"
 #include "InstallerModel.h"
 #include "JarvisFont.h"
+#include "LiveKeyboard.h"
 #include "OsRelease.h"
 #ifdef JARVIS_HAVE_DBUS
 #include "DBusInstallerBackend.h"
@@ -62,6 +64,17 @@ int main(int argc, char* argv[])
 
     auto* installer = new InstallerModel(backend, power, jarvis::ui::distroName(), QLocale::system().name(),
                                          QTimeZone::systemTimeZoneId(), &app);
+
+    // In the live labwc session the chosen keyboard applies at once, so the
+    // password is typed with the target's layout (contracts §11.5).
+    if (!parser.isSet(fake) && !qEnvironmentVariableIsEmpty("LABWC_PID")
+        && qEnvironmentVariable("JARVIS_INSTALLER_LIVE_KEYBOARD") != u"0"_s) {
+        QString config = qEnvironmentVariable("XDG_CONFIG_HOME");
+        if (config.isEmpty())
+            config = QDir::homePath() + u"/.config"_s;
+        installer->setLiveKeyboard(new LiveKeyboard(config, u"/etc/xdg/labwc/environment"_s,
+                                                    {u"labwc"_s, u"--reconfigure"_s}, installer));
+    }
 
     QQmlApplicationEngine engine;
     engine.setInitialProperties({{u"installer"_s, QVariant::fromValue(installer)}});

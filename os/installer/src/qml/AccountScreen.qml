@@ -67,6 +67,25 @@ ColumnLayout {
     }
 
     Text {
+        // The live session types with the chosen layout when it could be
+        // applied; otherwise warn before a password is set (contracts §11.5).
+        objectName: "keyboardNote"
+        readonly property LocaleChoice locale: root.installer.locale
+        readonly property string chosen: locale.keyboardName(locale.keyboard)
+        readonly property string typing: locale.keyboardName(locale.typingKeyboard)
+        Layout.fillWidth: true
+        text: locale.typingMatches
+            ? "You're typing with the " + chosen + " keyboard. Use the same layout to unlock the disk and sign in."
+            : "You're typing with the " + typing + " keyboard right now, but " + root.installer.distroName + " will use "
+              + chosen + ". Keys that differ between them will type different characters when you unlock the disk "
+              + "and sign in. Use only letters and digits that sit in the same place on both keyboards, or go back "
+              + "and choose " + typing + "."
+        textFormat: Text.PlainText
+        color: locale.typingMatches ? Theme.muted : Theme.warn
+        font.pixelSize: Theme.fontSmall
+        wrapMode: Text.Wrap
+    }
+    Text {
         objectName: "nameProblems"
         Layout.fillWidth: true
         visible: text.length > 0

@@ -28,6 +28,19 @@ TestCase {
             keyClick(ch)
     }
 
+    function test_keyboardNoteNamesTheTypingLayout() {
+        const c = make()
+        const note = findChild(c.s, "keyboardNote")
+        verify(note.visible)
+        verify(note.text.indexOf("English (US)") >= 0, note.text)
+        compare(note.color, Theme.muted)
+        c.m.locale.keyboard = "fr"
+        verify(note.text.indexOf("French") >= 0, note.text)
+        verify(note.text.indexOf("English (US)") >= 0, note.text)
+        verify(note.text.indexOf("Rafiq") >= 0, note.text)
+        compare(note.color, Theme.warn)
+    }
+
     function test_nameDerivesUsernameAndComputerName() {
         const c = make()
         compare(findChild(c.s, "screenTitle").text, "Your account")

@@ -67,6 +67,22 @@ private slots:
         locale.applyProbe(QJsonObject{{"geoTimezone", QJsonValue::Null}});
         QCOMPARE(locale.timezone(), u"Europe/London"_s);
     }
+
+    void typingKeyboardIsUsUntilTheLiveSessionFollows()
+    {
+        LocaleChoice locale(u"fr_FR"_s, "UTC");
+        QCOMPARE(locale.typingKeyboard(), u"us"_s);
+        QVERIFY(!locale.typingMatches());
+        QSignalSpy changed(&locale, &LocaleChoice::changed);
+        locale.setTypingKeyboard(u"fr"_s);
+        QCOMPARE(changed.size(), 1);
+        QVERIFY(locale.typingMatches());
+        locale.setTypingKeyboard(u"fr"_s);
+        QCOMPARE(changed.size(), 1);
+        QCOMPARE(locale.keyboardName(u"fr"_s), u"French"_s);
+        QCOMPARE(locale.keyboardName(u"us"_s), u"English (US)"_s);
+        QCOMPARE(locale.keyboardName(u"xx"_s), u"xx"_s);
+    }
 };
 
 QTEST_GUILESS_MAIN(TestLocaleChoice)
