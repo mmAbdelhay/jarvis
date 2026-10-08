@@ -12,3 +12,5 @@ take "$dist" "$1" 0644 usr/lib/systemd/system/jarvis-helper.service
 take "$dist" "$1" 0644 usr/share/polkit-1/actions/os.jarvis.helper.policy
 # Ours, not Plan B's (contracts §6 #19).
 install -D -m0644 "$(dirname "$0")/50-jarvis.rules" "$1/usr/share/polkit-1/rules.d/50-jarvis.rules"
+# Admin passwords are verified by the helper, outside the login session.
+install -D -m0644 "$(dirname "$0")/jarvis-admin.pam" "$1/etc/pam.d/jarvis-admin"

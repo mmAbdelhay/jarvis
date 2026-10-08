@@ -1,0 +1,13 @@
+Package: jarvis-apps
+Version: @VERSION@
+Architecture: amd64
+Maintainer: Muhammad AbdElHay <mmAbdelhay@users.noreply.github.com>
+Installed-Size: @INSTALLED_SIZE@
+Depends: jarvis-wl (= @VERSION@), xdg-utils, flatpak
+Section: x11
+Priority: optional
+Homepage: @HOME_URL@
+Description: @DISTRO_NAME@ app tools (MCP server)
+ Lists installed apps (APT and Flatpak), opens, focuses and closes apps and
+ windows, opens files and links with the default app and sets default apps,
+ for the Jarvis agent.

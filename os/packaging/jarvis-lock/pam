@@ -1,0 +1,10 @@
+# PAM service for jarvis-lock, the Rafiq lock screen (M3 contracts §3).
+# The user's own password through the same common-auth stack as the login
+# screen. jarvis-lock runs as the user, so pam_unix can only check that
+# user's password (via unix_chkpwd). A 2 s delay after each failure slows
+# guessing. The locker only authenticates: no session, no password change.
+auth     optional   pam_faildelay.so delay=2000000
+@include common-auth
+@include common-account
+password required   pam_deny.so
+session  required   pam_deny.so

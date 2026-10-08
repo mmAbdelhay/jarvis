@@ -43,7 +43,7 @@ permissions:
 env:
   # One version for every .deb and the ISO of this run (packages depend on
   # each other with (= version)); a tag os-vX.Y.Z builds X.Y.Z.
-  OS_VERSION: ${{ startsWith(github.ref, 'refs/tags/os-v') && github.ref_name || format('0.2.5~ci{0}', github.run_number) }}
+  OS_VERSION: ${{ startsWith(github.ref, 'refs/tags/os-v') && github.ref_name || format('0.3.0~ci{0}', github.run_number) }}
 
 jobs:
   checks:
@@ -70,6 +70,7 @@ jobs:
       - run: os/iso/tests/run.sh
       - run: python3 -m unittest discover -s os/models/tests -v
       - run: python3 -m unittest discover -s os/models/tools/tests -v
+      - run: python3 -m unittest discover -s os/packaging/lib/tests -v
       - run: python3 -m unittest discover -s os/iso/smoke/tests -t os/iso/smoke -v
       - run: node --test os/iso/smoke/assets/
       - name: shellcheck
@@ -92,7 +93,7 @@ jobs:
       - run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends dpkg-dev dbus-daemon
       - run: make -C os/go check test
       - run: make -C os/go dist
-      - run: os/packaging/build.sh --out out/debs jarvis-pkg jarvis-diag jarvis-helper jarvis-installer-backend jarvis-model-fetch
+      - run: os/packaging/build.sh --out out/debs jarvis-pkg jarvis-diag jarvis-helper jarvis-installer-backend jarvis-model-fetch jarvis-settings jarvis-apps jarvis-wl
       - run: sudo apt-get install -y -qq --no-install-recommends file gpg gpgv
       # Official MCP servers (contracts §7 #8: make -C os/go registry) as registry artifacts.
       - run: make -C os/go registry
@@ -183,7 +184,7 @@ jobs:
       - name: Install build dependencies
         run: |
           cat os/ui/deps/debian-build.txt os/shell/deps/debian-build.txt os/installer/deps/debian-build.txt \
-            os/greeter/deps/debian-build.txt | grep -v '^[[:space:]]*#' | awk 'NF' | sort -u > /tmp/build-deps
+            os/greeter/deps/debian-build.txt os/lock/deps/debian-build.txt os/idle/deps/debian-build.txt | grep -v '^[[:space:]]*#' | awk 'NF' | sort -u > /tmp/build-deps
           DEBIAN_FRONTEND=noninteractive xargs -a /tmp/build-deps \
             apt-get install -y -qq --no-install-recommends dpkg-dev xz-utils file python3 make
       - uses: pnpm/action-setup@v4
@@ -205,7 +206,9 @@ jobs:
           os/shell/ci/test.sh
       - run: os/installer/ci/test.sh
       - run: os/greeter/ci/test.sh
-      - run: os/packaging/build.sh --out out/debs jarvis-ui jarvis-shell jarvis-installer jarvis-greeter
+      - run: os/lock/ci/test.sh
+      - run: os/idle/ci/test.sh
+      - run: os/packaging/build.sh --out out/debs jarvis-ui jarvis-shell jarvis-installer jarvis-greeter jarvis-lock jarvis-idle
       - uses: actions/upload-artifact@v4
         with:
           name: debs-qt
@@ -253,8 +256,63 @@ jobs:
           path: ci-apt-key.tgz
           retention-days: 1
 
+  build-voice:
+    runs-on: ubuntu-24.04
+    container: debian:trixie
+    timeout-minutes: 60
+    steps:
+      - run: |
+          apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+            git ca-certificates curl dpkg-dev cmake g++ make file python3 xz-utils
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/jarvis-build
+          key: voice-${{ hashFiles('os/models/voice.json', 'os/packaging/jarvis-voice-engines/engines.env', 'os/packaging/jarvis-voice-models/models.list') }}
+      # M3 contracts §4: models from the voice registry; engines from pinned upstream.
+      - run: os/packaging/build.sh --out out/debs jarvis-voice-engines jarvis-voice-models
+      - run: python3 os/models/tools/voice.py scan-debs out/debs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: debs-voice
+          path: out/debs/*.deb
+          if-no-files-found: error
+          compression-level: 0
+
+  voice-roundtrip:
+    needs: build-voice
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: debs-voice
+          path: ${{ runner.temp }}/debs
+      # Piper speaks, Whisper transcribes, per voice and model (design §2.4).
+      - run: os/packaging/voice/roundtrip.sh --debs "$RUNNER_TEMP/debs"
+
+  session-test:
+    needs: build-qt
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: debs-qt
+          path: ${{ runner.temp }}/debs
+      # Headless labwc: Super+L / Super+Space, PAM unlock, idle lock (contracts §3).
+      - run: os/iso/session/run.sh --debs "$RUNNER_TEMP/debs" --out "$RUNNER_TEMP/session"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: session-test
+          path: ${{ runner.temp }}/session/
+          if-no-files-found: warn
+
   build-iso:
-    needs: [build-go, build-daemon, build-qt, build-distro]
+    needs: [build-go, build-daemon, build-qt, build-distro, build-voice]
     runs-on: ubuntu-24.04
     timeout-minutes: 100
     steps:
@@ -489,7 +547,7 @@ jobs:
 
   repo:
     if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/os-v'))
-    needs: [smoke-test, install-test, loop-tests, build-distro, agent-install, docker-image]
+    needs: [smoke-test, install-test, loop-tests, build-distro, agent-install, docker-image, session-test, voice-roundtrip]
     runs-on: ubuntu-24.04
     container: debian:trixie
     steps:
@@ -566,7 +624,7 @@ jobs:
 
   release:
     if: startsWith(github.ref, 'refs/tags/os-v')
-    needs: [smoke-test, install-test, loop-tests, repo, agent-install, docker-publish]
+    needs: [smoke-test, install-test, loop-tests, repo, agent-install, docker-publish, session-test, voice-roundtrip]
     runs-on: ubuntu-24.04
     permissions:
       contents: write

@@ -9,7 +9,8 @@ here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=../../branding/lib/brand.sh
 . "$here/../../branding/lib/brand.sh"
 brand_load
-max_mb=${ISO_MAX_MB:-1900}
+# M3 includes voice models and engines.
+max_mb=${ISO_MAX_MB:-2600}
 append=$(cat "$here/../bootappend")
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT

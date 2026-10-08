@@ -1,0 +1,12 @@
+Package: jarvis-voice-engines
+Version: @VERSION@
+Architecture: amd64
+Maintainer: Muhammad AbdElHay <mmAbdelhay@users.noreply.github.com>
+Installed-Size: @INSTALLED_SIZE@
+Depends: pipewire-bin | pulseaudio-utils | alsa-utils
+Section: sound
+Priority: optional
+Homepage: @HOME_URL@
+Description: Local speech engines for the Jarvis assistant
+ whisper.cpp (speech recognition) and Piper (speech synthesis), run by
+ jarvisd for push-to-talk and spoken replies. Audio never leaves the machine.

@@ -7,6 +7,8 @@
 //   jarvisctl wait   [--timeout S]
 //   jarvisctl prompt --text TEXT [--approve-all | --deny-all] [--timeout S]
 //   jarvisctl doctor [--approve-all | --deny-all] [--timeout S]
+//   jarvisctl snapshot --locked true|false [--timeout S]
+//   jarvisctl locked-confirm --text TEXT [--timeout S]
 //   (all take --run-dir DIR; default ~/.config/jarvis/run)
 //
 // Prints one JSON line per event. Exit status: 0 success, 1 the turn or the
@@ -23,7 +25,8 @@ const PROTOCOL_VERSION = 1;
 const PROBE_BUILD = "jarvisctl-probe";
 const DEFAULT_STAMP = "/usr/lib/jarvis/daemon/build-stamp.json";
 const USAGE =
-  "usage: jarvisctl wait|prompt|doctor [--text T] [--approve-all|--deny-all] [--timeout S]" +
+  "usage: jarvisctl wait|prompt|doctor|snapshot|locked-confirm [--text T] [--locked true|false]" +
+  " [--approve-all|--deny-all] [--timeout S]" +
   " [--run-dir D] [--build-stamp F]\n";
 
 export function encodeFrame(value) {
@@ -257,6 +260,66 @@ export function runDoctor(session, { decision, timeoutMs, log = () => {} }) {
   });
 }
 
+/** Resolves once a sys:snapshot push has `locked === locked`. jarvisd pushes
+ *  every 10 s and on change (M1 §6 #8), so a push missed while connecting is
+ *  followed by another. */
+export function waitSnapshot(session, { locked, timeoutMs, log = () => {} }) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve({ code: 2, reason: "timeout" }), timeoutMs);
+    session.onPush((channel, payload) => {
+      if (channel !== "sys:snapshot") return;
+      log({ type: "snapshot", locked: payload?.locked, voice: payload?.voice });
+      if (payload?.locked === locked) {
+        clearTimeout(timer);
+        resolve({ code: 0, reason: `locked=${locked}` });
+      }
+    });
+  });
+}
+
+/** M3 contracts §2: while locked, jarvisd refuses agent:confirm with code
+ *  "locked". Sends a prompt, approves its card, and passes only on that refusal. */
+export function runLockedConfirm(session, { text, timeoutMs, log = () => {} }) {
+  return new Promise((resolve) => {
+    let turnId = null;
+    const early = [];
+    const timer = setTimeout(() => resolve({ code: 2, reason: "timeout" }), timeoutMs);
+    const handle = (event) => {
+      if (event.type !== "card" || event.card.turnId !== turnId) return;
+      session.invoke("agent:confirm", [confirmation(event.card, "approve")]).then(
+        () => {
+          clearTimeout(timer);
+          resolve({ code: 1, reason: "confirm-accepted-while-locked" });
+        },
+        (error) => {
+          clearTimeout(timer);
+          resolve(
+            error.code === "locked"
+              ? { code: 0, reason: "locked" }
+              : { code: 1, reason: "error", error: `${error.code}: ${error.message}` },
+          );
+        },
+      );
+    };
+    session.onPush((channel, payload) => {
+      if (channel !== "agent:events") return;
+      log(payload);
+      if (turnId === null) early.push(payload);
+      else handle(payload);
+    });
+    session.invoke("agent:prompt", [{ text }]).then(
+      (result) => {
+        turnId = result.turnId;
+        for (const event of early.splice(0)) handle(event);
+      },
+      (error) => {
+        clearTimeout(timer);
+        resolve({ code: 1, reason: "error", error: error.message });
+      },
+    );
+  });
+}
+
 /** Retries until the daemon answers provider:list. */
 export async function waitForDaemon({ runDir, buildStamp, timeoutMs, log = () => {} }) {
   const deadline = Date.now() + timeoutMs;
@@ -287,6 +350,7 @@ export async function main(argv) {
       timeout: { type: "string", default: "300" },
       "run-dir": { type: "string" },
       "build-stamp": { type: "string" },
+      locked: { type: "string" },
     },
   });
   const command = positionals[0];
@@ -298,8 +362,14 @@ export async function main(argv) {
   if (values["deny-all"]) decision = "deny";
   const log = (event) => process.stdout.write(`${JSON.stringify(event)}\n`);
 
-  const known = command === "wait" || command === "prompt" || command === "doctor";
-  if (!known || !Number.isFinite(timeoutMs) || (command === "prompt" && !values.text)) {
+  const known = ["wait", "prompt", "doctor", "snapshot", "locked-confirm"].includes(command);
+  const lockedArg = values.locked === "true" ? true : values.locked === "false" ? false : undefined;
+  if (
+    !known ||
+    !Number.isFinite(timeoutMs) ||
+    ((command === "prompt" || command === "locked-confirm") && !values.text) ||
+    (command === "snapshot" && lockedArg === undefined)
+  ) {
     process.stderr.write(USAGE);
     return 64;
   }
@@ -318,7 +388,11 @@ export async function main(argv) {
   const result =
     command === "prompt"
       ? await runPrompt(session, { text: values.text, decision, timeoutMs, log })
-      : await runDoctor(session, { decision, timeoutMs, log });
+      : command === "doctor"
+        ? await runDoctor(session, { decision, timeoutMs, log })
+        : command === "snapshot"
+          ? await waitSnapshot(session, { locked: lockedArg, timeoutMs, log })
+          : await runLockedConfirm(session, { text: values.text, timeoutMs, log });
   log({ type: "result", ...result });
   session.close();
   return result.code;

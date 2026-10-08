@@ -158,6 +158,28 @@ def run_checks(run: Run, args: argparse.Namespace) -> dict | None:
         return out[-1500:]
 
     run.check("§11.3 provider unreachable + network down -> doctor -> full", doctor)
+    # --- Rafiq M3 (Plan P). The lock check is last: it leaves the screen locked.
+    run.check("M3: Wayland session reaches the user manager", lambda: sh(scenarios.user_env_has(uid, "WAYLAND_DISPLAY")))
+    run.check("M3: notification daemon runs", lambda: sh(scenarios.process_runs("mako")))
+    run.check("M3: no idle lock on live boots", lambda: sh(scenarios.NO_IDLE_ON_LIVE))
+    run.check("M3: voice engines and models installed", lambda: sh(scenarios.VOICE_INSTALLED))
+
+    def polkit_settings():
+        for action in scenarios.SETTINGS_ACTIONS:
+            sh(scenarios.polkit_grants(uid, action))
+        sh(scenarios.polkit_denies(uid, "os.jarvis.helper.admin"))
+
+    run.check("M3: polkit grants settings actions to jarvisd, never the admin action", polkit_settings)
+    run.check("M3: no network listener by default (phone bridge off)", lambda: sh(scenarios.NO_LAN_LISTENER))
+    run.check("M3: the live user has a password the lock screen can check", lambda: sh(scenarios.LIVE_PASSWORD_SET))
+
+    def lock_gates_approvals():
+        sh(scenarios.use_fake_provider(uid, "install-hello.json"), 150)
+        sh(scenarios.start_lock(uid), 30)
+        sh(ctl("snapshot --locked true --timeout 40"), 60)
+        return sh(ctl("locked-confirm --text 'install hello' --timeout 120"), 150)[-1500:]
+
+    run.check("M3: a locked session refuses approvals (contracts §2)", lock_gates_approvals)
     return ram_report
 
 

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Build the Jarvis OS live ISO (design §9). Runs as root in Debian trixie:
+# Build the Rafiq live ISO (design §9). Runs as root in Debian trixie:
 # in CI a privileged debian:trixie container, locally os/iso/dev/build-in-docker.sh.
 #
 #   build.sh --debs DIR --out DIR [--work DIR] [--cache DIR]
 #
-# The fourteen Jarvis .debs go into config/packages.chroot/, which live-build
+# The required Jarvis .debs go into config/packages.chroot/, which live-build
 # turns into a trusted local apt repository inside the chroot, so they are
 # installed with normal dependency resolution and the repo is removed after.
 set -euo pipefail
@@ -29,6 +29,7 @@ die() { echo "build.sh: $*" >&2; exit 1; }
 . "$here/../branding/lib/brand.sh"
 brand_load
 required="jarvisd jarvis-shell jarvis-pkg jarvis-diag jarvis-helper jarvis-ui jarvis-installer jarvis-greeter
+  jarvis-settings jarvis-apps jarvis-wl jarvis-lock jarvis-idle jarvis-voice-models jarvis-voice-engines
   jarvis-installer-backend jarvis-model-fetch jarvis-ollama jarvis-models-catalog jarvis-archive-keyring jarvis-branding jarvis-cli"
 for p in $required; do
   compgen -G "$debs/${p}_*.deb" >/dev/null || die "no $p .deb in $debs"

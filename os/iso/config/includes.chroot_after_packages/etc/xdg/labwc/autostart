@@ -9,6 +9,16 @@ if [ -d /run/live/medium ]; then
   printf '' | gnome-keyring-daemon --unlock --components=secrets >/dev/null 2>&1 &
 fi
 
+# Give user services and D-Bus activated tools access to this session (§5.14).
+systemctl --user import-environment WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP >/dev/null 2>&1 || true
+dbus-update-activation-environment --systemd WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP >/dev/null 2>&1 || true
+
+# Desktop notifications (M2.5 §7 #15).
+mako &
+
+# Handle session lock requests, idle, lid and suspend; off on live boots.
+. /usr/share/jarvis-idle/labwc/autostart
+
 # jarvis-shell and the loop that relaunches it (Plan C/E).
 . /usr/share/jarvis-shell/labwc/autostart
 

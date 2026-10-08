@@ -25,7 +25,7 @@ WAKE = b"fake-hey-jarvis"
 
 def fixture_registry() -> dict:
     return {"version": 1, "models": [
-        {"id": "whisper-base", "kind": "stt", "file": "whisper/ggml-base.bin", "sha256": sha(STT),
+        {"id": "whisper-base", "kind": "stt", "file": "stt/ggml-base.bin", "sha256": sha(STT),
          "license": "MIT", "redistributable": True,
          "source": "https://example.invalid/ggml-base.bin", "notes": ""},
         {"id": "oww-hey-jarvis", "kind": "wake", "file": "wake/hey_jarvis_v0.1.onnx", "sha256": sha(WAKE),
@@ -47,8 +47,12 @@ class RegistryFileTest(unittest.TestCase):
                         "at least one redistributable STT model (whisper.cpp, MIT)")
         tts = [m for m in models if m["kind"] == "tts"]
         self.assertTrue(tts, "at least one Piper voice")
-        self.assertTrue(all(m["redistributable"] for m in tts),
-                        "design §3.6: only Piper voices with redistributable licenses are listed")
+        by_id = {m["id"]: m for m in tts}
+        amy = by_id["piper-en_US-amy-medium"]
+        self.assertEqual((amy["license"], amy["redistributable"]), ("CC-BY-4.0", True))
+        self.assertFalse(by_id["piper-ar_JO-kareem-medium"]["redistributable"])
+        # Arabic is registered for config coverage, but may ship only once its
+        # redistribution license is verified; the scan gate enforces the flag.
         hey = [m for m in models if m["id"] == "oww-hey-jarvis"]
         self.assertEqual(len(hey), 1, "the hey-jarvis model is listed so the gate refuses it")
         self.assertEqual((hey[0]["kind"], hey[0]["redistributable"]), ("wake", False))
@@ -73,8 +77,8 @@ class ValidateTest(unittest.TestCase):
         self.assert_bad(lambda r: m0(r).update(extra=1), "keys")
         self.assert_bad(lambda r: m0(r).pop("notes"), "keys")
         self.assert_bad(lambda r: m0(r).update(kind="music"), "kind")
-        self.assert_bad(lambda r: m0(r).update(file="piper/ggml-base.bin"), "whisper/")
-        self.assert_bad(lambda r: m0(r).update(file="whisper/../x.bin"), "file")
+        self.assert_bad(lambda r: m0(r).update(file="tts/ggml-base.bin"), "stt/")
+        self.assert_bad(lambda r: m0(r).update(file="stt/../x.bin"), "file")
         self.assert_bad(lambda r: m0(r).update(sha256=None), "voice_pin.py")
         self.assert_bad(lambda r: m0(r).update(sha256="A" * 64), "sha256")
         self.assert_bad(lambda r: m0(r).update(source="http://example.invalid/x"), "https")
@@ -101,13 +105,13 @@ class ScanTest(unittest.TestCase):
         return p
 
     def test_scan_registered_model_passes(self):
-        self.put("usr/share/jarvis/voice/whisper/ggml-base.bin", STT)
-        self.put("usr/share/jarvis/voice/whisper/LICENSE", b"MIT")
+        self.put("usr/share/jarvis/voice/stt/ggml-base.bin", STT)
+        self.put("usr/share/jarvis/voice/stt/LICENSE", b"MIT")
         self.put("usr/share/doc/foo/README", b"text")
         self.assertEqual(voice.scan(self.tmp, self.reg), [])
 
     def test_scan_swapped_bytes_at_registered_path(self):
-        self.put("usr/share/jarvis/voice/whisper/ggml-base.bin", b"other bytes")
+        self.put("usr/share/jarvis/voice/stt/ggml-base.bin", b"other bytes")
         problems = voice.scan(self.tmp, self.reg)
         self.assertTrue(any("sha256" in p for p in problems), problems)
 
@@ -117,7 +121,7 @@ class ScanTest(unittest.TestCase):
         self.assertTrue(any("usr/lib/x/voice.tflite" in p and "not in" in p for p in problems), problems)
 
     def test_scan_unregistered_file_in_voice_dir(self):
-        self.put("usr/share/jarvis/voice/piper/mystery.bin", b"??")
+        self.put("usr/share/jarvis/voice/tts/mystery.bin", b"??")
         self.assertNotEqual(voice.scan(self.tmp, self.reg), [])
 
     def test_scan_non_redistributable_bytes_renamed(self):
@@ -145,16 +149,16 @@ class ScanTest(unittest.TestCase):
 
     def test_scan_piper_config_companion_is_metadata(self):
         reg = fixture_registry()
-        reg["models"].append({"id": "piper-x", "kind": "tts", "file": "piper/en_US-x-medium.onnx",
+        reg["models"].append({"id": "piper-x", "kind": "tts", "file": "tts/en_US-x-medium.onnx",
                               "sha256": sha(b"voice"), "license": "CC0-1.0", "redistributable": True,
                               "source": "https://example.invalid/x.onnx", "notes": ""})
-        self.put("usr/share/jarvis/voice/piper/en_US-x-medium.onnx", b"voice")
-        self.put("usr/share/jarvis/voice/piper/en_US-x-medium.onnx.json", b"{}")
-        self.put("usr/share/jarvis/voice/piper/MODEL_CARD", b"card")
+        self.put("usr/share/jarvis/voice/tts/en_US-x-medium.onnx", b"voice")
+        self.put("usr/share/jarvis/voice/tts/en_US-x-medium.onnx.json", b"{}")
+        self.put("usr/share/jarvis/voice/tts/MODEL_CARD", b"card")
         self.assertEqual(voice.scan(self.tmp, reg), [])
 
     def test_scan_ignores_symlinks_and_proc(self):
-        target = self.put("usr/share/jarvis/voice/whisper/ggml-base.bin", STT)
+        target = self.put("usr/share/jarvis/voice/stt/ggml-base.bin", STT)
         (self.tmp / "usr/lib").mkdir(parents=True, exist_ok=True)
         (self.tmp / "usr/lib/link.onnx").symlink_to(target)
         self.put("proc/1/fake.onnx", b"not a file in an image")
@@ -191,6 +195,41 @@ class CliTest(unittest.TestCase):
         bad = subprocess.run([sys.executable, str(tool), "scan", str(tree), "--registry", str(reg)], capture_output=True, text=True)
         self.assertEqual(bad.returncode, 1)
         self.assertIn("voice: opt/renamed.onnx", bad.stderr)
+
+
+class M3LayoutTest(unittest.TestCase):
+    """M3 contracts §5.13: models install under stt/ and tts/."""
+
+    def test_committed_files_use_the_m3_dirs(self):
+        for m in voice.load(None)["models"]:
+            self.assertTrue(m["file"].startswith(voice.SUBDIR[m["kind"]] + "/"), m)
+        self.assertEqual(voice.SUBDIR, {"stt": "stt", "tts": "tts", "wake": "wake"})
+
+    def test_m25_dirs_are_refused(self):
+        for old_file in ("whisper/ggml-base.bin", "piper/ggml-base.bin"):
+            with self.subTest(file=old_file):
+                reg = fixture_registry()
+                reg["models"][0]["file"] = old_file
+                self.assertTrue(any("stt" in p for p in voice.validate(reg)), voice.validate(reg))
+
+
+class VoiceConfigTest(unittest.TestCase):
+    """Every Piper voice ships with its committed runtime config."""
+
+    def test_every_tts_voice_has_its_piper_config(self):
+        for m in voice.load(None)["models"]:
+            if m["kind"] != "tts":
+                continue
+            cfg = voice.tts_config(m)
+            self.assertTrue(cfg.is_file(), f"{m['id']}: commit {cfg}")
+            data = json.loads(cfg.read_text())
+            self.assertIn("sample_rate", data["audio"], cfg)
+            lang = Path(m["file"]).name.split("_", 1)[0]
+            self.assertTrue(data["language"]["code"].startswith(lang), (cfg, data["language"]))
+
+    def test_tts_config_path(self):
+        m = {"file": "tts/en_US-amy-medium.onnx"}
+        self.assertEqual(voice.tts_config(m, Path("/c")), Path("/c/en_US-amy-medium.onnx.json"))
 
 
 if __name__ == "__main__":

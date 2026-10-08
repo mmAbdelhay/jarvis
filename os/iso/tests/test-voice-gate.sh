@@ -18,13 +18,13 @@ check "jarvis-cli is in the ISO package list" grep -qx jarvis-cli "$ISO_DIR/conf
 
 # A chroot with only registered, redistributable models passes; the
 # non-redistributable wake model, renamed and moved, fails and is named.
-c=$tmp/chroot; mkdir -p "$c/usr/share/jarvis/voice/whisper" "$c/opt/x"
-printf 'fake-stt-model' > "$c/usr/share/jarvis/voice/whisper/ggml-base.bin"
-stt=$(sha256sum "$c/usr/share/jarvis/voice/whisper/ggml-base.bin" | cut -d' ' -f1)
+c=$tmp/chroot; mkdir -p "$c/usr/share/jarvis/voice/stt" "$c/opt/x"
+printf 'fake-stt-model' > "$c/usr/share/jarvis/voice/stt/ggml-base.bin"
+stt=$(sha256sum "$c/usr/share/jarvis/voice/stt/ggml-base.bin" | cut -d' ' -f1)
 wake=$(printf 'fake-wake' | sha256sum | cut -d' ' -f1)
 cat > "$tmp/voice.json" <<EOF
 {"version": 1, "models": [
- {"id": "whisper-base", "kind": "stt", "file": "whisper/ggml-base.bin", "sha256": "$stt", "license": "MIT",
+ {"id": "whisper-base", "kind": "stt", "file": "stt/ggml-base.bin", "sha256": "$stt", "license": "MIT",
   "redistributable": true, "source": "https://example.invalid/ggml-base.bin", "notes": ""},
  {"id": "oww-hey-jarvis", "kind": "wake", "file": "wake/hey_jarvis_v0.1.onnx", "sha256": "$wake",
   "license": "CC-BY-NC-SA-4.0", "redistributable": false, "source": "https://example.invalid/hey.onnx", "notes": ""}]}

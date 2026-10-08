@@ -14,3 +14,12 @@ jarvis-models-catalog
 jarvis-archive-keyring
 jarvis-branding
 jarvis-cli
+
+# Rafiq M3 runtime packages.
+jarvis-settings
+jarvis-apps
+jarvis-wl
+jarvis-lock
+jarvis-idle
+jarvis-voice-models
+jarvis-voice-engines

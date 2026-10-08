@@ -42,15 +42,36 @@ import sys, xml.etree.ElementTree as ET
 kb = ET.parse(sys.argv[1]).getroot().find("keyboard")
 assert [b for b in kb.findall("keybind") if b.get("key") == "Super_L"][0].get("onRelease") == "yes"
 PY
+check "Super+L runs jarvis-lock directly (including live boots without jarvis-idle)" grep -Fxq $'W-l\tExecute\tjarvis-lock' <<<"$ours"
+check "Super+Space is push-to-talk" grep -Fxq $'W-space\tExecute\tjarvis-shell --voice' <<<"$ours"
+check "no key is bound twice" test -z "$(cut -f1 <<<"$ours" | sort | uniq -d)"
+auto=$inc/etc/xdg/labwc/autostart
+check "autostart hands the session to the user manager" \
+  grep -Fxq 'systemctl --user import-environment WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP >/dev/null 2>&1 || true' "$auto"
+check "autostart updates D-Bus activation env too" \
+  grep -Fxq 'dbus-update-activation-environment --systemd WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP >/dev/null 2>&1 || true' "$auto"
+check "autostart starts mako" grep -qx 'mako &' "$auto"
+check "autostart starts the idle lock" grep -Fxq '. /usr/share/jarvis-idle/labwc/autostart' "$auto"
+check "env imports, idle lock, then the shell" python3 - "$auto" <<'PYORDER'
+import sys
+t = open(sys.argv[1]).read()
+a = t.index("import-environment WAYLAND_DISPLAY")
+d = t.index("dbus-update-activation-environment --systemd")
+b = t.index(". /usr/share/jarvis-idle/labwc/autostart")
+c = t.index(". /usr/share/jarvis-shell/labwc/autostart")
+assert a < d < b < c, (a, d, b, c)
+PYORDER
 if [ -f "$c_labwc/rc.xml" ]; then
-  check "our binds equal Plan C's rc.xml" test "$ours" = "$(keybinds "$c_labwc/rc.xml")"
+  # Shell binds are a subset; the session also supplies the lock chord.
+  check "every jarvis-shell bind is ours, same action" \
+    test -z "$(comm -23 <(keybinds "$c_labwc/rc.xml") <(printf '%s\n' "$ours"))"
 else
   echo "SKIP: Plan C's os/shell/data/labwc/rc.xml not landed yet" >&2
 fi
 
 check "autostart parses" sh -n "$inc/etc/xdg/labwc/autostart"
 check "autostart sources C's relaunch loop" grep -qx '. /usr/share/jarvis-shell/labwc/autostart' "$inc/etc/xdg/labwc/autostart"
-check "environment is KEY=VALUE lines" bash -c "! grep -Ev '^(#.*|[A-Z_]+=.*|)$' '$inc/etc/xdg/labwc/environment'"
+check "environment is KEY=VALUE lines" bash -c "! grep -Ev '^(#.*|[A-Z_]+=.*)$|^$' '$inc/etc/xdg/labwc/environment'"
 check "Qt uses Wayland" grep -qx 'QT_QPA_PLATFORM=wayland' "$inc/etc/xdg/labwc/environment"
 # labwc applies this file with setenv(..., 1) after the /usr/local/bin/labwc
 # wrapper exported /etc/default/keyboard (contracts §11.5): any XKB line here
@@ -69,7 +90,7 @@ if [ -f "$c_labwc/autostart" ] && [ -f "$c_loop" ]; then
     "$tmp" "$tmp" "$tmp" > "$tmp/bin/jarvis-shell"
   chmod +x "$tmp/bin/jarvis-shell"
   XDG_RUNTIME_DIR="$tmp/xdg" WAYLAND_DISPLAY=wayland-test JARVIS_SHELL_BIN="$tmp/bin/jarvis-shell" \
-    JARVIS_LOOP_SLEEP=true timeout 10 sh "$c_loop" || true
+    JARVIS_LOOP_SLEEP=true perl -e 'alarm 10; exec @ARGV' sh "$c_loop" || true
   check "relaunch loop restarts the shell, then stops with the socket" test "$(wc -l < "$tmp/runs")" -eq 3
 else
   echo "SKIP: Plan C's os/shell/data/labwc/autostart or jarvis-shell-loop not landed yet" >&2
@@ -89,15 +110,18 @@ chmod +x "$tmp/keyboard/compositor"
 check_keyboard() {
   local result
   result=$(LABWC_KEYBOARD_FILE="$tmp/keyboard/default" LABWC_BIN="$tmp/keyboard/compositor" sh "$keyboard_session" --debug) || return
-  test "$result" = 'ara:azerty:--debug'
+  test "$result" = 'ara:azerty:--merge-config --debug'
 }
 check "labwc inherits layout and variant and forwards arguments" check_keyboard
 printf 'XKBLAYOUT="us"\nXKBVARIANT=""\n' > "$tmp/keyboard/default"
 check_keyboard_default() {
   local result
   result=$(LABWC_KEYBOARD_FILE="$tmp/keyboard/default" LABWC_BIN="$tmp/keyboard/compositor" XKB_DEFAULT_VARIANT=stale sh "$keyboard_session") || return
-  test "$result" = 'us::'
+  test "$result" = 'us::--merge-config'
 }
 check "empty variant clears inherited variant" check_keyboard_default
+
+check "labwc merges user config over ours" \
+  grep -Fq 'exec "${LABWC_BIN:-/usr/bin/labwc}" --merge-config "$@"' "$keyboard_session"
 
 finish

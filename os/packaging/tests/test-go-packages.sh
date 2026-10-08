@@ -40,7 +40,7 @@ rules=$(dpkg-deb --fsys-tarfile "$helper" | tar -xO ./usr/share/polkit-1/rules.d
 check "rule grants package actions" grep -q '"os.jarvis.helper.packages"' <<<"$rules"
 check "rule grants service actions" grep -q '"os.jarvis.helper.services"' <<<"$rules"
 check "rule is scoped to jarvis-admins" grep -q 'isInGroup("jarvis-admins")' <<<"$rules"
-check "rule does not grant the reserved admin action" bash -c '! grep -q os.jarvis.helper.admin' <<<"$rules"
+check "rule allows admin transport (helper PAM is the password gate)" grep -q 'action.id === "os.jarvis.helper.admin"' <<<"$rules"
 check "postinst creates jarvis-admins" grep -q 'jarvis-admins' <<<"$(deb_script "$helper" postinst)"
 check "helper is D-Bus activated, never enabled" bash -c "! grep -q 'systemctl enable' <<<\"\$(dpkg-deb --ctrl-tarfile '$helper' | tar -xO ./postinst)\""
 
