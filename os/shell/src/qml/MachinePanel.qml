@@ -95,7 +95,9 @@ Rectangle {
             warn: !root.shell.providerReachable
             detail: !root.shell.providerReachable && root.shell.providerError.length > 0
                     ? "Unreachable: " + root.shell.providerError
+                    : root.system.modelDownloadText.length > 0 ? root.system.modelDownloadText
                     : root.system.hasModel ? root.system.modelDetail : root.shell.provider.activeLabel
+            fraction: root.system.modelDownloadState === "downloading" ? root.system.modelDownloadPercent / 100 : -1
         }
         Fact {
             objectName: "panelMemory"

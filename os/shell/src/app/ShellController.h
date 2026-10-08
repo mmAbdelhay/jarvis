@@ -68,6 +68,7 @@ public:
     Q_INVOKABLE void openDoctor();
     Q_INVOKABLE void openTerminal();
     Q_INVOKABLE void requestComposerFocus();
+    Q_INVOKABLE void askForUpdates();
 
 signals:
     void viewChanged();

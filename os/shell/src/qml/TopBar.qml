@@ -1,6 +1,7 @@
 import QtQuick
 import Jarvis.UI
 import QtQuick.Layouts
+import QtQuick.Controls.Basic
 
 // 44 px top bar: logo, active model pill, reachability, clock.
 Rectangle {
@@ -44,6 +45,38 @@ Rectangle {
                     textFormat: Text.PlainText
                     color: Theme.muted
                     font.pixelSize: Theme.fontSmall
+                }
+            }
+        }
+
+        AbstractButton {
+            id: updatesBadge
+            objectName: "updatesBadge"
+            readonly property bool security: root.shell.system.updatesSecurity > 0
+            visible: root.shell.system.updatesCount > 0
+            text: root.shell.system.updatesText
+            implicitHeight: 26
+            implicitWidth: badgeRow.implicitWidth + 22
+            Accessible.name: "Updates available: " + text + ". Ask Jarvis to install them."
+            onClicked: root.shell.askForUpdates()
+            background: Rectangle {
+                radius: 13
+                color: "transparent"
+                border.color: updatesBadge.security ? Theme.approval : Theme.borderStrong
+            }
+            contentItem: Item {
+                RowLayout {
+                    id: badgeRow
+                    anchors.centerIn: parent
+                    spacing: 6
+                    Icon { path: Icons.download; color: updatesBadge.security ? Theme.approval : Theme.accent; strokeWidth: 2; size: 14 }
+                    Text {
+                        objectName: "updatesText"
+                        text: updatesBadge.text
+                        textFormat: Text.PlainText
+                        color: Theme.muted
+                        font.pixelSize: Theme.fontSmall
+                    }
                 }
             }
         }

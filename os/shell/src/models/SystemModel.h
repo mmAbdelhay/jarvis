@@ -25,6 +25,12 @@ class SystemModel : public QObject {
     Q_PROPERTY(bool hasModel READ hasModel NOTIFY changed)
     Q_PROPERTY(QString modelName READ modelName NOTIFY changed)
     Q_PROPERTY(QString modelDetail READ modelDetail NOTIFY changed)
+    Q_PROPERTY(int updatesCount READ updatesCount NOTIFY changed)
+    Q_PROPERTY(int updatesSecurity READ updatesSecurity NOTIFY changed)
+    Q_PROPERTY(QString updatesText READ updatesText NOTIFY changed)
+    Q_PROPERTY(QString modelDownloadState READ modelDownloadState NOTIFY changed)
+    Q_PROPERTY(int modelDownloadPercent READ modelDownloadPercent NOTIFY changed)
+    Q_PROPERTY(QString modelDownloadText READ modelDownloadText NOTIFY changed)
 
 public:
     explicit SystemModel(QObject* parent = nullptr);
@@ -43,6 +49,14 @@ public:
     bool hasModel() const { return !m_modelName.isEmpty(); }
     QString modelName() const { return m_modelName; }
     QString modelDetail() const;
+    // M2 contracts §2 sys:snapshot.updates and §5 sys:snapshot.model.download.
+    int updatesCount() const { return m_updatesCount; }
+    int updatesSecurity() const { return m_updatesSecurity; }
+    QString updatesText() const;
+    QString modelDownloadState() const { return m_downloadState; }
+    int modelDownloadPercent() const { return m_downloadPercent; }
+    QString modelDownloadText() const;
+    Q_INVOKABLE void applyUpdateCounts(int count, int security);
 
     Q_INVOKABLE void applySnapshot(const QJsonObject& snapshot);
     Q_INVOKABLE void reset();
@@ -62,4 +76,9 @@ private:
     QString m_modelName;
     bool m_modelLocal = false;
     bool m_modelTools = false;
+    void setUpdateCounts(int count, int security);
+    int m_updatesCount = 0;
+    int m_updatesSecurity = 0;
+    QString m_downloadState;
+    int m_downloadPercent = 0;
 };
