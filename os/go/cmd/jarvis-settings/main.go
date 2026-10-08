@@ -1,6 +1,8 @@
 // jarvis-settings is the built-in MCP server for desktop settings (Rafiq
 // M3 contracts §1), installed as /usr/lib/jarvis/mcp/jarvis-settings and
-// started by jarvisd as the session user.
+// started by jarvisd as the session user. It also serves the users and
+// disks tools (internal/admintools), which reach jarvis-helper's admin
+// methods for the password tier.
 //
 // `jarvis-settings restore` re-applies the remembered display scales; the
 // labwc session runs it once at login (labwc does not keep scales).
@@ -17,7 +19,9 @@ import (
 
 	"github.com/godbus/dbus/v5"
 
+	"github.com/mmAbdelhay/jarvis/os/go/internal/admintools"
 	"github.com/mmAbdelhay/jarvis/os/go/internal/execx"
+	"github.com/mmAbdelhay/jarvis/os/go/internal/helperclient"
 	"github.com/mmAbdelhay/jarvis/os/go/internal/mcp"
 	"github.com/mmAbdelhay/jarvis/os/go/internal/redact"
 	"github.com/mmAbdelhay/jarvis/os/go/internal/settings"
@@ -77,7 +81,9 @@ func main() {
 		}
 		return
 	}
-	srv := &mcp.Server{Name: "jarvis-settings", Version: version, Tools: settingstools.Tools(d), Redact: redact.String}
+	admin := admintools.Deps{Run: d.Sys.Run, Helper: helperclient.New()}
+	tools := append(settingstools.Tools(d), admintools.Tools(admin)...)
+	srv := &mcp.Server{Name: "jarvis-settings", Version: version, Tools: tools, Redact: redact.String}
 	if err := srv.Serve(ctx, os.Stdin, os.Stdout); err != nil {
 		log.Fatal(err)
 	}

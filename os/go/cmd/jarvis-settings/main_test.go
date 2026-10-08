@@ -25,7 +25,7 @@ func TestBinaryListsSettingsTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v: %s", err, out)
 	}
-	for _, want := range []string{`"name":"settings.get"`, `"name":"settings.keyboard"`, `"risk":"confirm"`, `"name":"jarvis.describe"`} {
+	for _, want := range []string{`"name":"settings.get"`, `"name":"settings.keyboard"`, `"risk":"confirm"`, `"name":"users.add"`, `"risk":"password"`, `"name":"jarvis.describe"`} {
 		if !strings.Contains(string(out), want) {
 			t.Errorf("output lacks %s:\n%s", want, out)
 		}
