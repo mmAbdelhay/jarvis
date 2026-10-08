@@ -104,5 +104,42 @@ class JarvisAptTest(unittest.TestCase):
         )
 
 
+class M3CommandsTest(unittest.TestCase):
+    def commands(self):
+        return [
+            scenarios.user_env_has(1000, "WAYLAND_DISPLAY"),
+            scenarios.process_runs("mako"),
+            scenarios.polkit_denies(1000, "os.jarvis.helper.admin"),
+            scenarios.start_lock(1000),
+            scenarios.NO_IDLE_ON_LIVE,
+            scenarios.VOICE_INSTALLED,
+            scenarios.NO_LAN_LISTENER,
+            scenarios.LIVE_PASSWORD_SET,
+        ]
+
+    def test_every_m3_command_fits_one_tty_line(self):
+        for command in self.commands():
+            self.assertNotIn("\n", command)
+            self.assertLess(len(command), MAX_LINE - 100, command)
+
+    def test_settings_actions_match_the_packaged_rule(self):
+        rule = (Path(__file__).resolve().parents[3] / "packaging/jarvis-settings/51-jarvis-settings.rules").read_text()
+        for action in scenarios.SETTINGS_ACTIONS:
+            self.assertIn(f'"{action}"', rule)
+
+    def test_bluetooth_group_is_required(self):
+        self.assertIn("bluetooth", scenarios.REQUIRED_GROUPS)
+
+    def test_lock_runs_as_the_user_on_the_session_display(self):
+        command = scenarios.start_lock(1000)
+        self.assertIn("runuser -u jarvis --", command)
+        self.assertIn("WAYLAND_DISPLAY=", command)
+        self.assertIn("jarvis-lock", command)
+
+    def test_polkit_denies_inverts_pkcheck(self):
+        self.assertTrue(scenarios.polkit_denies(1000, "x").startswith("pid="))
+        self.assertIn("! pkcheck --action-id x", scenarios.polkit_denies(1000, "x"))
+
+
 if __name__ == "__main__":
     unittest.main()

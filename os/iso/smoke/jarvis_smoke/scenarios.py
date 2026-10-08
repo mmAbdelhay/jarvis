@@ -7,7 +7,7 @@ USER = "jarvis"
 NODE = "/usr/lib/jarvis/node/bin/node"
 ASSETS = "/run/jarvis-smoke"
 CONNECTIVITY_CONF = "/etc/NetworkManager/conf.d/99-smoke-connectivity.conf"
-REQUIRED_GROUPS = ("systemd-journal", "netdev", "sudo", "jarvis-admins")
+REQUIRED_GROUPS = ("systemd-journal", "netdev", "sudo", "jarvis-admins", "bluetooth")
 DPKG_HELLO_INSTALLED = "dpkg -l hello | grep -Eq '^ii +hello '"
 # The root helper was started by D-Bus activation at least once this boot.
 HELPER_WAS_ACTIVATED = (
@@ -110,3 +110,52 @@ def wait_connectivity_full(seconds: int) -> str:
 # The live overlay only: nothing outlives the boot. Used when the ISO's
 # keyring cannot verify the public repo (throwaway key, or no Pages repo yet).
 DISABLE_JARVIS_APT = "mv /etc/apt/sources.list.d/jarvis.sources /run/jarvis.sources.disabled"
+
+
+# --- Rafiq M3 (Plan P) ---
+# Session-level actions 51-jarvis-settings.rules grants to jarvisd's tools
+# (the subset whose polkit policy exists on trixie).
+SETTINGS_ACTIONS = (
+    "org.freedesktop.NetworkManager.enable-disable-wifi",
+    "net.hadess.PowerProfiles.switch-profile",
+    "org.freedesktop.udisks2.filesystem-mount",
+)
+# Live boots never idle-lock (jarvis-idle's autostart fragment); the fragment is installed.
+NO_IDLE_ON_LIVE = (
+    f"test -f /usr/share/jarvis-idle/labwc/autostart && ! pgrep -u {USER} -f jarvis-idle-loop >/dev/null"
+)
+# Engines at /usr/lib/jarvis/voice/bin (contracts §5 #13), models + manifest.
+VOICE_INSTALLED = (
+    "test -x /usr/lib/jarvis/voice/bin/whisper-cli && test -x /usr/lib/jarvis/voice/bin/piper"
+    " && test -s /usr/share/jarvis/voice/manifest.json"
+)
+# Phone bridge is off by default (remote.enabled): nothing listens beyond loopback.
+NO_LAN_LISTENER = (
+    "! ss -Hltn | awk '{print $4}' | grep -Ev '^(127\\.[0-9.]+|\\[::1\\]|::1):[0-9]+$'"
+)
+# The lock screen checks the live user's password (live-config sets one).
+LIVE_PASSWORD_SET = f"[ \"$(passwd -S {USER} | awk '{{print $2}}')\" = P ]"
+
+
+def user_env_has(uid: int, name: str) -> str:
+    """labwc's autostart imported NAME into the user manager (Task 8)."""
+    return as_user(uid, "systemctl --user show-environment") + f" | grep -q '^{name}='"
+
+
+def process_runs(name: str) -> str:
+    return f"pgrep -u {USER} -x {name} >/dev/null"
+
+
+def polkit_denies(uid: int, action: str) -> str:
+    """Like polkit_grants, but the action must NOT be authorized for jarvisd."""
+    pid = as_user(uid, "systemctl --user show -p MainPID --value jarvisd.service")
+    return f'pid=$({pid}) && [ "$pid" -gt 0 ] && ! pkcheck --action-id {action} --process "$pid"'
+
+
+def start_lock(uid: int) -> str:
+    """Starts jarvis-lock in the live session, as Super+L does (contracts §3)."""
+    display = f"$(cd /run/user/{uid} && ls wayland-* | grep -v '[.]lock$' | head -n1)"
+    return (
+        as_user(uid, f"env WAYLAND_DISPLAY={display} QT_QPA_PLATFORM=wayland setsid -f jarvis-lock")
+        + f" && sleep 3 && pgrep -u {USER} -x jarvis-lock >/dev/null"
+    )

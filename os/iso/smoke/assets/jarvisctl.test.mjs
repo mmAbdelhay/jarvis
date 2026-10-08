@@ -11,7 +11,9 @@ import {
   FrameReader,
   openSession,
   runDoctor,
+  runLockedConfirm,
   runPrompt,
+  waitSnapshot,
 } from "./jarvisctl.mjs";
 
 const BUILD = "0.1.0+test.1";
@@ -21,7 +23,7 @@ function proof(secret, label, first, second) {
 }
 
 /** jarvisd's control server in miniature: the real handshake, scripted channels. */
-async function fakeDaemon({ handlers = {}, proofSecret } = {}) {
+async function fakeDaemon({ handlers = {}, proofSecret, onOpen } = {}) {
   const runDir = mkdtempSync(join(tmpdir(), "jctl-"));
   const secret = randomBytes(32);
   writeFileSync(join(runDir, "control.secret"), `${secret.toString("hex")}\n`);
@@ -56,11 +58,13 @@ async function fakeDaemon({ handlers = {}, proofSecret } = {}) {
             return;
           }
           send({ t: "welcome", v: 1, capabilities: [] });
+          if (onOpen) setTimeout(() => onOpen(push), 50);
           phase = "open";
         } else {
           const reply = (v) => send({ t: "res", id: message.id, v });
+          const fail = (code, text) => send({ t: "err", id: message.id, code, text });
           const handler = handlers[message.ch];
-          if (handler) handler(message.a, { reply, push });
+          if (handler) handler(message.a, { reply, push, fail });
           else reply(null);
         }
       }
@@ -228,6 +232,60 @@ test("doctor approves its null-turn card and succeeds when the doctor fixes it",
     confirmed.map((c) => c.cardId),
     ["d1"],
   );
+  session.close();
+  daemon.close();
+});
+
+test("snapshot waits for the asked locked state", async () => {
+  const daemon = await fakeDaemon({
+    onOpen: (push) => {
+      push("sys:snapshot", { locked: false });
+      setTimeout(() => push("sys:snapshot", { locked: true }), 50);
+    },
+  });
+  const session = await connectDaemon({ runDir: daemon.runDir, buildStamp: "/nonexistent" });
+  const result = await waitSnapshot(session, { locked: true, timeoutMs: 3000 });
+  assert.equal(result.code, 0);
+  session.close();
+  daemon.close();
+});
+
+test("snapshot times out when the state never comes", async () => {
+  const daemon = await fakeDaemon({ onOpen: (push) => push("sys:snapshot", { locked: false }) });
+  const session = await connectDaemon({ runDir: daemon.runDir, buildStamp: "/nonexistent" });
+  const result = await waitSnapshot(session, { locked: true, timeoutMs: 500 });
+  assert.equal(result.code, 2);
+  session.close();
+  daemon.close();
+});
+
+function lockedScript(confirmResult) {
+  return {
+    "agent:prompt": (args, { reply, push }) => {
+      push("agent:events", { type: "card", card: card("c1", "t1") });
+      reply({ turnId: "t1" });
+    },
+    "agent:confirm": (_args, { reply, fail }) => {
+      if (confirmResult === "locked") fail("locked", "Unlock the screen to approve");
+      else reply(null);
+    },
+  };
+}
+
+test("locked-confirm passes only when jarvisd refuses with code locked", async () => {
+  const daemon = await fakeDaemon({ handlers: lockedScript("locked") });
+  const session = await connectDaemon({ runDir: daemon.runDir, buildStamp: "/nonexistent" });
+  const result = await runLockedConfirm(session, { text: "install hello", timeoutMs: 3000 });
+  assert.deepEqual([result.code, result.reason], [0, "locked"]);
+  session.close();
+  daemon.close();
+});
+
+test("locked-confirm fails when an approval goes through while locked", async () => {
+  const daemon = await fakeDaemon({ handlers: lockedScript("accepted") });
+  const session = await connectDaemon({ runDir: daemon.runDir, buildStamp: "/nonexistent" });
+  const result = await runLockedConfirm(session, { text: "install hello", timeoutMs: 3000 });
+  assert.deepEqual([result.code, result.reason], [1, "confirm-accepted-while-locked"]);
   session.close();
   daemon.close();
 });
