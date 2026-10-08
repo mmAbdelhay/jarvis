@@ -1,0 +1,6 @@
+# Build dependencies of jarvis-idle on Debian 13 (trixie). One package per line.
+cmake
+ninja-build
+g++
+pkgconf
+qt6-base-dev

@@ -31,6 +31,11 @@ class SystemModel : public QObject {
     Q_PROPERTY(QString modelDownloadState READ modelDownloadState NOTIFY changed)
     Q_PROPERTY(int modelDownloadPercent READ modelDownloadPercent NOTIFY changed)
     Q_PROPERTY(QString modelDownloadText READ modelDownloadText NOTIFY changed)
+    // Rafiq M3 contracts §2: sys:snapshot.locked and .voice (absent from older daemons).
+    Q_PROPERTY(bool locked READ locked NOTIFY changed)
+    Q_PROPERTY(bool voiceAvailable READ voiceAvailable NOTIFY changed)
+    Q_PROPERTY(QString voiceStt READ voiceStt NOTIFY changed)
+    Q_PROPERTY(QString voiceTts READ voiceTts NOTIFY changed)
 
 public:
     explicit SystemModel(QObject* parent = nullptr);
@@ -57,6 +62,10 @@ public:
     int modelDownloadPercent() const { return m_downloadPercent; }
     QString modelDownloadText() const;
     Q_INVOKABLE void applyUpdateCounts(int count, int security);
+    bool locked() const { return m_locked; }
+    bool voiceAvailable() const { return m_voiceAvailable; }
+    QString voiceStt() const { return m_voiceStt; }
+    QString voiceTts() const { return m_voiceTts; }
 
     Q_INVOKABLE void applySnapshot(const QJsonObject& snapshot);
     Q_INVOKABLE void reset();
@@ -81,4 +90,7 @@ private:
     int m_updatesSecurity = 0;
     QString m_downloadState;
     int m_downloadPercent = 0;
+    bool m_locked = false;
+    bool m_voiceAvailable = false;
+    QString m_voiceStt, m_voiceTts;
 };

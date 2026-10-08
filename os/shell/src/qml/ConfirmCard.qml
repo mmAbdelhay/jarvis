@@ -108,6 +108,8 @@ Rectangle {
                 required property string sourceLabel
                 required property bool ticked
                 required property var secretFields
+                required property string changeFrom
+                required property string changeTo
 
                 width: itemList.width
                 spacing: 0
@@ -175,12 +177,20 @@ Rectangle {
                         Text {
                             objectName: "detail_" + row.itemId
                             Layout.fillWidth: true
-                            visible: text.length > 0
+                            visible: text.length > 0 && row.changeFrom === ""
                             text: row.detail
                             textFormat: Text.PlainText
                             color: Theme.approvalMuted
                             font.pixelSize: Theme.fontSmall
                             wrapMode: Text.Wrap
+                        }
+                        ChangeValue {
+                            objectName: "change_" + row.itemId
+                            visible: row.changeFrom !== ""
+                            from: row.changeFrom
+                            to: row.changeTo
+                            fromColor: Theme.approvalMuted
+                            toColor: Theme.text
                         }
                     }
 
@@ -230,8 +240,10 @@ Rectangle {
             Layout.bottomMargin: 14
             spacing: 12
             Text {
+                objectName: "cardHint"
                 Layout.fillWidth: true
-                text: root.card.exclusive ? "Pick one network." : "Untick anything you don't want. No answer in 5 minutes counts as Deny."
+                text: root.card.locked ? "The screen is locked. Unlock it to answer."
+                    : root.card.exclusive ? "Pick one network." : "Untick anything you don't want. No answer in 5 minutes counts as Deny."
                 color: Theme.approvalMuted
                 font.pixelSize: Theme.fontSmall
                 wrapMode: Text.Wrap
@@ -241,7 +253,7 @@ Rectangle {
                 objectName: "denyButton"
                 variant: "quiet"
                 text: root.card.exclusive ? "Cancel" : "Deny"
-                enabled: root.card.active
+                enabled: root.card.active && !root.card.locked
                 onClicked: root.decided(false)
             }
             ActionButton {

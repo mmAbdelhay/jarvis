@@ -1,0 +1,3 @@
+# Runtime packages of jarvis-idle (shared-library deps come from dh_shlibdeps).
+jarvis-lock
+systemd

@@ -1,0 +1,5 @@
+#%PAM-1.0
+# jarvis-lock: unlock the Rafiq session with the user's own password
+# (Rafiq M3 contracts §3). Same stack as a console login check.
+@include common-auth
+@include common-account

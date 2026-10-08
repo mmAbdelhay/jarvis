@@ -1,4 +1,5 @@
 #include "models/CardModel.h"
+#include "models/SettingChange.h"
 
 #include <QDateTime>
 #include <QJsonArray>
@@ -55,6 +56,11 @@ QVariant CardModel::data(const QModelIndex& index, int role) const
     case RiskRole: return item.risk;
     case TickedRole: return item.ticked;
     case SecretFieldsRole: return item.secretFields;
+    case ChangeFromRole:
+    case ChangeToRole: {
+        const auto change = settingChange(item.tool, item.detail);
+        return change ? (role == ChangeFromRole ? change->first : change->second) : QString();
+    }
     default: return {};
     }
 }
@@ -63,7 +69,7 @@ QHash<int, QByteArray> CardModel::roleNames() const
 {
     return {{ItemIdRole, "itemId"}, {ToolRole, "tool"}, {TitleRole, "title"}, {DetailRole, "detail"},
             {SourceRole, "source"}, {SourceLabelRole, "sourceLabel"}, {RiskRole, "risk"},
-            {TickedRole, "ticked"}, {SecretFieldsRole, "secretFields"}};
+            {TickedRole, "ticked"}, {SecretFieldsRole, "secretFields"}, {ChangeFromRole, "changeFrom"}, {ChangeToRole, "changeTo"}};
 }
 
 int CardModel::tickedCount() const
@@ -97,7 +103,26 @@ QString CardModel::approveLabel() const
 
 bool CardModel::canApprove() const
 {
-    return active() && !expired() && tickedCount() > 0;
+    return active() && !expired() && !m_locked && tickedCount() > 0;
+}
+
+void CardModel::setLocked(bool locked)
+{
+    if (locked == m_locked)
+        return;
+    m_locked = locked;
+    emit changed();
+}
+
+bool CardModel::voiceAnswerable() const
+{
+    // Design §3.2 ruling: voice may answer only a plain confirm card on an
+    // unlocked screen. Secrets and password-tier items need hands and eyes.
+    if (!active() || expired() || m_locked || m_exclusive)
+        return false;
+    return std::none_of(m_items.cbegin(), m_items.cend(), [](const Item& i) {
+        return i.risk == u"password" || !i.secretFields.isEmpty();
+    });
 }
 
 QString CardModel::countdownText() const
@@ -156,6 +181,7 @@ bool CardModel::load(const QJsonObject& card)
     m_turnId = card.value("turnId").toString(); // null → ""
     m_expiresAt = qint64(card.value("expiresAt").toDouble());
     m_exclusive = exclusive;
+    m_source = card;
     m_secondsLeft = -1;
     endResetModel();
     m_timer.start();
@@ -269,6 +295,7 @@ void CardModel::close()
     m_expiresAt = 0;
     m_secondsLeft = -1;
     m_exclusive = false;
+    m_source = QJsonObject();
     endResetModel();
     emit changed();
 }

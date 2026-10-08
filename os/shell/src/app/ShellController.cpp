@@ -67,6 +67,7 @@ ShellController::ShellController(ControlClient* client, QObject* parent)
     connect(m_providers, &ProviderListModel::saved, this, &ShellController::refreshProviders);
     connect(m_provider, &ProviderModel::activeChanged, this, &ShellController::bannerChanged);
     connect(m_system, &SystemModel::changed, this, &ShellController::providerStatusChanged);
+    connect(m_system, &SystemModel::changed, this, &ShellController::applyLockState);
 
     connect(m_doctor, &DoctorModel::startRequested, this, [this] {
         request(u"doctor:start"_s, QJsonArray{}, [this](const ControlResult& r) {
@@ -339,16 +340,39 @@ void ShellController::escape()
     emit dismissRequested();
 }
 
+void ShellController::applyLockState()
+{
+    const bool locked = m_system->locked();
+    m_chatCard->setLocked(locked);
+    m_doctorCard->setLocked(locked);
+    if (locked == m_locked)
+        return;
+    m_locked = locked;
+    emit lockedChanged();
+}
+
 void ShellController::decide(CardModel* card, bool approve)
 {
     if (!card || !card->active())
         return; // already answered: a double click sends nothing
+    if (m_locked) {
+        // M3 contracts §2: jarvisd refuses agent:confirm while locked. Keep the card.
+        m_conversation->addNotice(u"The screen is locked. Unlock it to answer this card."_s);
+        return;
+    }
+    const QJsonObject source = card->source();
     const QJsonObject payload = card->decision(approve);
     card->close();
-    request(u"agent:confirm"_s, QJsonArray{payload}, [this](const ControlResult& r) {
-        if (!r.ok)
-            m_conversation->addNotice(
-                u"Couldn't send your answer to Jarvis (%1). An unanswered card counts as Deny."_s.arg(r.text));
+    QPointer<CardModel> target(card);
+    request(u"agent:confirm"_s, QJsonArray{payload}, [this, target, source](const ControlResult& r) {
+        if (r.ok)
+            return;
+        if (r.code == u"locked" && target && !target->active() && target->load(source)) {
+            m_conversation->addNotice(u"The screen is locked. Unlock it to answer this card."_s);
+            return;
+        }
+        m_conversation->addNotice(
+            u"Couldn't send your answer to Jarvis (%1). An unanswered card counts as Deny."_s.arg(r.text));
     });
 }
 

@@ -260,6 +260,25 @@ void ControlClient::invoke(const QString& channel, const QJsonArray& args, Contr
     send({{"t", "req"}, {"id", qint64(id)}, {"ch", channel}, {"a", args}});
 }
 
+void ControlClient::upload(const QString& channel, const QJsonArray& args, const QByteArray& bytes, ControlReply reply)
+{
+    const auto failSoon = [this, &reply](const QString& code, const QString& text) {
+        if (reply)
+            QTimer::singleShot(0, this, [reply, code, text] { reply({false, {}, code, text}); });
+    };
+    if (bytes.isEmpty() || bytes.size() > kMaxBlobBytes)
+        return failSoon(u"bad-request"_s, u"Upload size is out of range"_s);
+    if (m_phase != Phase::Open || !m_socket)
+        return failSoon(u"closed"_s, u"Not connected to jarvisd"_s);
+    const qsizetype chunks = (bytes.size() + kMaxBlobChunkBytes - 1) / kMaxBlobChunkBytes;
+    const quint64 id = m_nextId++;
+    m_pending.insert(id, std::move(reply));
+    send({{"t", "blob"}, {"id", qint64(id)}, {"ch", channel}, {"a", args},
+          {"bytes", qint64(bytes.size())}, {"chunks", qint64(chunks)}});
+    for (qsizetype offset = 0; offset < bytes.size() && m_socket; offset += kMaxBlobChunkBytes)
+        m_socket->write(encodeBinaryFrame(bytes.mid(offset, kMaxBlobChunkBytes)));
+}
+
 void ControlClient::failPending(const QString& text)
 {
     const auto pending = std::exchange(m_pending, {});

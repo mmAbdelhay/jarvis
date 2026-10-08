@@ -11,6 +11,13 @@ double fraction(double used, double total)
 {
     return total > 0 ? std::clamp(used / total, 0.0, 1.0) : 0.0;
 }
+
+QString voicePart(const QJsonValue& value)
+{
+    if (value.isString())
+        return value.toString().left(80);
+    return value.toBool(false) ? u"ready"_s : QString();
+}
 } // namespace
 
 SystemModel::SystemModel(QObject* parent)
@@ -116,6 +123,11 @@ void SystemModel::applySnapshot(const QJsonObject& snapshot)
     const QJsonObject download = model.value("download").toObject();
     m_downloadState = download.value("state").toString();
     m_downloadPercent = std::clamp(int(download.value("percent").toDouble()), 0, 100);
+    m_locked = snapshot.value("locked").toBool(false);
+    const QJsonObject voice = snapshot.value("voice").toObject();
+    m_voiceAvailable = voice.value("available").toBool(false);
+    m_voiceStt = voicePart(voice.value("stt"));
+    m_voiceTts = voicePart(voice.value("tts"));
     emit changed();
 }
 
@@ -131,5 +143,9 @@ void SystemModel::reset()
     m_updatesCount = m_updatesSecurity = 0;
     m_downloadState.clear();
     m_downloadPercent = 0;
+    m_locked = false;
+    m_voiceAvailable = false;
+    m_voiceStt.clear();
+    m_voiceTts.clear();
     emit changed();
 }
