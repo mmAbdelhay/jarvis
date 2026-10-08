@@ -77,7 +77,7 @@ def fetch(m: dict, cache: Path, mirror: Path | None) -> Path:
         if not src.exists():
             src.parent.mkdir(parents=True, exist_ok=True)
             part = src.with_name(name + ".part")
-            req = urllib.request.Request(m["source"], headers={"User-Agent": "rafiq-voice-stage/1"})
+            req = urllib.request.Request(m["source"], headers={"User-Agent": "jarvis-voice-stage/1"})
             with urllib.request.urlopen(req, timeout=600) as r, part.open("wb") as f:
                 shutil.copyfileobj(r, f, 1 << 20)
             part.rename(src)
