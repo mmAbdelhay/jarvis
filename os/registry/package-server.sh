@@ -27,6 +27,9 @@ case $runtime in
 esac
 [ -n "$out" ] || die "--out is required"
 [ -d "$from" ] || die "no directory $from"
+# Canonicalize: find -P does not follow a symlinked start point, which would
+# silently skip every check below while tar/cd still follow it.
+from=$(cd "$from" && pwd -P)
 odd=$(find "$from" -mindepth 1 ! -type f ! -type d -print)
 [ -z "$odd" ] || die "only regular files and directories may be packaged: $odd"
 [ -f "$from/$entry" ] || die "$from has no $entry (the $runtime entry point)"
