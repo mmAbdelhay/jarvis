@@ -118,6 +118,10 @@ export async function writeOsRemoteSection(
   if (existing !== undefined && existing !== null && !isRecord(existing)) {
     throw new Error("Config `remote` must be an object");
   }
+  // An empty `remote:` (null) cannot take setIn; give it an empty map first.
+  if (!document.has("remote") || existing === undefined || existing === null) {
+    document.set("remote", document.createNode({}));
+  }
   document.setIn(["remote", "enabled"], patch.enabled);
   if (patch.bindAddress !== undefined) document.setIn(["remote", "bindAddress"], patch.bindAddress);
   if (patch.port !== undefined) document.setIn(["remote", "port"], patch.port);

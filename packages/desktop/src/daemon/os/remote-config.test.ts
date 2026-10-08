@@ -69,6 +69,18 @@ describe("jarvis.yaml remote: for the OS bridge", () => {
     });
   });
 
+  it.each(["remote:\n", "remote: null\n", "os: {}\nremote: ~\n"])(
+    "writes into an empty remote: key (%j)",
+    async (initial) => {
+      const file = io(initial);
+      await writeOsRemoteSection("/c.yaml", { enabled: true, port: 7800 }, file);
+      await expect(readOsRemoteConfig("/c.yaml", file)).resolves.toMatchObject({
+        enabled: true,
+        port: 7800,
+      });
+    },
+  );
+
   it("maps to a bridge config with no sidecar proxy and no web client", () => {
     expect(toBridgeConfig({ ...DEFAULT_OS_REMOTE, enabled: true })).toEqual({
       enabled: true,
