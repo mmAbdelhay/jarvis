@@ -60,7 +60,7 @@ if command -v gpg >/dev/null; then
   rm -f "$tmp/keys/FINGERPRINT"
   check "release refuses when no FINGERPRINT is committed" bash -c "! '$scripts/release-guard.sh' '$img/chroot' '$img/binary' --release '$tmp/keys' 2>/dev/null"
 else
-  fail "release keyring guard: gpg missing (run through os/packaging/dev/trixie.sh with TRIXIE_PACKAGES=gpg)"
+  fail "release keyring guard: gpg missing (run through os/packaging/dev/trixie.sh with TRIXIE_PACKAGES="gpg gpg-agent")"
 fi
 
 # --- check-iso on a non-bootable ISO lists every problem ---

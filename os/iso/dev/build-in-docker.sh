@@ -11,7 +11,7 @@ if [ -z "$debs" ]; then
   debs=$out/debs
   mkdir -p "$debs"
   TRIXIE_DOCKER_ARGS="-v $debs:/out-debs" \
-  TRIXIE_PACKAGES="gpg zstd librsvg2-bin grub-common fonts-ibm-plex" \
+  TRIXIE_PACKAGES="gpg gpg-agent zstd librsvg2-bin grub-common fonts-ibm-plex" \
     "$repo/os/packaging/dev/trixie.sh" '
       os/iso/dev/stub-debs.sh /out-debs &&
       mkdir -p /tmp/k && JARVIS_ARCHIVE_PUBKEY=/tmp/k/pubkey.asc &&
