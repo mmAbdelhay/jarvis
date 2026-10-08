@@ -74,6 +74,7 @@ import {
   type SysSnapshot,
   type ProbeResult,
   type ProviderDraft,
+  type RecipeEngine,
   runTurn,
   type ToolRegistry,
   TRUSTED_MCP_SERVERS,
@@ -113,6 +114,8 @@ export class OsAgentError extends Error {
 }
 
 export type OsAgentDeps = {
+  /** M4 §4: runs recipes locally with one card item per step. */
+  recipes?: RecipeEngine;
   defaultLanguage?: Lang;
   push(channel: string, payload: unknown): void;
   configPath: string;
@@ -703,6 +706,7 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
           failover?.beginTurn();
           const result = await runTurn(
             {
+              ...(deps.recipes === undefined ? {} : { recipes: deps.recipes }),
               provider,
               registry: tools,
               gate,

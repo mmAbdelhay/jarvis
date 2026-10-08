@@ -84,3 +84,12 @@ export function lockStatePath(env: { XDG_RUNTIME_DIR?: string | undefined }): st
 
 /** M2 contracts §4 + M4 §1: the model catalog; its role "backup" entry is the backup brain. */
 export const MODEL_CATALOG_PATH = "/usr/share/jarvis/models/catalog.json";
+
+/** M4 §4: package jarvis-recipes. JARVIS_RECIPES_DIR overrides it for tests. */
+export const RECIPES_DIR = "/usr/share/jarvis/recipes";
+
+export function recipesDirFrom(env: { JARVIS_RECIPES_DIR?: string | undefined }): string {
+  return env.JARVIS_RECIPES_DIR !== undefined && env.JARVIS_RECIPES_DIR !== ""
+    ? env.JARVIS_RECIPES_DIR
+    : RECIPES_DIR;
+}

@@ -23,7 +23,13 @@ import { mkdtemp, rm, mkdir, readdir, readFile, rename, writeFile } from "node:f
 import { homedir, tmpdir, totalmem } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { langFromLocale, type FakeTurn, parseFakeScript, TRUSTED_MCP_SERVERS } from "@jarvis/core";
+import {
+  createRecipeEngine,
+  langFromLocale,
+  type FakeTurn,
+  parseFakeScript,
+  TRUSTED_MCP_SERVERS,
+} from "@jarvis/core";
 import {
   auditLogPath,
   createAuditLog,
@@ -54,6 +60,7 @@ import {
   redirectConsole,
   scrubSecrets,
 } from "../log-file.js";
+import { loadRecipeFiles, parseOsReleaseId } from "./recipe-files.js";
 import { createOsAgent } from "./agent-service.js";
 import { readBackupTag } from "./backup-model.js";
 import { createEnvKeyStore, takeEnvProviderKeys } from "./provider-keys.js";
@@ -88,6 +95,7 @@ import {
   mcpDirFrom,
   memoryDbPath,
   osConfigPath,
+  recipesDirFrom,
   readOsBuildId,
   registryIndexPath,
   toolIndexPath,
@@ -327,7 +335,25 @@ async function main(argv: readonly string[]): Promise<void> {
   );
 
   let voice: ReturnType<typeof createOsVoice> | undefined;
+  const recipes = createRecipeEngine({
+    load: () =>
+      loadRecipeFiles(
+        recipesDirFrom(env),
+        {
+          listDir: (dir) => readdir(dir),
+          readFile: (path) => readFile(path, "utf8"),
+        },
+        info,
+      ),
+    machine: async () => ({
+      osId: await readFile("/etc/os-release", "utf8").then(parseOsReleaseId, () => null),
+      memTotalBytes: totalmem(),
+    }),
+    hostServers: new Set(TRUSTED_MCP_SERVERS),
+    log: info,
+  });
   const agent = createOsAgent({
+    ...(readonlyProfile ? {} : { recipes }),
     defaultLanguage: langFromLocale({ LANG: process.env["LANG"] }),
     // The Docker image (read-only profile) ships no model and no catalog.
     ...(readonlyProfile

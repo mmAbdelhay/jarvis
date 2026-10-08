@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  RECIPES_DIR,
+  recipesDirFrom,
   buildStampCandidates,
   lockStatePath,
   DEFAULT_MCP_DIR,
@@ -71,5 +73,14 @@ describe("lockStatePath", () => {
     );
     expect(lockStatePath({})).toBeUndefined();
     expect(lockStatePath({ XDG_RUNTIME_DIR: "relative" })).toBeUndefined();
+  });
+});
+
+describe("recipes dir (M4 §4)", () => {
+  it("is /usr/share/jarvis/recipes unless JARVIS_RECIPES_DIR says otherwise", () => {
+    expect(recipesDirFrom({})).toBe(RECIPES_DIR);
+    expect(RECIPES_DIR).toBe("/usr/share/jarvis/recipes");
+    expect(recipesDirFrom({ JARVIS_RECIPES_DIR: "/tmp/r" })).toBe("/tmp/r");
+    expect(recipesDirFrom({ JARVIS_RECIPES_DIR: "" })).toBe(RECIPES_DIR);
   });
 });
