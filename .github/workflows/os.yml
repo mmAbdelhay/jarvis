@@ -94,7 +94,8 @@ jobs:
       - run: make -C os/go dist
       - run: os/packaging/build.sh --out out/debs jarvis-pkg jarvis-diag jarvis-helper jarvis-installer-backend jarvis-model-fetch
       - run: sudo apt-get install -y -qq --no-install-recommends file gpg gpgv
-      # Official MCP servers (Plan J's os/go/dist-registry) as registry artifacts.
+      # Official MCP servers (contracts §7 #8: make -C os/go registry) as registry artifacts.
+      - run: make -C os/go registry
       - run: os/registry/package-official.sh --out out/registry
       # The whole sign/verify chain on every run, with a throwaway key.
       - name: Registry dry run (throwaway key, NOT FOR RELEASE)
