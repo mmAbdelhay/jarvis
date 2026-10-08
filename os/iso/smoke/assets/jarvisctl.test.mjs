@@ -261,7 +261,7 @@ test("snapshot times out when the state never comes", async () => {
 
 function lockedScript(confirmResult) {
   return {
-    "agent:prompt": (args, { reply, push }) => {
+    "agent:prompt": (_args, { reply, push }) => {
       push("agent:events", { type: "card", card: card("c1", "t1") });
       reply({ turnId: "t1" });
     },

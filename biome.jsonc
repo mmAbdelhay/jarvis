@@ -14,6 +14,7 @@
       "!pnpm-lock.yaml",
       "!**/*.jsonl",
       "!os/go/**/testdata",
+      "!os/models/voice-configs",
       "!apps/mobile/ios",
       "!apps/mobile/android",
       "!apps/mobile/.expo",
