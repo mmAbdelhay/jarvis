@@ -2,6 +2,7 @@
 // when every configured provider failed. It sees only the simple tools, at
 // most 8 steps a turn, and a note that keeps it modest. The tool loop also
 // refuses any other tool it names (it was never offered one). Pure.
+import { AGENT_TEXT } from "./messages.js";
 import { insertBeforeSafetyRules } from "./safety.js";
 import type { ToolRegistry } from "./tool-registry.js";
 import type { ModelProvider, ModelToolSpec } from "./types.js";
@@ -58,8 +59,10 @@ export function simpleToolSpecs(
     .filter((spec) => SIMPLE.has(registry.resolve(spec.name)?.name ?? ""));
 }
 
-/** The backup only ever sees the simple tools and the backup note. A request
- *  with no tools (the step-limit report) keeps none. */
+/** The backup only ever sees the simple tools and the backup note, even when
+ *  the usual model could not call tools (its no-tools note is dropped): the
+ *  simple profile always has its tools (M4 §1). Only the step-limit report
+ *  (`final`) goes without. */
 export function withSimpleProfile(
   provider: ModelProvider,
   tools: () => ModelToolSpec[],
@@ -68,8 +71,11 @@ export function withSimpleProfile(
     chat: (request) =>
       provider.chat({
         ...request,
-        system: insertBeforeSafetyRules(request.system, BACKUP_SYSTEM_NOTE),
-        tools: request.tools.length === 0 ? [] : tools(),
+        system: insertBeforeSafetyRules(
+          request.system.replace(`\n\n${AGENT_TEXT.noToolsNote}`, ""),
+          BACKUP_SYSTEM_NOTE,
+        ),
+        tools: request.final === true ? [] : tools(),
       }),
     probe: () => provider.probe(),
     listModels: (signal) => provider.listModels(signal),

@@ -30,6 +30,9 @@ export type ModelChatRequest = {
   system: string;
   messages: ModelMessage[];
   tools: ModelToolSpec[];
+  /** The step-limit report: answer in words, never with a tool, whichever
+   *  provider (and tool profile) takes the request. */
+  final?: boolean;
   signal: AbortSignal;
 };
 

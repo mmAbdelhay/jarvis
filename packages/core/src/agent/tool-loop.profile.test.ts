@@ -9,7 +9,11 @@ import type { McpSession, ModelChatRequest, ModelEvent, ModelProvider } from "./
 
 const done: ModelEvent = { type: "done", usage: { inputTokens: 1, outputTokens: 1 } };
 
-async function setup(options: { backupFrom: number; replies: ModelEvent[][] }) {
+async function setup(options: {
+  backupFrom: number;
+  replies: ModelEvent[][];
+  toolsEnabled?: boolean;
+}) {
   const requests: ModelChatRequest[] = [];
   const called: string[] = [];
   let backup = false;
@@ -62,7 +66,7 @@ async function setup(options: { backupFrom: number; replies: ModelEvent[][] }) {
       provider,
       registry,
       gate,
-      toolsEnabled: true,
+      toolsEnabled: options.toolsEnabled ?? true,
       emit: (event) => events.push(event),
       newId: () => "g",
       profile: () => (backup ? SIMPLE_PROFILE : FULL_PROFILE),
@@ -119,8 +123,28 @@ describe("the backup model's turn (M4 §1)", () => {
     expect(called).toHaveLength(8);
     expect(requests).toHaveLength(9);
     expect(requests[8]?.tools).toEqual([]);
+    expect(requests[8]?.final).toBe(true);
     const last = requests[8]?.messages.at(-1);
     expect(last).toEqual({ role: "user", text: AGENT_TEXT.stepLimitNote(8) });
+  });
+
+  it("runs the backup's simple tools when the usual model had none (supportsTools: false)", async () => {
+    const { called, requests } = await setup({
+      backupFrom: 0,
+      toolsEnabled: false,
+      replies: [call("net_status"), [{ type: "text", delta: "ok" }, done]],
+    });
+    expect(called).toEqual(["net.status"]);
+    expect(requests[0]?.final).toBeUndefined();
+  });
+
+  it("still refuses every tool while a usual model without tools answers", async () => {
+    const { called } = await setup({
+      backupFrom: 99,
+      toolsEnabled: false,
+      replies: [call("net_status"), [{ type: "text", delta: "ok" }, done]],
+    });
+    expect(called).toEqual([]);
   });
 
   it("counts only the backup's steps when it takes over mid-turn", async () => {

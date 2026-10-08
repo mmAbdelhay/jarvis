@@ -4,7 +4,7 @@
 // result — data, error, denial, timeout, stop — goes back to the model as a
 // tool result, fenced when it carries tool output. A running tool is never
 // interrupted: Stop takes effect between calls. Never throws.
-import type { ToolProfile } from "./backup.js";
+import { SIMPLE_PROFILE, type ToolProfile } from "./backup.js";
 import { fenceToolOutput } from "./fence.js";
 import { DEFAULT_CONTEXT_TOKENS, fitHistory, historyBudget } from "./context-fit.js";
 import { mapLimit } from "./map-limit.js";
@@ -17,6 +17,7 @@ import type { AgentEvent } from "./contract.js";
 import type { GateCall, GateItemStatus, RiskGate } from "./risk-gate.js";
 import { callRisk, type RegisteredTool, type ToolRegistry } from "./tool-registry.js";
 import {
+  type ModelChatRequest,
   type ModelMessage,
   type ModelProvider,
   type ModelToolCall,
@@ -122,12 +123,7 @@ const fenced = (
 
 async function streamReply(
   deps: ToolLoopDeps,
-  request: {
-    system: string;
-    messages: ModelMessage[];
-    tools: ModelToolSpec[];
-    signal: AbortSignal;
-  },
+  request: ModelChatRequest,
   turnId: string,
   onFirstEvent: () => void = () => {},
 ): Promise<{ text: string; calls: ModelToolCall[] }> {
@@ -161,6 +157,8 @@ async function runCalls(
     ran: string[];
     lang: Lang;
     allows(tool: string): boolean;
+    /** Tools resolve at all: the deps' toolsEnabled, or the simple profile. */
+    toolsOn: boolean;
   },
 ): Promise<ModelToolResult[]> {
   const { turnId, signal } = context;
@@ -200,7 +198,7 @@ async function runCalls(
   };
 
   for (const call of context.calls) {
-    const resolved = deps.toolsEnabled ? deps.registry.resolve(call.name) : undefined;
+    const resolved = context.toolsOn ? deps.registry.resolve(call.name) : undefined;
     // M4 §1: on the backup model, a tool outside the simple profile does not exist.
     const tool = resolved !== undefined && context.allows(resolved.name) ? resolved : undefined;
     if (tool === undefined) {
@@ -332,6 +330,7 @@ async function reportStepLimit(
         system: context.system,
         messages: fitHistory(context.messages, context.budget),
         tools: [],
+        final: true,
         signal: context.signal,
       },
       context.turnId,
@@ -448,6 +447,9 @@ export async function runTurn(deps: ToolLoopDeps, request: TurnRequest): Promise
           ran,
           lang,
           allows: (name) => profile.allows(name),
+          // M4 §1: the simple profile always has its tools, even when the
+          // usual model that started the turn could not call any.
+          toolsOn: deps.toolsEnabled || profile.name === SIMPLE_PROFILE.name,
         }),
       });
     }

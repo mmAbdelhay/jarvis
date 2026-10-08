@@ -6,6 +6,7 @@ import {
   simpleToolSpecs,
   withSimpleProfile,
 } from "./backup.js";
+import { AGENT_TEXT } from "./messages.js";
 import { buildSystemPrompt, insertBeforeSafetyRules, SAFETY_RULES } from "./safety.js";
 import { loadToolRegistry } from "./tool-registry.js";
 import type { McpSession, ModelChatRequest, ModelProvider, ModelToolSpec } from "./types.js";
@@ -92,6 +93,7 @@ describe("withSimpleProfile", () => {
       system,
       messages: [],
       tools: [],
+      final: true,
       signal: new AbortController().signal,
     })) {
       // drain: the step-limit report sends no tools
@@ -101,6 +103,32 @@ describe("withSimpleProfile", () => {
     const text = seen[0]?.system ?? "";
     expect(text.indexOf(BACKUP_SYSTEM_NOTE)).toBeGreaterThan(text.indexOf("base"));
     expect(text.endsWith(SAFETY_RULES)).toBe(true);
+  });
+
+  it("gives the backup its simple tools even when the usual model had none (failover mid-turn)", async () => {
+    seen.length = 0;
+    const wrapped = withSimpleProfile(inner, () => simple);
+    const system = buildSystemPrompt(`base\n\n${AGENT_TEXT.noToolsNote}`, []);
+    for await (const _ of wrapped.chat({
+      system,
+      messages: [],
+      tools: [],
+      signal: new AbortController().signal,
+    })) {
+      // drain
+    }
+    for await (const _ of wrapped.chat({
+      system,
+      messages: [],
+      tools: [],
+      final: true,
+      signal: new AbortController().signal,
+    })) {
+      // drain: the step-limit report
+    }
+    expect(seen[0]?.tools).toEqual(simple);
+    expect(seen[0]?.system).not.toContain(AGENT_TEXT.noToolsNote);
+    expect(seen[1]?.tools).toEqual([]);
   });
 
   it("keeps the rules last even when a system text lacks them", () => {
