@@ -164,14 +164,14 @@ def live_session(run: Run, m: Machine) -> bool:
     sh = run.sh
 
     def boot():
-        m.serial.wait_for_shell(600 * run.factor)
+        m.serial.wait_for_shell(600 * run.factor, via_grub=True)
         sh("mokutil --sb-state | grep -qx 'SecureBoot enabled'")
 
     if not run.check("criterion 1: ISO boots through shim with Secure Boot on", boot):
         return False
     run.check("live: session and installer start", lambda: (
         sh(scenarios.wait_for_user(150), 320), sh(scenarios.wait_for_session(150), 320),
-        sh(f"for i in $(seq 60); do pgrep -u {flow.LIVE_USER} -x jarvis-installer >/dev/null && exit 0; sleep 2; done; exit 1", 140)))
+        sh(f"for i in $(seq 60); do pgrep -u {flow.LIVE_USER} -f '(^|/)jarvis-installer( |$)' >/dev/null && exit 0; sleep 2; done; exit 1", 140)))
     run.check("live: smoke assets mounted", lambda: sh(scenarios.mount_assets()))
     run.check("live: ollama does not run in the live session", lambda: sh("! systemctl is-active -q ollama"))
     run.check("live: Probe sees UEFI, Secure Boot and the catalog", lambda: sh(
@@ -206,7 +206,7 @@ def unlock(run: Run, m: Machine, *, wrong_first: bool, layout: str = "us") -> bo
         time.sleep(10)
         assert screen.find_prompt(m.screen("after-3-wrong")), "the prompt went away after 3 wrong passphrases"
         try:
-            m.serial.wait_for_shell(15)
+            m.serial.wait_for_shell(15, via_grub=True)
         except SerialTimeout:
             return "still asking, no shell"
         raise AssertionError("the system came up without the passphrase")
@@ -218,7 +218,7 @@ def unlock(run: Run, m: Machine, *, wrong_first: bool, layout: str = "us") -> bo
         if not wrong_first:
             m.wait_prompt(300 * run.factor)
         m.qmp.type_text(flow.PASSPHRASE + "\n", layout=layout)
-        m.serial.wait_for_shell(300 * run.factor)
+        m.serial.wait_for_shell(300 * run.factor, via_grub=True)
 
     return run.check(f"criterion 2: Plymouth prompt unlocks the disk (typed on the {layout} layout)", right)
 
@@ -297,7 +297,7 @@ def scenario_alongside(args, run: Run, work: Path, out: Path, ovmf: firmware.Ovm
     ntfs_before = {p.number: p for p in disks.partitions(win)}[3]
     vars_path = firmware.make_vars(ovmf, work / "vars.fd")
     assets = build_assets(work)
-    given = 24 * GIB
+    given = 32 * GIB  # at least MinRootBytes (30 GiB): Windows' ESP is reused
     with Machine("live", live_vm(args, work, (win,), vars_path, ovmf, assets, "live"), out) as m:
         run.shell = m.serial
         if not live_session(run, m):

@@ -65,6 +65,25 @@ class SerialShellTest(unittest.TestCase):
         s.wait_for_shell(timeout=10)
         self.assertEqual(s.run("echo ok"), (0, "ok\n"))
 
+    def test_wait_for_shell_via_grub_sends_only_enter_until_the_prompt(self):
+        host, guest = socket.socketpair()
+        s = SerialShell(host)
+        guest.settimeout(5)
+
+        def guest_side():
+            self.assertEqual(guest.recv(1), b"\r")  # GRUB sees Enter, never a letter
+            guest.sendall(b"\r\n# ")
+            data = b""
+            while b"$((0))" not in data:
+                data += guest.recv(4096)
+            token = data.split(b"echo R", 1)[1].split(b"$", 1)[0]
+            guest.sendall(b"R" + token + b"0\r\n# ")
+
+        t = threading.Thread(target=guest_side)
+        t.start()
+        s.wait_for_shell(timeout=10, via_grub=True)
+        t.join()
+
     def test_timeout(self):
         with self.assertRaises(SerialTimeout):
             shell().run("sleep 3", timeout=0.3)

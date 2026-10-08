@@ -18,6 +18,7 @@ import time
 import uuid
 from typing import BinaryIO
 
+PROMPT = re.compile(rb"# $")  # root sh's prompt, the last thing on the line
 MAX_LINE = 3500  # below the tty's 4095-byte canonical line limit
 
 
@@ -76,9 +77,24 @@ class SerialShell:
                 return match
             self._fill(deadline)
 
-    def wait_for_shell(self, timeout: float) -> None:
-        """Pokes the console every 5 s until a shell answers."""
+    def wait_for_shell(self, timeout: float, *, via_grub: bool = False) -> None:
+        """Pokes the console every 5 s until a shell answers.
+
+        via_grub: a firmware boot (install tests) passes GRUB, which reads the
+        serial port as a keyboard too: the "e" of a probe opens its entry
+        editor and the VM never boots. So poke with a bare Enter (boots the
+        default entry, like the timeout) until the shell's prompt shows; no
+        kernel console is on ttyS0 there, so "# " can only be the shell."""
         deadline = time.monotonic() + timeout
+        while via_grub:
+            self._sock.sendall(b"\r")
+            try:
+                self._expect(PROMPT, min(deadline, time.monotonic() + 5))
+                self._buf = b""
+                break
+            except SerialTimeout:
+                if time.monotonic() >= deadline:
+                    raise SerialTimeout(f"no shell prompt on the serial console after {timeout:.0f}s") from None
         while True:
             token = uuid.uuid4().hex[:12]
             self._sock.sendall(f"\necho R{token}$((0))\n".encode())
