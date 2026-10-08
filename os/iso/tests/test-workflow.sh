@@ -120,8 +120,12 @@ assert "os/packaging/backup/offline-chat.sh" in d("backup-model-test")
 assert needs("classic-session-test") == {"build-distro"} and "os/iso/session/classic.sh" in d("classic-session-test")
 assert {"build-qt", "build-distro"} <= needs("session-test") and "debs-distro" in d("session-test")
 ws = d("build-workspace")
-for s in ("electron-builder --linux dir --x64", "jarvis-workspace", "workspace-deb", "ldd /opt/jarvis-workspace/jarvis"):
+for s in ("electron-builder --linux dir --x64", "jarvis-workspace", "workspace-deb",
+          "for f in /opt/jarvis-workspace/jarvis ", "ldd ", "not found"):
     assert s in ws, s
+# Depends must be proven in a container without the build host's libraries.
+assert ws.count("docker run --rm") >= 2 and "libgtk-3-0t64" in ws.split("Install-test in a clean")[0], "clean install test"
+assert "libgtk" not in ws.split("Install-test in a clean")[1], "the install-test container must not preinstall Electron's libraries"
 assert "debs-" not in ws, "the workspace .deb must never reach the ISO (contracts §5)"
 assert {"build-backup-model", "i18n-gate"} <= needs("build-iso")
 for n in ("backup-model-test", "classic-session-test"):
