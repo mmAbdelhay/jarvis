@@ -37,7 +37,7 @@ export const HOST_FORCED_RISK: Readonly<Record<string, ToolRisk>> = {
   "registry.install": "confirm",
   "registry.remove": "confirm",
   // Rafiq M3 contracts §1: every setter and file write is a card; users and
-  // formatting need the admin password (checked by the helper with PAM, §5 #5).
+  // formatting need the admin password (checked by the helper, §5 #5; threat model M28).
   "settings.brightness": "confirm",
   "settings.volume": "confirm",
   "settings.night_light": "confirm",

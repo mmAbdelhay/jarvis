@@ -46,4 +46,29 @@ describe("docs/os/threat-model.md (design §3.2, criterion 2)", () => {
     }
     expect(parseThreatModel(DOC).mitigations.length).toBeGreaterThanOrEqual(24);
   });
+
+  it("covers the Rafiq M3 surfaces (criterion 8)", () => {
+    const mitigations = section(DOC, "Mitigations");
+    for (const term of [
+      "$HOME",
+      "files.trash",
+      "undo",
+      "settings.",
+      "apps.open_path",
+      "apps.open_url",
+      "adminPassword",
+      "unix_chkpwd",
+      "voice:utterance",
+      "phone:<deviceName>",
+      "sys:setLocked",
+      "locked",
+      "51-jarvis-settings.rules",
+      "50-jarvis.rules",
+    ]) {
+      expect(mitigations, term).toContain(term);
+    }
+    const accepted = section(DOC, "Accepted risks");
+    for (const term of ["Super+L", "pam_faillock"]) expect(accepted, term).toContain(term);
+    expect(parseThreatModel(DOC).mitigations.length).toBeGreaterThanOrEqual(35);
+  });
 });
