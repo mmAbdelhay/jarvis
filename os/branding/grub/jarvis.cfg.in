@@ -1,0 +1,9 @@
+# @DISTRO_NAME@ boot menu (jarvis-branding). Read by update-grub after /etc/default/grub.
+GRUB_DISTRIBUTOR="@DISTRO_NAME@"
+GRUB_THEME=/usr/share/grub/themes/jarvis/theme.txt
+GRUB_GFXMODE=auto
+GRUB_CMDLINE_LINUX_DEFAULT="quiet splash"
+# Hidden unless another OS is installed: 42_jarvis_timeout then shows the menu for 3 s.
+GRUB_TIMEOUT_STYLE=hidden
+GRUB_TIMEOUT=0
+GRUB_DISABLE_OS_PROBER=false

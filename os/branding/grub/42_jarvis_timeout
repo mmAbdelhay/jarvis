@@ -1,0 +1,12 @@
+#!/bin/sh
+# grub.d: after 30_os-prober, show the menu for 3 s only when another OS
+# (Windows) is installed (design §7). GRUB reads timeout after the whole
+# config, so this late "set" wins over 00_header's hidden 0 s.
+set -e
+[ "${GRUB_DISABLE_OS_PROBER:-false}" = true ] && exit 0
+command -v os-prober >/dev/null 2>&1 || exit 0
+if [ -n "$(os-prober 2>/dev/null)" ]; then
+  echo "set timeout_style=menu"
+  echo "set timeout=3"
+fi
+exit 0

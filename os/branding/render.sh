@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # render.sh OUT_ROOT — render every branding asset into OUT_ROOT at its install
 # path (jarvis-branding's stage.sh, ISO GRUB menu). Needs rsvg-convert
-# (librsvg2-bin), grub-mkfont (grub-common) and fonts-ibm-plex.
+# (librsvg2-bin), grub-mkfont (grub-common) and a font (PLEX_FONT, else fonts-inter).
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=lib/brand.sh
@@ -39,5 +39,28 @@ rsvg-convert "$here/plymouth/entry.svg" -o "$pt/entry.png"
 rsvg-convert "$here/plymouth/bullet.svg" -o "$pt/bullet.png"
 chmod 0644 "$pt"/*
 
-# Tasks 4-5 append their sections below this line.
+# GRUB theme and defaults (Task 4).
+need grub-mkfont grub-common
+# Debian has no IBM Plex package: use PLEX_FONT, an installed Plex, else Inter
+# (fonts-inter). The internal font names below are ids the theme references.
+plex=${PLEX_FONT:-}
+if [ -z "$plex" ]; then
+  for c in /usr/share/fonts/opentype/ibm-plex/IBMPlexSans-Regular.otf /usr/share/fonts/opentype/inter/Inter-Regular.otf; do
+    if [ -f "$c" ]; then plex=$c; break; fi
+  done
+fi
+[ -f "$plex" ] || { echo "render: no font found (set PLEX_FONT or install fonts-inter)" >&2; exit 1; }
+gt=$out/usr/share/grub/themes/jarvis
+mkdir -p "$gt"
+brand_render "$here/grub/theme.txt.in" "$gt/theme.txt"
+cp "$bg/wallpaper-1920x1080.png" "$gt/background.png"
+grub-mkfont -s 16 -n "IBM Plex Sans Regular 16" -o "$gt/plex-16.pf2" "$plex"
+grub-mkfont -s 24 -n "IBM Plex Sans Regular 24" -o "$gt/plex-24.pf2" "$plex"
+chmod 0644 "$gt"/*
+mkdir -p "$out/etc/default/grub.d" "$out/etc/grub.d"
+brand_render "$here/grub/jarvis.cfg.in" "$out/etc/default/grub.d/jarvis.cfg"
+chmod 0644 "$out/etc/default/grub.d/jarvis.cfg"
+install -m0755 "$here/grub/42_jarvis_timeout" "$out/etc/grub.d/42_jarvis_timeout"
+
+# Task 5 appends its section below this line.
 echo "render: $out"
