@@ -59,7 +59,7 @@ import { createEnvKeyStore, takeEnvProviderKeys } from "./provider-keys.js";
 import { createMemoryBackendOpener } from "./memory-backend.js";
 import { connectOsMcpServers } from "./mcp-servers.js";
 import { createModelStateReader } from "./model-state-reader.js";
-import { createOsBinding } from "./os-binding.js";
+import { createOsBinding, createOsRouter } from "./os-binding.js";
 import {
   buildStampCandidates,
   MODEL_STATE_PATH,
@@ -276,7 +276,7 @@ async function main(argv: readonly string[]): Promise<void> {
   });
 
   let requestStop: (reason: string) => void = () => {};
-  const handlers = createOsBinding(agent, {
+  const handlers = createOsBinding(createOsRouter({ agent }), {
     requestStop: () => requestStop("stop intent"),
     defer: (callback) => setImmediate(callback),
   });

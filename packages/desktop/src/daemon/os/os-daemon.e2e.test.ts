@@ -15,7 +15,7 @@ import { nodeControlDeps } from "../control/deps.js";
 import { createControlServer } from "../control/server.js";
 import { createOsAgent } from "./agent-service.js";
 import { connectOsMcpServers } from "./mcp-servers.js";
-import { createOsBinding } from "./os-binding.js";
+import { createOsBinding, createOsRouter } from "./os-binding.js";
 
 const WINDOWS = process.platform === "win32";
 const FIXTURE = fileURLToPath(
@@ -90,7 +90,7 @@ describe.skipIf(WINDOWS)("jarvisd OS mode over the real control socket", () => {
       log: () => {},
     });
     cleanups.push(() => agent.shutdown());
-    const handlers = createOsBinding(agent, {
+    const handlers = createOsBinding(createOsRouter({ agent }), {
       requestStop: () => {},
       defer: (cb) => setImmediate(cb),
     });

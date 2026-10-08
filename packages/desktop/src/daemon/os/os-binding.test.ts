@@ -2,7 +2,15 @@ import { describe, expect, it } from "vitest";
 import { ControlRequestError } from "../control/messages.js";
 import type { ControlConnection } from "../control/server.js";
 import { type OsAgent, OsAgentError } from "./agent-service.js";
-import { createOsBinding } from "./os-binding.js";
+import {
+  createOsBinding,
+  createOsRouter,
+  confirmFrom,
+  phoneDeviceName,
+  phoneVia,
+  PHONE_REQUESTS,
+  requireLocal,
+} from "./os-binding.js";
 
 const connection: ControlConnection = { id: 1, onClose: () => {} };
 
@@ -56,7 +64,10 @@ function fakeAgent() {
 describe("createOsBinding", () => {
   it("routes each contract channel with parsed arguments", async () => {
     const { agent, calls } = fakeAgent();
-    const handlers = createOsBinding(agent, { requestStop: () => {}, defer: (cb) => cb() });
+    const handlers = createOsBinding(createOsRouter({ agent }), {
+      requestStop: () => {},
+      defer: (cb) => cb(),
+    });
     await expect(
       handlers.invoke("agent:prompt", [{ text: "install vlc", extra: 1 }], connection),
     ).resolves.toEqual({ turnId: "t1" });
@@ -121,7 +132,10 @@ describe("createOsBinding", () => {
 
   it("answers bad arguments with bad-request and unknown channels with unknown-channel", async () => {
     const { agent, calls } = fakeAgent();
-    const handlers = createOsBinding(agent, { requestStop: () => {}, defer: (cb) => cb() });
+    const handlers = createOsBinding(createOsRouter({ agent }), {
+      requestStop: () => {},
+      defer: (cb) => cb(),
+    });
     await expect(handlers.invoke("agent:prompt", [{}], connection)).rejects.toMatchObject({
       code: "bad-request",
     });
@@ -170,7 +184,10 @@ describe("createOsBinding", () => {
         "Could not check for updates: The repository is not signed.",
       );
     };
-    const handlers = createOsBinding(agent, { requestStop: () => {}, defer: (cb) => cb() });
+    const handlers = createOsBinding(createOsRouter({ agent }), {
+      requestStop: () => {},
+      defer: (cb) => cb(),
+    });
     await expect(handlers.invoke("updates:check", [], connection)).rejects.toMatchObject({
       code: "internal",
       message: "Could not check for updates: The repository is not signed.",
@@ -182,7 +199,10 @@ describe("createOsBinding", () => {
     agent.prompt = () => {
       throw new OsAgentError("bad-request", "A request is already running. Stop it first.");
     };
-    const handlers = createOsBinding(agent, { requestStop: () => {}, defer: (cb) => cb() });
+    const handlers = createOsBinding(createOsRouter({ agent }), {
+      requestStop: () => {},
+      defer: (cb) => cb(),
+    });
     const failure = await handlers
       .invoke("agent:prompt", [{ text: "x" }], connection)
       .catch((e: unknown) => e);
@@ -199,8 +219,96 @@ describe("createOsBinding", () => {
   it("stops the daemon after the hello's stop intent", () => {
     const { agent } = fakeAgent();
     let stops = 0;
-    const handlers = createOsBinding(agent, { requestStop: () => stops++, defer: (cb) => cb() });
+    const handlers = createOsBinding(createOsRouter({ agent }), {
+      requestStop: () => stops++,
+      defer: (cb) => cb(),
+    });
     handlers.stop();
     expect(stops).toBe(1);
+  });
+});
+
+describe("createOsRouter origins (Rafiq M3 phone bridge)", () => {
+  const phone = { kind: "phone" as const, device: { id: "d".repeat(32), name: "Pixel 8" } };
+
+  it("serves a phone the allowlisted channels", async () => {
+    const { agent, calls } = fakeAgent();
+    const router = createOsRouter({ agent });
+    await expect(router.invoke("agent:prompt", [{ text: "hi" }], phone)).resolves.toEqual({
+      turnId: "t1",
+    });
+    expect(calls.map((c) => c.method)).toEqual(["prompt"]);
+  });
+
+  it("refuses a phone everything else, before parsing", async () => {
+    const { agent, calls } = fakeAgent();
+    const router = createOsRouter({ agent });
+    for (const channel of ["provider:save", "provider:list", "doctor:start", "updates:check"]) {
+      await expect(router.invoke(channel, ["junk"], phone)).rejects.toMatchObject({
+        code: "forbidden",
+      });
+    }
+    expect(calls).toEqual([]);
+  });
+
+  it("names the phone allowlist of the contract", () => {
+    expect([...PHONE_REQUESTS].sort()).toEqual(
+      [
+        "agent:confirm",
+        "agent:prompt",
+        "agent:stop",
+        "agent:undo",
+        "audit:list",
+        "memory:list",
+      ].sort(),
+    );
+  });
+
+  it("bounds and cleans a phone's name for the audit log", () => {
+    expect(phoneDeviceName("Pixel\u0007 8\n")).toBe("Pixel 8");
+    expect(phoneDeviceName("   ")).toBe("phone");
+    expect(phoneDeviceName("x".repeat(300))).toHaveLength(64);
+    expect(phoneVia("__proto__")).toBe("phone:__proto__");
+    expect(confirmFrom(phone)).toEqual({ via: "phone:Pixel 8", allowPassword: false });
+    expect(confirmFrom({ kind: "local", connection })).toEqual({
+      via: "desktop",
+      allowPassword: true,
+    });
+  });
+});
+
+describe("OS router adapters", () => {
+  it("requires a local origin for computer-only operations", () => {
+    expect(() => requireLocal({ kind: "local", connection })).not.toThrow();
+    expect(() => requireLocal({ kind: "phone", device: { id: "d", name: "Pixel" } })).toThrowError(
+      ControlRequestError,
+    );
+  });
+
+  it("preserves the connection and bytes through the local binding", async () => {
+    const calls: unknown[][] = [];
+    const router = {
+      async invoke(...args: Parameters<import("./os-binding.js").OsRouter["invoke"]>) {
+        calls.push(args);
+        return "invoked";
+      },
+      async upload(...args: Parameters<import("./os-binding.js").OsRouter["upload"]>) {
+        calls.push(args);
+        return "uploaded";
+      },
+    };
+    const binding = createOsBinding(router, {
+      requestStop() {},
+      defer(cb) {
+        cb();
+      },
+    });
+    const bytes = new Uint8Array([1, 2]);
+    await expect(binding.invoke("test", [1], connection)).resolves.toBe("invoked");
+    await expect(binding.upload("blob", [2], bytes, connection)).resolves.toBe("uploaded");
+    expect(calls).toEqual([
+      ["test", [1], { kind: "local", connection }],
+      ["blob", [2], bytes, { kind: "local", connection }],
+    ]);
   });
 });
