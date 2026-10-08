@@ -45,6 +45,18 @@ export function nodeTerminal(options: NodeTerminalOptions = {}): Terminal {
   const readers = new Set<{ resolve: (value: string | null) => void }>();
   let rl: Interface | null = null;
   let ended = false;
+  // With no reader waiting, the input is paused and the terminal leaves raw
+  // mode, so nothing keeps the process alive once the CLI is done. Lines that
+  // readline has already split from a chunk still land in the queue.
+  const idle = () => {
+    if (rl === null || readers.size > 0) return;
+    rl.pause();
+    if (interactive) input.setRawMode?.(false);
+  };
+  const wake = (active: Interface) => {
+    if (interactive) input.setRawMode?.(true);
+    active.resume();
+  };
   const stopReader = () => {
     const current = rl;
     rl = null;
@@ -102,6 +114,7 @@ export function nodeTerminal(options: NodeTerminalOptions = {}): Terminal {
           resolve: (value: string | null) => {
             signal?.removeEventListener("abort", onAbort);
             resolve(value);
+            idle();
           },
         };
         const onAbort = () => {
@@ -112,6 +125,7 @@ export function nodeTerminal(options: NodeTerminalOptions = {}): Terminal {
         signal?.addEventListener("abort", onAbort, { once: true });
         readers.add(reader);
         const active = ensureReader();
+        wake(active);
         active.setPrompt(prompt);
         active.prompt();
       });

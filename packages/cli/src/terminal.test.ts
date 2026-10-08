@@ -95,6 +95,31 @@ describe("nodeTerminal", () => {
     await expect(term.readLine("› ")).resolves.toBeNull();
   });
 
+  it("lets go of the terminal between reads so the process can exit", async () => {
+    const io = fakeStdio();
+    const term = nodeTerminal({ input: io.input, output: io.output, signals: false });
+    const first = term.readLine("› ");
+    io.input.write("hello\r");
+    await expect(first).resolves.toBe("hello");
+    expect(io.input.isPaused()).toBe(true);
+    expect(io.raw.at(-1)).toBe(false);
+
+    const second = term.readLine("› ");
+    expect(io.input.isPaused()).toBe(false);
+    expect(io.raw.at(-1)).toBe(true);
+    io.input.write("again\r");
+    await expect(second).resolves.toBe("again");
+    expect(io.input.isPaused()).toBe(true);
+    expect(io.raw.at(-1)).toBe(false);
+
+    const abort = new AbortController();
+    const third = term.readLine("› ", abort.signal);
+    abort.abort();
+    await expect(third).resolves.toBeNull();
+    expect(io.input.isPaused()).toBe(true);
+    expect(io.raw.at(-1)).toBe(false);
+  });
+
   it("returns null when a line read is aborted", async () => {
     const io = fakeStdio(false);
     const term = nodeTerminal({ input: io.input, output: io.output, signals: false });
