@@ -26,6 +26,9 @@ public slots:
     void onLidClosed() { requestLock(); }
     void onLockRequested() { requestLock(); }
     void onSleepComing();
+    // Sleep is over (resumed) or the delay was given up (fallback timeout): a
+    // later "locked" must not release a delay taken for a newer sleep.
+    void onSleepFinished() { m_sleepPending = false; }
     void onLockConfirmed();
     void onLockExited(int exitCode, bool crashed);
 

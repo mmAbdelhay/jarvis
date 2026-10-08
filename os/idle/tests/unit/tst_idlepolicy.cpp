@@ -45,6 +45,18 @@ private slots:
         QCOMPARE(release.size(), 1);
     }
 
+    void finishedSleepDoesNotReleaseALaterDelay()
+    {
+        IdlePolicy policy;
+        QSignalSpy release(&policy, &IdlePolicy::releaseSleepDelay);
+        policy.onSleepComing();
+        policy.onSleepFinished(); // fallback fired or system resumed
+        policy.onLockConfirmed();
+        QCOMPARE(release.count(), 0);
+        policy.onLockExited(0, false);
+        QCOMPARE(release.count(), 0);
+    }
+
     void sleepWhileLockedReleasesAtOnce()
     {
         IdlePolicy policy([this] { return m_now; });

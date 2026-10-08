@@ -80,7 +80,14 @@ int main(int argc, char* argv[])
         sleepFallback.stop();
         logind.releaseSleepDelay();
     });
-    QObject::connect(&sleepFallback, &QTimer::timeout, &logind, &LogindWatcher::releaseSleepDelay);
+    QObject::connect(&sleepFallback, &QTimer::timeout, &app, [&] {
+        policy.onSleepFinished();
+        logind.releaseSleepDelay();
+    });
+    QObject::connect(&logind, &LogindWatcher::resumed, &app, [&] {
+        sleepFallback.stop();
+        policy.onSleepFinished();
+    });
     QObject::connect(&policy, &IdlePolicy::gaveUp, &app, [](const QString& reason) {
         std::fprintf(stderr, "jarvis-idle: %s\n", qPrintable(reason));
     });
