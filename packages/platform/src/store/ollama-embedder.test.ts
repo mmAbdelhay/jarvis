@@ -30,14 +30,27 @@ describe("createOllamaEmbedder (design §3.8: local only)", () => {
     expect(embedder.model).toBe("nomic-embed-text");
   });
 
-  it("serves repeats from the cache without a request", async () => {
+  it("serves repeated documents from the cache without a request", async () => {
     const { fetch, calls } = recordingFetch([json({ embeddings: [[3, 4]] })]);
     const cache = openVectorCache({ path: ":memory:", now: () => 0 });
     const embedder = createOllamaEmbedder({ fetch, now: () => 0, log: () => {}, cache });
-    await embedder.embed(["q"], "query");
-    const again = await embedder.embed(["q"], "query");
+    await embedder.embed(["d"], "document");
+    const again = await embedder.embed(["d"], "document");
     expect([...(again[0] ?? [])]).toEqual([3, 4]);
     expect(calls).toHaveLength(1);
+  });
+
+  it("never reads or writes the cache for queries (user text stays off disk)", async () => {
+    const { fetch, calls } = recordingFetch([
+      json({ embeddings: [[3, 4]] }),
+      json({ embeddings: [[3, 4]] }),
+    ]);
+    const cache = openVectorCache({ path: ":memory:", now: () => 0 });
+    const embedder = createOllamaEmbedder({ fetch, now: () => 0, log: () => {}, cache });
+    await embedder.embed(["q"], "query");
+    await embedder.embed(["q"], "query");
+    expect(calls).toHaveLength(2);
+    expect(cache.get("nomic-embed-text", "search_query: q")).toBeUndefined();
   });
 
   it("refuses any Ollama that is not on this computer", () => {

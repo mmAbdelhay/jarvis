@@ -78,9 +78,11 @@ export function createOllamaEmbedder(options: {
         throw new EmbedderUnavailableError("Local embeddings are paused after a failure");
       }
       const inputs = texts.map((text) => `${PREFIX[purpose]}${text}`);
-      const out: (Float32Array | undefined)[] = inputs.map((input) =>
-        options.cache?.get(model, input),
-      );
+      // Only tool descriptions ('document') are cached, in plaintext on disk.
+      // User turns ('query') never are, and the memory service must be given
+      // an embedder built without a cache so memories never reach this file.
+      const cache = purpose === "document" ? options.cache : undefined;
+      const out: (Float32Array | undefined)[] = inputs.map((input) => cache?.get(model, input));
       const missing = out.flatMap((vector, index) => (vector === undefined ? [index] : []));
       try {
         for (let start = 0; start < missing.length; start += EMBED_BATCH) {
@@ -96,7 +98,7 @@ export function createOllamaEmbedder(options: {
           batch.forEach((index, k) => {
             const vector = vectors[k] as Float32Array;
             out[index] = vector;
-            options.cache?.set(model, inputs[index] as string, vector);
+            cache?.set(model, inputs[index] as string, vector);
           });
         }
       } catch (error) {
