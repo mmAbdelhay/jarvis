@@ -8,6 +8,9 @@ export default defineConfig({
       "@jarvis/platform/model": fileURLToPath(
         new URL("./packages/platform/src/model/index.ts", import.meta.url),
       ),
+      "@jarvis/platform/store": fileURLToPath(
+        new URL("./packages/platform/src/store/index.ts", import.meta.url),
+      ),
       "@jarvis/platform": fileURLToPath(
         new URL("./packages/platform/src/index.ts", import.meta.url),
       ),

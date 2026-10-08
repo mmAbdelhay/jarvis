@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 // files and collects every bare specifier the bundle would pull in. The
 // esbuild bundle (scripts/build-daemon.mjs) is built from exactly this graph.
 const HERE = dirname(fileURLToPath(import.meta.url));
+const PLATFORM_STORE = resolve(HERE, "../../../../platform/src/store/index.ts");
 const PLATFORM_MODEL = resolve(HERE, "../../../../platform/src/model/index.ts");
 
 function specifiers(source: string): string[] {
@@ -48,7 +49,13 @@ describe("the Jarvis OS daemon bundle graph", () => {
     const outside = [...bare].filter(
       (spec) =>
         !spec.startsWith("node:") &&
-        !["@jarvis/core", "@jarvis/wire", "@jarvis/platform/model", "yaml"].includes(spec),
+        ![
+          "@jarvis/core",
+          "@jarvis/wire",
+          "@jarvis/platform/model",
+          "@jarvis/platform/store",
+          "yaml",
+        ].includes(spec),
     );
     expect(outside).toEqual([]);
     const names = [...files].map((file) => file.split(/[\\/]/).slice(-2).join("/"));
@@ -61,6 +68,13 @@ describe("the Jarvis OS daemon bundle graph", () => {
     ]) {
       expect(names).not.toContain(forbidden);
     }
+  });
+
+  it("keeps @jarvis/platform/store to node built-ins and @jarvis/core", () => {
+    const { bare } = walk(PLATFORM_STORE);
+    expect(
+      [...bare].filter((spec) => !spec.startsWith("node:") && spec !== "@jarvis/core"),
+    ).toEqual([]);
   });
 
   it("keeps @jarvis/platform/model free of the Agent SDK, node-pty and sqlite", () => {
