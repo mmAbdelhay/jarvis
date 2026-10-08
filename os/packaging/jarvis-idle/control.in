@@ -1,0 +1,12 @@
+Package: jarvis-idle
+Version: @VERSION@
+Architecture: amd64
+Maintainer: Muhammad AbdElHay <mmAbdelhay@users.noreply.github.com>
+Installed-Size: @INSTALLED_SIZE@
+Depends: jarvis-lock (= @VERSION@), systemd
+Section: x11
+Priority: optional
+Homepage: @HOME_URL@
+Description: @DISTRO_NAME@ automatic screen lock
+ Locks the screen with jarvis-lock after a period without input (default
+ 10 minutes), when the lid closes and before suspend.

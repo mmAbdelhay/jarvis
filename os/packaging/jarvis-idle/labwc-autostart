@@ -1,0 +1,4 @@
+# jarvis-idle line for labwc's autostart (Plan P owns /etc/xdg/labwc/autostart).
+# Live boots autologin a user whose password nobody typed, so they never lock
+# on idle (Super+L still works there). Installed systems always do.
+if [ ! -d "${JARVIS_LIVE_MEDIUM:-/run/live/medium}" ]; then /usr/libexec/jarvis/jarvis-idle-loop & fi

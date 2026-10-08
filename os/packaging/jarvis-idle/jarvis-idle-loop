@@ -1,0 +1,19 @@
+#!/bin/sh
+# Keeps jarvis-idle (M3 contracts §3: idle and lid/suspend -> jarvis-lock)
+# running for the whole labwc session. A crashed idle daemon would silently
+# stop the auto-lock. Relaunches with back-off (1 s, doubling to 30 s; reset
+# after 60 s of uptime) and stops once the compositor's socket is gone.
+bin=${JARVIS_IDLE_BIN:-/usr/libexec/jarvis/jarvis-idle}
+pause=${JARVIS_LOOP_SLEEP:-sleep}
+socket="${XDG_RUNTIME_DIR:?}/${WAYLAND_DISPLAY:?}"
+delay=1
+while [ -e "$socket" ]; do
+  started=$(date +%s)
+  "$bin"
+  [ -e "$socket" ] || break
+  if [ $(($(date +%s) - started)) -ge 60 ]; then delay=1; fi
+  logger -t jarvis-idle-loop "jarvis-idle exited; restarting in ${delay}s" 2>/dev/null || true
+  "$pause" "$delay"
+  delay=$((delay * 2))
+  [ "$delay" -le 30 ] || delay=30
+done
