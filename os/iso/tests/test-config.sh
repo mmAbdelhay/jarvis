@@ -33,7 +33,7 @@ check "no package listed twice" test -z "$(sort <<<"$all_packages" | uniq -d)"
 # design §9 plus contracts §6 #20.
 for p in greetd labwc foot layer-shell-qt qt6-wayland pipewire polkitd gnome-keyring network-manager \
   network-manager-config-connectivity-debian pciutils usbutils flatpak sudo live-boot \
-  live-config user-setup libsecret-tools iputils-ping rfkill iproute2 fonts-ibm-plex dbus-daemon \
+  live-config user-setup libsecret-tools iputils-ping rfkill iproute2 fonts-inter dbus-daemon \
   jarvisd jarvis-shell jarvis-pkg jarvis-diag jarvis-helper; do
   check "lists include $p" grep -qx "$p" <<<"$all_packages"
 done

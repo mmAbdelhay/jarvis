@@ -52,7 +52,7 @@ jobs:
       - run: |
           apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
             git ca-certificates dpkg-dev shellcheck xorriso python3 python3-yaml gpg gpgv reprepro apt \
-            librsvg2-bin grub-common fonts-ibm-plex cmake gcc libc6-dev zstd file sbsigntool curl
+            librsvg2-bin grub-common fonts-inter cmake gcc libc6-dev zstd file sbsigntool curl
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
@@ -150,9 +150,9 @@ jobs:
       - run: chmod +x os/go/dist/usr/lib/jarvis/mcp/* os/go/dist/usr/libexec/jarvis/*
       # Plan E's entry points: configure (prefix /usr), build, test, check install layout.
       - run: os/ui/ci/test.sh
-      - run: os/shell/ci/test.sh
-        env:
-          JARVIS_MCP_DIR: ${{ github.workspace }}/os/go/dist/usr/lib/jarvis/mcp
+      - run: |
+          export JARVIS_MCP_DIR="$GITHUB_WORKSPACE/os/go/dist/usr/lib/jarvis/mcp"
+          os/shell/ci/test.sh
       - run: os/installer/ci/test.sh
       - run: os/greeter/ci/test.sh
       - run: os/packaging/build.sh --out out/debs jarvis-ui jarvis-shell jarvis-installer jarvis-greeter
@@ -170,7 +170,7 @@ jobs:
     steps:
       - run: |
           apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
-            git ca-certificates curl dpkg-dev gpg librsvg2-bin grub-common fonts-ibm-plex zstd file python3
+            git ca-certificates curl dpkg-dev gpg gpg-agent librsvg2-bin grub-common fonts-inter zstd file python3
       - uses: actions/checkout@v4
       - uses: actions/cache@v4
         with:
@@ -195,12 +195,12 @@ jobs:
           path: out/debs/*.deb
           if-no-files-found: error
       - if: steps.key.outputs.keyring == 'throwaway'
-        run: tar -C "$RUNNER_TEMP" -czf "$RUNNER_TEMP/ci-apt-key.tgz" ci-apt-key
+        run: tar -C "$RUNNER_TEMP" -czf "$GITHUB_WORKSPACE/ci-apt-key.tgz" ci-apt-key
       - if: steps.key.outputs.keyring == 'throwaway'
         uses: actions/upload-artifact@v4
         with:
           name: ci-apt-key
-          path: ${{ runner.temp }}/ci-apt-key.tgz
+          path: ci-apt-key.tgz
           retention-days: 1
 
   build-iso:
@@ -408,7 +408,15 @@ jobs:
           fpr=$(os/repo/import-key.sh "$RUNNER_TEMP/gnupg")
           install -m0600 /dev/null "$RUNNER_TEMP/deploy"; printf '%s\n' "$DEPLOY_KEY" > "$RUNNER_TEMP/deploy"
           export GIT_SSH_COMMAND="ssh -i $RUNNER_TEMP/deploy -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
-          git clone -q --depth 1 git@github.com:mmAbdelhay/jarvis-apt.git "$RUNNER_TEMP/previous" || mkdir -p "$RUNNER_TEMP/previous"
+          # Only an empty remote (reachable, no branch) is a first publish; any other
+          # failure must stop the job, or publish.sh would wipe the other suite.
+          remote=git@github.com:mmAbdelhay/jarvis-apt.git
+          heads=$(git ls-remote --heads "$remote") || { echo "::error::cannot reach $remote"; exit 1; }
+          if [ -z "$heads" ]; then
+            mkdir -p "$RUNNER_TEMP/previous"
+          else
+            git clone -q --depth 1 "$remote" "$RUNNER_TEMP/previous"
+          fi
           os/repo/build-repo.sh --suite "$suite" --debs "$RUNNER_TEMP/debs" --out "$RUNNER_TEMP/site" \
             --gnupghome "$RUNNER_TEMP/gnupg" --sign-with "$fpr" --previous "$RUNNER_TEMP/previous"
           os/repo/publish.sh --site "$RUNNER_TEMP/site" --remote git@github.com:mmAbdelhay/jarvis-apt.git \
