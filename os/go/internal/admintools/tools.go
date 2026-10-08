@@ -9,7 +9,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io/fs"
 	"regexp"
 	"strings"
@@ -17,6 +16,7 @@ import (
 
 	"github.com/mmAbdelhay/jarvis/os/go/internal/execx"
 	"github.com/mmAbdelhay/jarvis/os/go/internal/helperapi"
+	"github.com/mmAbdelhay/jarvis/os/go/internal/i18n"
 	"github.com/mmAbdelhay/jarvis/os/go/internal/mcp"
 	"github.com/mmAbdelhay/jarvis/os/go/internal/validate"
 )
@@ -150,16 +150,18 @@ func (d Deps) addUser(ctx context.Context, raw json.RawMessage) (any, error) {
 	return helperResult(out, err, map[string]any{"username": in.Username})
 }
 
-func (d Deps) describeAddUser(_ context.Context, raw json.RawMessage) (mcp.Description, error) {
+func (d Deps) describeAddUser(ctx context.Context, raw json.RawMessage) (mcp.Description, error) {
 	in, err := decodeUser(raw, false, false)
 	if err != nil {
 		return mcp.Description{}, err
 	}
-	title := fmt.Sprintf(text.AddTitle, in.Username)
+	l := i18n.FromContext(ctx)
+	t := cardText.Get(l)
+	title := i18n.Sprintf(l, t.AddTitle, in.Username)
 	if in.FullName != "" {
-		title = fmt.Sprintf(text.AddTitleFull, in.Username, in.FullName)
+		title = i18n.Sprintf(l, t.AddTitleFull, in.Username, in.FullName)
 	}
-	return mcp.Description{Title: title, Detail: text.AddDetail + text.Password, Source: mcp.SourceSystem}, nil
+	return mcp.Description{Title: title, Detail: t.AddDetail + t.Password, Source: mcp.SourceSystem}, nil
 }
 
 func (d Deps) removeUser(ctx context.Context, raw json.RawMessage) (any, error) {
@@ -171,16 +173,18 @@ func (d Deps) removeUser(ctx context.Context, raw json.RawMessage) (any, error) 
 	return helperResult(out, err, map[string]any{"username": in.Username, "keptHome": in.KeepHome})
 }
 
-func (d Deps) describeRemoveUser(_ context.Context, raw json.RawMessage) (mcp.Description, error) {
+func (d Deps) describeRemoveUser(ctx context.Context, raw json.RawMessage) (mcp.Description, error) {
 	in, err := decodeUser(raw, true, false)
 	if err != nil {
 		return mcp.Description{}, err
 	}
-	detail := text.RemoveDelete
+	l := i18n.FromContext(ctx)
+	t := cardText.Get(l)
+	detail := t.RemoveDelete
 	if in.KeepHome {
-		detail = text.RemoveKeep
+		detail = t.RemoveKeep
 	}
-	return mcp.Description{Title: fmt.Sprintf(text.RemoveTitle, in.Username), Detail: detail + text.Password, Source: mcp.SourceSystem}, nil
+	return mcp.Description{Title: i18n.Sprintf(l, t.RemoveTitle, in.Username), Detail: detail + t.Password, Source: mcp.SourceSystem}, nil
 }
 
 type formatIn struct {
@@ -222,7 +226,7 @@ func (d Deps) format(ctx context.Context, raw json.RawMessage) (any, error) {
 
 // driveName describes a drive for a card ("SanDisk Ultra, 32 GB"),
 // reading lsblk as the user; "" when unknown.
-func (d Deps) driveName(ctx context.Context, device string) string {
+func (d Deps) driveName(ctx context.Context, l i18n.Lang, device string) string {
 	res, err := d.Run.Run(ctx, execx.Cmd{Name: "lsblk", Args: []string{"--json", "--bytes", "--nodeps", "--output", "MODEL,SIZE", "--", device}, Timeout: 10 * time.Second})
 	if err != nil || res.ExitCode != 0 {
 		return ""
@@ -237,11 +241,12 @@ func (d Deps) driveName(ctx context.Context, device string) string {
 		return ""
 	}
 	b := out.Blockdevices[0]
-	name := text.UnknownDrive
+	t := cardText.Get(l)
+	name := t.UnknownDrive
 	if b.Model != nil && strings.TrimSpace(*b.Model) != "" {
 		name = strings.TrimSpace(*b.Model)
 	}
-	return fmt.Sprintf("%s, %.0f GB", name, float64(b.Size)/1e9)
+	return i18n.Sprintf(l, t.DriveSize, name, float64(b.Size)/1e9)
 }
 
 func (d Deps) describeFormat(ctx context.Context, raw json.RawMessage) (mcp.Description, error) {
@@ -249,13 +254,15 @@ func (d Deps) describeFormat(ctx context.Context, raw json.RawMessage) (mcp.Desc
 	if err != nil {
 		return mcp.Description{}, err
 	}
-	drive := d.driveName(ctx, in.Device)
+	l := i18n.FromContext(ctx)
+	t := cardText.Get(l)
+	drive := d.driveName(ctx, l, in.Device)
 	if drive == "" {
 		drive = in.Device
 	} else {
 		drive = in.Device + " (" + drive + ")"
 	}
-	return mcp.Description{Title: fmt.Sprintf(text.FormatTitle, in.Device, in.FS), Detail: fmt.Sprintf(text.FormatDetail, drive) + text.Password, Source: mcp.SourceSystem}, nil
+	return mcp.Description{Title: i18n.Sprintf(l, t.FormatTitle, in.Device, in.FS), Detail: i18n.Sprintf(l, t.FormatDetail, drive) + t.Password, Source: mcp.SourceSystem}, nil
 }
 
 var partRe = regexp.MustCompile(`^/dev/(sd[a-z]{1,2}[0-9]{0,3}|mmcblk[0-9]{1,2}(p[0-9]{1,3})?)$`)
@@ -268,7 +275,7 @@ func decodeDevice(raw json.RawMessage) (string, error) {
 		return "", err
 	}
 	if !partRe.MatchString(in.Device) {
-		return "", mcp.Errorf(mcp.CodeInvalid, text.BadPartition, in.Device)
+		return "", mcp.Errorf(mcp.CodeInvalid, errText.BadPartition, in.Device)
 	}
 	return in.Device, nil
 }
@@ -329,7 +336,9 @@ func (d Deps) describeMount(ctx context.Context, raw json.RawMessage) (mcp.Descr
 	if err != nil {
 		return mcp.Description{}, err
 	}
-	return mcp.Description{Title: fmt.Sprintf(text.MountTitle, dev), Detail: text.MountDetail, Source: mcp.SourceSystem}, nil
+	l := i18n.FromContext(ctx)
+	t := cardText.Get(l)
+	return mcp.Description{Title: i18n.Sprintf(l, t.MountTitle, dev), Detail: t.MountDetail, Source: mcp.SourceSystem}, nil
 }
 
 func (d Deps) describeUnmount(ctx context.Context, raw json.RawMessage) (mcp.Description, error) {
@@ -337,5 +346,7 @@ func (d Deps) describeUnmount(ctx context.Context, raw json.RawMessage) (mcp.Des
 	if err != nil {
 		return mcp.Description{}, err
 	}
-	return mcp.Description{Title: fmt.Sprintf(text.UnmountTitle, dev), Detail: text.MountDetail, Source: mcp.SourceSystem}, nil
+	l := i18n.FromContext(ctx)
+	t := cardText.Get(l)
+	return mcp.Description{Title: i18n.Sprintf(l, t.UnmountTitle, dev), Detail: t.MountDetail, Source: mcp.SourceSystem}, nil
 }
