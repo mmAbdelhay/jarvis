@@ -261,8 +261,19 @@ void ShellController::onPush(const QString& channel, const QJsonValue& payload)
         m_doctor->applyState(payload.toObject());
         return maybeLeaveDoctor();
     }
-    if (channel == u"sys:snapshot")
-        m_system->applySnapshot(payload.toObject());
+    if (channel == u"sys:snapshot") {
+        const QJsonObject snap = payload.toObject();
+        m_system->applySnapshot(snap);
+        // jarvisd's undo stack is authoritative when it reports one (M3 contracts §5 #10);
+        // otherwise keep the local inference from approved cards.
+        if (const QJsonValue undo = snap.value("undo"); undo.isObject()) {
+            const bool available = undo.toObject().value("available").toBool(false);
+            if (available != m_undoAvailable) {
+                m_undoAvailable = available;
+                emit undoChanged();
+            }
+        }
+    }
 }
 
 void ShellController::onAgentEvent(const QJsonObject& event)
@@ -409,9 +420,10 @@ void ShellController::stopSpeaking()
     request(u"voice:stop"_s, QJsonArray{});
 }
 
-void ShellController::answerPairing(bool approve)
+void ShellController::answerPairing(const QString& requestId, bool approve)
 {
-    request(u"pairing:answer"_s, QJsonArray{QJsonObject{{"approve", approve}}}, [this](const ControlResult& r) {
+    // M3 contracts §5 #9: pairing:answer [{requestId, approve}], requestId from the pairing:pending push.
+    request(u"pairing:answer"_s, QJsonArray{QJsonObject{{"requestId", requestId}, {"approve", approve}}}, [this](const ControlResult& r) {
         if (!r.ok)
             m_conversation->addNotice(u"Couldn't send the pairing answer (%1)."_s.arg(r.text));
     });

@@ -90,7 +90,7 @@ public:
     Q_INVOKABLE void requestComposerFocus();
     Q_INVOKABLE void undo();
     Q_INVOKABLE void stopSpeaking();
-    Q_INVOKABLE void answerPairing(bool approve);
+    Q_INVOKABLE void answerPairing(const QString& requestId, bool approve);
     // voice:utterance (M3 contracts §2): one 16 kHz mono WAV, header {lang, cardId?}.
     void sendUtterance(const QByteArray& wav, const QJsonObject& header, std::function<void(const ControlResult&)> done);
     Q_INVOKABLE void askForUpdates();
