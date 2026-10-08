@@ -42,6 +42,8 @@ InstallerModel* TestHarness::fresh(const QVariantMap& options)
     if (options.value(u"failProbe"_s).toBool())
         m_backend->failNext = u"Probe"_s;
     m_model = new InstallerModel(m_backend, m_power, u"Rafiq"_s, u"en_US"_s, "Africa/Cairo", this);
+    if (m_language)
+        m_model->setLanguageApplier([language = m_language](const QString& code) { return language->setLanguage(code); });
     m_model->start();
     return m_model;
 }

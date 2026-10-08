@@ -14,7 +14,7 @@ ColumnLayout {
     Text {
         objectName: "doneTitle"
         Layout.fillWidth: true
-        text: Brand.distroName + " is installed"
+        text: qsTr("%1 is installed").arg(Brand.distroName)
         textFormat: Text.PlainText
         color: Theme.text
         font.pixelSize: Theme.fontTitle
@@ -23,7 +23,7 @@ ColumnLayout {
     }
     Text {
         Layout.fillWidth: true
-        text: "Remove the USB stick, then restart. Jarvis will greet you after you log in."
+        text: qsTr("Remove the USB stick, then restart. Jarvis will greet you after you log in.")
         color: Theme.muted
         wrapMode: Text.Wrap
     }
@@ -31,7 +31,7 @@ ColumnLayout {
         objectName: "modelLater"
         Layout.fillWidth: true
         visible: root.installer.progress.modelVisible && root.installer.progress.modelPercent < 100
-        text: "Jarvis will finish downloading its model after the first start."
+        text: qsTr("Jarvis will finish downloading its model after the first start.")
         color: Theme.muted
         wrapMode: Text.Wrap
     }

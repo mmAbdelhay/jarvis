@@ -29,6 +29,61 @@
         </message>
     </context>
     <context>
+        <name>AccountScreen</name>
+        <message>
+            <source>Your account</source>
+            <translation>Your account</translation>
+        </message>
+        <message>
+            <source>This password unlocks the computer and approves high-risk changes, such as adding users or touching disks.</source>
+            <translation>This password unlocks the computer and approves high-risk changes, such as adding users or touching disks.</translation>
+        </message>
+        <message>
+            <source>Your name</source>
+            <translation>Your name</translation>
+        </message>
+        <message>
+            <source>Computer name</source>
+            <translation>Computer name</translation>
+        </message>
+        <message>
+            <source>Username</source>
+            <translation>Username</translation>
+        </message>
+        <message>
+            <source>Password</source>
+            <translation>Password</translation>
+        </message>
+        <message>
+            <source>Confirm password</source>
+            <translation>Confirm password</translation>
+        </message>
+        <message>
+            <source>You're typing with the %1 keyboard. Use the same layout to unlock the disk and sign in.</source>
+            <translation>You're typing with the %1 keyboard. Use the same layout to unlock the disk and sign in.</translation>
+        </message>
+        <message>
+            <source>You're typing with the %1 keyboard right now, but %2 will use %3. Keys that differ between them will type different characters when you unlock the disk and sign in. Use only letters and digits that sit in the same place on both keyboards, or go back and choose %1.</source>
+            <translation>You're typing with the %1 keyboard right now, but %2 will use %3. Keys that differ between them will type different characters when you unlock the disk and sign in. Use only letters and digits that sit in the same place on both keyboards, or go back and choose %1.</translation>
+        </message>
+        <message>
+            <source>Log in automatically (not recommended on a laptop)</source>
+            <translation>Log in automatically (not recommended on a laptop)</translation>
+        </message>
+        <message>
+            <source>Use this password to unlock the disk at start</source>
+            <translation>Use this password to unlock the disk at start</translation>
+        </message>
+        <message>
+            <source>Disk passphrase</source>
+            <translation>Disk passphrase</translation>
+        </message>
+        <message>
+            <source>Confirm disk passphrase</source>
+            <translation>Confirm disk passphrase</translation>
+        </message>
+    </context>
+    <context>
         <name>BrainChoice</name>
         <message>
             <source>%1 · %2 download</source>
@@ -73,6 +128,69 @@
         <message>
             <source>Enter the model name, like qwen3:8b.</source>
             <translation>Enter the model name, like qwen3:8b.</translation>
+        </message>
+    </context>
+    <context>
+        <name>BrainScreen</name>
+        <message>
+            <source>Jarvis's brain</source>
+            <translation>Jarvis's brain</translation>
+        </message>
+        <message>
+            <source>Memory</source>
+            <translation>Memory</translation>
+        </message>
+        <message>
+            <source>GPU</source>
+            <translation>GPU</translation>
+        </message>
+        <message>
+            <source>Free disk</source>
+            <translation>Free disk</translation>
+        </message>
+        <message>
+            <source>Where the model runs</source>
+            <translation>Where the model runs</translation>
+        </message>
+        <message>
+            <source>Recommended</source>
+            <translation>Recommended</translation>
+        </message>
+        <message>
+            <source>Models that fit this computer</source>
+            <translation>Models that fit this computer</translation>
+        </message>
+        <message>
+            <source>Cloud provider</source>
+            <translation>Cloud provider</translation>
+        </message>
+        <message>
+            <source>Strongest models. Enter an API key after the first login.</source>
+            <translation>Strongest models. Enter an API key after the first login.</translation>
+        </message>
+        <message>
+            <source>Network server</source>
+            <translation>Network server</translation>
+        </message>
+        <message>
+            <source>Use a model running on another computer at home or work.</source>
+            <translation>Use a model running on another computer at home or work.</translation>
+        </message>
+        <message>
+            <source>Server address (Ollama, LM Studio or vLLM)</source>
+            <translation>Server address (Ollama, LM Studio or vLLM)</translation>
+        </message>
+        <message>
+            <source>Model</source>
+            <translation>Model</translation>
+        </message>
+        <message>
+            <source>You can add a cloud provider later, too.</source>
+            <translation>You can add a cloud provider later, too.</translation>
+        </message>
+        <message>
+            <source>A small backup model is installed too, so Jarvis can still help when your main model can't answer.</source>
+            <translation>A small backup model is installed too, so Jarvis can still help when your main model can't answer.</translation>
         </message>
     </context>
     <context>
@@ -140,6 +258,64 @@
         <message>
             <source>Choose where to install %1.</source>
             <translation>Choose where to install %1.</translation>
+        </message>
+    </context>
+    <context>
+        <name>DiskScreen</name>
+        <message>
+            <source>Where should %1 go?</source>
+            <translation>Where should %1 go?</translation>
+        </message>
+        <message>
+            <source>Disk</source>
+            <translation>Disk</translation>
+        </message>
+        <message>
+            <source>Disk layout</source>
+            <translation>Disk layout</translation>
+        </message>
+        <message>
+            <source>Space for %1</source>
+            <translation>Space for %1</translation>
+        </message>
+        <message>
+            <source>After install</source>
+            <translation>After install</translation>
+        </message>
+        <message>
+            <source>Not used</source>
+            <translation>Not used</translation>
+        </message>
+        <message>
+            <source>Use %1 as</source>
+            <translation>Use %1 as</translation>
+        </message>
+        <message>
+            <source>Format</source>
+            <translation>Format</translation>
+        </message>
+        <message>
+            <source>Manual mode makes no partition-table changes. / must be formatted; /boot/efi must be an existing EF00 partition of at least 300 MB. Encrypted installs use a swapfile, with no swap partition. LVM and RAID are not offered.</source>
+            <translation>Manual mode makes no partition-table changes. / must be formatted; /boot/efi must be an existing EF00 partition of at least 300 MB. Encrypted installs use a swapfile, with no swap partition. LVM and RAID are not offered.</translation>
+        </message>
+        <message>
+            <source>Encrypt %1 (recommended). You'll type a passphrase at every start.</source>
+            <translation>Encrypt %1 (recommended). You'll type a passphrase at every start.</translation>
+        </message>
+    </context>
+    <context>
+        <name>DoneScreen</name>
+        <message>
+            <source>%1 is installed</source>
+            <translation>%1 is installed</translation>
+        </message>
+        <message>
+            <source>Remove the USB stick, then restart. Jarvis will greet you after you log in.</source>
+            <translation>Remove the USB stick, then restart. Jarvis will greet you after you log in.</translation>
+        </message>
+        <message>
+            <source>Jarvis will finish downloading its model after the first start.</source>
+            <translation>Jarvis will finish downloading its model after the first start.</translation>
         </message>
     </context>
     <context>
@@ -340,6 +516,40 @@
         </message>
     </context>
     <context>
+        <name>InstallerRoot</name>
+        <message>
+            <source>Back</source>
+            <translation>Back</translation>
+        </message>
+    </context>
+    <context>
+        <name>InstallingScreen</name>
+        <message>
+            <source>Installation stopped</source>
+            <translation>Installation stopped</translation>
+        </message>
+        <message>
+            <source>Installing</source>
+            <translation>Installing</translation>
+        </message>
+        <message>
+            <source>Starting…</source>
+            <translation>Starting…</translation>
+        </message>
+        <message>
+            <source>Nothing more will be changed. Some disk changes may already be done: restart and run the installer again, or start your other system.</source>
+            <translation>Nothing more will be changed. Some disk changes may already be done: restart and run the installer again, or start your other system.</translation>
+        </message>
+        <message>
+            <source>While you wait</source>
+            <translation>While you wait</translation>
+        </message>
+        <message>
+            <source>After restart, try “set up this machine for Python and Docker”, or “why is my battery draining?”. Anything that changes the system shows a card first.</source>
+            <translation>After restart, try “set up this machine for Python and Docker”, or “why is my battery draining?”. Anything that changes the system shows a card first.</translation>
+        </message>
+    </context>
+    <context>
         <name>LocaleChoice</name>
         <message>
             <source>English (US)</source>
@@ -364,6 +574,90 @@
         <message>
             <source>Spanish</source>
             <translation>Spanish</translation>
+        </message>
+    </context>
+    <context>
+        <name>Main</name>
+        <message>
+            <source>Install %1</source>
+            <translation>Install %1</translation>
+        </message>
+    </context>
+    <context>
+        <name>ReviewScreen</name>
+        <message>
+            <source>Ready to install</source>
+            <translation>Ready to install</translation>
+        </message>
+        <message>
+            <source>Disk after install</source>
+            <translation>Disk after install</translation>
+        </message>
+        <message>
+            <source>encrypted</source>
+            <translation>encrypted</translation>
+        </message>
+        <message>
+            <source>Changes to the disk start when you press Install.</source>
+            <translation>Changes to the disk start when you press Install.</translation>
+        </message>
+    </context>
+    <context>
+        <name>StepRail</name>
+        <message>
+            <source>Install %1</source>
+            <translation>Install %1</translation>
+        </message>
+        <message>
+            <source>Install steps</source>
+            <translation>Install steps</translation>
+        </message>
+        <message>
+            <source>%1, current step</source>
+            <translation>%1, current step</translation>
+        </message>
+        <message>
+            <source>%1, done</source>
+            <translation>%1, done</translation>
+        </message>
+    </context>
+    <context>
+        <name>WelcomeScreen</name>
+        <message>
+            <source>Could not detect your time zone. Choose it above.</source>
+            <translation>Could not detect your time zone. Choose it above.</translation>
+        </message>
+        <message>
+            <source>Welcome</source>
+            <translation>Welcome</translation>
+        </message>
+        <message>
+            <source>These were guessed from your locale and keyboard. Change anything that's wrong.</source>
+            <translation>These were guessed from your locale and keyboard. Change anything that's wrong.</translation>
+        </message>
+        <message>
+            <source>Language</source>
+            <translation>Language</translation>
+        </message>
+        <message>
+            <source>Keyboard</source>
+            <translation>Keyboard</translation>
+        </message>
+        <message>
+            <source>Time zone</source>
+            <translation>Time zone</translation>
+        </message>
+        <message>
+            <source>Detect my time zone contacts geoip.ubuntu.com and shares your IP address.</source>
+            <translation>Detect my time zone contacts geoip.ubuntu.com and shares your IP address.</translation>
+        </message>
+        <message>
+            <source>Detect my time zone</source>
+            <translation>Detect my time zone</translation>
+        </message>
+        <message>
+            <source>Try again</source>
+            <translation>Try again</translation>
         </message>
     </context>
 </TS>

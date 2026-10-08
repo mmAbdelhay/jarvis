@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Language.h"
 #include <QObject>
 #include <QStringList>
 #include <QVariantMap>
@@ -15,6 +16,8 @@ class TestHarness : public QObject {
 public:
     explicit TestHarness(QObject* parent = nullptr);
 
+    void setLanguageManager(jarvis::ui::LanguageManager* language) { m_language = language; }
+
     Q_INVOKABLE InstallerModel* fresh(const QVariantMap& options = {});
     Q_INVOKABLE QStringList calls() const;
     Q_INVOKABLE QVariantMap lastChoices() const;
@@ -28,6 +31,7 @@ public:
     QString screenshotDir() const { return qEnvironmentVariable("JARVIS_SCREENSHOT_DIR"); }
 
 private:
+    jarvis::ui::LanguageManager* m_language = nullptr;
     FakeInstallerBackend* m_backend = nullptr;
     FakePower* m_power = nullptr;
     InstallerModel* m_model = nullptr;

@@ -9,6 +9,9 @@ Rectangle {
     id: root
     required property InstallerModel installer
 
+    LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft
+    LayoutMirroring.childrenInherit: true
+
     color: Theme.bg
 
     RowLayout {
@@ -102,7 +105,7 @@ Rectangle {
                     objectName: "backButton"
                     implicitHeight: 48
                     variant: "ghost"
-                    text: "Back"
+                    text: qsTr("Back")
                     enabled: root.installer.backVisible
                     opacity: root.installer.backVisible ? 1 : 0
                     onClicked: root.installer.back()

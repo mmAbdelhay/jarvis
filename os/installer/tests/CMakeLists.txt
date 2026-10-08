@@ -58,10 +58,11 @@ target_include_directories(tst_qml PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/support $
 target_link_libraries(tst_qml PRIVATE jarvis_installer_core jarvis_installer_coreplugin Qt6::QuickTest)
 target_compile_definitions(tst_qml PRIVATE
   QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml"
+  JARVIS_TEST_I18N_DIR="${JARVIS_I18N_BUILD_DIR}"
   JARVIS_QML_DIR="${QT_QML_OUTPUT_DIRECTORY}"
   JARVIS_INSTALLER_TEST_DATA="${JARVIS_INSTALLER_TEST_DATA}"
   JARVIS_TEST_OS_RELEASE="${CMAKE_CURRENT_SOURCE_DIR}/data/os-release")
-add_dependencies(tst_qml jarvis_ui)
+add_dependencies(tst_qml jarvis_ui jarvis-ui_translations jarvis-installer_translations)
 add_test(NAME tst_qml COMMAND tst_qml)
 set_tests_properties(tst_qml PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" LABELS qml TIMEOUT 180)
 

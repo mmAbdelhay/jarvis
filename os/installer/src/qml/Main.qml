@@ -6,7 +6,7 @@ Window {
     id: window
     required property InstallerModel installer
 
-    title: "Install " + Brand.distroName
+    title: qsTr("Install %1").arg(Brand.distroName)
     width: 1440
     height: 900
     color: Theme.bg

@@ -22,7 +22,7 @@ ColumnLayout {
 
     ScreenTitle {
         Layout.fillWidth: true
-        title: root.progress.failed ? "Installation stopped" : "Installing"
+        title: root.progress.failed ? qsTr("Installation stopped") : qsTr("Installing")
     }
 
     ColumnLayout {
@@ -34,7 +34,7 @@ ColumnLayout {
             Text {
                 objectName: "currentTitle"
                 Layout.fillWidth: true
-                text: root.progress.currentTitle.length > 0 ? root.progress.currentTitle : "Starting…"
+                text: root.progress.currentTitle.length > 0 ? root.progress.currentTitle : qsTr("Starting…")
                 textFormat: Text.PlainText
                 color: Theme.text
                 font.pixelSize: 14
@@ -149,7 +149,7 @@ ColumnLayout {
         }
         Text {
             Layout.fillWidth: true
-            text: "Nothing more will be changed. Some disk changes may already be done: restart and run the installer again, or start your other system."
+            text: qsTr("Nothing more will be changed. Some disk changes may already be done: restart and run the installer again, or start your other system.")
             color: Theme.approvalMuted
             font.pixelSize: Theme.fontSmall
             wrapMode: Text.Wrap
@@ -160,10 +160,10 @@ ColumnLayout {
         objectName: "whileYouWait"
         Layout.fillWidth: true
         visible: !root.progress.failed
-        Text { text: "While you wait"; color: Theme.text; font.weight: Font.DemiBold }
+        Text { text: qsTr("While you wait"); color: Theme.text; font.weight: Font.DemiBold }
         Text {
             Layout.fillWidth: true
-            text: "After restart, try “set up this machine for Python and Docker”, or “why is my battery draining?”. Anything that changes the system shows a card first."
+            text: qsTr("After restart, try “set up this machine for Python and Docker”, or “why is my battery draining?”. Anything that changes the system shows a card first.")
             color: Theme.textSoft
             wrapMode: Text.Wrap
         }

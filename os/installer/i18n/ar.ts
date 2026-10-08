@@ -29,6 +29,61 @@
         </message>
     </context>
     <context>
+        <name>AccountScreen</name>
+        <message>
+            <source>Your account</source>
+            <translation>حسابك</translation>
+        </message>
+        <message>
+            <source>This password unlocks the computer and approves high-risk changes, such as adding users or touching disks.</source>
+            <translation>تفتح كلمة المرور هذه قفل الحاسوب وتعتمد التغييرات عالية الخطورة، مثل إضافة المستخدمين أو التعامل مع الأقراص.</translation>
+        </message>
+        <message>
+            <source>Your name</source>
+            <translation>اسمك</translation>
+        </message>
+        <message>
+            <source>Computer name</source>
+            <translation>اسم الحاسوب</translation>
+        </message>
+        <message>
+            <source>Username</source>
+            <translation>اسم المستخدم</translation>
+        </message>
+        <message>
+            <source>Password</source>
+            <translation>كلمة المرور</translation>
+        </message>
+        <message>
+            <source>Confirm password</source>
+            <translation>تأكيد كلمة المرور</translation>
+        </message>
+        <message>
+            <source>You're typing with the %1 keyboard. Use the same layout to unlock the disk and sign in.</source>
+            <translation>أنت تكتب الآن بلوحة مفاتيح %1. استخدم التخطيط نفسه لفتح قفل القرص وتسجيل الدخول.</translation>
+        </message>
+        <message>
+            <source>You're typing with the %1 keyboard right now, but %2 will use %3. Keys that differ between them will type different characters when you unlock the disk and sign in. Use only letters and digits that sit in the same place on both keyboards, or go back and choose %1.</source>
+            <translation>أنت تكتب الآن بلوحة مفاتيح %1، لكن %2 سيستخدم %3. المفاتيح المختلفة بينهما ستكتب أحرفًا مختلفة عند فتح قفل القرص وتسجيل الدخول. استخدم فقط الأحرف والأرقام التي تقع في الموضع نفسه على اللوحتين، أو عُد واختر %1.</translation>
+        </message>
+        <message>
+            <source>Log in automatically (not recommended on a laptop)</source>
+            <translation>سجّل الدخول تلقائيًا (لا يُنصح به على الحاسوب المحمول)</translation>
+        </message>
+        <message>
+            <source>Use this password to unlock the disk at start</source>
+            <translation>استخدم كلمة المرور هذه لفتح قفل القرص عند بدء التشغيل</translation>
+        </message>
+        <message>
+            <source>Disk passphrase</source>
+            <translation>عبارة مرور القرص</translation>
+        </message>
+        <message>
+            <source>Confirm disk passphrase</source>
+            <translation>تأكيد عبارة مرور القرص</translation>
+        </message>
+    </context>
+    <context>
         <name>BrainChoice</name>
         <message>
             <source>%1 · %2 download</source>
@@ -73,6 +128,69 @@
         <message>
             <source>Enter the model name, like qwen3:8b.</source>
             <translation>أدخل اسم النموذج، مثل qwen3:8b.</translation>
+        </message>
+    </context>
+    <context>
+        <name>BrainScreen</name>
+        <message>
+            <source>Jarvis's brain</source>
+            <translation>عقل جارفيس</translation>
+        </message>
+        <message>
+            <source>Memory</source>
+            <translation>الذاكرة</translation>
+        </message>
+        <message>
+            <source>GPU</source>
+            <translation>معالج الرسوميات</translation>
+        </message>
+        <message>
+            <source>Free disk</source>
+            <translation>المساحة الفارغة</translation>
+        </message>
+        <message>
+            <source>Where the model runs</source>
+            <translation>أين يعمل النموذج</translation>
+        </message>
+        <message>
+            <source>Recommended</source>
+            <translation>موصى به</translation>
+        </message>
+        <message>
+            <source>Models that fit this computer</source>
+            <translation>النماذج المناسبة لهذا الحاسوب</translation>
+        </message>
+        <message>
+            <source>Cloud provider</source>
+            <translation>مزوّد سحابي</translation>
+        </message>
+        <message>
+            <source>Strongest models. Enter an API key after the first login.</source>
+            <translation>أقوى النماذج. أدخل مفتاح API بعد أول تسجيل دخول.</translation>
+        </message>
+        <message>
+            <source>Network server</source>
+            <translation>خادم على الشبكة</translation>
+        </message>
+        <message>
+            <source>Use a model running on another computer at home or work.</source>
+            <translation>استخدم نموذجًا يعمل على حاسوب آخر في المنزل أو العمل.</translation>
+        </message>
+        <message>
+            <source>Server address (Ollama, LM Studio or vLLM)</source>
+            <translation>عنوان الخادم (Ollama أو LM Studio أو vLLM)</translation>
+        </message>
+        <message>
+            <source>Model</source>
+            <translation>النموذج</translation>
+        </message>
+        <message>
+            <source>You can add a cloud provider later, too.</source>
+            <translation>يمكنك أيضًا إضافة مزوّد سحابي لاحقًا.</translation>
+        </message>
+        <message>
+            <source>A small backup model is installed too, so Jarvis can still help when your main model can't answer.</source>
+            <translation>يُثبَّت أيضًا نموذج احتياطي صغير، ليبقى جارفيس قادرًا على المساعدة عندما يتعذّر على نموذجك الرئيسي الرد.</translation>
         </message>
     </context>
     <context>
@@ -140,6 +258,64 @@
         <message>
             <source>Choose where to install %1.</source>
             <translation>اختر مكان تثبيت %1.</translation>
+        </message>
+    </context>
+    <context>
+        <name>DiskScreen</name>
+        <message>
+            <source>Where should %1 go?</source>
+            <translation>أين تريد تثبيت %1؟</translation>
+        </message>
+        <message>
+            <source>Disk</source>
+            <translation>القرص</translation>
+        </message>
+        <message>
+            <source>Disk layout</source>
+            <translation>تخطيط القرص</translation>
+        </message>
+        <message>
+            <source>Space for %1</source>
+            <translation>المساحة المخصصة لـ%1</translation>
+        </message>
+        <message>
+            <source>After install</source>
+            <translation>بعد التثبيت</translation>
+        </message>
+        <message>
+            <source>Not used</source>
+            <translation>غير مستخدم</translation>
+        </message>
+        <message>
+            <source>Use %1 as</source>
+            <translation>استخدام %1 بوصفه</translation>
+        </message>
+        <message>
+            <source>Format</source>
+            <translation>تهيئة</translation>
+        </message>
+        <message>
+            <source>Manual mode makes no partition-table changes. / must be formatted; /boot/efi must be an existing EF00 partition of at least 300 MB. Encrypted installs use a swapfile, with no swap partition. LVM and RAID are not offered.</source>
+            <translation>لا يُجري الوضع اليدوي أي تغيير على جدول الأقسام. يجب تهيئة / ، ويجب أن يكون /boot/efi قسم EF00 موجودًا بحجم 300 ميغابايت على الأقل. تستخدم عمليات التثبيت المشفّرة ملف تبديل دون قسم تبديل. لا يتوفر LVM ولا RAID.</translation>
+        </message>
+        <message>
+            <source>Encrypt %1 (recommended). You'll type a passphrase at every start.</source>
+            <translation>شفّر %1 (موصى به). ستكتب عبارة مرور عند كل بدء تشغيل.</translation>
+        </message>
+    </context>
+    <context>
+        <name>DoneScreen</name>
+        <message>
+            <source>%1 is installed</source>
+            <translation>تم تثبيت %1</translation>
+        </message>
+        <message>
+            <source>Remove the USB stick, then restart. Jarvis will greet you after you log in.</source>
+            <translation>انزع ذاكرة USB، ثم أعد التشغيل. سيرحّب بك جارفيس بعد تسجيل الدخول.</translation>
+        </message>
+        <message>
+            <source>Jarvis will finish downloading its model after the first start.</source>
+            <translation>سيُكمل جارفيس تنزيل نموذجه بعد أول تشغيل.</translation>
         </message>
     </context>
     <context>
@@ -340,6 +516,40 @@
         </message>
     </context>
     <context>
+        <name>InstallerRoot</name>
+        <message>
+            <source>Back</source>
+            <translation>رجوع</translation>
+        </message>
+    </context>
+    <context>
+        <name>InstallingScreen</name>
+        <message>
+            <source>Installation stopped</source>
+            <translation>توقف التثبيت</translation>
+        </message>
+        <message>
+            <source>Installing</source>
+            <translation>جارٍ التثبيت</translation>
+        </message>
+        <message>
+            <source>Starting…</source>
+            <translation>جارٍ البدء…</translation>
+        </message>
+        <message>
+            <source>Nothing more will be changed. Some disk changes may already be done: restart and run the installer again, or start your other system.</source>
+            <translation>لن يتغيّر أي شيء آخر. ربما اكتملت بعض تغييرات القرص بالفعل: أعد التشغيل وشغّل المثبّت مجددًا، أو شغّل نظامك الآخر.</translation>
+        </message>
+        <message>
+            <source>While you wait</source>
+            <translation>في أثناء الانتظار</translation>
+        </message>
+        <message>
+            <source>After restart, try “set up this machine for Python and Docker”, or “why is my battery draining?”. Anything that changes the system shows a card first.</source>
+            <translation>بعد إعادة التشغيل، جرّب «جهّز هذا الجهاز لـ Python وDocker» أو «لماذا تنفد بطاريتي بسرعة؟». أي شيء يغيّر النظام يعرض بطاقة أولًا.</translation>
+        </message>
+    </context>
+    <context>
         <name>LocaleChoice</name>
         <message>
             <source>English (US)</source>
@@ -364,6 +574,90 @@
         <message>
             <source>Spanish</source>
             <translation>الإسبانية</translation>
+        </message>
+    </context>
+    <context>
+        <name>Main</name>
+        <message>
+            <source>Install %1</source>
+            <translation>تثبيت %1</translation>
+        </message>
+    </context>
+    <context>
+        <name>ReviewScreen</name>
+        <message>
+            <source>Ready to install</source>
+            <translation>جاهز للتثبيت</translation>
+        </message>
+        <message>
+            <source>Disk after install</source>
+            <translation>القرص بعد التثبيت</translation>
+        </message>
+        <message>
+            <source>encrypted</source>
+            <translation>مشفّر</translation>
+        </message>
+        <message>
+            <source>Changes to the disk start when you press Install.</source>
+            <translation>تبدأ التغييرات على القرص عند الضغط على «تثبيت».</translation>
+        </message>
+    </context>
+    <context>
+        <name>StepRail</name>
+        <message>
+            <source>Install %1</source>
+            <translation>تثبيت %1</translation>
+        </message>
+        <message>
+            <source>Install steps</source>
+            <translation>خطوات التثبيت</translation>
+        </message>
+        <message>
+            <source>%1, current step</source>
+            <translation>%1، الخطوة الحالية</translation>
+        </message>
+        <message>
+            <source>%1, done</source>
+            <translation>%1، مكتملة</translation>
+        </message>
+    </context>
+    <context>
+        <name>WelcomeScreen</name>
+        <message>
+            <source>Could not detect your time zone. Choose it above.</source>
+            <translation>تعذّر اكتشاف منطقتك الزمنية. اخترها من الأعلى.</translation>
+        </message>
+        <message>
+            <source>Welcome</source>
+            <translation>مرحبًا</translation>
+        </message>
+        <message>
+            <source>These were guessed from your locale and keyboard. Change anything that's wrong.</source>
+            <translation>خُمّنت هذه الإعدادات من لغتك ولوحة مفاتيحك. غيّر أي شيء غير صحيح.</translation>
+        </message>
+        <message>
+            <source>Language</source>
+            <translation>اللغة</translation>
+        </message>
+        <message>
+            <source>Keyboard</source>
+            <translation>لوحة المفاتيح</translation>
+        </message>
+        <message>
+            <source>Time zone</source>
+            <translation>المنطقة الزمنية</translation>
+        </message>
+        <message>
+            <source>Detect my time zone contacts geoip.ubuntu.com and shares your IP address.</source>
+            <translation>يتصل زر «اكتشف منطقتي الزمنية» بالموقع geoip.ubuntu.com ويشاركه عنوان IP الخاص بك.</translation>
+        </message>
+        <message>
+            <source>Detect my time zone</source>
+            <translation>اكتشف منطقتي الزمنية</translation>
+        </message>
+        <message>
+            <source>Try again</source>
+            <translation>حاول مجددًا</translation>
         </message>
     </context>
 </TS>
