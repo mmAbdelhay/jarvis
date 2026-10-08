@@ -72,10 +72,11 @@ class EntryTest(unittest.TestCase):
                      "~/.config/autostart", "~/.local/share/keyrings", "~/.local/bin"):
             e = third(); e["permissions"]["paths"] = [path]
             self.assert_bad(e, "protected")
-        for path in ("/etc", "~", "~/", "~/../etc", "~/Notes/../.ssh", "~/./x", "~//x", "Notes", "~/a\nb", "~/.cache", "~/Notes/.hidden", "~/.mozilla", "~/.local/share"):
+        for path in ("/etc", "~", "~/", "~/../etc", "~/Notes/../.ssh", "~/./x", "~//x", "Notes", "~/a\nb", "~/.cache", "~/Notes/.hidden", "~/.mozilla", "~/.local/share",
+                     "~/Documents/Notes Archive", "~/x /etc", "~/a %h", "~/a%h", '~/a "b"', "~/a'b", "~/a\\b", "~/caf\u00e9", "~/-x"):
             e = third(); e["permissions"]["paths"] = [path]
             self.assertNotEqual(schema.validate_entry(e), [], path)
-        e = third(); e["permissions"]["paths"] = ["~/Notes", "~/Documents/Notes Archive"]
+        e = third(); e["permissions"]["paths"] = ["~/Notes", "~/Documents/Notes-Archive_2.d"]
         self.assertEqual(schema.validate_entry(e), [])
         e = third(); e["permissions"]["paths"] = [f"~/d{i}" for i in range(9)]
         self.assert_bad(e, "at most 8")

@@ -51,6 +51,7 @@ SHA256 = re.compile(r"^[0-9a-f]{64}$")
 TOOL = re.compile(r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$")
 URL = re.compile(r"^https://[A-Za-z0-9.-]+(:[0-9]+)?/\S*$")
 STAMP = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
+SEGMENT = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]*$")
 CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 
 
@@ -82,6 +83,9 @@ def check_path(path) -> str | None:
             return f"overlaps protected {q}"
     if any(seg.startswith(".") for seg in rest.split("/")):  # contracts §7.4: no hidden segments
         return "may not contain hidden (dot) segments"
+    # Contracts §7.1 hands paths to systemd as a space-separated, quote- and %-expanding list.
+    if not all(SEGMENT.match(seg) for seg in rest.split("/")):
+        return "segments may only use A-Z a-z 0-9 . _ - (no spaces, %, quotes or backslashes)"
     return None
 
 
