@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AgentEvent, AuditEntry, Card } from "./contract.js";
-import { createRiskGate, GateError, type GateCall } from "./risk-gate.js";
+import { AGENT_TEXT } from "./messages.js";
+import { createRiskGate, DESCRIBE_CONCURRENCY, GateError, type GateCall } from "./risk-gate.js";
 import type { RegisteredTool } from "./tool-registry.js";
 import type { ToolOutcome } from "./types.js";
 
@@ -480,3 +481,134 @@ function createRiskGateWithFailingAudit(lines: string[]) {
   };
   return { gate, cardOf };
 }
+
+describe("RiskGate with large update batches (M2 contracts §2)", () => {
+  const applyTool = registered("updates.apply", {
+    batchItems: true,
+    inputSchema: {
+      type: "object",
+      properties: { items: { type: "array", minItems: 1, maxItems: 200 } },
+      required: ["items"],
+    },
+  });
+  const updateItems = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({ source: "apt", id: `pkg${i + 1}` }));
+
+  function bigHarness() {
+    const events: AgentEvent[] = [];
+    const audit: AuditEntry[] = [];
+    let inflight = 0;
+    let peak = 0;
+    const gate = createRiskGate({
+      emit: (event) => events.push(event),
+      describe: async (tool, input) => {
+        inflight++;
+        peak = Math.max(peak, inflight);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        inflight--;
+        const items = input["items"] as { id: string }[] | undefined;
+        return {
+          title: `${tool.name} ${items?.[0]?.id ?? ""}`.trim(),
+          detail: "",
+          source: "debian",
+        };
+      },
+      audit: async (entry) => {
+        audit.push(entry);
+      },
+      now: () => 1_000,
+      newId: () => "card1",
+      timers: { setTimeout: () => 0, clearTimeout: () => {} },
+      log: () => {},
+    });
+    const waitForCard = async (): Promise<Card> => {
+      for (let i = 0; i < 1_000; i++) {
+        const event = events.find((e) => e.type === "card");
+        if (event?.type === "card") return event.card;
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      throw new Error("no card emitted");
+    };
+    return { gate, events, audit, waitForCard, peak: () => peak };
+  }
+
+  it("describes 150 items at most 8 at a time, keeps their order, and runs the tool once with every ticked item", async () => {
+    const h = bigHarness();
+    const executed: Record<string, unknown>[] = [];
+    const running = h.gate.runBatch({
+      turnId: "t1",
+      via: "desktop",
+      calls: [{ callId: "a", tool: applyTool, input: { items: updateItems(150) } }],
+      execute: async (_call, input) => {
+        executed.push(input);
+        return ok();
+      },
+    });
+    const card = await h.waitForCard();
+    expect(card.items).toHaveLength(150);
+    expect(card.items[0]).toMatchObject({
+      itemId: "item-1",
+      tool: "updates.apply",
+      title: "updates.apply pkg1",
+    });
+    expect(card.items[149]).toMatchObject({ itemId: "item-150", title: "updates.apply pkg150" });
+    expect(h.peak()).toBeGreaterThan(1);
+    expect(h.peak()).toBeLessThanOrEqual(DESCRIBE_CONCURRENCY);
+    h.gate.confirm({
+      cardId: card.cardId,
+      approve: true,
+      ticked: card.items.map((item) => item.itemId),
+      secrets: {},
+    });
+    const [result] = await running;
+    expect(result).toMatchObject({ callId: "a", status: "ran", skippedItems: 0 });
+    expect(executed).toEqual([{ items: updateItems(150) }]);
+    expect(h.audit).toHaveLength(150);
+  });
+
+  it("refuses a batch over the tool's maxItems without a card, an audit line or a run", async () => {
+    const h = bigHarness();
+    let runs = 0;
+    const results = await h.gate.runBatch({
+      turnId: "t1",
+      via: "desktop",
+      calls: [{ callId: "a", tool: applyTool, input: { items: updateItems(201) } }],
+      execute: async () => {
+        runs++;
+        return ok();
+      },
+    });
+    expect(results).toEqual([
+      {
+        callId: "a",
+        status: "ran",
+        outcome: { ok: false, data: null, text: AGENT_TEXT.tooManyItems(200), code: "invalid" },
+        skippedItems: 0,
+      },
+    ]);
+    expect(h.events).toEqual([]);
+    expect(h.audit).toEqual([]);
+    expect(runs).toBe(0);
+  });
+
+  it("still shows the step's other calls on the card", async () => {
+    const h = bigHarness();
+    const running = h.gate.runBatch({
+      turnId: "t1",
+      via: "desktop",
+      calls: [
+        { callId: "a", tool: applyTool, input: { items: updateItems(201) } },
+        { callId: "b", tool: registered("svc.restart"), input: { unit: "cups" } },
+      ],
+      execute: async () => ok(),
+    });
+    const card = await h.waitForCard();
+    expect(card.items.map((item) => item.tool)).toEqual(["svc.restart"]);
+    h.gate.confirm({ cardId: card.cardId, approve: true, ticked: ["item-1"], secrets: {} });
+    const results = await running;
+    expect(results.map((r) => [r.callId, r.status, r.outcome?.code])).toEqual([
+      ["a", "ran", "invalid"],
+      ["b", "ran", undefined],
+    ]);
+  });
+});

@@ -7,6 +7,7 @@
 import { AGENT_TEXT, type ModelProvider, ProviderError } from "@jarvis/core";
 import {
   createAnthropicProvider,
+  createGeminiProvider,
   createOllamaProvider,
   createOpenAiCompatibleProvider,
   type FetchLike,
@@ -103,6 +104,14 @@ export function buildProvider(
         baseUrl: section.baseUrl,
         model: section.model,
         ...(apiKey === undefined ? {} : { apiKey }),
+        fetch: deps.fetch,
+      });
+    case "gemini":
+      if (apiKey === undefined || apiKey === "") return unavailableProvider(AGENT_TEXT.noKey);
+      return createGeminiProvider({
+        baseUrl: section.baseUrl,
+        model: section.model,
+        apiKey,
         fetch: deps.fetch,
       });
   }

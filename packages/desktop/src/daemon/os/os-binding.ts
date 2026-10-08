@@ -1,4 +1,4 @@
-// The contract §3.1 channels as ControlHandlers for the existing control
+// The contract §3.1 channels (+ M2 §2 updates:check) as ControlHandlers for the existing control
 // server (frames, handshake, lock and run dir unchanged). Every argument is
 // parsed by @jarvis/wire's field-by-field parsers before the agent sees it;
 // a parse failure or an OsAgentError is a typed refusal, never "internal".
@@ -56,6 +56,9 @@ export function createOsBinding(
         return agent.doctorSkip(value(parseDoctorSkip(args)).stepId);
       case OS_CONTROL_REQUESTS.auditList:
         return agent.auditList(value(parseAuditList(args)));
+      case OS_CONTROL_REQUESTS.updatesCheck:
+        value(parseNoArgs(args));
+        return agent.checkUpdates();
       default:
         throw new ControlRequestError("unknown-channel", `No handler for ${channel}`);
     }

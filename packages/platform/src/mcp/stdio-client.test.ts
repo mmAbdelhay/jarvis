@@ -175,6 +175,8 @@ describe("connectMcpServer against a real process", () => {
         "pkg.install",
         "net.wifi_connect",
         "test.crash",
+        "updates.list",
+        "updates.apply",
         "jarvis.describe",
       ]);
       expect(tools[1]?.meta).toEqual({

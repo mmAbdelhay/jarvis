@@ -9,3 +9,5 @@ export * from "./risk-gate.js";
 export * from "./tool-loop.js";
 export * from "./doctor.js";
 export * from "./sys-snapshot.js";
+export * from "./updates.js";
+export * from "./model-state.js";

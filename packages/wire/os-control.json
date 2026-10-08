@@ -11,7 +11,8 @@
     "provider:save",
     "doctor:start",
     "doctor:skip",
-    "audit:list"
+    "audit:list",
+    "updates:check"
   ],
   "pushes": ["agent:events", "provider:status", "doctor:state", "sys:snapshot"]
 }

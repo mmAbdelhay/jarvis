@@ -1,4 +1,5 @@
 import {
+  AGENT_TEXT,
   type AgentEvent,
   type AuditEntry,
   type DoctorState,
@@ -6,6 +7,7 @@ import {
   type McpTool,
   type ModelProvider,
   parseFakeScript,
+  type SysSnapshot,
 } from "@jarvis/core";
 import { createMemorySecretStore, providerAccount } from "@jarvis/platform/model";
 import { describe, expect, it } from "vitest";
@@ -41,6 +43,28 @@ const diagTools: McpTool[] = [
   },
 ];
 
+const updatesTools: McpTool[] = [
+  {
+    name: "updates.list",
+    description: "List updates",
+    inputSchema: { type: "object", properties: {} },
+    meta: { jarvis: { risk: "safe" } },
+  },
+  {
+    name: "updates.apply",
+    description: "Apply updates",
+    inputSchema: { type: "object", properties: { items: { type: "array", maxItems: 200 } } },
+    meta: { jarvis: { risk: "confirm", batch: "items" } },
+  },
+];
+const UPDATES_LIST = {
+  items: [
+    { source: "apt", id: "jarvis-shell", from: "0.1.0", to: "0.2.0", security: false },
+    { source: "apt", id: "openssl", from: "3.5.1-1", to: "3.5.1-1+deb13u1", security: true },
+  ],
+  checkedAt: "2026-10-08T09:00:00Z",
+};
+
 function session(
   name: string,
   tools: McpTool[],
@@ -55,6 +79,9 @@ function session(
     listTools: async () => tools,
     callTool: async (tool) => {
       calls.push(tool);
+      if (tool === "updates.list") {
+        return { isError: false, structuredContent: UPDATES_LIST, text: "{}" };
+      }
       if (tool === "net.status") {
         return {
           isError: false,
@@ -144,6 +171,7 @@ function harness(overrides: Partial<OsAgentDeps> = {}) {
         session("jarvis-diag", diagTools, toolCalls, alive),
       ];
     },
+    readModelState: async () => null,
     audit: {
       append: async (entry) => {
         audit.push(entry);
@@ -199,6 +227,34 @@ const installScript = parseFakeScript([
 ]);
 
 describe("createOsAgent", () => {
+  it("saves a gemini provider: key in the keyring under its own account, kind in jarvis.yaml", async () => {
+    const stub: ModelProvider = {
+      async *chat() {
+        yield { type: "done", usage: { inputTokens: 0, outputTokens: 0 } };
+      },
+      probe: async () => ({ ok: true, supportsTools: true, models: ["gemini-2.5-flash"] }),
+      listModels: async () => ["gemini-2.5-flash"],
+      reachable: async () => ({ ok: true }),
+    };
+    const h = harness({ makeProvider: () => stub });
+    await h.agent.start();
+    await expect(
+      h.agent.save({
+        kind: "gemini",
+        baseUrl: "https://generativelanguage.googleapis.com",
+        model: "gemini-2.5-flash",
+        apiKey: "AIza-k",
+      }),
+    ).resolves.toMatchObject({ ok: true });
+    await expect(
+      h.secrets.get(providerAccount("gemini", "https://generativelanguage.googleapis.com")),
+    ).resolves.toBe("AIza-k");
+    expect(h.files.get("/home/jarvis/.config/jarvis/jarvis.yaml")).toContain("kind: gemini");
+    await expect(h.agent.providerList()).resolves.toMatchObject({
+      active: { kind: "gemini", hasKey: true },
+    });
+  });
+
   it("runs a prompt through a card to the installed answer, and audits it", async () => {
     const h = harness({ fakeScript: installScript });
     await h.agent.start();
@@ -256,7 +312,14 @@ describe("createOsAgent", () => {
       memUsedBytes: 500_000_000,
       disk: { mount: "/", sizeBytes: 64_000_000_000, usedBytes: 6_000_000_000 },
       failedUnits: ["cups.service"],
-      model: { kind: "ollama", model: "qwen3:8b", local: true, supportsTools: true },
+      model: {
+        kind: "ollama",
+        model: "qwen3:8b",
+        local: true,
+        supportsTools: true,
+        download: null,
+      },
+      updates: { count: 0, security: 0, checkedAt: null },
     });
   });
 
@@ -341,7 +404,7 @@ describe("createOsAgent", () => {
     await h.agent.start();
     await expect(h.agent.providerList()).resolves.toEqual({
       active: null,
-      kinds: ["anthropic", "openai-compatible", "ollama"],
+      kinds: ["anthropic", "openai-compatible", "ollama", "gemini"],
     });
     const draft = {
       kind: "anthropic",
@@ -367,7 +430,7 @@ describe("createOsAgent", () => {
         model: "claude-sonnet-4-5",
         hasKey: true,
       },
-      kinds: ["anthropic", "openai-compatible", "ollama"],
+      kinds: ["anthropic", "openai-compatible", "ollama", "gemini"],
     });
     // A probe without a key in the draft uses the stored one.
     await h.agent.probe({
@@ -527,5 +590,116 @@ describe("createOsAgent", () => {
     });
     await h.until(() => h.events().filter((e) => e.type === "turn-end").length === 2);
     expect(h.connects()).toBe(before + 1);
+  });
+});
+
+describe("updates and model download (M2 contracts §2, §5)", () => {
+  const withUpdates = (calls: string[]) => async () => [
+    session("jarvis-pkg", [...pkgTools, ...updatesTools], calls),
+    session("jarvis-diag", diagTools, calls),
+  ];
+  const snapshots = (pushes: { channel: string; payload: unknown }[]) =>
+    pushes.filter((p) => p.channel === "sys:snapshot").map((p) => p.payload as SysSnapshot);
+
+  it("answers updates:check from updates.list and pushes the counts in sys:snapshot", async () => {
+    const calls: string[] = [];
+    const h = harness({ connectMcp: withUpdates(calls) });
+    await h.agent.start();
+    await h.until(() => snapshots(h.pushes).length > 0);
+    await expect(h.agent.checkUpdates()).resolves.toEqual({ count: 2, security: 1 });
+    await h.until(() => snapshots(h.pushes).some((s) => s.updates.count === 2));
+    expect(snapshots(h.pushes).at(-1)?.updates).toEqual({
+      count: 2,
+      security: 1,
+      checkedAt: Date.parse("2026-10-08T09:00:00Z"),
+    });
+  });
+
+  it("says unsupported when jarvis-pkg has no updates.list (an M1 system)", async () => {
+    const h = harness();
+    await h.agent.start();
+    await expect(h.agent.checkUpdates()).rejects.toMatchObject({
+      name: "OsAgentError",
+      code: "unsupported",
+      message: AGENT_TEXT.updatesUnavailable,
+    });
+  });
+
+  it("passes apt's refusal on as internal with its message", async () => {
+    const failing: McpSession = {
+      ...session("jarvis-pkg", [...pkgTools, ...updatesTools], []),
+      callTool: async () => ({
+        isError: true,
+        structuredContent: { code: "failed", message: "The repository is not signed." },
+        text: "failed",
+      }),
+    };
+    const h = harness({ connectMcp: async () => [failing] });
+    await h.agent.start();
+    await expect(h.agent.checkUpdates()).rejects.toMatchObject({
+      code: "internal",
+      message: AGENT_TEXT.updatesCheckFailed("The repository is not signed."),
+    });
+  });
+
+  it("re-checks updates after updates.apply ran from a card", async () => {
+    const calls: string[] = [];
+    const script = parseFakeScript([
+      {
+        expectPromptContains: "update my computer",
+        replies: [
+          {
+            toolCalls: [
+              { name: "updates.apply", input: { items: [{ source: "apt", id: "openssl" }] } },
+            ],
+          },
+          { text: "Updated." },
+        ],
+      },
+    ]);
+    const h = harness({ fakeScript: script, connectMcp: withUpdates(calls) });
+    await h.agent.start();
+    h.agent.prompt("update my computer");
+    await h.until(() => h.events().some((e) => e.type === "card"));
+    const card = h.events().find((e) => e.type === "card");
+    if (card?.type !== "card") throw new Error("no card");
+    h.agent.confirm({
+      cardId: card.card.cardId,
+      approve: true,
+      ticked: card.card.items.map((item) => item.itemId),
+      secrets: {},
+    });
+    await h.until(
+      () =>
+        calls.includes("updates.apply") &&
+        calls.lastIndexOf("updates.list") > calls.indexOf("updates.apply"),
+    );
+  });
+
+  it("reports the local model download in sys:snapshot.model", async () => {
+    const h = harness({
+      fakeScript: installScript,
+      readModelState: async () => ({
+        modelId: "qwen3-8b",
+        ollamaTag: "qwen3:8b",
+        state: "downloading",
+        percent: 42,
+        message: "",
+        updatedAt: "2026-10-08T09:00:00Z",
+      }),
+    });
+    h.files.set(
+      "/home/jarvis/.config/jarvis/jarvis.yaml",
+      "provider:\n  kind: ollama\n  baseUrl: http://127.0.0.1:11434\n  model: qwen3:8b\n",
+    );
+    await h.agent.start();
+    await h.until(() => snapshots(h.pushes).length > 0);
+    expect(snapshots(h.pushes)[0]?.model).toEqual({
+      kind: "ollama",
+      model: "qwen3:8b",
+      local: true,
+      supportsTools: true,
+      download: { state: "downloading", percent: 42 },
+    });
   });
 });

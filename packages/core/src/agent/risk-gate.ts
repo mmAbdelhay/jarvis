@@ -5,6 +5,7 @@
 // whatever it returns — and never into events, model messages or the audit
 // log. One audit line per item, approved or not.
 import { auditInput } from "./audit.js";
+import { AGENT_TEXT } from "./messages.js";
 import {
   type AgentEvent,
   type AuditEntry,
@@ -118,6 +119,39 @@ function batchElements(call: GateCall): unknown[] | undefined {
   return call.tool.batchItems && Array.isArray(items) && items.length > 0 ? items : undefined;
 }
 
+/** Card items are described this many at a time: a 150-update card must
+ *  open in seconds, and jarvis.describe is a stdio round trip each. */
+export const DESCRIBE_CONCURRENCY = 8;
+/** No card holds more items from one call than this (updates.apply's 1-200,
+ *  M2 contracts §2; also the shell's tick cap in @jarvis/wire). */
+export const MAX_BATCH_ITEMS = 200;
+
+function batchLimit(tool: RegisteredTool): number {
+  const properties = tool.inputSchema["properties"];
+  const items = isRecord(properties) ? properties["items"] : undefined;
+  const max = isRecord(items) ? items["maxItems"] : undefined;
+  return typeof max === "number" && Number.isInteger(max) && max >= 1
+    ? Math.min(max, MAX_BATCH_ITEMS)
+    : MAX_BATCH_ITEMS;
+}
+
+async function mapLimit<T, R>(
+  items: readonly T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const index = next++;
+      out[index] = await fn(items[index] as T);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
+}
+
 export function createRiskGate(deps: RiskGateDeps): RiskGate {
   const open = new Map<
     string,
@@ -136,36 +170,58 @@ export function createRiskGate(deps: RiskGateDeps): RiskGate {
 
   async function runBatch(request: GateBatchRequest): Promise<GateItemResult[]> {
     // One unit per card item. A batchItems tool (contracts §6 #1) gives one
-    // unit per element of input.items, each described on its own.
-    const units: Unit[] = [];
+    // unit per element of input.items, each described on its own; a batch
+    // over its limit is refused before the card (no item, no audit, no run).
+    const oversize = new Map<number, number>();
+    const jobs: {
+      callIndex: number;
+      elementIndex: number | undefined;
+      describedInput: Record<string, unknown>;
+      call: GateCall;
+    }[] = [];
     for (const [callIndex, call] of request.calls.entries()) {
       const elements = batchElements(call);
-      const parts: (Record<string, unknown> | undefined)[] =
-        elements === undefined
-          ? [undefined]
-          : elements.map((element) => ({ ...call.input, items: [element] }));
-      for (const [elementIndex, part] of parts.entries()) {
-        const describedInput = part ?? call.input;
-        const description = await deps.describe(call.tool, describedInput);
-        units.push({
+      if (elements === undefined) {
+        jobs.push({ callIndex, elementIndex: undefined, describedInput: call.input, call });
+        continue;
+      }
+      const limit = batchLimit(call.tool);
+      if (elements.length > limit) {
+        oversize.set(callIndex, limit);
+        continue;
+      }
+      for (const [elementIndex, element] of elements.entries()) {
+        jobs.push({
           callIndex,
-          elementIndex: part === undefined ? undefined : elementIndex,
-          describedInput,
-          item: {
-            itemId: `item-${units.length + 1}`,
-            tool: call.tool.name,
-            title: description.title,
-            detail: description.detail,
-            source: description.source,
-            risk: call.tool.risk === "password" ? "password" : "confirm",
-            secretFields: call.tool.secrets.map((name) => ({
-              name,
-              label: secretLabel(call.tool, name),
-            })),
-          },
+          elementIndex,
+          describedInput: { ...call.input, items: [element] },
+          call,
         });
       }
     }
+    const descriptions = await mapLimit(jobs, DESCRIBE_CONCURRENCY, (job) =>
+      deps.describe(job.call.tool, job.describedInput),
+    );
+    const units: Unit[] = jobs.map((job, index) => {
+      const description = descriptions[index] as CardDescription;
+      return {
+        callIndex: job.callIndex,
+        elementIndex: job.elementIndex,
+        describedInput: job.describedInput,
+        item: {
+          itemId: `item-${index + 1}`,
+          tool: job.call.tool.name,
+          title: description.title,
+          detail: description.detail,
+          source: description.source,
+          risk: job.call.tool.risk === "password" ? "password" : "confirm",
+          secretFields: job.call.tool.secrets.map((name) => ({
+            name,
+            label: secretLabel(job.call.tool, name),
+          })),
+        },
+      };
+    });
     const items = units.map((unit) => unit.item);
     const card: Card = {
       cardId: deps.newId(),
@@ -174,31 +230,44 @@ export function createRiskGate(deps: RiskGateDeps): RiskGate {
       items,
     };
 
-    const decision = await new Promise<Decision>((resolve) => {
-      let settled = false;
-      const onAbort = () => settle(refused("denied"));
-      const timer = deps.timers.setTimeout(() => settle(refused("timeout")), CARD_TIMEOUT_MS);
-      function settle(result: Decision): void {
-        if (settled) return;
-        settled = true;
-        deps.timers.clearTimeout(timer);
-        request.signal?.removeEventListener("abort", onAbort);
-        open.delete(card.cardId);
-        deps.emit({ type: "card-closed", cardId: card.cardId, decision: result.decision });
-        resolve(result);
-      }
-      open.set(card.cardId, {
-        card,
-        maxTicked: request.maxTicked ?? Number.POSITIVE_INFINITY,
-        settle,
-      });
-      deps.emit({ type: "card", card });
-      if (request.signal?.aborted === true) onAbort();
-      else request.signal?.addEventListener("abort", onAbort, { once: true });
-    });
+    const decision: Decision =
+      units.length === 0
+        ? refused("denied")
+        : await new Promise<Decision>((resolve) => {
+            let settled = false;
+            const onAbort = () => settle(refused("denied"));
+            const timer = deps.timers.setTimeout(() => settle(refused("timeout")), CARD_TIMEOUT_MS);
+            function settle(result: Decision): void {
+              if (settled) return;
+              settled = true;
+              deps.timers.clearTimeout(timer);
+              request.signal?.removeEventListener("abort", onAbort);
+              open.delete(card.cardId);
+              deps.emit({ type: "card-closed", cardId: card.cardId, decision: result.decision });
+              resolve(result);
+            }
+            open.set(card.cardId, {
+              card,
+              maxTicked: request.maxTicked ?? Number.POSITIVE_INFINITY,
+              settle,
+            });
+            deps.emit({ type: "card", card });
+            if (request.signal?.aborted === true) onAbort();
+            else request.signal?.addEventListener("abort", onAbort, { once: true });
+          });
 
     const results: GateItemResult[] = [];
     for (const [callIndex, call] of request.calls.entries()) {
+      const limit = oversize.get(callIndex);
+      if (limit !== undefined) {
+        results.push({
+          callId: call.callId,
+          status: "ran",
+          outcome: { ok: false, data: null, text: AGENT_TEXT.tooManyItems(limit), code: "invalid" },
+          skippedItems: 0,
+        });
+        continue;
+      }
       const mine = units.filter((unit) => unit.callIndex === callIndex);
       const ticked =
         decision.decision === "approved"

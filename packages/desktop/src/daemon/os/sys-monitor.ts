@@ -2,7 +2,8 @@
 // 10 s (pushed each time, so a shell always has a fresh one), plus refresh()
 // after something changed (a provider save, a doctor run), which pushes only
 // when the snapshot differs. Collections never overlap: net.status pings and
-// resolves, and a slow one must not pile up.
+// resolves, and a slow one must not pile up; a refresh during a collection
+// runs one more afterwards.
 //
 // No electron here (core/no-electron.test.ts).
 import type { SysSnapshot } from "@jarvis/core";
@@ -29,10 +30,17 @@ export function createSysMonitor(deps: {
   let current: SysSnapshot | undefined;
   let handle: unknown;
   let busy = false;
+  let again = false;
   let stopped = false;
 
   async function collect(always: boolean): Promise<void> {
-    if (busy || stopped) return;
+    if (stopped) return;
+    // Never overlap; a refresh that arrives mid-collection asks for one more
+    // collection afterwards, so a change it announces is not lost.
+    if (busy) {
+      again = true;
+      return;
+    }
     busy = true;
     try {
       const next = await deps.collect();
@@ -43,6 +51,10 @@ export function createSysMonitor(deps: {
       deps.log(`[sys] snapshot failed: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       busy = false;
+    }
+    if (again && !stopped) {
+      again = false;
+      await collect(false);
     }
   }
 

@@ -10,6 +10,7 @@ const snapshot = (online: boolean): SysSnapshot => ({
   disk: { mount: "/", sizeBytes: 1, usedBytes: 1 },
   failedUnits: [],
   model: null,
+  updates: { count: 0, security: 0, checkedAt: null },
 });
 
 describe("createSysMonitor", () => {
@@ -58,5 +59,25 @@ describe("createSysMonitor", () => {
     await monitor.refresh();
     expect(lines.join("\n")).toContain("jarvis-diag gone");
     expect(monitor.current()).toBeUndefined();
+  });
+  it("collects again after a refresh that arrived during a collection, and pushes the change", async () => {
+    let release: (s: SysSnapshot) => void = () => {};
+    const answers: Array<() => Promise<SysSnapshot>> = [
+      () => new Promise<SysSnapshot>((resolve) => (release = resolve)),
+      async () => snapshot(false),
+    ];
+    const pushed: SysSnapshot[] = [];
+    const monitor = createSysMonitor({
+      collect: () => (answers.shift() ?? (async () => snapshot(false)))(),
+      push: (s) => pushed.push(s),
+      timers: { setInterval: () => 1, clearInterval: () => {} },
+      log: () => {},
+    });
+    const first = monitor.refresh();
+    const second = monitor.refresh(); // arrives mid-collection
+    release(snapshot(true));
+    await Promise.all([first, second]);
+    expect(answers).toHaveLength(0);
+    expect(pushed.map((s) => s.online)).toEqual([true, false]);
   });
 });

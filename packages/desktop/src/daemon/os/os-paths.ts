@@ -46,3 +46,7 @@ export function buildStampCandidates(scriptDir: string): string[] {
     posix.join(scriptDir, "..", "..", "..", "build-stamp.json"),
   ];
 }
+
+/** World-readable, written atomically by the installer backend and
+ *  jarvis-model-fetch (M2 contracts §5). */
+export const MODEL_STATE_PATH = "/var/lib/jarvis/model-state.json";

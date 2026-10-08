@@ -3,6 +3,7 @@ import {
   buildStampCandidates,
   DEFAULT_MCP_DIR,
   mcpDirFrom,
+  MODEL_STATE_PATH,
   osConfigPath,
   readOsBuildId,
 } from "./os-paths.js";
@@ -39,5 +40,11 @@ describe("os paths", () => {
         throw new Error("ENOENT");
       }),
     ).toBe("dev");
+  });
+});
+
+describe("MODEL_STATE_PATH", () => {
+  it("is the M2 contracts §5 path", () => {
+    expect(MODEL_STATE_PATH).toBe("/var/lib/jarvis/model-state.json");
   });
 });

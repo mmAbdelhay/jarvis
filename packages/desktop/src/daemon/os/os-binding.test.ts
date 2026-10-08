@@ -35,6 +35,10 @@ function fakeAgent() {
     doctorStart: record("doctorStart", idle) as OsAgent["doctorStart"],
     doctorSkip: record("doctorSkip", idle) as OsAgent["doctorSkip"],
     auditList: record("auditList", Promise.resolve([])) as OsAgent["auditList"],
+    checkUpdates: record(
+      "checkUpdates",
+      Promise.resolve({ count: 2, security: 1 }),
+    ) as OsAgent["checkUpdates"],
     resync: () => {},
     shutdown: async () => {},
   };
@@ -68,6 +72,10 @@ describe("createOsBinding", () => {
     await handlers.invoke("doctor:start", [], connection);
     await handlers.invoke("doctor:skip", [{ stepId: "wifi" }], connection);
     await handlers.invoke("audit:list", [{ limit: 20 }], connection);
+    await expect(handlers.invoke("updates:check", [], connection)).resolves.toEqual({
+      count: 2,
+      security: 1,
+    });
     expect(calls.map((c) => c.method)).toEqual([
       "prompt",
       "stop",
@@ -78,6 +86,7 @@ describe("createOsBinding", () => {
       "doctorStart",
       "doctorSkip",
       "auditList",
+      "checkUpdates",
     ]);
     expect(calls[0]?.args).toEqual(["install vlc"]);
   });
@@ -104,7 +113,25 @@ describe("createOsBinding", () => {
     await expect(handlers.invoke("constructor", [], connection)).rejects.toMatchObject({
       code: "unknown-channel",
     });
+    await expect(handlers.invoke("updates:check", ["now"], connection)).rejects.toMatchObject({
+      code: "bad-request",
+    });
     expect(calls).toEqual([]);
+  });
+
+  it("maps an internal OsAgentError (a failed update check) to internal with its text", async () => {
+    const { agent } = fakeAgent();
+    agent.checkUpdates = async () => {
+      throw new OsAgentError(
+        "internal",
+        "Could not check for updates: The repository is not signed.",
+      );
+    };
+    const handlers = createOsBinding(agent, { requestStop: () => {}, defer: (cb) => cb() });
+    await expect(handlers.invoke("updates:check", [], connection)).rejects.toMatchObject({
+      code: "internal",
+      message: "Could not check for updates: The repository is not signed.",
+    });
   });
 
   it("maps OsAgentError to its code and refuses uploads", async () => {
