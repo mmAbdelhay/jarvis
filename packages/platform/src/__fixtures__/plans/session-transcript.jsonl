@@ -1,0 +1,2 @@
+{"type":"user","sessionId":"11111111-2222-3333-4444-555555555555","cwd":"__CWD__","timestamp":"2026-09-27T10:00:00.000Z","message":{"role":"user","content":"Let's plan this out."}}
+{"type":"assistant","sessionId":"11111111-2222-3333-4444-555555555555","cwd":"__CWD__","timestamp":"2026-09-27T10:00:05.000Z","message":{"role":"assistant","model":"claude-x","content":[{"type":"text","text":"I saved the plan to __BASE__/plans/session-found.md for you to review."}]}}

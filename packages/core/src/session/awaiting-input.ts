@@ -79,3 +79,102 @@ export function looksLikePrompt(tail: string): boolean {
     return LOWER_PROMPT_MARKERS.some((marker) => lowerLine.includes(marker));
   });
 }
+
+/** One choice a waiting prompt offers, in the prompt's own words. */
+export type PromptOption = {
+  label: string;
+  /** Exactly what to type to choose it, as a person at the keyboard would. */
+  keys: string;
+};
+
+/** What a session is waiting on: the agent's own question and choices. */
+export type PendingPrompt = {
+  /** The question line as the agent printed it ("Do you want to proceed?"). */
+  question: string;
+  options: PromptOption[];
+};
+
+const DOWN = "\x1b[B";
+const ENTER = "\r";
+// "❯ 1. Yes" / "  2. Yes, and don't ask again" — a numbered menu row, the
+// pointer marking the one currently highlighted.
+const MENU_ROW = /^(❯\s*)?(\d{1,2})\.\s+(.+)$/;
+const YES_NO = /\((y)\/(n)\)|\[(y)\/(n)\]/i;
+
+/**
+ * Reads the prompt a session is sitting at from its output tail, so it can
+ * be shown and answered without the terminal. Three shapes, the ones
+ * {@link PROMPT_MARKERS} already recognise:
+ *
+ *  - a numbered menu (Claude Code's permission prompt): one option per row,
+ *    answered by moving the highlight there with Down and pressing Enter —
+ *    what a person does, and what works whether or not the menu also takes
+ *    a digit;
+ *  - a `(y/n)` / `[Y/n]` question: "y" or "n", then Enter;
+ *  - "Press Enter to continue" / "Enter to confirm": Enter.
+ *
+ * Undefined when the tail does not end at one of those — this never guesses
+ * an answer for a prompt it cannot read. The output is a terminal stream
+ * with redraws in it, so the *last* question and the rows after it are what
+ * count; an earlier, already-answered prompt further up is ignored.
+ */
+export function readPrompt(tail: string): PendingPrompt | undefined {
+  if (!looksLikePrompt(tail)) return undefined;
+  const scanned = tail.length > PROMPT_TAIL_CHARS ? tail.slice(-PROMPT_TAIL_CHARS) : tail;
+  const lines = stripAnsi(scanned)
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .slice(-20);
+
+  // The last question in the tail, and only what follows it.
+  let questionAt = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i] ?? "";
+    if (line.endsWith("?") || YES_NO.test(line) || /press enter|enter to confirm/i.test(line)) {
+      questionAt = i;
+      break;
+    }
+  }
+  if (questionAt === -1) return undefined;
+  const question = lines[questionAt] ?? "";
+  const after = lines.slice(questionAt + 1);
+
+  const rows = new Map<number, { label: string; highlighted: boolean }>();
+  for (const line of after) {
+    const match = MENU_ROW.exec(line);
+    if (match === null) continue;
+    const number = Number(match[2]);
+    // A redraw repeats rows; the latest copy of each wins.
+    rows.set(number, { label: (match[3] ?? "").trim(), highlighted: match[1] !== undefined });
+  }
+  if (rows.size >= 2) {
+    const numbers = [...rows.keys()].sort((a, b) => a - b);
+    // Consecutive from 1, or it is not a menu this can drive.
+    if (numbers.some((number, index) => number !== index + 1)) return undefined;
+    const current = numbers.find((number) => rows.get(number)?.highlighted) ?? 1;
+    return {
+      question,
+      options: numbers.map((number) => ({
+        label: rows.get(number)?.label ?? "",
+        keys:
+          (number > current ? DOWN.repeat(number - current) : "\x1b[A".repeat(current - number)) +
+          ENTER,
+      })),
+    };
+  }
+
+  if (YES_NO.test(question)) {
+    return {
+      question,
+      options: [
+        { label: "Yes", keys: `y${ENTER}` },
+        { label: "No", keys: `n${ENTER}` },
+      ],
+    };
+  }
+  if (/press enter|enter to confirm/i.test(question)) {
+    return { question, options: [{ label: "Enter", keys: ENTER }] };
+  }
+  return undefined;
+}

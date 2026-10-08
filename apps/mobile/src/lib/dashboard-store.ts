@@ -24,7 +24,7 @@ export type ProjectSummary = { name: string; path?: string };
 // wire dependency.
 export type SessionSummary = Pick<
   Session,
-  "id" | "project" | "state" | "summary" | "startedAt" | "origin"
+  "id" | "project" | "agentId" | "state" | "summary" | "startedAt" | "origin"
 >;
 
 export type DashboardView = {
@@ -49,7 +49,7 @@ export type DashboardStore = {
   openTerminal(project: string): Promise<TerminalOpenOutcome>;
 };
 
-function parseProjects(value: unknown): ProjectSummary[] {
+export function parseProjects(value: unknown): ProjectSummary[] {
   if (!Array.isArray(value)) return [];
   const projects: ProjectSummary[] = [];
   for (const item of value) {
@@ -81,6 +81,7 @@ export function parseSessions(value: unknown): SessionSummary[] {
     sessions.push({
       id: session.id,
       project: session.project,
+      agentId: session.agentId,
       state: session.state,
       summary: session.summary,
       startedAt: session.startedAt,

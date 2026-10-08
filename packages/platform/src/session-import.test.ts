@@ -6,6 +6,7 @@ import type { AgentConfig } from "@jarvis/core";
 import type { Session, SessionStore } from "@jarvis/core";
 import {
   isSessionTranscriptEntry,
+  parseCopilotTranscript,
   parseTranscript,
   createFsImportDeps,
   createSessionImporter,
@@ -14,6 +15,7 @@ import {
   resolveProject,
   sessionFromTranscript,
   transcriptDirs,
+  transcriptSource,
   type SessionImporterDeps,
   type TranscriptFile,
 } from "./session-import.js";
@@ -126,6 +128,70 @@ describe("resolveProject", () => {
 
   it("ignores a trailing separator on a configured path", () => {
     expect(resolveProject("/Users/u/work/site/src", { site: "/Users/u/work/site/" })).toBe("site");
+  });
+});
+
+describe("parseCopilotTranscript", () => {
+  // Event shapes from Copilot's published session-events.schema.json:
+  // every event carries id/timestamp/parentId/type/data.
+  const event = (type: string, data: Record<string, unknown>): string =>
+    JSON.stringify({ id: "e", timestamp: "2026-01-01T00:00:00Z", parentId: null, type, data });
+
+  it("reads user and assistant messages and names the tools", () => {
+    const text = [
+      event("session.start", { sessionId: "s", context: { cwd: "/w" } }),
+      event("user.message", { content: "  fix the build  " }),
+      event("assistant.message_delta", { deltaContent: "Look" }),
+      event("assistant.message", {
+        messageId: "m1",
+        content: "Looking at it.",
+        toolRequests: [{ toolCallId: "t1", name: "bash" }],
+      }),
+      event("tool.execution_complete", { toolCallId: "t1" }),
+      event("assistant.message", {
+        messageId: "m2",
+        content: "",
+        toolRequests: [{ toolCallId: "t2", name: "edit" }],
+      }),
+      event("assistant.message", { messageId: "m3", content: "Fixed." }),
+    ].join("\n");
+    expect(parseCopilotTranscript(text)).toEqual([
+      { role: "user", text: "fix the build", tools: [] },
+      { role: "assistant", text: "Looking at it.", tools: ["bash", "edit"] },
+      { role: "assistant", text: "Fixed.", tools: [] },
+    ]);
+  });
+
+  it("leaves out injected messages, autopilot continuations and sub-agents", () => {
+    const text = [
+      event("user.message", { content: "skill text", source: "skill-pdf" }),
+      event("user.message", { content: "continue", isAutopilotContinuation: true }),
+      event("assistant.message", { messageId: "m", content: "sub", parentToolCallId: "t" }),
+      event("user.message", { content: "real" }),
+    ].join("\n");
+    expect(parseCopilotTranscript(text)).toEqual([{ role: "user", text: "real", tools: [] }]);
+  });
+
+  it("skips unreadable lines rather than losing the rest", () => {
+    const text = ["{nope", "42", event("user.message", { content: "hi" }), ""].join("\n");
+    expect(parseCopilotTranscript(text)).toEqual([{ role: "user", text: "hi", tools: [] }]);
+  });
+});
+
+describe("transcriptSource", () => {
+  it("reads a Copilot row's events.jsonl beside its workspace.yaml", () => {
+    const source = transcriptSource(
+      join("/h", ".copilot", "session-state", "s1", "workspace.yaml"),
+    );
+    expect(source.path).toBe(join("/h", ".copilot", "session-state", "s1", "events.jsonl"));
+    expect(source.parse).toBe(parseCopilotTranscript);
+  });
+
+  it("reads a Claude transcript as it stands", () => {
+    expect(transcriptSource("/t/s1.jsonl")).toEqual({
+      path: "/t/s1.jsonl",
+      parse: parseTranscript,
+    });
   });
 });
 
@@ -918,6 +984,29 @@ describe("createSessionImporter", () => {
       expect(found).toBeNull();
     });
 
+    // A Jarvis session running in the same directory writes the newest
+    // transcript there; it is that session's, never a scanned process's.
+    it("skips a transcript whose id is one of Jarvis's own sessions", async () => {
+      const { deps } = world({
+        [`${DIR}/-Users-u-work-notes/typed.jsonl`]: {
+          head: transcript({ id: "typed", cwd: "/Users/u/work/notes", prompt: "typed one" }),
+          mtime: NOW - 2 * DAY,
+        },
+        [`${DIR}/-Users-u-work-notes/jarvis-1.jsonl`]: {
+          head: transcript({ id: "jarvis-1", cwd: "/Users/u/work/notes", prompt: "jarvis one" }),
+          mtime: NOW - DAY,
+        },
+      });
+
+      const found = await createSessionImporter(deps).latestTranscriptFor(
+        "claude-main",
+        "/Users/u/work/notes",
+        new Set(["jarvis-1"]),
+      );
+
+      expect(found?.session.summary).toBe("typed one");
+    });
+
     it("returns null for an agent with no configured transcript directory", async () => {
       const { deps } = world({});
 
@@ -945,6 +1034,49 @@ describe("createSessionImporter", () => {
       );
 
       expect(found).toBeNull();
+    });
+  });
+
+  describe("transcriptForPid", () => {
+    // Claude Code writes <configDir>/sessions/<pid>.json naming the session
+    // a running process is in — the one exact link from a pid to its
+    // transcript, whatever else shares its directory.
+    const pidFile = join("/h/.claude-main", "sessions", "4242.json");
+
+    it("follows the pid file to that session's transcript, newest or not", async () => {
+      const { deps } = world({
+        [pidFile]: {
+          head: JSON.stringify({ pid: 4242, sessionId: "mine", cwd: "/Users/u/work/notes" }),
+          dir: "elsewhere",
+        },
+        [`${DIR}/-Users-u-work-notes/mine.jsonl`]: {
+          head: transcript({ id: "mine", cwd: "/Users/u/work/notes", prompt: "my prompt" }),
+          mtime: NOW - 2 * DAY,
+        },
+        [`${DIR}/-Users-u-work-notes/other.jsonl`]: {
+          head: transcript({ id: "other", cwd: "/Users/u/work/notes", prompt: "theirs" }),
+          mtime: NOW - DAY,
+        },
+      });
+
+      const found = await createSessionImporter(deps).transcriptForPid("claude-main", 4242);
+
+      expect(found?.session.summary).toBe("my prompt");
+      expect(found?.path).toBe(`${DIR}/-Users-u-work-notes/mine.jsonl`);
+    });
+
+    it("returns null with no pid file, or one written for another pid", async () => {
+      const { deps } = world({
+        [pidFile]: { head: JSON.stringify({ pid: 1, sessionId: "mine" }), dir: "elsewhere" },
+        [`${DIR}/-Users-u-work-notes/mine.jsonl`]: {
+          head: transcript({ id: "mine", cwd: "/Users/u/work/notes" }),
+        },
+      });
+      const importer = createSessionImporter(deps);
+
+      expect(await importer.transcriptForPid("claude-main", 4242)).toBeNull();
+      expect(await importer.transcriptForPid("claude-main", 7)).toBeNull();
+      expect(await importer.transcriptForPid("no-such-agent", 4242)).toBeNull();
     });
   });
 });

@@ -100,6 +100,9 @@ function recordingHost(): { host: DesktopHost; seen: unknown[][]; state: { focus
       sweepIdleViews: () => seen.push(["sweepIdleViews"]),
       destroyViews: () => seen.push(["destroyViews"]),
       showNotification: (...args) => seen.push(["showNotification", ...args]),
+      trashItem: async (path) => {
+        seen.push(["trashItem", path]);
+      },
       openExternal: async (url) => {
         seen.push(["openExternal", url]);
       },

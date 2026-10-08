@@ -14,6 +14,7 @@ vi.mock("./vendor/xterm.mjs", () => ({ Terminal: FakeTerminal }));
 vi.mock("./vendor/addon-fit.mjs", () => ({ FitAddon: FakeFitAddon }));
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 import {
+  focusTerminalPane,
   initWorkspace,
   renderWorkspace,
   reportWorkspaceBounds,
@@ -225,6 +226,13 @@ function harness(): Recorded[] {
     resizeTerminal: record("resizeTerminal"),
     onTerminalData: () => {},
     onTerminalExit: () => {},
+    // Task 8: workspace-terminal.ts's initWorkspaceTerminals subscribes to
+    // both unconditionally, so the module import throws without them even
+    // in a test that never opens a terminal tab's plan panel.
+    onTabPlans: () => {},
+    onPlansChanged: () => {},
+    plansList: () => Promise.resolve({ session: undefined, planMode: [], repo: [] }),
+    plansOpenLink: () => Promise.resolve(),
     listBookmarks: () => Promise.resolve({ ok: true, value: [] }),
     addBookmark: (...args: unknown[]) => {
       calls.push({ call: "addBookmark", args });
@@ -440,6 +448,30 @@ describe("workspace chrome", () => {
 
     const select = document.getElementById("workspace-project") as HTMLSelectElement;
     expect(select.value).toBe("storefront");
+  });
+
+  it("goes to a terminal pane's tab, split key or not, and shows the Workspace", () => {
+    renderWorkspace({
+      tabs: [
+        tab({ project: "acme" }),
+        tab({ id: "tab-2", project: "storefront", kind: "terminal", url: "" }),
+      ],
+      activeTabId: "tab-1",
+    });
+    let navigated = 0;
+    document.getElementById("nav-workspace")?.addEventListener("click", () => (navigated += 1));
+
+    expect(focusTerminalPane("tab-2:p1")).toBe(true);
+
+    expect(calls).toContainEqual({ call: "activateTab", args: ["tab-2"] });
+    expect(navigated).toBe(1);
+  });
+
+  it("reports false, touching nothing, for a pane whose tab is no longer open", () => {
+    renderWorkspace({ tabs: [tab({ project: "acme" })], activeTabId: "tab-1" });
+
+    expect(focusTerminalPane("tab-9")).toBe(false);
+    expect(calls.some((entry) => entry.call === "activateTab")).toBe(false);
   });
 
   it("collapses a non-selected project's tabs into one labeled, counted pill", () => {

@@ -7,25 +7,31 @@ import type { Language } from "./i18n";
 import type { LayoutClass } from "./layout-class";
 
 export type SessionTarget =
-  | { action: "push"; href: "/session/[id]"; params: { id: string } }
+  | { action: "push"; href: "/session/[id]" | "/transcript/[id]"; params: { id: string } }
   | { action: "setParams"; params: { id: string } }
   | { action: "navigate"; href: "/sessions"; params: { id: string } };
 
 /** Where a session row press goes. `from` is the screen holding the row:
  *  the sessions split selects in place, any other wide screen (the
- *  Dashboard) goes to the split with the id. */
+ *  Dashboard) goes to the split with the id. A session that exists only in
+ *  the saved history has no live screen: a phone opens its transcript (a
+ *  wide split shows the transcript in its detail pane). */
 export function sessionTarget(
   kind: LayoutClass,
   id: string,
   from: "sessions" | "elsewhere" = "sessions",
+  source: "live" | "history" = "live",
 ): SessionTarget {
-  if (kind === "phone") return { action: "push", href: "/session/[id]", params: { id } };
+  if (kind === "phone") {
+    const href = source === "history" ? "/transcript/[id]" : "/session/[id]";
+    return { action: "push", href, params: { id } };
+  }
   if (from === "sessions") return { action: "setParams", params: { id } };
   return { action: "navigate", href: "/sessions", params: { id } };
 }
 
 export type SessionRouter = {
-  push(href: { pathname: "/session/[id]"; params: { id: string } }): void;
+  push(href: { pathname: "/session/[id]" | "/transcript/[id]"; params: { id: string } }): void;
   setParams(params: { id: string }): void;
   navigate(href: { pathname: "/sessions"; params: { id: string } }): void;
 };
@@ -121,5 +127,3 @@ export function splitLayout(input: { language: Language; platformRtl: boolean })
 export function firstChildSide(direction: "rtl" | "ltr"): "left" | "right" {
   return direction === "rtl" ? "right" : "left";
 }
-
-export const SESSIONS_LIST_WIDTH = 360;

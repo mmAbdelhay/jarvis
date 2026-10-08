@@ -318,6 +318,40 @@ describe("createPageController", () => {
       expect(deps.fixedSizes).toEqual([{ cols: 100, rows: 30 }]);
     });
 
+    // Fit toggle: the phone takes the pty's size itself, so the page goes
+    // back to fitting its own width and reports what that fits.
+    it('receive({"t":"free"}) drops the fixed size: fit() again, and resize posts the fitted size', () => {
+      const term = makeFakeTerminal();
+      const deps = makeDeps(term);
+      deps.fit = () => term.setSize(48, 40);
+      const controller = createPageController(deps);
+      controller.start();
+      controller.receive('{"t":"size","cols":200,"rows":50}');
+      deps.posted.length = 0;
+      deps.fixedSizes.length = 0;
+
+      controller.receive('{"t":"free"}');
+      controller.layoutChanged();
+
+      expect(deps.fixedSizes).toEqual([]);
+      expect(deps.posted).toEqual([{ t: "resize", cols: 48, rows: 40 }]);
+    });
+
+    it("a size after a free fixes the size again", () => {
+      const term = makeFakeTerminal();
+      const deps = makeDeps(term);
+      deps.fit = () => term.setSize(48, 40);
+      const controller = createPageController(deps);
+      controller.start();
+      controller.receive('{"t":"free"}');
+      deps.posted.length = 0;
+
+      controller.receive('{"t":"size","cols":200,"rows":50}');
+
+      expect(deps.fixedSizes).toEqual([{ cols: 200, rows: 50 }]);
+      expect(deps.posted).toEqual([{ t: "resize", cols: 200, rows: 50 }]);
+    });
+
     it("ignores a size message with a non-number cols/rows", () => {
       const term = makeFakeTerminal();
       const deps = makeDeps(term);
@@ -376,6 +410,51 @@ describe("createPageController", () => {
       controller.touchEnd();
 
       expect(term.scrolls).toEqual([]);
+    });
+
+    // A wide fixed size pans sideways natively; that drag must not also
+    // scroll the scrollback (or send wheel events to a full-screen program).
+    it("a mostly-sideways drag is a pan: no scrolling for the rest of the touch", () => {
+      const term = makeFakeTerminal();
+      const deps = makeDeps(term);
+      const controller = createPageController(deps);
+      controller.start();
+
+      controller.touchStart();
+      controller.touchMove(-3, 6);
+      controller.touchMove(-4, 10);
+      controller.touchMove(-60, 0);
+      controller.touchEnd();
+
+      expect(term.scrolls).toEqual([]);
+    });
+
+    it("a mostly-vertical drag still scrolls, the movement before the lock included", () => {
+      const term = makeFakeTerminal();
+      const deps = makeDeps(term);
+      const controller = createPageController(deps);
+      controller.start();
+
+      controller.touchStart();
+      controller.touchMove(-6, 2);
+      controller.touchMove(-34, 3);
+
+      expect(term.scrolls).toEqual([1, 1]);
+    });
+
+    it("a sideways pan in the alternate buffer sends no wheel", () => {
+      const term = makeFakeTerminal();
+      term.setBufferType("alternate");
+      term.setMouseTrackingMode("vt200");
+      const deps = makeDeps(term);
+      const controller = createPageController(deps);
+      controller.start();
+      deps.posted.length = 0;
+
+      controller.touchStart();
+      controller.touchMove(-20, 40);
+
+      expect(deps.posted).toEqual([]);
     });
 
     it("accumulates a drag across several touchMove calls", () => {
@@ -500,5 +579,151 @@ describe("selection (wide layout, fix round 1)", () => {
     controller.receive(JSON.stringify({ t: "clearSelection" }));
     expect(term.clearedSelections).toBe(1);
     expect(term.getSelection()).toBe("");
+  });
+});
+
+describe("scrollback navigation", () => {
+  function navDeps(lines: string[], rows = 4) {
+    const term = makeFakeTerminal();
+    term.setSize(80, rows);
+    let viewport = Math.max(0, lines.length - rows);
+    const selections: [number, number, number][] = [];
+    const deps = makeDeps(term);
+    deps.nav = {
+      viewportY: () => viewport,
+      baseY: () => Math.max(0, lines.length - rows),
+      lineCount: () => lines.length,
+      lineText: (row) => lines[row] ?? "",
+      scrollToLine: (row) => {
+        viewport = row;
+      },
+      scrollToBottom: () => {
+        viewport = Math.max(0, lines.length - rows);
+      },
+      select: (column, row, length) => {
+        selections.push([column, row, length]);
+      },
+    };
+    const controller = createPageController(deps);
+    return {
+      controller,
+      deps,
+      selections,
+      viewport: () => viewport,
+      setViewport: (row: number) => {
+        viewport = row;
+      },
+    };
+  }
+
+  const LINES = Array.from({ length: 20 }, (_, index) => `line ${index}`);
+
+  it("jumps between marked prompts and back to the live end", () => {
+    const nav = navDeps(LINES);
+    for (const line of [2, 8, 14]) nav.controller.commandMark({ line, isDisposed: false });
+    nav.setViewport(10);
+    nav.controller.receive(JSON.stringify({ t: "jump", to: "prevCommand" }));
+    expect(nav.viewport()).toBe(8);
+    nav.controller.receive(JSON.stringify({ t: "jump", to: "prevCommand" }));
+    expect(nav.viewport()).toBe(2);
+    nav.controller.receive(JSON.stringify({ t: "jump", to: "nextCommand" }));
+    expect(nav.viewport()).toBe(8);
+    nav.controller.receive(JSON.stringify({ t: "jump", to: "nextCommand" }));
+    expect(nav.viewport()).toBe(14);
+    // Past the newest prompt only the live end is left.
+    nav.controller.receive(JSON.stringify({ t: "jump", to: "nextCommand" }));
+    expect(nav.viewport()).toBe(16);
+    nav.setViewport(0);
+    nav.controller.receive(JSON.stringify({ t: "jump", to: "latest" }));
+    expect(nav.viewport()).toBe(16);
+  });
+
+  it("forgets a prompt xterm trimmed out of the scrollback", () => {
+    const nav = navDeps(LINES);
+    nav.controller.commandMark({ line: 2, isDisposed: true });
+    nav.controller.commandMark({ line: 6, isDisposed: false });
+    nav.setViewport(10);
+    nav.controller.receive(JSON.stringify({ t: "jump", to: "prevCommand" }));
+    expect(nav.viewport()).toBe(6);
+    nav.controller.receive(JSON.stringify({ t: "jump", to: "prevCommand" }));
+    expect(nav.viewport()).toBe(6);
+  });
+
+  it("reports only whether it is scrolled back and whether prompts are marked", () => {
+    const nav = navDeps(LINES);
+    nav.controller.viewChanged();
+    nav.setViewport(3);
+    nav.controller.viewChanged();
+    nav.controller.commandMark({ line: 1, isDisposed: false });
+    expect(nav.deps.posted.filter((m) => (m as { t: string }).t === "view")).toEqual([
+      { t: "view", back: false, commands: false },
+      { t: "view", back: true, commands: false },
+      { t: "view", back: true, commands: true },
+    ]);
+  });
+
+  it("finds the next and previous match, ignoring case, and says when there is none", () => {
+    const lines = ["$ make", "ok", "ERROR one", "fine", "error two", "$ "];
+    const nav = navDeps(lines, 2);
+    nav.setViewport(0);
+    nav.controller.receive(JSON.stringify({ t: "find", query: "error", direction: "next" }));
+    expect(nav.selections.at(-1)).toEqual([0, 2, 5]);
+    nav.controller.receive(JSON.stringify({ t: "find", query: "error", direction: "next" }));
+    expect(nav.selections.at(-1)).toEqual([0, 4, 5]);
+    nav.controller.receive(JSON.stringify({ t: "find", query: "error", direction: "prev" }));
+    expect(nav.selections.at(-1)).toEqual([0, 2, 5]);
+    nav.controller.receive(JSON.stringify({ t: "find", query: "missing", direction: "next" }));
+    const found = nav.deps.posted.filter((m) => (m as { t: string }).t === "found");
+    expect(found).toEqual([
+      { t: "found", ok: true },
+      { t: "found", ok: true },
+      { t: "found", ok: true },
+      { t: "found", ok: false },
+    ]);
+  });
+
+  it("ignores an empty or oversized search", () => {
+    const nav = navDeps(LINES);
+    nav.controller.receive(JSON.stringify({ t: "find", query: "", direction: "next" }));
+    nav.controller.receive(
+      JSON.stringify({ t: "find", query: "x".repeat(201), direction: "next" }),
+    );
+    expect(nav.deps.posted.filter((m) => (m as { t: string }).t === "found")).toEqual([]);
+  });
+
+  it("parses the new page messages field by field", () => {
+    expect(parsePageMessage(JSON.stringify({ t: "view", back: true, commands: false }))).toEqual({
+      t: "view",
+      back: true,
+      commands: false,
+    });
+    expect(
+      parsePageMessage(JSON.stringify({ t: "view", back: "yes", commands: false })),
+    ).toBeUndefined();
+    expect(parsePageMessage(JSON.stringify({ t: "found", ok: false }))).toEqual({
+      t: "found",
+      ok: false,
+    });
+  });
+});
+
+// The fixed size's font: the largest in [11, 14]px whose columns fit the
+// width. A wider pty overflows at 11px and pans rather than shrinking to
+// an unreadable size.
+describe("fixedFont", () => {
+  const controller = createPageController(makeDeps(makeFakeTerminal()));
+  const monoWidth = (size: number) => size * 0.6;
+
+  it("picks the largest size whose columns fit", () => {
+    // 80 cols x 0.6 x 13 = 624 <= 640; 14 would be 672.
+    expect(controller.fixedFont(80, 640, monoWidth)).toEqual({ size: 13, overflowing: false });
+  });
+
+  it("never goes below 11px, and says the width overflows there", () => {
+    expect(controller.fixedFont(200, 400, monoWidth)).toEqual({ size: 11, overflowing: true });
+  });
+
+  it("caps at 14px for a narrow pty", () => {
+    expect(controller.fixedFont(20, 1000, monoWidth)).toEqual({ size: 14, overflowing: false });
   });
 });

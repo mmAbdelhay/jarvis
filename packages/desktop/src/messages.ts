@@ -24,6 +24,7 @@ import type { PrerequisiteId } from "@jarvis/platform";
 import type { BindKind, DesktopNoticeKind, RemoteErrorCode, RemoteProblem } from "@jarvis/remote";
 import type { AuthChannel, PushKind } from "@jarvis/wire";
 import type { RemoteWebState } from "./remote-web.js";
+import type { RunningCounts, UpdateError } from "./updater.js";
 
 export const PRIMARY_LANGUAGE = "en";
 
@@ -52,6 +53,340 @@ function splitOnNamePlaceholder(template: string): { before: string; after: stri
 }
 
 export const MESSAGES = {
+  planPanelLabel: (language: "ar" | "en"): string =>
+    language === "ar" ? "لوحة الخطة" : "Plan panel",
+  // Task 8 fix round 1: the palette's own toggle for it — the file
+  // sidebar's matching action stays a plain English literal in
+  // terminal-pane.ts (that one is out of scope here), but this one is new
+  // and goes through MESSAGES from the start.
+  planPanelToggle: (language: "ar" | "en"): string =>
+    language === "ar" ? "تبديل لوحة الخطة" : "Toggle plan panel",
+  planEmptyTitle: (language: "ar" | "en"): string =>
+    language === "ar" ? "لا توجد خطة لهذه الجلسة بعد" : "No plan for this session yet",
+  planEmptyHint: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "ابدأ وضع الخطة في الجلسة لعرضها هنا."
+      : "Start plan mode in the session to see it here.",
+  planSourceSession: (language: "ar" | "en"): string =>
+    language === "ar" ? "هذه الجلسة · وضع الخطة" : "This session · plan mode",
+  planSourceMode: (language: "ar" | "en"): string =>
+    language === "ar" ? "وضع الخطة" : "Plan mode",
+  planSourceRepo: (language: "ar" | "en"): string => (language === "ar" ? "المستودع" : "Repo"),
+  planKindSpec: (language: "ar" | "en"): string => (language === "ar" ? "مواصفات" : "spec"),
+  planKindPlan: (language: "ar" | "en"): string => (language === "ar" ? "خطة" : "plan"),
+  planSourceToggle: (language: "ar" | "en"): string => (language === "ar" ? "المصدر" : "Source"),
+  planClose: (language: "ar" | "en"): string => (language === "ar" ? "إغلاق الخطة" : "Close plan"),
+  planUpdated: (language: "ar" | "en"): string => (language === "ar" ? "حُدِّثت" : "Updated"),
+  planDone: (language: "ar" | "en"): string => (language === "ar" ? "منجزة" : "done"),
+  planPickerOpen: (language: "ar" | "en"): string =>
+    language === "ar" ? "اختر خطة" : "Choose a plan",
+  planPickerSearch: (language: "ar" | "en"): string =>
+    language === "ar" ? "ابحث عن خطة" : "Search plans",
+  planPickerSession: (language: "ar" | "en"): string =>
+    language === "ar" ? "هذه الجلسة" : "This session",
+  planPickerRecent: (language: "ar" | "en"): string =>
+    language === "ar" ? "وضع الخطة · حديثة" : "Plan mode · recent",
+  planPickerRepo: (language: "ar" | "en"): string =>
+    language === "ar" ? "المستودع · docs/superpowers" : "Repo · docs/superpowers",
+  planComment: (language: "ar" | "en"): string => (language === "ar" ? "تعليق" : "Comment"),
+  planCommentPlaceholder: (language: "ar" | "en"): string =>
+    language === "ar" ? "اكتب تعليقًا…" : "Write a comment…",
+  planAddComment: (language: "ar" | "en"): string =>
+    language === "ar" ? "أضف تعليقًا" : "Add comment",
+  planCancel: (language: "ar" | "en"): string => (language === "ar" ? "إلغاء" : "Cancel"),
+  planEdit: (language: "ar" | "en"): string => (language === "ar" ? "تعديل" : "Edit"),
+  planDelete: (language: "ar" | "en"): string => (language === "ar" ? "حذف" : "Delete"),
+  planSave: (language: "ar" | "en"): string => (language === "ar" ? "حفظ" : "Save"),
+  planCommentNumber: (language: "ar" | "en"): string => (language === "ar" ? "التعليق" : "Comment"),
+  planCommentOnBlock: (language: "ar" | "en"): string =>
+    language === "ar" ? "علّق على هذا القسم" : "Comment on this section",
+  planComments: (language: "ar" | "en"): string => (language === "ar" ? "تعليقات" : "comments"),
+  planQueued: (language: "ar" | "en"): string => (language === "ar" ? "في الانتظار" : "queued"),
+  planSent: (language: "ar" | "en"): string => (language === "ar" ? "أُرسلت" : "sent"),
+  planShowAll: (language: "ar" | "en"): string => (language === "ar" ? "إظهار الكل" : "Show all"),
+  planKeepLater: (language: "ar" | "en"): string =>
+    language === "ar" ? "احتفظ بها لوقت لاحق" : "Keep for later",
+  // The Changes view's branch and sync row (changes.ts).
+  changesNewBranch: (language: "ar" | "en"): string =>
+    language === "ar" ? "فرع جديد" : "New branch",
+  changesNewBranchPlaceholder: (language: "ar" | "en"): string =>
+    language === "ar" ? "اسم الفرع، ثم Enter" : "Branch name, then Enter",
+  changesBranchLabel: (language: "ar" | "en"): string => (language === "ar" ? "الفرع" : "Branch"),
+  changesPull: (language: "ar" | "en"): string => (language === "ar" ? "سحب" : "Pull"),
+  changesPush: (language: "ar" | "en"): string => (language === "ar" ? "دفع" : "Push"),
+  changesPullRequest: (language: "ar" | "en"): string =>
+    language === "ar" ? "طلب سحب" : "Pull request",
+  changesNoUpstream: (language: "ar" | "en"): string =>
+    language === "ar" ? "ليس على البعيد بعد" : "not on a remote yet",
+  changesPulled: (language: "ar" | "en"): string => (language === "ar" ? "تم السحب." : "Pulled."),
+  changesUpToDate: (language: "ar" | "en"): string =>
+    language === "ar" ? "محدّث بالفعل." : "Already up to date.",
+  changesPushed: (language: "ar" | "en"): string => (language === "ar" ? "تم الدفع." : "Pushed."),
+  changesSwitched: (language: "ar" | "en"): string =>
+    language === "ar" ? "تم تبديل الفرع." : "Switched branch.",
+  changesPullRequestOpened: (language: "ar" | "en"): string =>
+    language === "ar" ? "فُتح طلب السحب في المتصفح." : "Opened the pull request in the browser.",
+  changesPullRequestReady: (language: "ar" | "en"): string =>
+    language === "ar" ? "طلب السحب جاهز:" : "Pull request ready:",
+  changesWorking: (language: "ar" | "en"): string => (language === "ar" ? "جارٍ…" : "Working…"),
+  worktreeInUse: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "لا يزال الوكيل يعمل في هذه الـ worktree. أوقف الجلسة أولًا."
+      : "The agent is still working in this worktree. Stop the session first.",
+  changesWorktree: (language: "ar" | "en"): string =>
+    language === "ar" ? "worktree منفصلة" : "Own worktree",
+  changesMergeInto: (branch: string, language: "ar" | "en"): string =>
+    language === "ar" ? `ادمج في ${branch}` : `Merge into ${branch}`,
+  changesRemoveWorktree: (language: "ar" | "en"): string =>
+    language === "ar" ? "أزل الـ worktree" : "Remove worktree",
+  changesMerged: (branch: string, language: "ar" | "en"): string =>
+    language === "ar" ? `تم الدمج في ${branch}.` : `Merged into ${branch}.`,
+  changesWorktreeRemoved: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "أُزيلت الـ worktree، وبقي فرعها."
+      : "Removed the worktree; its branch is kept.",
+  promptChanged: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "تغيّر السؤال قبل الإجابة، فلم يُكتب شيء. انظر مجددًا."
+      : "That prompt changed before the answer reached it, so nothing was typed. Look again.",
+  // Settings → General → Updates (update-settings.ts).
+  updateCheckNow: (language: "ar" | "en"): string =>
+    language === "ar" ? "تحقّق الآن" : "Check now",
+  updateChecking: (language: "ar" | "en"): string =>
+    language === "ar" ? "جارٍ التحقق…" : "Checking…",
+  updateVersion: (version: string, language: "ar" | "en"): string =>
+    language === "ar" ? `إصدارك الحالي ${version}` : `Jarvis ${version}`,
+  updateLastChecked: (ago: string, language: "ar" | "en"): string =>
+    language === "ar" ? `آخر تحقق ${ago}` : `last checked ${ago}`,
+  updateCurrent: (version: string, language: "ar" | "en"): string =>
+    language === "ar"
+      ? `هذا أحدث إصدار (${version}).`
+      : `You're on the latest version (${version}).`,
+  updateNewer: (latest: string, current: string, language: "ar" | "en"): string =>
+    language === "ar"
+      ? `الإصدار ${latest} متاح، ولديك ${current}.`
+      : `Jarvis ${latest} is available; you have ${current}.`,
+  updateFullNotes: (language: "ar" | "en"): string =>
+    language === "ar" ? "الملاحظات كاملة" : "Full notes",
+  updateInstall: (language: "ar" | "en"): string =>
+    language === "ar" ? "ثبّت التحديث" : "Install update",
+  updateDownloading: (received: string, total: string, language: "ar" | "en"): string =>
+    language === "ar"
+      ? `جارٍ التنزيل: ${received} من ${total}`
+      : `Downloading ${received} of ${total}`,
+  updateVerifying: (language: "ar" | "en"): string =>
+    language === "ar" ? "جارٍ التحقق من الملف…" : "Checking the download…",
+  updateCancel: (language: "ar" | "en"): string => (language === "ar" ? "إلغاء" : "Cancel"),
+  /** The confirm before a restart. Without counts (the core did not
+   *  answer) it still warns, without numbers. Arabic puts each count in
+   *  brackets after its noun, which reads naturally for any number. */
+  updateRestartEnds: (counts: RunningCounts | undefined, language: "ar" | "en"): string => {
+    if (counts === undefined) {
+      return language === "ar"
+        ? "سيُعاد تشغيل Jarvis، وستتوقف الطرفيات والوكلاء العاملة."
+        : "Jarvis will restart, ending any running terminals and agents.";
+    }
+    if (language === "ar") {
+      return `ستُنهي إعادة التشغيل الطرفيات العاملة (${counts.terminals}) والوكلاء العاملين (${counts.agents}).`;
+    }
+    const terminals = `${counts.terminals} running ${counts.terminals === 1 ? "terminal" : "terminals"}`;
+    const agents = `${counts.agents} ${counts.agents === 1 ? "agent" : "agents"}`;
+    return `Restarting ends ${terminals} and ${agents}.`;
+  },
+  updateReady: (latest: string, language: "ar" | "en"): string =>
+    language === "ar"
+      ? `نُزِّل الإصدار ${latest} وتم التحقق منه.`
+      : `Jarvis ${latest} is downloaded and verified.`,
+  updateNavDot: (language: "ar" | "en"): string =>
+    language === "ar" ? "يوجد تحديث لـ Jarvis" : "A Jarvis update is available",
+  updateInstallNow: (language: "ar" | "en"): string =>
+    language === "ar" ? "ثبّت الآن" : "Install now",
+  updateLater: (language: "ar" | "en"): string => (language === "ar" ? "لاحقًا" : "Later"),
+  updateInstalling: (language: "ar" | "en"): string =>
+    language === "ar" ? "جارٍ التثبيت… سيُعاد تشغيل Jarvis." : "Installing… Jarvis will restart.",
+  /** One line per UpdateError (updater.ts). Every failure leaves the
+   *  installed app as it was. */
+  updateError: (error: UpdateError, language: "ar" | "en"): string => {
+    const ar = language === "ar";
+    switch (error) {
+      case "offline":
+        return ar
+          ? "فشل آخر تحقق: تعذّر الوصول إلى GitHub."
+          : "Last check failed: couldn't reach GitHub.";
+      case "no-asset":
+        return ar
+          ? "لا توجد نسخة لهذا الجهاز في هذا الإصدار."
+          : "No build for this computer in this release.";
+      case "no-sums":
+        return ar
+          ? "الإصدار بلا ملف بصمات (SHA256SUMS)، فلم يُنزَّل."
+          : "The release has no checksums (SHA256SUMS), so nothing was installed.";
+      case "mismatch":
+        return ar
+          ? "الملف المُنزَّل لا يطابق بصمته، فحُذف."
+          : "The download didn't match its checksum and was deleted.";
+      case "download":
+        return ar ? "فشل التنزيل. حاول مرة أخرى." : "The download failed. Try again.";
+      case "read-only":
+        return ar
+          ? "انقل Jarvis إلى مجلد تستطيع الكتابة فيه، مثل Applications، ثم حاول مجددًا."
+          : "Move Jarvis to a folder you can write to, such as Applications, then try again.";
+      case "translocated":
+        return ar
+          ? "انقل Jarvis إلى مجلد Applications أولًا، ثم حاول مجددًا."
+          : "Move Jarvis to the Applications folder first, then try again.";
+      case "not-appimage":
+        return ar
+          ? "لا يُحدِّث نفسه إلا إصدار AppImage."
+          : "Only the AppImage build can update itself.";
+      case "dev-build":
+        return ar
+          ? "لا تُثبَّت التحديثات إلا في النسخة المُجمَّعة من التطبيق."
+          : "Updates install only in the packaged app.";
+      case "swap":
+        return ar
+          ? "فشل التثبيت، وبقي هذا الإصدار كما هو."
+          : "Installing failed; this version is unchanged.";
+    }
+  },
+  // The API tab's find in response (api-response.ts).
+  apiFindInResponse: (language: "ar" | "en"): string =>
+    language === "ar" ? "ابحث في الاستجابة" : "Find in response",
+  apiFindPrevious: (language: "ar" | "en"): string =>
+    language === "ar" ? "التطابق السابق" : "Previous match",
+  apiFindNext: (language: "ar" | "en"): string =>
+    language === "ar" ? "التطابق التالي" : "Next match",
+  // The Dashboard's usage charts (usage-charts.ts).
+  capacityHistoryLabel: (language: "ar" | "en"): string =>
+    language === "ar" ? "المتبقي خلال آخر ٢٤ ساعة" : "Left over the last 24 hours",
+  capacityPointLeft: (time: string, left: number, language: "ar" | "en"): string =>
+    language === "ar" ? `${time} · متبقٍّ ${left}٪` : `${time} · ${left}% left`,
+  sessionsHistoryLabel: (total: number, language: "ar" | "en"): string =>
+    language === "ar"
+      ? `الجلسات في آخر ١٤ يومًا: ${total}`
+      : `Sessions over the last 14 days: ${total}`,
+  // The file sidebar's own writes (terminal-explorer.ts).
+  explorerNewFile: (language: "ar" | "en"): string => (language === "ar" ? "ملف جديد" : "New file"),
+  explorerNewFolder: (language: "ar" | "en"): string =>
+    language === "ar" ? "مجلد جديد" : "New folder",
+  explorerRename: (language: "ar" | "en"): string => (language === "ar" ? "إعادة تسمية" : "Rename"),
+  explorerTrash: (language: "ar" | "en"): string =>
+    language === "ar" ? "نقل إلى سلة المهملات" : "Move to Trash",
+  explorerErrorExists: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "يوجد ملف أو مجلد بهذا الاسم بالفعل."
+      : "Something with that name is already there.",
+  explorerErrorInvalidName: (language: "ar" | "en"): string =>
+    language === "ar" ? "لا يمكن استخدام هذا الاسم." : "That name can't be used.",
+  explorerErrorOutside: (language: "ar" | "en"): string =>
+    language === "ar" ? "هذا خارج المشروع." : "That's outside the project.",
+  explorerErrorFailed: (language: "ar" | "en"): string =>
+    language === "ar" ? "تعذّر تنفيذ ذلك." : "That didn't work.",
+  planSendClaude: (language: "ar" | "en"): string =>
+    language === "ar" ? "إرسال إلى Claude" : "Send to Claude",
+  planSectionChanged: (language: "ar" | "en"): string =>
+    language === "ar" ? "تغيّر القسم" : "Section changed",
+  // Fix round 1, I3: loadDocument's PlanResult failure reasons, translated
+  // by reason rather than shown as a swallowed error. Closed table —
+  // plan-panel.ts's planErrorKey() switch is a compile error if a reason
+  // is ever added here without a case there.
+  planErrorForbidden: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "لا تملك صلاحية الوصول إلى هذا الملف."
+      : "You don't have access to this file.",
+  planErrorNotFound: (language: "ar" | "en"): string =>
+    language === "ar" ? "لم يعد هذا الملف موجودًا." : "This file no longer exists.",
+  planErrorTooLarge: (language: "ar" | "en"): string =>
+    language === "ar" ? "هذا الملف كبير جدًا ليُفتح." : "This file is too large to open.",
+  planErrorConflict: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "تغيّر هذا الملف على القرص. أعد فتحه لرؤية أحدث نسخة."
+      : "This file changed on disk. Reopen it to see the latest version.",
+  planErrorMissingBlock: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "لم يعد هذا القسم موجودًا في الملف."
+      : "This section no longer exists in the file.",
+  planErrorIo: (language: "ar" | "en"): string =>
+    language === "ar" ? "تعذّرت قراءة هذا الملف." : "Could not read this file.",
+  // Generic fallback for a rejected promise or plansSend's own reasons —
+  // the async click handlers (save/edit/delete/send/refreshList) have no
+  // more specific detail to translate than "that didn't work".
+  planActionError: (language: "ar" | "en"): string =>
+    language === "ar" ? "حدث خطأ ما. حاول مرة أخرى." : "Something went wrong. Try again.",
+  planSendErrorNoComments: (language: "ar" | "en"): string =>
+    language === "ar" ? "لا يوجد شيء في الانتظار لإرساله." : "There is nothing queued to send.",
+  planSendErrorForbidden: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "إرسال التعليقات غير مسموح به هنا."
+      : "Sending comments is not allowed here.",
+  planSendErrorNoPane: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "تعذّر العثور على الجلسة لإرسال التعليقات إليها."
+      : "Could not find the session to send to.",
+  planDraftOrphaned: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "تغيّر القسم المرتبط بهذه المسودة."
+      : "The section this draft was on has changed.",
+  // Task 7b: in-place block editing. The header's own dirty indicator —
+  // shown while the block being edited has a real, unsaved change (an
+  // `input` event fired and the result isn't a no-op against the block's
+  // source) — and the badge shown instead of an immediate reload when
+  // notifyChanged fires for the open document while that edit is still
+  // dirty (plan-panel.ts defers the reload until the edit is saved or
+  // discarded, so it never clobbers text the user is mid-typing).
+  planUnsavedIndicator: (language: "ar" | "en"): string =>
+    language === "ar" ? "غير محفوظ · ⌘S" : "Unsaved · ⌘S",
+  planUpdatedOnDisk: (language: "ar" | "en"): string =>
+    language === "ar" ? "تحدّث على القرص" : "Updated on disk",
+  // The hint under an editing block (D2) — Esc discards the in-progress
+  // edit and exits; ⌘S writes it without exiting.
+  planEditHint: (language: "ar" | "en"): string =>
+    language === "ar" ? "Esc إلغاء · ⌘S لحفظ القسم" : "Esc cancel · ⌘S save block",
+  // The formatting toolbar's own accessible names — B/I/</>/🔗 are the
+  // visible glyphs (same discipline as the existing ×/+ buttons in this
+  // panel); this is what a screen reader says instead.
+  planFormatBold: (language: "ar" | "en"): string => (language === "ar" ? "غامق" : "Bold"),
+  planFormatItalic: (language: "ar" | "en"): string => (language === "ar" ? "مائل" : "Italic"),
+  planFormatCode: (language: "ar" | "en"): string =>
+    language === "ar" ? "كود مضمّن" : "Inline code",
+  planFormatLink: (language: "ar" | "en"): string => (language === "ar" ? "رابط" : "Link"),
+  planLinkUrlPlaceholder: (language: "ar" | "en"): string =>
+    language === "ar" ? "الصق رابطًا…" : "Paste a link…",
+  // writeBlock's conflict/missing-block reasons, from inside an active edit
+  // (distinct from planErrorConflict/planErrorMissingBlock, which cover a
+  // failed *read*): the doc has already been reloaded from the failed
+  // write's own `doc`, and the user's text is kept in a textarea rather
+  // than discarded.
+  planEditConflictNotice: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "تغيّر هذا الملف على القرص — أتريد إعادة تطبيق تعديلك؟"
+      : "Changed on disk — reapply your edit?",
+  // Final fix wave I3: a block save that failed for a reason other than a
+  // conflict — the notice keeps the typed text, with the reason under it.
+  planEditSaveFailed: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "تعذّر حفظ تعديلك — نصّك محفوظ أدناه."
+      : "Couldn't save your edit — your text is kept below.",
+  planApply: (language: "ar" | "en"): string => (language === "ar" ? "تطبيق" : "Apply"),
+  planDiscard: (language: "ar" | "en"): string => (language === "ar" ? "تجاهل" : "Discard"),
+  // Fix round 1, I4: the label above the conflict notice's read-only
+  // preview of what Apply would actually overwrite.
+  planEditConflictCurrent: (language: "ar" | "en"): string =>
+    language === "ar" ? "حاليًا:" : "Currently:",
+  // Apply's own last-resort failure: the reloaded doc has neither the
+  // original block id nor anything left at its old position (fix round 1,
+  // I4: or something of a different kind entirely), so there is nothing
+  // left to write the edit back onto.
+  planEditConflictGone: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "لم يعد هذا القسم موجودًا — تعديلك محفوظ أدناه، لكن لا يمكن حفظه."
+      : "This section is gone — your edit is kept below, but can't be saved.",
+  // S1: relative-time units composed by plan-panel.ts as `${count}${unit}`
+  // — t() takes no interpolation args, so the count/unit split stays here.
+  planRelativeNow: (language: "ar" | "en"): string => (language === "ar" ? "الآن" : "now"),
+  planRelativeMinute: (language: "ar" | "en"): string => (language === "ar" ? "د" : "m"),
+  planRelativeHour: (language: "ar" | "en"): string => (language === "ar" ? "س" : "h"),
+  planRelativeDay: (language: "ar" | "en"): string => (language === "ar" ? "ي" : "d"),
   hotkeyCollision: (combo: string, language: "ar" | "en"): string =>
     language === "ar"
       ? `تعذر تسجيل اختصار ${combo} — يبدو أن تطبيقًا آخر يستخدمه بالفعل.`
@@ -755,6 +1090,8 @@ export const MESSAGES = {
   tabMenuRename: (language: "ar" | "en"): string => (language === "ar" ? "إعادة تسمية" : "Rename"),
   tabMenuReload: (language: "ar" | "en"): string => (language === "ar" ? "إعادة تحميل" : "Reload"),
   tabMenuClose: (language: "ar" | "en"): string => (language === "ar" ? "إغلاق" : "Close"),
+  // Task 8: the tab menu's fourth item, opening this tab's own plan panel.
+  tabMenuPlans: (language: "ar" | "en"): string => (language === "ar" ? "الخطط" : "Plans"),
   // Ruling P22: gitChanges() always reads the repository's current working
   // tree, never a per-session snapshot. For a session that has already
   // ended, showing that data under its name would repeat exactly the lie
@@ -842,6 +1179,13 @@ export const MESSAGES = {
   // that it is "running" in a sense Jarvis observed).
   sessionRunningOutsideJarvis: (language: "ar" | "en"): string =>
     language === "ar" ? "قيد التشغيل خارج جارفيس" : "Running outside Jarvis",
+  // An external row whose agent the user typed into one of Jarvis's own
+  // Terminal panes — not a session Jarvis started, but not outside it
+  // either. The chip, and the summary before a transcript is matched.
+  sessionInJarvisTerminal: (language: "ar" | "en"): string =>
+    language === "ar" ? "في طرفية جارفيس" : "in Jarvis terminal",
+  sessionRunningInJarvisTerminal: (language: "ar" | "en"): string =>
+    language === "ar" ? "قيد التشغيل في طرفية جارفيس" : "Running in a Jarvis terminal",
   // Shown when an external row's process was found but no transcript could
   // be matched to it — distinct from sessionNone, which means no session is
   // open at all.
@@ -1714,6 +2058,8 @@ export const MESSAGES = {
       ? "تعذّر تسجيل هذا الجهاز لتلقّي الإشعارات"
       : "This device could not be registered for notifications",
 };
+
+export type MessageKey = keyof typeof MESSAGES;
 
 // NOT the same table as arabicSessionsCount below, even though the two
 // started out identical (that copy-paste is exactly the bug this comment

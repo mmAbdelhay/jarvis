@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { connectionPillModel } from "./connection-pill";
+import { connectionPillModel, machinePillModel } from "./connection-pill";
 import type { ConnectionView } from "./connection-store";
 
 function view(partial: Partial<ConnectionView>): ConnectionView {
@@ -53,5 +53,29 @@ describe("connectionPillModel", () => {
         tone: "danger",
       });
     }
+  });
+});
+
+describe("machinePillModel", () => {
+  it("shows the laptop name with the success tone when connected", () => {
+    expect(machinePillModel(view({}), " MacBook ")).toEqual({
+      label: { kind: "name", name: "MacBook" },
+      tone: "success",
+    });
+  });
+
+  it("falls back to Connected without a name", () => {
+    expect(machinePillModel(view({}), undefined).label).toEqual({
+      kind: "key",
+      key: "conn.connected",
+    });
+    expect(machinePillModel(view({}), "  ").label).toEqual({ kind: "key", key: "conn.connected" });
+  });
+
+  it("keeps the state text and warning tone when reconnecting, even with a name", () => {
+    expect(machinePillModel(view({ state: "reconnecting" }), "MacBook")).toEqual({
+      label: { kind: "key", key: "conn.reconnecting" },
+      tone: "warning",
+    });
   });
 });

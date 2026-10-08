@@ -43,6 +43,9 @@ export type BrainSessionSummary = {
   agentId: string;
   state: string;
   summary: string;
+  /** The prompt the session is sitting at, when it is at one — the
+   *  agent's own question and option labels, numbered from 1 in order. */
+  prompt?: { question: string; options: string[] };
 };
 
 export type BrainContext = {

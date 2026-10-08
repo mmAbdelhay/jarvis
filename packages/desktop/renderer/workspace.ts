@@ -6,7 +6,11 @@ import { PERSONAL_PROJECT, isPersonalProject } from "../src/personal.js";
 import { detectLanguage } from "./format.js";
 import { initApi, renderApi } from "./api.js";
 import { attachDockerPane, detachDockerPane } from "./workspace-docker.js";
-import { initWorkspaceTerminals, renderWorkspaceTerminals } from "./workspace-terminal.js";
+import {
+  focusTerminalLeaf,
+  initWorkspaceTerminals,
+  renderWorkspaceTerminals,
+} from "./workspace-terminal.js";
 
 // Structurally the same shape the preload bridge and main process pass
 // across IPC (packages/desktop/src/ipc.ts's Bookmark, from @jarvis/platform)
@@ -237,6 +241,23 @@ type TabChipHandle = {
  *  so switching back to it does not lose whatever the chip was mid-doing.
  *  Pruned in renderWorkspace to the tabs actually still open. */
 const tabChips = new Map<string, TabChipHandle>();
+
+/**
+ * Shows the Terminal pane `paneKey` (`tabId` or `tabId:paneId`) — the
+ * Sessions table's way into an agent the user typed into one. False when
+ * no open tab holds it, so the caller can show something else instead.
+ * The project switcher follows on its own: activating a tab of another
+ * project moves it (renderWorkspace).
+ */
+export function focusTerminalPane(paneKey: string): boolean {
+  const tabId = paneKey.split(":")[0] ?? paneKey;
+  const tab = latest.tabs.find((candidate) => candidate.id === tabId);
+  if (tab === undefined) return false;
+  focusTerminalLeaf(paneKey);
+  void window.jarvis.activateTab(tab.id);
+  document.getElementById("nav-workspace")?.click();
+  return true;
+}
 
 /** Selects `project` and shows whatever it was last on: its remembered
  *  tab if that tab still exists, any other of its open tabs otherwise, or

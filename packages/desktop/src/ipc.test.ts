@@ -46,7 +46,9 @@ import {
   createGitHandlers,
   createSettingsHandlers,
   findEditorTab,
+  entryWithin,
   isDeclaredContainer,
+  isValidEntryName,
   resolveWithin,
   showEditorTab,
   type WiringDeps,
@@ -78,6 +80,7 @@ import {
   ProviderMonitor,
   ProviderStatusStore,
   type GitProvider,
+  type GitRemoteOps,
   type ProviderStatus,
 } from "@jarvis/core";
 import type { JarvisConfig, TerminalConfig } from "./config.js";
@@ -417,6 +420,177 @@ function handlerFakes(overrides: Partial<GitProvider> = {}) {
   });
   return { handlers, refreshes };
 }
+
+describe("createGitHandlers' branch, pull, push and pull-request calls", () => {
+  const session = {
+    id: "s1",
+    project: "acme",
+    projectPath: "/projects/acme",
+    agentId: "claude-acme",
+    state: "running" as const,
+    summary: "",
+    startedAt: 0,
+    lastActivityAt: 0,
+  };
+
+  function build(remote: Partial<GitRemoteOps> | undefined, git: Partial<GitProvider> = {}) {
+    const order: string[] = [];
+    const refresh = vi.fn(async () => {
+      order.push("refresh");
+    });
+    const full: GitRemoteOps | undefined =
+      remote === undefined
+        ? undefined
+        : {
+            branches: async () => ({
+              ok: true,
+              value: { current: "main", detached: false, local: ["main", "feat/x"] },
+            }),
+            switchBranch: async () => ({ ok: true, value: null }),
+            pull: async () => ({ ok: true, value: { updated: true } }),
+            push: async () => ({
+              ok: true,
+              value: { remote: "origin", branch: "main", upstreamSet: false },
+            }),
+            pullRequest: async () => ({
+              ok: true,
+              value: { url: "https://github.com/o/r/pull/1", created: true },
+            }),
+            ...remote,
+          };
+    const handlers = createGitHandlers({
+      git: {
+        changes: async () => ({ ok: false, error: { code: "failed", detail: "" } }),
+        diff: async () => ({ ok: false, error: { code: "failed", detail: "" } }),
+        stage: async () => ({ ok: true, value: null }),
+        unstage: async () => ({ ok: true, value: null }),
+        commit: async () => ({ ok: true, value: { sha: "abc", filesChanged: 1 } }),
+        ...git,
+      },
+      remote: full,
+      sessions: { get: (id) => (id === "s1" ? session : undefined) },
+      language: "en",
+      refresh,
+    });
+    return { handlers, refresh, order };
+  }
+
+  it("runs each against the session's own repository, never a caller's path", async () => {
+    const seen: string[] = [];
+    const { handlers } = build({
+      branches: async (repo) => {
+        seen.push(repo);
+        return { ok: true, value: { current: "main", detached: false, local: ["main"] } };
+      },
+      switchBranch: async (repo, name, create) => {
+        seen.push(`${repo} ${name} ${create}`);
+        return { ok: true, value: null };
+      },
+    });
+
+    await handlers.branches("s1");
+    await handlers.switchBranch("s1", "feat/x", true);
+    expect(seen).toEqual(["/projects/acme", "/projects/acme feat/x true"]);
+  });
+
+  it("refreshes the change counts after anything that moves the repository, not after a read", async () => {
+    const { handlers, refresh } = build({});
+    await handlers.branches("s1");
+    expect(refresh).not.toHaveBeenCalled();
+
+    await handlers.switchBranch("s1", "feat/x", false);
+    await handlers.pull("s1");
+    await handlers.push("s1");
+    await handlers.pullRequest("s1");
+    expect(refresh).toHaveBeenCalledTimes(4);
+  });
+
+  it("queues a switch behind a commit already running for the same repository", async () => {
+    let finishCommit!: () => void;
+    const order: string[] = [];
+    const { handlers } = build(
+      {
+        switchBranch: async () => {
+          order.push("switch");
+          return { ok: true, value: null };
+        },
+      },
+      {
+        commit: () =>
+          new Promise((resolve) => {
+            finishCommit = () => {
+              order.push("commit");
+              resolve({ ok: true, value: { sha: "abc", filesChanged: 1 } });
+            };
+          }),
+      },
+    );
+
+    const committing = handlers.commit("s1", "msg");
+    const switching = handlers.switchBranch("s1", "feat/x", false);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(order).toEqual([]);
+    finishCommit();
+    await Promise.all([committing, switching]);
+    expect(order).toEqual(["commit", "switch"]);
+  });
+
+  it("shows a refusal in the user's language rather than rejecting", async () => {
+    const { handlers } = build({
+      push: async () => ({ ok: false, error: { code: "rejected", detail: "" } }),
+    });
+    const result = await handlers.push("s1");
+    expect(result).toEqual({
+      ok: false,
+      text: "The remote rejected the push: it has commits you don't. Pull first.",
+      language: "en",
+    });
+  });
+
+  it("refuses to remove a worktree an agent is still running in", async () => {
+    const removed: string[] = [];
+    const handlers = createGitHandlers({
+      git: {
+        changes: async () => ({ ok: false, error: { code: "failed", detail: "" } }),
+        diff: async () => ({ ok: false, error: { code: "failed", detail: "" } }),
+        stage: async () => ({ ok: true, value: null }),
+        unstage: async () => ({ ok: true, value: null }),
+        commit: async () => ({ ok: true, value: { sha: "abc", filesChanged: 1 } }),
+      },
+      worktrees: {
+        create: async () => ({ ok: true, value: { path: "/wt", branch: "jarvis/x" } }),
+        info: async () => ({ ok: true, value: null }),
+        mergeBack: async () => ({ ok: true, value: { into: "main" } }),
+        remove: async (path) => {
+          removed.push(path);
+          return { ok: true, value: null };
+        },
+      },
+      sessions: {
+        get: (id) =>
+          id === "live"
+            ? { ...session, id, state: "running" as const }
+            : { ...session, id, state: "done" as const },
+      },
+      language: "en",
+      refresh: async () => {},
+    });
+
+    expect((await handlers.removeWorktree("live")).ok).toBe(false);
+    expect(removed).toEqual([]);
+    expect(await handlers.removeWorktree("ended")).toEqual({ ok: true, value: null });
+    expect(removed).toEqual(["/projects/acme"]);
+  });
+
+  it("refuses an unknown session, an untyped argument, and a wiring with no remote ops", async () => {
+    const { handlers } = build({});
+    expect((await handlers.pull("nope")).ok).toBe(false);
+    expect((await handlers.switchBranch("s1", 7 as unknown as string, true)).ok).toBe(false);
+
+    const { handlers: bare } = build(undefined);
+    expect((await bare.branches("s1")).ok).toBe(false);
+  });
+});
 
 describe("createGitHandlers", () => {
   it("returns the changes plus the session that produced them", async () => {
@@ -1465,7 +1639,9 @@ const sampleConfig: JarvisConfig = {
 function settingsDeps(
   overrides: Partial<{
     readConfig: () => Promise<JarvisConfig>;
-    writeConfig: (draft: JarvisConfig) => Promise<{ ok: true } | { ok: false; detail: string }>;
+    writeConfig: (
+      draft: JarvisConfig | ((current: JarvisConfig) => JarvisConfig),
+    ) => Promise<{ ok: true } | { ok: false; detail: string }>;
     run: (
       command: string,
       args: string[],
@@ -1494,7 +1670,7 @@ describe("createSettingsHandlers", () => {
     const handlers = createSettingsHandlers(
       settingsDeps({
         writeConfig: (draft) => {
-          written.push(draft);
+          written.push(draft as JarvisConfig);
           return Promise.resolve({ ok: true });
         },
       }),
@@ -1504,6 +1680,41 @@ describe("createSettingsHandlers", () => {
 
     expect(result).toEqual({ ok: true });
     expect(written).toEqual([sampleConfig]);
+  });
+
+  // [bite-proof] Writing a config read earlier (settings.read() then save)
+  // would put `remote.enabled` back to true here.
+  it("saveSessions changes only `sessions`, on the config as it is when the write runs", async () => {
+    let disk: JarvisConfig = { ...sampleConfig, remote: { ...sampleConfig.remote, enabled: true } };
+    const handlers = createSettingsHandlers(
+      settingsDeps({
+        writeConfig: (input) => {
+          disk = typeof input === "function" ? input(disk) : input;
+          return Promise.resolve({ ok: true });
+        },
+      }),
+    );
+    // The laptop turns the bridge off after the phone read its settings and
+    // before the phone's save lands.
+    disk = { ...disk, remote: { ...disk.remote, enabled: false } };
+
+    const result = await handlers.saveSessions({ importWindowDays: 3, worktrees: "parallel" });
+
+    expect(result).toEqual({ ok: true });
+    expect(disk.remote.enabled).toBe(false);
+    expect(disk.sessions).toEqual({ importWindowDays: 3, worktrees: "parallel" });
+    expect(disk.projects).toEqual(sampleConfig.projects);
+    expect(disk.whisper).toEqual(sampleConfig.whisper);
+  });
+
+  it("saveSessions reports a write failure like save does", async () => {
+    const handlers = createSettingsHandlers(
+      settingsDeps({ writeConfig: () => Promise.resolve({ ok: false, detail: "disk full" }) }),
+    );
+    expect(await handlers.saveSessions({ importWindowDays: 3 })).toMatchObject({
+      ok: false,
+      detail: "disk full",
+    });
   });
 
   it("wraps a write failure in the bilingual headline plus the raw detail", async () => {
@@ -1987,6 +2198,7 @@ describe("terminal handlers", () => {
         snapshot: () => ({ text: "", end: 0 }),
         has: () => false,
         panes: () => [],
+        shellPids: () => new Map(),
         write: (tabId, data) => written.push({ tabId, data }),
         resize: () => {},
         kill: (tabId) => killed.push(tabId),
@@ -3138,6 +3350,226 @@ describe("terminal handlers", () => {
   // renderer and a shell can cd anywhere, so every one of these asks the
   // same question: can a string reach a directory outside the project the
   // pane belongs to?
+  describe("isValidEntryName", () => {
+    it("accepts an ordinary file or folder name", () => {
+      expect(isValidEntryName("notes.md")).toBe(true);
+      expect(isValidEntryName(".env.local")).toBe(true);
+      expect(isValidEntryName("مذكرة.txt")).toBe(true);
+    });
+
+    it("refuses anything that is not exactly one path segment", () => {
+      for (const name of ["", ".", "..", "a/b", "a\\b", "nul\0byte", " lead", "trail ", 7]) {
+        expect(isValidEntryName(name)).toBe(false);
+      }
+    });
+
+    it("refuses a name longer than 255 bytes, counting UTF-8 bytes", () => {
+      expect(isValidEntryName("a".repeat(255))).toBe(true);
+      expect(isValidEntryName("a".repeat(256))).toBe(false);
+      // 128 two-byte letters: 128 characters, 256 bytes.
+      expect(isValidEntryName("ب".repeat(128))).toBe(false);
+    });
+  });
+
+  describe.runIf(POSIX_FIXTURES)("entryWithin", () => {
+    const real = (p: string) => (p.startsWith("/proj/out") ? p.replace("/proj/out", "/etc") : p);
+
+    it("keeps the entry itself unresolved, so a link is acted on as the link", () => {
+      const linkToOutside = (p: string) => (p === "/proj/link" ? "/etc" : p);
+      expect(entryWithin("/proj", "/proj/link", linkToOutside)).toBe("/proj/link");
+    });
+
+    it("refuses an entry whose folder resolves outside the project", () => {
+      expect(entryWithin("/proj", "/proj/out/passwd", real)).toBeUndefined();
+      expect(entryWithin("/proj", "/etc/passwd", real)).toBeUndefined();
+    });
+
+    it("never treats the project root itself as an entry", () => {
+      expect(entryWithin("/proj", "/proj", real)).toBeUndefined();
+      expect(entryWithin("/proj", "/proj/..", real)).toBeUndefined();
+    });
+  });
+
+  describe.runIf(POSIX_FIXTURES)("the file sidebar's writes", () => {
+    // An in-memory disk: every path that exists, and every call made. A
+    // refusal asserts `calls` stayed empty — the boundary's promise is that
+    // nothing was touched, not merely that the answer was "no".
+    let disk: Set<string>;
+    let calls: string[];
+    beforeEach(() => {
+      disk = new Set(["/proj", "/proj/src", "/proj/a.ts", "/proj/link"]);
+      calls = [];
+    });
+
+    function files(
+      overrides: Record<string, unknown> = {},
+    ): NonNullable<TerminalHandlerDeps["files"]> {
+      return {
+        readDir: () => [],
+        realPath: (p: string) => (p === "/proj/link" ? "/etc" : p.replace(/\/$/, "")),
+        exists: (p: string) => disk.has(p),
+        makeDir: (p: string) => {
+          calls.push(`mkdir ${p}`);
+          disk.add(p);
+        },
+        makeFile: (p: string) => {
+          calls.push(`touch ${p}`);
+          disk.add(p);
+        },
+        rename: (from: string, to: string) => {
+          calls.push(`mv ${from} ${to}`);
+          disk.delete(from);
+          disk.add(to);
+        },
+        trash: async (p: string) => {
+          calls.push(`trash ${p}`);
+          disk.delete(p);
+        },
+        ...overrides,
+      };
+    }
+
+    function handlersWith(fileDeps = files()): ReturnType<typeof createTerminalHandlers> {
+      const { manager } = shells();
+      const handlers = createTerminalHandlers({
+        shells: manager,
+        openTerminalTab: () => "tab-1",
+        projects: { p: "/proj" },
+        language: "en",
+        terminal: terminalConfig,
+        terminalScrollback: 5000,
+        files: fileDeps,
+      });
+      handlers.open("p");
+      return handlers;
+    }
+
+    it("creates a file and a folder inside the project", async () => {
+      const handlers = handlersWith();
+      await expect(handlers.createEntry("tab-1", "/proj/src", "new.ts", "file")).resolves.toEqual({
+        ok: true,
+        path: "/proj/src/new.ts",
+      });
+      await expect(handlers.createEntry("tab-1", "/proj", "docs", "directory")).resolves.toEqual({
+        ok: true,
+        path: "/proj/docs",
+      });
+      expect(calls).toEqual(["touch /proj/src/new.ts", "mkdir /proj/docs"]);
+    });
+
+    it("never overwrites: an existing name is refused before anything is written", async () => {
+      const handlers = handlersWith();
+      await expect(handlers.createEntry("tab-1", "/proj", "a.ts", "file")).resolves.toEqual({
+        ok: false,
+        reason: "exists",
+      });
+      await expect(handlers.renameEntry("tab-1", "/proj/src", "a.ts")).resolves.toEqual({
+        ok: false,
+        reason: "exists",
+      });
+      expect(calls).toEqual([]);
+    });
+
+    it("answers `exists` when the name appears between the check and the write", async () => {
+      const racing = files({
+        makeFile: () => {
+          throw Object.assign(new Error("EEXIST"), { code: "EEXIST" });
+        },
+      });
+      const handlers = handlersWith(racing);
+      await expect(handlers.createEntry("tab-1", "/proj", "late.ts", "file")).resolves.toEqual({
+        ok: false,
+        reason: "exists",
+      });
+    });
+
+    it("refuses a name that is not a single segment, touching nothing", async () => {
+      const handlers = handlersWith();
+      for (const name of ["../escape", "a/b", "..", "", "a\nb", "a\u007fb", "é".repeat(200)]) {
+        await expect(handlers.createEntry("tab-1", "/proj", name, "file")).resolves.toEqual({
+          ok: false,
+          reason: "invalid-name",
+        });
+        await expect(handlers.renameEntry("tab-1", "/proj/a.ts", name)).resolves.toEqual({
+          ok: false,
+          reason: "invalid-name",
+        });
+      }
+      expect(calls).toEqual([]);
+    });
+
+    it("refuses every write outside the project, through a link, or for an unknown pane", async () => {
+      const handlers = handlersWith();
+      const outside = { ok: false, reason: "outside" };
+      await expect(handlers.createEntry("tab-1", "/etc", "x", "file")).resolves.toEqual(outside);
+      await expect(handlers.createEntry("tab-1", "/proj/link", "x", "file")).resolves.toEqual(
+        outside,
+      );
+      await expect(handlers.renameEntry("tab-1", "/etc/passwd", "x")).resolves.toEqual(outside);
+      await expect(handlers.trashEntry("tab-1", "/proj")).resolves.toEqual(outside);
+      await expect(handlers.trashEntry("nope", "/proj/a.ts")).resolves.toEqual(outside);
+      await expect(handlers.trashEntry("tab-1", "/proj/missing.ts")).resolves.toEqual(outside);
+      expect(calls).toEqual([]);
+    });
+
+    it("renames and trashes a link as the link, never what it points at", async () => {
+      const handlers = handlersWith();
+      await expect(handlers.renameEntry("tab-1", "/proj/link", "link2")).resolves.toEqual({
+        ok: true,
+        path: "/proj/link2",
+      });
+      await expect(handlers.trashEntry("tab-1", "/proj/link2")).resolves.toEqual({
+        ok: true,
+        path: "/proj/link2",
+      });
+      expect(calls).toEqual(["mv /proj/link /proj/link2", "trash /proj/link2"]);
+    });
+
+    it("lets a case-only rename through rather than calling it a clash with itself", async () => {
+      const caseInsensitive = files({
+        exists: (p: string) => [...disk].some((d) => d.toLowerCase() === p.toLowerCase()),
+      });
+      const handlers = handlersWith(caseInsensitive);
+      await expect(handlers.renameEntry("tab-1", "/proj/a.ts", "A.ts")).resolves.toEqual({
+        ok: true,
+        path: "/proj/A.ts",
+      });
+    });
+
+    it("answers `failed` rather than throwing when the disk refuses", async () => {
+      const refusing = files({
+        makeDir: () => {
+          throw new Error("EACCES");
+        },
+        trash: async () => {
+          throw new Error("no trash");
+        },
+      });
+      const handlers = handlersWith(refusing);
+      await expect(handlers.createEntry("tab-1", "/proj", "d", "directory")).resolves.toEqual({
+        ok: false,
+        reason: "failed",
+      });
+      await expect(handlers.trashEntry("tab-1", "/proj/a.ts")).resolves.toEqual({
+        ok: false,
+        reason: "failed",
+      });
+    });
+
+    it("answers `failed` when the wiring has no write for it", async () => {
+      const listingOnly = { readDir: () => [], realPath: (p: string) => p };
+      const handlers = handlersWith(listingOnly);
+      await expect(handlers.createEntry("tab-1", "/proj", "x", "file")).resolves.toEqual({
+        ok: false,
+        reason: "failed",
+      });
+      await expect(handlers.trashEntry("tab-1", "/proj/a.ts")).resolves.toEqual({
+        ok: false,
+        reason: "failed",
+      });
+    });
+  });
+
   describe.runIf(POSIX_FIXTURES)("listDir", () => {
     // Every path readDir was asked for. Asserting only on the return value
     // cannot tell a refusal from a listing that happened to be empty — the
@@ -3194,6 +3626,21 @@ describe("terminal handlers", () => {
       await expect(handlers.listDir("tab-1", "/etc")).resolves.toEqual([]);
       await expect(handlers.listDir("tab-1", "/proj/../etc")).resolves.toEqual([]);
       expect(read).toEqual([]);
+    });
+
+    it("takes a relative path from the project root, and refuses one that climbs out", async () => {
+      const handlers = listing();
+      handlers.open("p");
+
+      await expect(handlers.listDir("tab-1", "")).resolves.toEqual([
+        { name: "src", directory: true },
+        { name: "a.ts", directory: false },
+      ]);
+      await expect(handlers.listDir("tab-1", "src")).resolves.toEqual([]);
+      expect(read).toEqual(["/proj", "/proj/src"]);
+      await expect(handlers.listDir("tab-1", "../etc")).resolves.toEqual([]);
+      await expect(handlers.listDir("tab-1", "src/../../etc")).resolves.toEqual([]);
+      expect(read).toEqual(["/proj", "/proj/src"]);
     });
 
     it("refuses a symlink that points outside the project", async () => {
@@ -3290,22 +3737,10 @@ describe("terminal handlers", () => {
 
     // Anything not absolute would resolve against whatever directory the
     // Electron main process happens to be running in — never the project.
-    it("refuses a relative or empty path", async () => {
-      const handlers = listing();
-      handlers.open("p");
-
-      await expect(handlers.listDir("tab-1", "src")).resolves.toEqual([]);
-      await expect(handlers.listDir("tab-1", "../etc")).resolves.toEqual([]);
-      await expect(handlers.listDir("tab-1", "")).resolves.toEqual([]);
-      expect(read).toEqual([]);
-    });
-
-    // Through the handler, a relative path is refused by containment
-    // anyway, because this process's cwd is not inside the fake project —
-    // so that test alone does not pin the guard. Asked of the check
-    // directly, with the process's own cwd as the root, it does: the guard
-    // is the only thing standing between "src" and a listing of whatever
-    // directory Jarvis happens to have been launched from.
+    // listDir takes a relative path from the project root (above); the
+    // check under it still refuses one outright, so nothing else that
+    // calls it can ever list whatever directory Jarvis happens to have
+    // been launched from.
     it("refuses a relative candidate even when the process cwd is the root", () => {
       const identity = (p: string) => p;
 
@@ -3695,8 +4130,10 @@ describe("terminal handlers", () => {
       await expect(handlers.listDir("tab-1", "C:\\proj\\..\\Windows")).resolves.toEqual([]);
       await expect(handlers.listDir("tab-1", "C:\\proj-secrets")).resolves.toEqual([]);
       await expect(handlers.listDir("tab-1", "D:\\proj")).resolves.toEqual([]);
+      // Relative: taken from the project root, and refused once it climbs out.
       await expect(handlers.listDir("tab-1", "src")).resolves.toEqual([]);
-      expect(read).toEqual([PROJ, PROJ]);
+      await expect(handlers.listDir("tab-1", "..\\Windows")).resolves.toEqual([]);
+      expect(read).toEqual([PROJ, PROJ, `${PROJ}\\src`]);
     });
 
     it("refuses a junction that resolves outside the project, and reads the real path of one inside", async () => {
@@ -4297,7 +4734,7 @@ describe("api handlers", () => {
           passed: true,
           actual: "200",
         })),
-      toCurl: () => "curl 'http://h'",
+      toSnippet: () => "curl 'http://h'",
       sendRequest: () =>
         Promise.resolve({
           response: {
@@ -4318,6 +4755,20 @@ describe("api handlers", () => {
     };
     return { api: createApiHandlers(deps), saved };
   }
+
+  it("copies as the language asked for, and as cURL when none (or an unknown one) is named", async () => {
+    const asked: string[] = [];
+    const { api } = handlers({
+      toSnippet: (_request, _variables, language) => {
+        asked.push(language);
+        return language;
+      },
+    });
+    await api.curl("acme", {}, {}, "python");
+    await api.curl("acme", {}, {});
+    await api.curl("acme", {}, {}, "rust" as never);
+    expect(asked).toEqual(["python", "curl", "curl"]);
+  });
 
   it("lists a project's collections", async () => {
     const { api } = handlers();
@@ -4650,7 +5101,7 @@ describe("api handlers — remote api:save against the real serializer", () => {
       sendRequest: () => Promise.reject(new Error("unused")),
       truncateBody: (body: string) => body,
       evaluateAssertions: () => [],
-      toCurl: () => "",
+      toSnippet: () => "",
       store: {
         read: () =>
           Promise.resolve({
@@ -4862,7 +5313,7 @@ describe("api editing handlers", () => {
       writeEnvironment: (path, name) => Promise.resolve(`${path}/environments/${name}.bru`),
       postmanToRequests: () => ({ name: "Imported", requests: [] }),
       evaluateAssertions: () => [],
-      toCurl: () => "curl 'http://h'",
+      toSnippet: () => "curl 'http://h'",
       writeImported: (root, name) => Promise.resolve(`${root}/${name}`),
       projects: { acme: "/p/acme" },
       language: "en",
@@ -5661,6 +6112,19 @@ describe("createTranscriptHandler", () => {
     expect(await handler("s1")).toEqual([{ role: "user", text: "hi there", tools: [] }]);
   });
 
+  it("renders a Copilot session from the events.jsonl beside its workspace.yaml", async () => {
+    const read: string[] = [];
+    const handler = createTranscriptHandler({
+      history: () => [session({ transcriptPath: "/c/s1/workspace.yaml" })],
+      readFile: async (path) => {
+        read.push(path);
+        return JSON.stringify({ type: "user.message", data: { content: "hi" } });
+      },
+    });
+    expect(await handler("s1")).toEqual([{ role: "user", text: "hi", tools: [] }]);
+    expect(read).toEqual([join("/c/s1", "events.jsonl")]);
+  });
+
   // A session Jarvis spawned has a pty backlog instead; asking for its
   // transcript is not an error, there simply is not one.
   it("returns nothing for a session with no transcript recorded", async () => {
@@ -5844,6 +6308,7 @@ describe("createResumeInTerminalHandler", () => {
     const result = await handler(past({ project: "app" }).id, "other");
     expect(result.ok).toBe(true);
     expect(opened).toEqual([{ project: "app", cwd: "/home/u/app" }]);
+    expect(result).toEqual({ ok: true, project: "app", tabId: "tab-1", language: "en" });
   });
 
   // 66 of 95 sessions on the machine this was built against have no
@@ -5865,7 +6330,12 @@ describe("createResumeInTerminalHandler", () => {
 
   it("reports which project the tab landed under, so the view can follow it", async () => {
     const { handler } = harness(past({ project: "app" }));
-    expect((await handler(past().id, "other")).project).toBe("app");
+    expect(await handler(past().id, "other")).toMatchObject({ ok: true, project: "app" });
+  });
+
+  it("returns the new terminal tab's id so a phone can open it", async () => {
+    const { handler } = harness(past({ project: "app" }));
+    expect(await handler(past().id, "app")).toMatchObject({ ok: true, tabId: "tab-1" });
   });
 
   it("refuses when the session's agent is no longer configured", async () => {

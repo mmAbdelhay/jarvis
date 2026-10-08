@@ -121,12 +121,15 @@ function buildBootCode(theme, fontFamily, scrollback, fontSize) {
     "textarea.readOnly=true;" +
     'textarea.setAttribute("inputmode","none");' +
     "}" +
-    // Bug 8: a fixed size from native (the pty's real cols/rows) picks the
-    // largest font size in [6,14]px whose `cols` columns fit the WebView's
-    // current width, measured with a scratch canvas rather than xterm's own
-    // (fontSize-dependent) internals — clamped to 6px rather than shrunk
-    // further, with native horizontal panning left on for whatever still
-    // overflows at that floor.
+    // Bug 8: a fixed size from native (the pty's real cols/rows) gets the
+    // largest font in [11,14]px whose `cols` columns fit the WebView's
+    // current width (the controller's fixedFont), measured with a scratch
+    // canvas rather than xterm's own (fontSize-dependent) internals. A pty
+    // wider than 11px fits overflows and pans sideways instead of shrinking
+    // to an unreadable size. xterm rounds its cell width to device pixels,
+    // so the rendered screen can still come out wider than the canvas
+    // estimate — its real width decides the pan too, or the right edge is
+    // cut off with no way to reach it.
     'var fitCanvas=document.createElement("canvas");' +
     'var fitCtx=fitCanvas.getContext("2d");' +
     "function charWidthAt(size){" +
@@ -136,15 +139,22 @@ function buildBootCode(theme, fontFamily, scrollback, fontSize) {
     "function applyFixedSize(cols,rows){" +
     'var container=document.getElementById("t");' +
     "var width=container.clientWidth;" +
-    "var chosen=6;" +
-    "for(var size=14;size>=6;size--){" +
-    "if(charWidthAt(size)*cols<=width){chosen=size;break;}" +
-    "}" +
-    "term.options.fontSize=chosen;" +
+    "var font=controller.fixedFont(cols,width,charWidthAt);" +
+    "term.options.fontSize=font.size;" +
     "term.resize(cols,rows);" +
-    "var overflowing=charWidthAt(chosen)*cols>width;" +
+    'var screen=container.querySelector(".xterm-screen");' +
+    "var overflowing=font.overflowing||(screen!==null&&screen.scrollWidth>width);" +
     'container.style.overflowX=overflowing?"auto":"hidden";' +
     'container.style.touchAction=overflowing?"pan-x":"none";' +
+    "}" +
+    // Fit toggle: back to fitting the WebView — no pan, and fitAddon's own
+    // font size rather than whatever the fixed size last picked.
+    "function fitToView(){" +
+    'var container=document.getElementById("t");' +
+    "term.options.fontSize=fontSize;" +
+    'container.style.overflowX="hidden";' +
+    'container.style.touchAction="none";' +
+    "fitAddon.fit();" +
     "}" +
     // Bug 9: `term` is passed straight through as `PageDeps.term` — real
     // xterm 6 already shapes `.write`/`.reset`/`.cols`/`.rows`/`.modes`/
@@ -152,7 +162,7 @@ function buildBootCode(theme, fontFamily, scrollback, fontSize) {
     // no adapter object is needed here.
     "var controller=createPageController({" +
     "term:term," +
-    "fit:function(){fitAddon.fit();}," +
+    "fit:fitToView," +
     // Task 13: the same script also runs in the browser build, as the
     // static terminal.html in a sandboxed iframe (TerminalWebView.web.tsx)
     // with no ReactNativeWebView bridge — there it posts to its parent.
@@ -165,8 +175,28 @@ function buildBootCode(theme, fontFamily, scrollback, fontSize) {
     'else if(window.parent!==window){window.parent.postMessage(s,"*");}' +
     "}," +
     "applyFixedSize:applyFixedSize," +
-    'lineHeightPx:function(){return document.getElementById("t").clientHeight/term.rows;}' +
+    'lineHeightPx:function(){return document.getElementById("t").clientHeight/term.rows;},' +
+    // Getting around the scrollback: xterm's own buffer and viewport,
+    // read and moved here; only geometry and a found/not-found bit ever
+    // go back to native (terminal-page.ts).
+    "nav:{" +
+    "viewportY:function(){return term.buffer.active.viewportY;}," +
+    "baseY:function(){return term.buffer.active.baseY;}," +
+    "lineCount:function(){return term.buffer.active.length;}," +
+    'lineText:function(y){var l=term.buffer.active.getLine(y);return l?l.translateToString(true):"";},' +
+    "scrollToLine:function(y){term.scrollToLine(y);}," +
+    "scrollToBottom:function(){term.scrollToBottom();}," +
+    "select:function(c,r,n){term.select(c,r,n);}" +
+    "}" +
     "});" +
+    // The laptop's shell integration marks each prompt with OSC 133;A.
+    // Each one becomes a stop for "previous / next command"; returning
+    // false leaves the sequence to xterm's own (no-op) handling.
+    "term.parser.registerOscHandler(133,function(data){" +
+    'if(data.charAt(0)==="A"){var m=term.registerMarker(0);if(m)controller.commandMark(m);}' +
+    "return false;" +
+    "});" +
+    "term.onScroll(function(){controller.viewChanged();});" +
     // In the iframe, only the parent (the app) may drive the terminal; the
     // native WebView's own injected events carry no source, and are
     // accepted exactly as before.
@@ -178,23 +208,29 @@ function buildBootCode(theme, fontFamily, scrollback, fontSize) {
     'window.addEventListener("resize",function(){controller.layoutChanged();});' +
     // Bug 9: touch scrolling — xterm 6's own viewport is wheel-only, so
     // every touch gesture on the terminal element is turned into
-    // scrollLines()/wheel calls by the controller itself. `{passive:true}`
-    // throughout: CSS `touch-action` (STYLE, and applyFixedSize's
+    // scrollLines()/wheel calls by the controller itself — a mostly
+    // sideways one excepted, which is the native "pan-x" pan (its axis is
+    // locked in the controller, so it never scrolls as well). `{passive:true}`
+    // throughout: CSS `touch-action` (buildStyle, and applyFixedSize's
     // "pan-x" override) is what stops the WebView's own default handling,
     // not preventDefault() here.
     "var touchY=0;" +
+    "var touchX=0;" +
     'document.getElementById("t").addEventListener("touchstart",function(e){' +
     "var t0=e.touches[0];" +
     "if(!t0)return;" +
     "touchY=t0.clientY;" +
+    "touchX=t0.clientX;" +
     "controller.touchStart();" +
     "},{passive:true});" +
     'document.getElementById("t").addEventListener("touchmove",function(e){' +
     "var t0=e.touches[0];" +
     "if(!t0)return;" +
     "var dy=t0.clientY-touchY;" +
+    "var dx=t0.clientX-touchX;" +
     "touchY=t0.clientY;" +
-    "controller.touchMove(dy);" +
+    "touchX=t0.clientX;" +
+    "controller.touchMove(dy,dx);" +
     "},{passive:true});" +
     'document.getElementById("t").addEventListener("touchend",function(){' +
     "controller.touchEnd();" +
@@ -232,9 +268,20 @@ const CSP =
 // tracking on, an SGR wheel sequence). applyFixedSize() (bug 8) is the only
 // thing that ever relaxes this, to "pan-x" for whatever a size that cannot
 // shrink to the WebView's width still overflows by.
-const STYLE =
-  "html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#000;}" +
-  "#t{width:100%;height:100%;touch-action:none;}";
+//
+// The page is painted in the theme's own background: a pty with fewer rows
+// than the WebView is tall leaves page showing under xterm's last row, and
+// plain black there read as a hole in the terminal.
+function buildStyle(theme) {
+  const ground = theme.background;
+  if (typeof ground !== "string" || !/^#[0-9a-fA-F]{3,8}$/.test(ground)) {
+    throw new Error(`terminal theme background must be a hex colour, got ${String(ground)}`);
+  }
+  return (
+    `html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:${ground};}` +
+    "#t{width:100%;height:100%;touch-action:none;}"
+  );
+}
 
 /** The page's one script, exactly as both the native inline page and the
  *  browser's external terminal.<hash>.js carry it. */
@@ -276,7 +323,7 @@ export function buildTerminalHtml(inputs) {
     '<meta charset="utf-8">' +
     '<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">' +
     `<meta http-equiv="Content-Security-Policy" content="${csp}">` +
-    `<style>${inputs.xtermCss}${STYLE}</style>` +
+    `<style>${inputs.xtermCss}${buildStyle(inputs.theme)}</style>` +
     "</head>" +
     "<body>" +
     '<div id="t"></div>' +
@@ -312,7 +359,7 @@ function contentName(text, extension) {
 
 export function buildTerminalWebPage(inputs) {
   const script = buildTerminalScript(inputs);
-  const style = inputs.xtermCss + STYLE;
+  const style = inputs.xtermCss + buildStyle(inputs.theme);
   const scriptName = contentName(script, "js");
   const styleName = contentName(style, "css");
   const html =

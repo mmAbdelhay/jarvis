@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   commandBasename,
+  isAgentServiceCommand,
   listAgentProcesses,
   parseEtime,
   parseLsofCwd,
   parsePsOutput,
   type ProcessScanDeps,
+  transcriptsForProcesses,
 } from "./process-scan.js";
 
 const AGENTS = [
@@ -88,6 +90,81 @@ describe("parseLsofCwd", () => {
 
   it("returns an empty map for empty output", () => {
     expect(parseLsofCwd("")).toEqual(new Map());
+  });
+});
+
+describe("isAgentServiceCommand", () => {
+  const CLAUDE = { command: "claude", vendor: "anthropic" as const };
+  const CODEX = { command: "/opt/homebrew/bin/codex", vendor: "openai" as const };
+
+  it("reads codex's app-server and mcp-server as services, not sessions", () => {
+    expect(isAgentServiceCommand(CODEX, "codex app-server --listen unix:// --managed-daemon")).toBe(
+      true,
+    );
+    expect(
+      isAgentServiceCommand(CODEX, "/opt/homebrew/bin/codex app-server daemon pid-update-loop"),
+    ).toBe(true);
+    expect(isAgentServiceCommand(CODEX, "codex mcp-server")).toBe(true);
+  });
+
+  it("reads claude's mcp subcommand as a service, after leading flags too", () => {
+    expect(isAgentServiceCommand(CLAUDE, "claude mcp serve")).toBe(true);
+    expect(isAgentServiceCommand(CLAUDE, "claude --debug mcp serve")).toBe(true);
+  });
+
+  it("keeps an interactive or resumed agent", () => {
+    expect(isAgentServiceCommand(CLAUDE, "claude")).toBe(false);
+    expect(isAgentServiceCommand(CLAUDE, "claude --resume abc")).toBe(false);
+    expect(isAgentServiceCommand(CODEX, "codex")).toBe(false);
+    expect(isAgentServiceCommand(CODEX, "codex resume")).toBe(false);
+  });
+
+  it("keys each subcommand to its own agent, whatever its id or command is called", () => {
+    // `mcp` is claude's service; for codex it is the config subcommand.
+    expect(isAgentServiceCommand(CODEX, "codex mcp list")).toBe(false);
+    expect(isAgentServiceCommand(CLAUDE, "claude app-server")).toBe(false);
+    // A wrapper command still names its vendor's subcommands.
+    expect(
+      isAgentServiceCommand({ command: "claude-acme", vendor: "anthropic" }, "claude-acme mcp"),
+    ).toBe(true);
+    // No vendor: the command's own name decides.
+    expect(isAgentServiceCommand({ command: "codex" }, "codex app-server")).toBe(true);
+    expect(isAgentServiceCommand({ command: "aider" }, "aider mcp")).toBe(false);
+  });
+});
+
+describe("transcriptsForProcesses", () => {
+  const proc = (pid: number, agentId: string, cwd: string | null) => ({
+    pid,
+    agentId,
+    command: agentId,
+    cwd,
+    startedAt: 0,
+  });
+
+  it("prefers the pid's own transcript, then the directory's, and gives a shared directory none", async () => {
+    const found = await transcriptsForProcesses(
+      [
+        proc(1, "claude", "/p/a"), // pid link
+        proc(2, "claude", "/p/b"), // alone in /p/b: directory guess
+        proc(3, "claude", "/p/c"), // shares /p/c with 4, no pid link: none
+        proc(4, "claude", "/p/c"),
+        proc(5, "codex", "/p/c"), // same dir, other agent: still alone
+        proc(6, "claude", null), // no cwd, no pid link: none
+      ],
+      {
+        byPid: async (_agentId, pid) => (pid === 1 ? "pid-1" : null),
+        latestInDir: async (agentId, cwd) => `${agentId}@${cwd}`,
+      },
+    );
+
+    expect(found).toEqual(
+      new Map([
+        [1, "pid-1"],
+        [2, "claude@/p/b"],
+        [5, "codex@/p/c"],
+      ]),
+    );
   });
 });
 
@@ -229,5 +306,94 @@ describe("listAgentProcesses", () => {
     );
     expect(lsofCalls).toBe(1);
     expect(result.map((r) => r.pid).sort()).toEqual([1111, 2222]);
+  });
+  it("skips codex's background daemon (app-server), keeping a real session", async () => {
+    const psOut = [
+      "17859   1   1-02:00:00 codex app-server --listen unix:// --managed-daemon",
+      "17860   1   1-02:00:00 codex app-server daemon pid-update-loop",
+      " 2222   1   00:06 codex",
+    ].join("\n");
+    const result = await listAgentProcesses(
+      deps({
+        exec: async (command) =>
+          command === "ps" ? { code: 0, stdout: psOut } : { code: 0, stdout: "" },
+      }),
+    );
+    expect(result.map((r) => r.pid)).toEqual([2222]);
+  });
+
+  describe("an agent typed into a Jarvis terminal", () => {
+    // jarvis 500 -> 600 (terminal tab-3's shell) -> 96359 (claude typed in)
+    //            -> 700 (tab-4:p2's shell) -> 800 (a wrapper) -> 98800 (claude)
+    //            -> 900 (a session Jarvis started, owned)
+    //            -> 950 (the brain's own SDK child, under no terminal)
+    const psOut = [
+      "  500     1   10:00:00 /Applications/Jarvis.app/Contents/MacOS/Jarvis",
+      "  600   500   05:00 /bin/zsh -l",
+      "96359   600   00:05 claude --dangerously-skip-permissions",
+      "  700   500   05:00 /bin/zsh -l",
+      "  800   700   00:30 npx something",
+      "98800   800   00:07 /usr/local/bin/claude",
+      "  900   500   00:09 claude --session-id abc",
+      "  950   500   00:09 claude -p hello",
+      "  960   600   00:04 claude mcp serve",
+    ].join("\n");
+    const lsofOut = [
+      "p96359",
+      "fcwd",
+      "n/Users/u/projects/saudisale",
+      "p98800",
+      "fcwd",
+      "n/Users/u/projects/jarvis",
+    ].join("\n");
+
+    function scan(overrides: Partial<ProcessScanDeps> = {}) {
+      return listAgentProcesses(
+        deps({
+          jarvisPid: 500,
+          ownedPids: () => new Set([900]),
+          terminalShells: () =>
+            new Map([
+              [600, "tab-3"],
+              [700, "tab-4:p2"],
+            ]),
+          exec: async (command) =>
+            command === "ps" ? { code: 0, stdout: psOut } : { code: 0, stdout: lsofOut },
+          ...overrides,
+        }),
+      );
+    }
+
+    it("reports it with the pane its shell runs in, owned and paneless ones left out", async () => {
+      expect(await scan()).toEqual([
+        {
+          pid: 96359,
+          agentId: "claude",
+          command: "claude",
+          cwd: "/Users/u/projects/saudisale",
+          startedAt: now - 5000,
+          terminalPaneKey: "tab-3",
+        },
+        {
+          pid: 98800,
+          agentId: "claude",
+          command: "claude",
+          cwd: "/Users/u/projects/jarvis",
+          startedAt: now - 7000,
+          terminalPaneKey: "tab-4:p2",
+        },
+      ]);
+    });
+
+    it("reports an agent exec'd in place of its pane's shell (same pid)", async () => {
+      const result = await scan({
+        terminalShells: () => new Map([[96359, "tab-5"]]),
+      });
+      expect(result.map((r) => [r.pid, r.terminalPaneKey])).toEqual([[96359, "tab-5"]]);
+    });
+
+    it("reports nothing from Jarvis's own tree when no shell pids are known", async () => {
+      expect(await scan({ terminalShells: undefined })).toEqual([]);
+    });
   });
 });

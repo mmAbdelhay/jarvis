@@ -1,9 +1,29 @@
+import type { Session } from "@jarvis/core";
 import { describe, expect, it } from "vitest";
-import { historyListDisplay, transcriptDisplay, withLrmPrefixes } from "./history-screen";
+import {
+  agentsOf,
+  chatTurnLabel,
+  filterHistory,
+  historyDetailSub,
+  historyListDisplay,
+  historyRowSub,
+  historyRowTime,
+  projectsOf,
+  transcriptDisplay,
+  withLrmPrefixes,
+} from "./history-screen";
 import type { HistoryState } from "./history-store";
 import { t } from "./i18n";
 
-const BASE: HistoryState = { sessions: [], transcript: [], stale: false, loading: false };
+const BASE: HistoryState = {
+  sessions: [],
+  transcript: [],
+  stale: false,
+  loading: false,
+  more: false,
+  loadingMore: false,
+  query: "",
+};
 const SESSION = {
   id: "s1",
   project: "jarvis",
@@ -143,5 +163,72 @@ describe("withLrmPrefixes (M12 Task 8, rule 10)", () => {
 
   it("leaves a line with no strong-LTR character (pure digits/punctuation) unmarked", () => {
     expect(withLrmPrefixes("123.45", "ar")).toBe("123.45");
+  });
+});
+
+describe("wide History helpers", () => {
+  const at = (h: number, m: number) => new Date(2026, 8, 30, h, m).getTime();
+  const row = (over: Partial<Session> = {}): Session => ({
+    ...SESSION,
+    startedAt: at(21, 29),
+    lastActivityAt: at(22, 10),
+    endedAt: at(22, 10),
+    ...over,
+  });
+
+  it("historyRowTime is the clock time and the duration", () => {
+    expect(historyRowTime(row())).toBe("22:10 · 41m");
+    expect(
+      historyRowTime(
+        row({ startedAt: at(15, 16), lastActivityAt: at(16, 20), endedAt: at(16, 20) }),
+      ),
+    ).toBe("16:20 · 1h 04m");
+  });
+
+  it("historyRowSub joins project, agent and imported", () => {
+    expect(historyRowSub(row({ project: "api", agentId: "claude-main" }), "imported")).toBe(
+      "api · claude-main",
+    );
+    expect(historyRowSub(row({ transcriptPath: "/x" }), "imported")).toBe(
+      "jarvis · codex · imported",
+    );
+    expect(historyRowSub(row({ project: null }), "imported")).toBe("codex");
+  });
+
+  it("projectsOf and agentsOf are unique and sorted", () => {
+    const rows = [
+      row({ project: "web", agentId: "b" }),
+      row({ project: "api", agentId: "a" }),
+      row({ project: null, agentId: "b" }),
+      row({ project: "api", agentId: "a" }),
+    ];
+    expect(projectsOf(rows)).toEqual(["api", "web"]);
+    expect(agentsOf(rows)).toEqual(["a", "b"]);
+  });
+
+  it("filterHistory composes project and agent, and undefined keeps all", () => {
+    const rows = [
+      row({ id: "1", project: "api", agentId: "a" }),
+      row({ id: "2", project: "api", agentId: "b" }),
+      row({ id: "3", project: "web", agentId: "a" }),
+    ];
+    expect(filterHistory(rows, undefined, undefined)).toHaveLength(3);
+    expect(filterHistory(rows, "api", undefined).map((r) => r.id)).toEqual(["1", "2"]);
+    expect(filterHistory(rows, "api", "a").map((r) => r.id)).toEqual(["1"]);
+    expect(filterHistory(rows, "web", "b")).toEqual([]);
+  });
+
+  it("historyDetailSub reads project, agent, day and time", () => {
+    expect(historyDetailSub(row({ agentId: "copilot" }), "yesterday")).toBe(
+      "jarvis · copilot · yesterday 22:10 · 41m",
+    );
+  });
+
+  it("chatTurnLabel announces the role in both languages", () => {
+    expect(chatTurnLabel({ role: "user", text: "hi", tools: [] }, "en")).toBe("User: hi");
+    expect(chatTurnLabel({ role: "assistant", text: "", tools: ["Read"] }, "en")).toBe("Assistant");
+    expect(chatTurnLabel({ role: "user", text: "hi", tools: [] }, "ar")).toBe(
+      `${t("ar", "history.user")}: hi`,
+    );
   });
 });

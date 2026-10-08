@@ -8,6 +8,178 @@ version and the downloads. This file is the index.
 
 ## Unreleased
 
+## [0.1.9] — 2026-10-04
+
+- Desktop: Jarvis checks for a new version when it starts and once a day,
+  with one request to GitHub that carries nothing about the machine.
+- Desktop: an Updates card in Settings → General shows the version, the
+  last check, the new release's notes and an Install update button. A dot
+  on the Settings icon says there is one waiting.
+- Install update downloads the new build, checks its SHA-256, asks before
+  restarting, and swaps the app in place — the `.dmg` on macOS, the
+  AppImage on Linux. Anything that fails leaves the installed app as it was.
+- Releases ship a `SHA256SUMS` file beside the downloads, written by
+  `scripts/release-sums.mjs`. A release without it cannot be installed from
+  Settings.
+
+## [0.1.8] — 2026-10-04
+
+- Phone Home shows CPU, memory and disk, New session and New terminal,
+  every project with its Terminal, Docker, API and Sidecars tools, and
+  counts agents running outside Jarvis in the headline.
+- The phone terminal is readable: an 11px floor with sideways panning
+  instead of shrinking to 6px, and compact controls that leave about
+  three quarters of the screen to the output.
+- Fit on the phone resizes the shared terminal to the phone and gives the
+  desktop its size back when Fit is turned off, the phone leaves or
+  disconnects.
+- No more "Connection may be stale" flash on a healthy connection.
+- Desktop: a Plan button on each terminal tab.
+- Desktop: Cmd+V pastes screenshots into Claude Code in a terminal tab.
+- Sessions no longer lists Codex's background service as running agents,
+  and shows agents typed into a Jarvis terminal as running, linked to
+  their own transcript; clicking one opens its tab.
+
+## [0.1.7] — 2026-10-03
+
+- The phone and browser app now match the redesign: line icons and the
+  redesign's type and spacing on every screen.
+- Phone Home shows the laptop's name, the waiting question as a row of
+  answers, capacity cards with a 24-hour trend, and the sessions that are
+  working, with their +/− line counts.
+- Sessions includes finished and imported sessions from History, grouped
+  by day, with Resume on each and a New button and project filter.
+- The session screen has Live, Changes, Plan and Files tabs, a five-key bar
+  with the rest one tap away (adding Ctrl+R), and a message bar.
+- Changes opens on a session straight away, with the branch card, files
+  with stage checkboxes, the diff and a commit bar.
+- Workspace opens on a project, with a + Tab sheet, one row per laptop tab
+  and the project's files inline. The terminal screen gains a navigation
+  mode with the arrow pad.
+- In the browser and on tablets: a sidebar that becomes an icon rail for
+  the terminal, a Home with tiles and tables, Sessions beside the open
+  session, a two-pane Changes with a split diff, History as a chat, Settings
+  split into This browser and The laptop, and a Workspace with tabs, a
+  file tree and the plan beside the terminal.
+
+## [0.1.6] — 2026-10-03
+
+- The phone's terminal key bar has an Alt key. Like Ctrl, it applies to the
+  next key or text sent, so Alt+⌫ deletes a word and Alt+arrows move by word.
+- Home shows how many sessions started each day over the last two weeks.
+- Browser and tablet History shows the list and the open conversation side by
+  side. A transcript now opens for any session, not only those on History's
+  first page (`history:list` also takes an `id`).
+- Phone and browser Settings: an "On the laptop" section shows the laptop's
+  agents, projects and worktree mode (`settings:read`).
+- The phone can change the worktree mode in the laptop's settings. A save from
+  a phone changes only the `sessions` section; everything else is ignored, so
+  it cannot turn the bridge off or change project roots or command paths.
+- The phone can close and rename the laptop's tabs.
+- The phone can resume a past session; it opens in a new terminal tab on the
+  laptop and the phone lands on it.
+- The phone can rename a file or move it to the trash inside a project; the
+  project's root and anything outside it are refused.
+- Browser and tablet redesign: the top bar becomes a sidebar with every
+  section — Home, Sessions (with its running count), Workspace, Changes,
+  History, Voice, Settings — and the laptop's connection, metrics and clock at
+  its foot. Below 900 points wide it narrows to an icon rail. "Dashboard" is
+  now called Home.
+- Phone redesign, files: a terminal's Files button browses its project
+  (folders first, a breadcrumb back up) and types a chosen file's path into the
+  terminal, quoted when the shell would misread it. `terminal:listDir` now also
+  takes a path relative to the project root, checked by the same containment
+  rule.
+- Phone redesign, terminal: the plan stays in view above the keys (progress,
+  the step it is on, notes waiting to be sent) and opens a restyled sheet with
+  a Plan / Notes switch and ticked steps struck through. Getting around the
+  output: previous / next command (from the shell's own prompt marks),
+  Latest once scrolled back, find in output, and a drag pad for arrow keys.
+- Phone redesign, Session and Changes: a session screen switches between Live,
+  Changes, Plan (with its progress) and Transcript; its plan opens on the
+  session, and notes on it are sent to the session (`plans:send` now also
+  accepts a live session id). Changes shows one branch card (branch picker,
+  ahead/behind, Pull / Push / Pull request, the worktree's merge and remove), a
+  file list with status badges and staged toggles, and a commit bar.
+- Phone redesign, Sessions and History: Sessions has a search field and
+  status chips (All, Waiting, Running, Done) with live counts; History searches
+  on the laptop, groups by day and loads 50 sessions at a time instead of all
+  of them (`history:list` takes an optional page request; with none it answers
+  the whole list as before).
+- Phone redesign, Home: a new bottom bar (Home, Sessions, a Talk button in the
+  middle, Workspace, Changes); any question a session is waiting at, answerable
+  from Home; and each account's capacity with its last-day trend.
+- Phone Changes screen: pull, push, open a pull request, switch or create a
+  branch, and merge or remove a session's worktree. A commit git refuses now
+  says why on the phone and keeps the draft.
+- Imported Copilot CLI sessions open with their conversation: History reads
+  the session's `events.jsonl` instead of showing an empty view.
+- Find in an API response: a search field above the body marks every match,
+  counts them, and steps through with Enter / Shift+Enter.
+
+- The API client copies a request as JavaScript `fetch` or Python
+  `requests` as well as cURL, from one menu. All three come from the same
+  resolved request, so they agree on headers, auth and body.
+
+- **Check for updates** in Settings → General: one request to GitHub's
+  releases API, only when pressed, with the newer release's page opened in
+  the Personal browser. Nothing is ever checked in the background.
+
+- The plan panel shows a plan's checklist progress in its header ("3/7
+  done", with a meter), counted from its own `- [ ]` / `- [x]` items.
+
+- Answer a waiting session without its terminal. A session sitting at a
+  permission menu, a `(y/n)` or a "Press Enter" shows the agent's own
+  question and options on its Dashboard row and on the phone's session
+  screen, and by voice ("say no to the acme session"). Each answer types
+  what you would, and is refused — typing nothing — if the prompt changed
+  since you saw it.
+
+- Usage history on the Dashboard: a line under each provider's meter shows
+  its remaining capacity over the last day, and the Sessions header shows
+  sessions started per day for the last two weeks. Readings are kept as
+  they arrive (30 days, in `sessions.db`); nothing extra is ever queried.
+
+- Sessions can run in a git worktree of their own, so two agents in the
+  same project stop writing over each other. `sessions.worktrees:
+  parallel` gives one to a session started while another is live in the
+  same checkout; `always` gives one to every session; asking for "a
+  separate worktree" works whatever the setting. The session's Changes
+  view can merge it back into the project's branch (refused over
+  uncommitted work, backed out on conflict) or remove it, keeping the
+  branch. Off by default: a fresh worktree has no installed dependencies.
+
+- The Changes view finishes the git loop: a branch picker and **New
+  branch**, where the branch stands against its remote (`↑2 ↓1`),
+  fast-forward-only **Pull**, never-forced **Push** (the first push sets
+  the upstream), and **Pull request**, which opens the branch's pull
+  request — or creates it with `gh` — in the project's browser tab.
+
+- The file sidebar keeps itself current: it re-reads after every command
+  and every few seconds while it is on screen, keeping open folders open
+  and leaving unchanged rows alone. Right-click for **New file**, **New
+  folder**, **Rename** and **Move to Trash** (or use the two buttons by the
+  header); names are typed in place, nothing is ever overwritten, and every
+  write is held to the project root the same way listing is.
+- The plan panel has a user guide section, under Workspace tabs → Terminal.
+- Jarvis no longer thinks a background daemon is running when the home
+  folder's path is too long for a socket, which showed a startup dialog
+  offering to stop a daemon that did not exist.
+
+## [0.1.5] — 2026-09-28
+
+- Plan panel in every terminal tab: the plan Claude Code writes in plan
+  mode opens beside the terminal on its own (without taking focus), and
+  any `docs/superpowers/specs` or `plans` file in the project can be
+  picked. Click a section to edit it in place (⌘S saves just that
+  section; if the file changed on disk, a notice keeps your text), pin
+  comments to a selection or a section, and **Send to Claude** pastes
+  them into the tab as one message. Toggle it from the palette (⌘P →
+  Toggle plan panel) or the tab's right-click menu. The phone's terminal
+  screen gains a **Plan** sheet with the same comments and per-section
+  editing. Plan files are only read or written inside plan folders;
+  remote images in plans never load, and links open only if they are
+  http, https or mailto.
 - Tablet and desktop layout for the browser client and the iPad and
   Android tablet app: a window at least 744 wide (an iPad mini in
   portrait) whose shorter side is at least 600 gets a desktop-style top bar (sections, the laptop's metrics,

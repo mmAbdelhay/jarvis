@@ -101,6 +101,8 @@ describe("parseSessionList", () => {
         summary: "fixing tests",
         state: "running",
         agentId: "claude-main",
+        project: "acme",
+        projectPath: "/Users/x/acme",
         startedAt: 50,
         lastActivityAt: 100,
       },
@@ -110,6 +112,15 @@ describe("parseSessionList", () => {
   it("keeps endedAt when present and finite", () => {
     const rows = parseSessionList([rowPayload({ state: "done", endedAt: 500 })]);
     expect(rows[0]?.endedAt).toBe(500);
+  });
+
+  it("marks a row the laptop found running in one of its own Terminal panes", () => {
+    const rows = parseSessionList([
+      rowPayload({ id: "ext-1", origin: "external", terminalPaneKey: "tab-3" }),
+      rowPayload({ id: "ext-2", origin: "external" }),
+    ]);
+    expect(rows[0]?.inJarvisTerminal).toBe(true);
+    expect(rows[1]?.inJarvisTerminal).toBeUndefined();
   });
 
   it("keeps origin when present", () => {
@@ -131,7 +142,17 @@ describe("parseSessionList", () => {
     ]);
     expect(rows).toHaveLength(1);
     expect(Object.keys(rows[0] as object).sort()).toEqual(
-      ["agentId", "id", "label", "lastActivityAt", "startedAt", "state", "summary"].sort(),
+      [
+        "agentId",
+        "id",
+        "label",
+        "lastActivityAt",
+        "project",
+        "projectPath",
+        "startedAt",
+        "state",
+        "summary",
+      ].sort(),
     );
   });
 

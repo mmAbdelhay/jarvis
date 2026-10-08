@@ -58,6 +58,9 @@ export const DAEMON_PUSHES = {
   requestFavicon: "daemon:requestFavicon",
   sweepIdleViews: "daemon:sweepIdleViews",
   openExternal: "daemon:openExternal",
+  /** To the app whose request it is: move this path to the OS trash. The
+   *  core has already proven it inside a project. Payload: { path }. */
+  trashItem: "daemon:trashItem",
   /** To the one app whose request asked for a restart: relaunch yourself if
    *  a setting only the app reads (hostConfig().suspendTabsAfterMs) changed. */
   restart: "daemon:restart",

@@ -1,11 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { settingsSections, settingsWideLayout } from "./settings-sections";
+import {
+  sectionScope,
+  SETTINGS_SCOPES,
+  settingsScopes,
+  settingsSections,
+  settingsWideLayout,
+} from "./settings-sections";
 
 const nativeSections = [
   { id: "general", labelKey: "settings.section.general" },
   { id: "voice", labelKey: "settings.speakReplies" },
   { id: "notifications", labelKey: "settings.notifications" },
   { id: "paired-computer", labelKey: "settings.pairedLaptop" },
+  { id: "laptop", labelKey: "laptopSettings.title" },
   { id: "connection", labelKey: "settings.connection" },
   { id: "security", labelKey: "settings.security" },
   { id: "remote-access", labelKey: "settings.section.remoteAccess" },
@@ -57,4 +64,35 @@ describe("settingsWideLayout", () => {
       expect(settingsWideLayout({ language, platformRtl }).railSide).toBe(side);
     },
   );
+});
+
+describe("settingsScopes", () => {
+  it("places every section in exactly one scope", () => {
+    for (const platform of ["web", "native"] as const) {
+      const all = settingsSections(platform);
+      const scopes = settingsScopes(all);
+      const ids = SETTINGS_SCOPES.flatMap((scope) => scopes[scope].map(({ id }) => id));
+      expect([...ids].sort()).toEqual(all.map(({ id }) => id).sort());
+    }
+  });
+
+  it("puts only the laptop section under The laptop", () => {
+    const scopes = settingsScopes(settingsSections("web"));
+    expect(scopes.laptop.map(({ id }) => id)).toEqual(["laptop"]);
+    expect(scopes.browser.map(({ id }) => id)).toEqual([
+      "general",
+      "voice",
+      "paired-computer",
+      "connection",
+      "security",
+      "keep-signed-in",
+      "passkeys",
+      "remote-access",
+    ]);
+  });
+
+  it("opens on This browser", () => {
+    expect(SETTINGS_SCOPES[0]).toBe("browser");
+    expect(sectionScope("security")).toBe("browser");
+  });
 });

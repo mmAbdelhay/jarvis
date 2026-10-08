@@ -19,6 +19,10 @@ export type SessionRowView = {
   summary: string;
   state: SessionState;
   agentId: string;
+  /** The configured project the session belongs to; null for none. */
+  project: string | null;
+  /** Where the session runs — what its plan panel looks in. */
+  projectPath: string;
   // `startedAt` added (fix round, 2026-09-19 redesign): the Sessions
   // screen's row-level "elapsed mono" field (`Sessions.dc.html`) needs a
   // start time — `parseSession` already requires and parses `startedAt` on
@@ -31,6 +35,18 @@ export type SessionRowView = {
   // found running outside Jarvis. Absent means "jarvis" — the ordinary row,
   // same default as the wire `Session` type itself.
   origin?: "jarvis" | "external";
+  /** An "external" row whose agent the user typed into one of the laptop's
+   *  own Jarvis Terminal panes — live, just not a session Jarvis started.
+   *  The wire row carries the pane key, but the row keeps only the fact:
+   *  the phone does not open a desktop pane from this row. */
+  inJarvisTerminal?: true;
+  /** Set when the session was imported from an agent's own transcript. */
+  transcriptPath?: string;
+  /** Git totals the laptop recorded for the session (finished ones). */
+  branch?: string;
+  insertions?: number;
+  deletions?: number;
+  changedFiles?: number;
 };
 
 export type SessionsView = {
@@ -104,6 +120,8 @@ export function parseSessionList(value: unknown): SessionRowView[] {
       summary: session.summary,
       state: session.state,
       agentId: session.agentId,
+      project: session.project,
+      projectPath: session.projectPath,
       startedAt: session.startedAt,
       lastActivityAt: session.lastActivityAt,
     };
@@ -113,6 +131,12 @@ export function parseSessionList(value: unknown): SessionRowView[] {
     if (session.origin !== undefined) {
       row.origin = session.origin;
     }
+    if (session.terminalPaneKey !== undefined) row.inJarvisTerminal = true;
+    if (session.transcriptPath !== undefined) row.transcriptPath = session.transcriptPath;
+    if (session.branch !== undefined) row.branch = session.branch;
+    if (session.insertions !== undefined) row.insertions = session.insertions;
+    if (session.deletions !== undefined) row.deletions = session.deletions;
+    if (session.changedFiles !== undefined) row.changedFiles = session.changedFiles;
     rows.push(row);
   }
   return rows;

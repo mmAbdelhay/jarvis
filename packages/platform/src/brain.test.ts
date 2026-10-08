@@ -177,6 +177,32 @@ describe("createBrain", () => {
     expect(call?.prompt).toContain("Known projects: acme, storefront");
   });
 
+  it("names the prompt a session is waiting at, with its options numbered", async () => {
+    const { query, calls } = fakeSdkQuery([[textMessage("ok")]]);
+    const brain = createBrain({ systemPrompt: "You are Jarvis.", cwd: "/tmp/jarvis-brain", query });
+    await brain.ask({
+      text: "say yes to acme",
+      tools,
+      context: {
+        projects: [],
+        sessions: [
+          {
+            id: "sess-abc",
+            project: "acme",
+            agentId: "claude-acme",
+            state: "running",
+            summary: "",
+            prompt: { question: "Do you want to proceed?", options: ["Yes", "No"] },
+          },
+        ],
+        changes: [],
+      },
+    });
+    expect(calls[0]?.prompt).toContain(
+      'waiting at prompt "Do you want to proceed?" with options 1) Yes 2) No',
+    );
+  });
+
   it("lists running sessions with their ids so the model can address them", async () => {
     const { query, calls } = fakeSdkQuery([[textMessage("ok")]]);
     const brain = createBrain({ systemPrompt: "You are Jarvis.", cwd: "/tmp/jarvis-brain", query });

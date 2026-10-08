@@ -7,8 +7,8 @@
 
 import type { Clock } from "./clock";
 import type { RpcClient, RpcResult } from "./rpc-client";
-import type { KeyName, TerminalModes } from "./terminal-keys";
-import { ctrlByte, keyBytes } from "./terminal-keys";
+import type { KeyName, Latch, TerminalModes } from "./terminal-keys";
+import { altKeyBytes, ctrlByte, keyBytes } from "./terminal-keys";
 
 export const MAX_INPUT_CHARS = 16_384;
 export const RESIZE_DEBOUNCE_MS = 300;
@@ -33,6 +33,9 @@ export type SessionInput = {
   armCtrl(): void;
   disarmCtrl(): void;
   ctrlArmed(): boolean;
+  armAlt(): void;
+  disarmAlt(): void;
+  altArmed(): boolean;
   setModes(modes: TerminalModes): void;
   setEnded(ended: boolean): void;
   resize(cols: number, rows: number): void;
@@ -105,6 +108,7 @@ function isValidDimension(value: number): boolean {
 export function createRawInput(deps: RawInputDeps): SessionInput {
   let modes: TerminalModes = { applicationCursor: false };
   let ctrlArmedFlag = false;
+  let altArmedFlag = false;
   let ended = false;
   // I1: `disposed` is deliberately separate from `ended`. `ended` is a
   // runtime toggle (setEnded(false) legitimately re-enables a live
@@ -140,6 +144,10 @@ export function createRawInput(deps: RawInputDeps): SessionInput {
       log("ended", text.length);
       return { kind: "ended" };
     }
+    // Alt is ESC before whatever would have been sent, Ctrl'd or not —
+    // the way a terminal with Alt as Meta sends Alt+<key>.
+    const meta = altArmedFlag ? "\x1b" : "";
+    altArmedFlag = false;
     if (ctrlArmedFlag) {
       ctrlArmedFlag = false;
       const byte = ctrlByte(text);
@@ -147,7 +155,7 @@ export function createRawInput(deps: RawInputDeps): SessionInput {
         log("ctrlInvalid", text.length);
         return { kind: "ctrlInvalid" };
       }
-      return sendBytes(byte);
+      return sendBytes(meta + byte);
     }
     if (text === "") {
       log("empty", 0);
@@ -158,7 +166,7 @@ export function createRawInput(deps: RawInputDeps): SessionInput {
       return { kind: "tooLong" };
     }
     // Verbatim (ruling 3): no trim, no normalisation, no CR appended.
-    return sendBytes(text);
+    return sendBytes(meta + text);
   }
 
   async function sendKey(key: KeyName): Promise<SendResult> {
@@ -166,7 +174,12 @@ export function createRawInput(deps: RawInputDeps): SessionInput {
       log("ended", 0);
       return { kind: "ended" };
     }
-    // A key never consumes the Ctrl latch.
+    // A key never consumes the Ctrl latch; it does consume Alt, which is
+    // how Alt+⌫ and Alt+arrows reach the shell.
+    if (altArmedFlag) {
+      altArmedFlag = false;
+      return sendBytes(altKeyBytes(key, modes));
+    }
     return sendBytes(keyBytes(key, modes));
   }
 
@@ -180,6 +193,18 @@ export function createRawInput(deps: RawInputDeps): SessionInput {
 
   function ctrlArmed(): boolean {
     return ctrlArmedFlag;
+  }
+
+  function armAlt(): void {
+    altArmedFlag = true;
+  }
+
+  function disarmAlt(): void {
+    altArmedFlag = false;
+  }
+
+  function altArmed(): boolean {
+    return altArmedFlag;
   }
 
   function setModes(next: TerminalModes): void {
@@ -269,12 +294,46 @@ export function createRawInput(deps: RawInputDeps): SessionInput {
     armCtrl,
     disarmCtrl,
     ctrlArmed,
+    armAlt,
+    disarmAlt,
+    altArmed,
     setModes,
     setEnded,
     resize,
     reassert,
     dispose,
   };
+}
+
+export type Latches = Readonly<Record<Latch, boolean>>;
+export const NO_LATCHES: Latches = { ctrl: false, alt: false };
+
+/** Which latches are armed now — what the key bar's caps show. */
+export function latchesOf(input: SessionInput | undefined): Latches {
+  if (input === undefined) return NO_LATCHES;
+  return { ctrl: input.ctrlArmed(), alt: input.altArmed() };
+}
+
+/** Flips one latch and says which are armed afterwards. */
+export function toggleLatch(input: SessionInput, latch: Latch): Latches {
+  if (latch === "ctrl") {
+    if (input.ctrlArmed()) input.disarmCtrl();
+    else input.armCtrl();
+  } else if (input.altArmed()) input.disarmAlt();
+  else input.armAlt();
+  return latchesOf(input);
+}
+
+/** Whether any latch is armed. */
+export function anyLatch(latches: Latches): boolean {
+  return latches.ctrl || latches.alt;
+}
+
+/** Disarms both latches, for when their caps leave the screen. */
+export function clearLatches(input: SessionInput | undefined): Latches {
+  input?.disarmCtrl();
+  input?.disarmAlt();
+  return latchesOf(input);
 }
 
 export function createSessionInput(deps: SessionInputDeps): SessionInput {

@@ -30,6 +30,31 @@ let activeTab: ResponseTab = "body";
  *  can only be offered for JSON. */
 let raw = false;
 let view: View = { response: undefined, assertions: [] };
+/** Find in the body: kept across responses, so re-sending a request keeps
+ *  the search on screen against the new body. */
+let query = "";
+let currentMatch = 0;
+
+/** More matches than this and only the first are marked — a one-letter
+ *  search in a 2 MB body must not build a million elements. */
+export const MAX_MARKED_MATCHES = 2000;
+
+/** Every case-insensitive occurrence of `needle` in `text`, as start
+ *  offsets, at most `MAX_MARKED_MATCHES + 1` (one more says "and more"). */
+export function findMatches(text: string, needle: string): number[] {
+  if (needle === "") return [];
+  const haystack = text.toLowerCase();
+  const target = needle.toLowerCase();
+  const found: number[] = [];
+  let from = 0;
+  while (found.length <= MAX_MARKED_MATCHES) {
+    const at = haystack.indexOf(target, from);
+    if (at === -1) break;
+    found.push(at);
+    from = at + Math.max(1, target.length);
+  }
+  return found;
+}
 
 export function setResponse(next: View): void {
   view = next;
@@ -210,10 +235,91 @@ function bodyView(body: string): HTMLElement {
     wrapper.append(toggle);
   }
 
+  const text = raw ? body : pretty;
+  const bar = document.createElement("div");
+  bar.className = "api-find";
+  const input = document.createElement("input");
+  input.type = "search";
+  input.id = "api-response-search";
+  input.className = "api-find-input mono";
+  input.placeholder = MESSAGES.apiFindInResponse(PRIMARY_LANGUAGE);
+  input.setAttribute("aria-label", MESSAGES.apiFindInResponse(PRIMARY_LANGUAGE));
+  input.value = query;
+  const count = document.createElement("span");
+  count.className = "api-find-count mono";
+  count.dir = "ltr";
+  const step = (label: string, delta: number): HTMLButtonElement => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "settings-add api-find-step";
+    button.textContent = delta < 0 ? "↑" : "↓";
+    button.setAttribute("aria-label", label);
+    button.title = label;
+    button.addEventListener("click", () => move(delta));
+    return button;
+  };
+  const previous = step(MESSAGES.apiFindPrevious(PRIMARY_LANGUAGE), -1);
+  const next = step(MESSAGES.apiFindNext(PRIMARY_LANGUAGE), 1);
+  bar.append(input, count, previous, next);
+
   const pre = document.createElement("pre");
   pre.className = "api-response-body mono";
-  pre.textContent = raw ? body : pretty;
-  wrapper.append(pre);
+
+  // Redraws the body and the count in place — never the input, so typing
+  // keeps its focus and caret.
+  function draw(scroll: boolean): void {
+    const matches = findMatches(text, query);
+    const marked = matches.slice(0, MAX_MARKED_MATCHES);
+    if (marked.length === 0) {
+      currentMatch = 0;
+      pre.textContent = text;
+    } else {
+      currentMatch = ((currentMatch % marked.length) + marked.length) % marked.length;
+      const nodes: Node[] = [];
+      let at = 0;
+      marked.forEach((start, index) => {
+        if (start > at) nodes.push(document.createTextNode(text.slice(at, start)));
+        const mark = document.createElement("mark");
+        mark.className = index === currentMatch ? "api-match api-match--current" : "api-match";
+        mark.textContent = text.slice(start, start + query.length);
+        nodes.push(mark);
+        at = start + query.length;
+      });
+      nodes.push(document.createTextNode(text.slice(at)));
+      pre.replaceChildren(...nodes);
+      if (scroll) pre.querySelector(".api-match--current")?.scrollIntoView?.({ block: "nearest" });
+    }
+    const more = matches.length > MAX_MARKED_MATCHES ? "+" : "";
+    count.textContent =
+      query === "" ? "" : `${marked.length === 0 ? 0 : currentMatch + 1}/${marked.length}${more}`;
+    previous.disabled = marked.length < 2;
+    next.disabled = marked.length < 2;
+  }
+
+  function move(delta: number): void {
+    currentMatch += delta;
+    draw(true);
+  }
+
+  input.addEventListener("input", () => {
+    query = input.value;
+    currentMatch = 0;
+    draw(true);
+  });
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      move(event.shiftKey ? -1 : 1);
+    } else if (event.key === "Escape" && input.value !== "") {
+      event.preventDefault();
+      input.value = "";
+      query = "";
+      draw(false);
+    }
+  });
+
+  draw(false);
+  wrapper.append(bar, pre);
   return wrapper;
 }
 

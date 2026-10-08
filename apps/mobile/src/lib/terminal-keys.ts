@@ -5,11 +5,15 @@
 // terminal. See
 // the mobile milestone 7, task 5 plan (docs/superpowers/plans).
 
+/** The key bar's two latches: armed by a tap, applied to the next input. */
+export type Latch = "ctrl" | "alt";
+
 export type KeyName =
   | "esc"
   | "tab"
   | "shiftTab"
   | "ctrlC"
+  | "ctrlR"
   | "left"
   | "up"
   | "down"
@@ -17,13 +21,14 @@ export type KeyName =
   | "backspace"
   | "enter";
 
-// Display order per the brief: esc, tab, shiftTab, ctrl, ctrlC, left, up,
-// down, right, backspace, enter.
-export const KEY_BAR: readonly (KeyName | "ctrl")[] = [
+// Display order per the brief: esc, tab, shiftTab, ctrl, alt, ctrlC, left,
+// up, down, right, backspace, enter.
+export const KEY_BAR: readonly (KeyName | Latch)[] = [
   "esc",
   "tab",
   "shiftTab",
   "ctrl",
+  "alt",
   "ctrlC",
   "left",
   "up",
@@ -32,6 +37,54 @@ export const KEY_BAR: readonly (KeyName | "ctrl")[] = [
   "backspace",
   "enter",
 ];
+
+/** Keys that type a character rather than send a control sequence. */
+export type TextKey = "pipe" | "tilde";
+
+/** Anything a key bar can show. */
+export type BarKey = KeyName | Latch | TextKey;
+
+export const TEXT_KEY_VALUE: Readonly<Record<TextKey, string>> = { pipe: "|", tilde: "~" };
+
+export function isTextKey(key: BarKey): key is TextKey {
+  return key === "pipe" || key === "tilde";
+}
+
+/** The Session screen's own bar: the mockup's five keys. */
+export const SESSION_KEYS: readonly BarKey[] = ["esc", "tab", "up", "down", "ctrlC"];
+
+/** What the session bar's "more keys" row adds, so no key is lost. */
+export const MORE_KEYS: readonly BarKey[] = [
+  "shiftTab",
+  "ctrl",
+  "alt",
+  "ctrlR",
+  "left",
+  "right",
+  "backspace",
+  "enter",
+  "pipe",
+  "tilde",
+];
+
+/** The terminal pane's footer: the mockup's six keys. */
+export const TERMINAL_KEYS: readonly BarKey[] = ["esc", "tab", "up", "down", "ctrlC", "ctrlR"];
+
+/** The footer in navigation mode (the arrow pad's ← → and ⌫ ⏎ live beside it). */
+export const NAV_KEYS: readonly BarKey[] = [
+  "ctrl",
+  "alt",
+  "esc",
+  "tab",
+  "shiftTab",
+  "pipe",
+  "tilde",
+];
+
+/** The keys the terminal footer shows for the current mode. */
+export function terminalFooterKeys(navMode: boolean): readonly BarKey[] {
+  return navMode ? NAV_KEYS : TERMINAL_KEYS;
+}
 
 export type TerminalModes = { applicationCursor: boolean };
 
@@ -52,6 +105,8 @@ export function keyBytes(key: KeyName, modes: TerminalModes): string {
       return "\x1b[Z";
     case "ctrlC":
       return "\x03";
+    case "ctrlR":
+      return "\x12";
     case "backspace":
       return "\x7f";
     case "enter":
@@ -63,6 +118,24 @@ export function keyBytes(key: KeyName, modes: TerminalModes): string {
       const letter = CURSOR_KEY_LETTER[key];
       return modes.applicationCursor ? `\x1bO${letter}` : `\x1b[${letter}`;
     }
+  }
+}
+
+/**
+ * The bytes for Alt+<key>, as xterm sends them with Alt as Meta: an arrow
+ * carries the modifier parameter (`ESC [ 1 ; 3 D`, whatever the cursor
+ * mode), every other key is its usual bytes behind an ESC — so Alt+⌫
+ * deletes a word and Alt+← moves back one in a shell.
+ */
+export function altKeyBytes(key: KeyName, modes: TerminalModes): string {
+  switch (key) {
+    case "up":
+    case "down":
+    case "right":
+    case "left":
+      return `\x1b[1;3${CURSOR_KEY_LETTER[key]}`;
+    default:
+      return `\x1b${keyBytes(key, modes)}`;
   }
 }
 

@@ -4,7 +4,20 @@
 
 import { describe, expect, it } from "vitest";
 import type { KeyName, TerminalModes } from "./terminal-keys";
-import { ctrlByte, KEY_BAR, keyBytes, sgrWheelSequence } from "./terminal-keys";
+import {
+  altKeyBytes,
+  ctrlByte,
+  KEY_BAR,
+  keyBytes,
+  MORE_KEYS,
+  SESSION_KEYS,
+  sgrWheelSequence,
+  NAV_KEYS,
+  TERMINAL_KEYS,
+  terminalFooterKeys,
+  TEXT_KEY_VALUE,
+  isTextKey,
+} from "./terminal-keys";
 
 const NORMAL: TerminalModes = { applicationCursor: false };
 const APP_CURSOR: TerminalModes = { applicationCursor: true };
@@ -60,12 +73,13 @@ describe("keyBytes", () => {
 });
 
 describe("KEY_BAR", () => {
-  it("contains every KeyName exactly once, plus 'ctrl', in the specified display order", () => {
-    const expected: (KeyName | "ctrl")[] = [
+  it("contains every KeyName exactly once, plus the two latches, in the specified display order", () => {
+    const expected: (KeyName | "ctrl" | "alt")[] = [
       "esc",
       "tab",
       "shiftTab",
       "ctrl",
+      "alt",
       "ctrlC",
       "left",
       "up",
@@ -115,5 +129,58 @@ describe("sgrWheelSequence", () => {
 
   it("encodes wheel-down as button 65", () => {
     expect(sgrWheelSequence("down")).toBe("\x1b[<65;1;1M");
+  });
+});
+
+describe("altKeyBytes", () => {
+  it("puts the Alt modifier on arrows whatever the cursor mode", () => {
+    expect(altKeyBytes("left", { applicationCursor: false })).toBe("\x1b[1;3D");
+    expect(altKeyBytes("up", { applicationCursor: true })).toBe("\x1b[1;3A");
+  });
+
+  it("puts ESC before every other key's bytes", () => {
+    expect(altKeyBytes("backspace", { applicationCursor: false })).toBe("\x1b\x7f");
+    expect(altKeyBytes("enter", { applicationCursor: false })).toBe("\x1b\r");
+  });
+});
+
+describe("ctrlR", () => {
+  it("is DC2, and Alt+ctrlR follows the Alt rule (ESC first)", () => {
+    expect(keyBytes("ctrlR", NORMAL)).toBe("\x12");
+    expect(altKeyBytes("ctrlR", NORMAL)).toBe("\x1b\x12");
+  });
+});
+
+describe("key sets", () => {
+  const valid = new Set<string>([...KEY_BAR, "ctrlR", ...Object.keys(TEXT_KEY_VALUE)]);
+
+  it.each([
+    ["SESSION_KEYS", SESSION_KEYS],
+    ["MORE_KEYS", MORE_KEYS],
+    ["TERMINAL_KEYS", TERMINAL_KEYS],
+    ["NAV_KEYS", NAV_KEYS],
+  ])("%s holds only known keys, each once", (_name, keys) => {
+    for (const key of keys) expect(valid.has(key)).toBe(true);
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it("the session bar and its more row together lose no former key-bar key", () => {
+    const shown = new Set<string>([...SESSION_KEYS, ...MORE_KEYS]);
+    for (const key of KEY_BAR) expect(shown.has(key)).toBe(true);
+    expect(SESSION_KEYS.filter((key) => MORE_KEYS.includes(key))).toEqual([]);
+  });
+
+  it("switches the terminal footer's key set on navigation mode", () => {
+    expect(terminalFooterKeys(false)).toBe(TERMINAL_KEYS);
+    expect(terminalFooterKeys(true)).toBe(NAV_KEYS);
+    expect(TERMINAL_KEYS).toEqual(["esc", "tab", "up", "down", "ctrlC", "ctrlR"]);
+    expect(NAV_KEYS).toContain("ctrl");
+    expect(NAV_KEYS).toContain("alt");
+  });
+
+  it("sends | and ~ as text, not as control keys", () => {
+    expect(TEXT_KEY_VALUE).toEqual({ pipe: "|", tilde: "~" });
+    expect(isTextKey("pipe")).toBe(true);
+    expect(isTextKey("esc")).toBe(false);
   });
 });

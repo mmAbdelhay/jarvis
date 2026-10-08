@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { isIP } from "node:net";
 import { isAbsolute, join, normalize, sep } from "node:path";
 import { parse } from "yaml";
+import { DEFAULT_IMPORT_WINDOW_DAYS, parseSessions } from "./sessions-config.js";
 import { DEFAULT_GREETING } from "@jarvis/core";
 import type { AgentConfig, ProviderVendor, RegistryConfig, RoutingRule } from "@jarvis/core";
 import type {
@@ -242,7 +243,12 @@ export type JarvisConfig = {
   /** How the transcript importer behaves. Absent from jarvis.yaml for
    *  everyone until they want to change it — the defaults are the whole
    *  point of the section. */
-  sessions: { importWindowDays: number };
+  sessions: {
+    importWindowDays: number;
+    /** When a session gets a git worktree of its own — see
+     *  OrchestratorOptions.worktrees. Absent is off. */
+    worktrees?: "parallel" | "always";
+  };
   /** The `remote:` section. Absent from jarvis.yaml for everyone who has
    *  never turned it on — see RemoteConfig. */
   remote: RemoteConfig;
@@ -315,15 +321,6 @@ const DEFAULT_PIPER_ARABIC_MODEL = join(CONFIG_DIR, "voices/ar_JO-kareem-low.onn
 // sessions inherit hooks and skills from their cwd, so this must never
 // default to the repo or to `process.cwd()`.
 const DEFAULT_BRAIN_CWD = join(CONFIG_DIR, "brain");
-
-/**
- * How far back the transcript backfill reaches, by file mtime.
- *
- * 30 days was 90 of the 125 transcripts on the machine this was designed
- * against, and 90 days was all of them — generous without being unbounded
- * on a machine with years of history.
- */
-const DEFAULT_IMPORT_WINDOW_DAYS = 30;
 
 const DEFAULT_WHISPER_BINARY_PATH = "~/.voicemode/services/whisper/build/bin/whisper-cli";
 // large-v3-turbo, not base: synthesised-speech testing of the spec's own
@@ -709,27 +706,6 @@ function parseRouting(rawRouting: unknown): RoutingRule[] {
       },
     };
   });
-}
-
-function parseSessions(rawSessions: unknown): { importWindowDays: number } {
-  if (rawSessions === undefined) {
-    return { importWindowDays: DEFAULT_IMPORT_WINDOW_DAYS };
-  }
-  if (typeof rawSessions !== "object" || rawSessions === null || Array.isArray(rawSessions)) {
-    throw new Error("Config `sessions` must be an object");
-  }
-  const sessions = rawSessions as Record<string, unknown>;
-  const window = sessions["importWindowDays"];
-  if (window === undefined) {
-    return { importWindowDays: DEFAULT_IMPORT_WINDOW_DAYS };
-  }
-  // Rejected rather than clamped: a window of zero or a string imports
-  // nothing, and silently reads as a bug in the importer rather than in
-  // the config line that caused it.
-  if (typeof window !== "number" || !Number.isFinite(window) || window <= 0) {
-    throw new Error("Config `sessions.importWindowDays` must be a positive number");
-  }
-  return { importWindowDays: window };
 }
 
 /** The `browser:` section as it stands with nothing in jarvis.yaml. */

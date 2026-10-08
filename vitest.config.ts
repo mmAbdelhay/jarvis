@@ -25,7 +25,11 @@ export default defineConfig({
     },
   },
   test: {
-    include: ["packages/*/src/**/*.test.ts", "packages/*/renderer/**/*.test.ts"],
+    include: [
+      "packages/*/src/**/*.test.ts",
+      "packages/*/renderer/**/*.test.ts",
+      "scripts/**/*.test.ts",
+    ],
     environment: "node",
     // Runs in every environment, and does nothing outside jsdom. See the
     // file for why xterm cannot be constructed in a jsdom test without it.

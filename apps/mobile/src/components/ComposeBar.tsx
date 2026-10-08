@@ -1,17 +1,27 @@
-import { useEffect, useRef, useState } from "react";
-import { Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { type ReactNode, useEffect, useRef, useState } from "react";
+import { Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { IconButton } from "@/components/IconButton";
 import { clientPlatformFor } from "@/lib/client-platform";
 import { isRtl, t } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
 import type { SendResult } from "@/lib/session-input";
-import { sendResultText } from "@/lib/session-screen";
+import { isSendChord, sendResultText } from "@/lib/session-screen";
 import { theme } from "@/lib/theme";
 
 export function ComposeBar(props: {
   disabled: boolean;
   onSend(text: string): Promise<SendResult>;
   onSent(): void;
+  /** The hint in the empty field; defaults to the generic one. */
+  placeholder?: string;
+  /** Type the field in the monospace face (a terminal command line). */
+  mono?: boolean;
+  /** Sits between the field and Send (the dictate button). */
+  beforeSend?: ReactNode;
+  /** "inline" (wide Session card): a 42-high field and a text Send button. */
+  variant?: "inline";
 }) {
+  const inline = props.variant === "inline";
   const language = useLanguage();
   const [value, setValue] = useState("");
   const [notice, setNotice] = useState("");
@@ -50,6 +60,7 @@ export function ComposeBar(props: {
     }
   }
 
+  const placeholder = props.placeholder ?? t(language, "session.composePlaceholder");
   return (
     <View style={styles.container}>
       {notice !== "" && (
@@ -66,56 +77,87 @@ export function ComposeBar(props: {
           autoCorrect={false}
           autoCapitalize="none"
           spellCheck={false}
-          placeholder={t(language, "session.composePlaceholder")}
+          placeholder={placeholder}
           placeholderTextColor={theme.colors.textMuted}
-          accessibilityLabel={t(language, "session.composePlaceholder")}
+          accessibilityLabel={placeholder}
           onSubmitEditing={() => {
             void send();
           }}
-          style={[styles.input, { writingDirection: isRtl(language) ? "rtl" : "ltr" }]}
-        />
-        <TouchableOpacity
-          disabled={props.disabled || sending}
-          accessibilityRole="button"
-          accessibilityLabel={t(language, "session.sendText")}
-          onPress={() => {
-            void send();
+          // Web: ⌘/Ctrl+Enter sends too. The other platforms' key events
+          // carry no modifier fields, so this reads nothing there.
+          onKeyPress={(event) => {
+            if (Platform.OS !== "web") return;
+            const native: unknown = event.nativeEvent;
+            if (typeof native !== "object" || native === null) return;
+            const { key, metaKey, ctrlKey } = native as Record<string, unknown>;
+            if (typeof key !== "string") return;
+            if (isSendChord({ key, metaKey: metaKey === true, ctrlKey: ctrlKey === true })) {
+              void send();
+            }
           }}
-          style={styles.button}
-        >
-          <Text style={styles.buttonText}>↑</Text>
-        </TouchableOpacity>
+          style={[
+            styles.input,
+            inline && styles.inputInline,
+            props.mono && styles.mono,
+            { writingDirection: isRtl(language) ? "rtl" : "ltr" },
+          ]}
+        />
+        {props.beforeSend}
+        {inline ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t(language, "session.sendText")}
+            accessibilityState={{ disabled: props.disabled || sending }}
+            disabled={props.disabled || sending}
+            onPress={() => {
+              void send();
+            }}
+            style={[styles.sendInline, (props.disabled || sending) && styles.sendDisabled]}
+          >
+            <Text style={styles.sendText}>{t(language, "session.send")}</Text>
+          </Pressable>
+        ) : (
+          <IconButton
+            icon="send"
+            size={46}
+            filled
+            label={t(language, "session.sendText")}
+            disabled={props.disabled || sending}
+            onPress={() => {
+              void send();
+            }}
+          />
+        )}
       </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    paddingVertical: 8,
-    gap: theme.spacing.sm,
-    backgroundColor: theme.colors.ground,
-  },
-  row: { flexDirection: "row", gap: theme.spacing.sm },
+  container: { gap: theme.spacing.sm },
+  row: { flexDirection: "row", alignItems: "center", gap: theme.spacing.sm },
   input: {
     flex: 1,
     color: theme.colors.text,
-    height: 44,
+    minHeight: 46,
     paddingHorizontal: 14,
     backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.control,
+    borderRadius: theme.radius.lg,
     borderWidth: 1,
     borderColor: theme.colors.border,
     fontFamily: theme.font.body,
+    fontSize: 15,
   },
-  button: {
-    width: 44,
-    height: 44,
-    alignItems: "center",
+  inputInline: { minHeight: 42, borderRadius: theme.radius.small, fontSize: 14 },
+  sendInline: {
+    minHeight: 42,
     justifyContent: "center",
-    backgroundColor: theme.colors.primary,
-    borderRadius: theme.radius.control,
+    paddingHorizontal: 16,
+    borderRadius: theme.radius.small,
+    backgroundColor: theme.colors.accent,
   },
-  buttonText: { color: theme.colors.primaryText, fontSize: 22, fontFamily: theme.font.bold },
+  sendDisabled: { opacity: 0.5 },
+  sendText: { color: theme.colors.primaryText, fontFamily: theme.font.bold, fontSize: 14 },
+  mono: { fontFamily: theme.font.mono, fontSize: 13 },
   notice: { color: theme.colors.warning, fontSize: theme.font.size.sm },
 });

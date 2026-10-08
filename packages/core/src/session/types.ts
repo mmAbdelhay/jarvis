@@ -86,6 +86,11 @@ export type Session = {
    *  guaranteed to still be the same OS process by the time anything reads
    *  this back (SessionManager never sets it on its own rows). */
   pid?: number;
+  /** Set on an "external" row whose agent runs inside one of Jarvis's own
+   *  Terminal panes — the user typed it there, so Jarvis did not start it
+   *  as a session, but it is not outside Jarvis either. The pane's key
+   *  (`tabId` or `tabId:paneId`), so a click can go to that pane. */
+  terminalPaneKey?: string;
 };
 
 /**

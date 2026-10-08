@@ -6,11 +6,21 @@ import {
   sessionLabel,
   type AgentConfig,
   type AgentHealth,
+  type AnchoredComment,
   type CommandRunner,
+  type GitBranches,
   type GitChanges,
   type GitFileDiff,
   type GitOutcome,
   type GitProvider,
+  type GitPullRequest,
+  type GitPullResult,
+  type GitPushResult,
+  type GitRemoteOps,
+  type GitWorktreeInfo,
+  type GitWorktrees,
+  type PendingPrompt,
+  type PlanComment,
   type ProviderStatus,
   type Session,
   type SessionChanges,
@@ -20,7 +30,7 @@ import {
   type SystemMetrics,
   type Turn,
 } from "@jarvis/core";
-import { basename, isAbsolute, join, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import type { Brain, WorkspaceState, WorkspaceTab } from "@jarvis/core";
 import type { BindChoice, OwnerStatus, RemoteStatus, SetOwnerPasswordResult } from "@jarvis/remote";
 import type { PushRegisterResult, PushRegistration, TerminalPaneInfo } from "@jarvis/wire";
@@ -36,9 +46,9 @@ import {
   chatUrl,
   eksUpdateKubeconfigArgs,
   loadWorkflows,
-  parseTranscript,
   pathPrefix,
   profileForContext,
+  transcriptSource,
 } from "@jarvis/platform";
 import type {
   ApiFailure,
@@ -68,6 +78,9 @@ import type {
   FaviconStore,
   HeadlampManager,
   InstalledVoice,
+  PlanDoc,
+  PlanList,
+  PlanResult,
   ShellManager,
   Workflow,
   WorkflowsConfig,
@@ -78,6 +91,9 @@ import type { CompletionSource } from "./completion-source.js";
 import type { JarvisConfig, TerminalConfig } from "./config.js";
 import type { ChangeResult, DaemonStatus } from "./daemon/mode.js";
 import { MESSAGES } from "./messages.js";
+import type { SnippetLanguage } from "@jarvis/platform";
+import type { RunningCounts, UpdateState } from "./updater.js";
+import type { UsageHistory } from "./usage-history.js";
 import type { TailscaleCertResult } from "./tailscale-cert.js";
 import type { IpLocateResult } from "./ip-locate.js";
 import {
@@ -141,6 +157,10 @@ export type ChangesView = {
   session: {
     id: string;
     project: string;
+    /** The configured project's key, when the session has one — what a
+     *  Workspace tab is opened under (a pull request, from this view).
+     *  Absent for a session in no configured project. */
+    projectKey?: string;
     projectPath: string;
     agentId: string;
     lastActivityAt: number;
@@ -161,10 +181,24 @@ export type GitHandlers = {
   fileDiff(sessionId: string, path: string): Promise<GitViewResult<GitFileDiff>>;
   setStaged(sessionId: string, path: string, staged: boolean): Promise<GitViewResult<null>>;
   commit(sessionId: string, message: string): Promise<GitViewResult<null>>;
+  branches(sessionId: string): Promise<GitViewResult<GitBranches>>;
+  switchBranch(sessionId: string, name: string, create: boolean): Promise<GitViewResult<null>>;
+  pull(sessionId: string): Promise<GitViewResult<GitPullResult>>;
+  push(sessionId: string): Promise<GitViewResult<GitPushResult>>;
+  pullRequest(sessionId: string): Promise<GitViewResult<GitPullRequest>>;
+  worktree(sessionId: string): Promise<GitViewResult<GitWorktreeInfo | null>>;
+  mergeWorktree(sessionId: string): Promise<GitViewResult<{ into: string }>>;
+  removeWorktree(sessionId: string): Promise<GitViewResult<null>>;
 };
 
 export type GitHandlerDeps = {
   git: GitProvider;
+  /** Branches, pull, push and pull requests. Absent, each answers with a
+   *  failure rather than throwing — a wiring without network git. */
+  remote?: GitRemoteOps | undefined;
+  /** A session's own worktree: what it is of, merging back, removing it.
+   *  Absent, each answers with a failure. */
+  worktrees?: GitWorktrees | undefined;
   sessions: { get(id: string): Session | undefined };
   /** The user's configured primary language, used for every failure string. */
   language: "ar" | "en";
@@ -266,6 +300,9 @@ export function createGitHandlers(deps: GitHandlerDeps): GitHandlers {
             // in the renderer: this view names one repository, and a
             // session with no configured project still has a directory.
             project: sessionLabel(session),
+            ...(session.project !== null && session.project !== ""
+              ? { projectKey: session.project }
+              : {}),
             projectPath: session.projectPath,
             agentId: session.agentId,
             lastActivityAt: session.lastActivityAt,
@@ -315,7 +352,102 @@ export function createGitHandlers(deps: GitHandlerDeps): GitHandlers {
         return { ok: true, value: null };
       });
     },
+
+    async branches(sessionId) {
+      if (!isString(sessionId)) return invalid();
+      return remoteCall(sessionId, false, (remote, repo) => remote.branches(repo));
+    },
+
+    async switchBranch(sessionId, name, create) {
+      if (!isString(sessionId) || !isString(name) || !isBoolean(create)) return invalid();
+      return remoteCall(sessionId, true, (remote, repo) => remote.switchBranch(repo, name, create));
+    },
+
+    async pull(sessionId) {
+      if (!isString(sessionId)) return invalid();
+      return remoteCall(sessionId, true, (remote, repo) => remote.pull(repo));
+    },
+
+    async push(sessionId) {
+      if (!isString(sessionId)) return invalid();
+      return remoteCall(sessionId, true, (remote, repo) => remote.push(repo));
+    },
+
+    async pullRequest(sessionId) {
+      if (!isString(sessionId)) return invalid();
+      return remoteCall(sessionId, true, (remote, repo) => remote.pullRequest(repo));
+    },
+
+    async worktree(sessionId) {
+      if (!isString(sessionId)) return invalid();
+      return worktreeCall(sessionId, false, (ops, path) => ops.info(path));
+    },
+
+    async mergeWorktree(sessionId) {
+      if (!isString(sessionId)) return invalid();
+      return worktreeCall(sessionId, true, (ops, path) => ops.mergeBack(path));
+    },
+
+    async removeWorktree(sessionId) {
+      if (!isString(sessionId)) return invalid();
+      const session = repoFor(sessionId);
+      // The agent's own working directory: removing it under a live agent
+      // would pull the floor out from under every command it runs next.
+      if (
+        session !== undefined &&
+        (session.state === "starting" || session.state === "running" || session.state === "waiting")
+      ) {
+        return fail(MESSAGES.worktreeInUse(deps.language));
+      }
+      return worktreeCall(sessionId, true, (ops, path) => ops.remove(path));
+    },
   };
+
+  /** One GitWorktrees call for a session's directory — the same queue and
+   *  refresh rules as remoteCall. */
+  async function worktreeCall<T>(
+    sessionId: string,
+    mutates: boolean,
+    run: (ops: GitWorktrees, path: string) => Promise<GitOutcome<T>>,
+  ): Promise<GitViewResult<T>> {
+    const session = repoFor(sessionId);
+    if (session === undefined) return fail(MESSAGES.unknownSession(sessionId, deps.language));
+    const ops = deps.worktrees;
+    if (ops === undefined) {
+      return fail(gitFailureText({ code: "failed", detail: "not available" }, deps.language));
+    }
+    const task = async (): Promise<GitViewResult<T>> => {
+      const outcome = await callGit(() => run(ops, session.projectPath));
+      if (!outcome.ok) return fail(gitFailureText(outcome.error, deps.language));
+      if (mutates) await deps.refresh();
+      return { ok: true, value: outcome.value };
+    };
+    return mutates ? enqueue(session.projectPath, task) : task();
+  }
+
+  /** One GitRemoteOps call for a session's repository. A call that changes
+   *  the repository waits its turn in the same per-repo queue staging and
+   *  committing use — a switch must never land between a stage and its
+   *  commit — and refreshes the change counts after. A read does neither. */
+  async function remoteCall<T>(
+    sessionId: string,
+    mutates: boolean,
+    run: (remote: GitRemoteOps, repoPath: string) => Promise<GitOutcome<T>>,
+  ): Promise<GitViewResult<T>> {
+    const session = repoFor(sessionId);
+    if (session === undefined) return fail(MESSAGES.unknownSession(sessionId, deps.language));
+    const remote = deps.remote;
+    if (remote === undefined) {
+      return fail(gitFailureText({ code: "failed", detail: "not available" }, deps.language));
+    }
+    const task = async (): Promise<GitViewResult<T>> => {
+      const outcome = await callGit(() => run(remote, session.projectPath));
+      if (!outcome.ok) return fail(gitFailureText(outcome.error, deps.language));
+      if (mutates) await deps.refresh();
+      return { ok: true, value: outcome.value };
+    };
+    return mutates ? enqueue(session.projectPath, task) : task();
+  }
 }
 
 /**
@@ -409,6 +541,25 @@ export type RendererApi = {
   gitDiff(sessionId: string, path: string): Promise<GitViewResult<GitFileDiff>>;
   gitSetStaged(sessionId: string, path: string, staged: boolean): Promise<GitViewResult<null>>;
   gitCommit(sessionId: string, message: string): Promise<GitViewResult<null>>;
+  /** The Changes view's branch picker: every local branch and which one
+   *  is checked out. */
+  gitBranches(sessionId: string): Promise<GitViewResult<GitBranches>>;
+  /** Checks out `name` in the session's repository, creating it first
+   *  when `create`. */
+  gitSwitchBranch(sessionId: string, name: string, create: boolean): Promise<GitViewResult<null>>;
+  /** Fast-forward-only pull of the current branch. */
+  gitPull(sessionId: string): Promise<GitViewResult<GitPullResult>>;
+  /** Pushes the current branch, setting its upstream the first time. */
+  gitPush(sessionId: string): Promise<GitViewResult<GitPushResult>>;
+  /** The current branch's open pull request, or a new one. */
+  gitPullRequest(sessionId: string): Promise<GitViewResult<GitPullRequest>>;
+  /** What the session's directory is a worktree of; null for a main
+   *  checkout. */
+  gitWorktree(sessionId: string): Promise<GitViewResult<GitWorktreeInfo | null>>;
+  /** Merges the session's worktree branch into the main checkout. */
+  gitMergeWorktree(sessionId: string): Promise<GitViewResult<{ into: string }>>;
+  /** Removes the session's worktree, keeping its branch. */
+  gitRemoveWorktree(sessionId: string): Promise<GitViewResult<null>>;
   onChangeCounts(cb: (changes: SessionChanges[]) => void): void;
   // A session's live output, chunk by chunk, for every session at once —
   // the Session view keeps only the one it is showing. Paired with
@@ -441,11 +592,15 @@ export type RendererApi = {
   /** Continues a past session in a Workspace Terminal tab, rooted where the
    *  session ran. `selectedProject` is the project the tab hangs on when the
    *  session's own directory belongs to none. Resolves with the project the
-   *  tab landed under, so the view can follow it. */
+   *  tab landed under, so the view can follow it, and the new tab's id, so a
+   *  phone can open that terminal. */
   resumeSession(
     sessionId: string,
     selectedProject: string,
-  ): Promise<{ ok: boolean; text?: string; project?: string; language: "ar" | "en" }>;
+  ): Promise<
+    | { ok: true; project: string; tabId: string; language: "ar" | "en" }
+    | { ok: false; text: string; language: "ar" | "en" }
+  >;
   /**
    * Raw keystrokes for one session's terminal, written to its pty exactly
    * as given — including control bytes (Ctrl-C, arrows, Escape). This is
@@ -453,6 +608,14 @@ export type RendererApi = {
    * message" path, because the agent's own terminal UI owns the input line.
    */
   sendSessionInput(sessionId: string, data: string): Promise<void>;
+  /** What the session is sitting at, read from its own output — the
+   *  agent's question and its choices — or null when it is at no prompt
+   *  this can read. */
+  sessionPrompt(sessionId: string): Promise<PendingPrompt | null>;
+  /** Chooses option `index` of the session's current prompt. `label` is
+   *  the option as it was shown; the prompt is read again first, and a
+   *  prompt that is gone or changed is refused rather than typed into. */
+  answerSession(sessionId: string, index: number, label: string): Promise<SessionAnswerResult>;
   /**
    * The terminal pane's new size in character cells. A terminal UI lays
    * itself out from this, so it is sent whenever the pane is measured or
@@ -474,6 +637,26 @@ export type RendererApi = {
    * it is never wired to a timer, a focus event, or a route change.
    */
   refreshProviders(): Promise<void>;
+  /** The Dashboard's usage charts: each account's capacity over the last
+   *  day, and sessions started per day over the last two weeks. Free — it
+   *  reads only what was already recorded. */
+  usageHistory(): Promise<UsageHistory>;
+  /** The updater (updater.ts). Each resolves with the state after the
+   *  call; every change along the way also arrives on onUpdateState. A call
+   *  made while another operation is in flight changes nothing. */
+  updateCheck(): Promise<UpdateState>;
+  /** Downloads and verifies the available release; resolves when it is
+   *  ready, cancelled or failed. */
+  updateDownload(): Promise<UpdateState>;
+  /** Aborts a download in flight; nothing otherwise. */
+  updateCancel(): Promise<UpdateState>;
+  /** What a restart would end: live terminal panes and live agent sessions. */
+  updateCounts(): Promise<RunningCounts>;
+  /** From "ready" only: swaps the app in and quits (macOS, Linux AppImage),
+   *  or opens the installer (Windows). */
+  updateInstall(): Promise<UpdateState>;
+  /** Returns the unsubscribe. */
+  onUpdateState(cb: (state: UpdateState) => void): () => void;
   // Workspace. Every call is fire-and-forget: the authoritative state comes
   // back on workspace:update, so the renderer never keeps a second copy it
   // would have to reconcile.
@@ -512,11 +695,15 @@ export type RendererApi = {
   /** A tab's DevTools closed without the renderer asking: the user closed
    *  their undocked window. */
   onDevToolsClosed(cb: (tabId: string) => void): void;
-  /** Pops a chip's native Rename/Reload/Close menu at (x, y) — the click's
-   *  own clientX/clientY. Reload and Close run in main directly; Rename
-   *  arrives back on onTabRename so the renderer's own inline input opens. */
+  /** Pops a chip's native Rename/Reload/Close/Plans menu at (x, y) — the
+   *  click's own clientX/clientY. Reload and Close run in main directly;
+   *  Rename arrives back on onTabRename so the renderer's own inline input
+   *  opens, and Plans arrives back on onTabPlans (Task 8) so the renderer
+   *  toggles that tab's own plan panel — main knows only which tab, never
+   *  whether the panel is open. */
   tabMenu(tabId: string, x: number, y: number): Promise<void>;
   onTabRename(cb: (tabId: string) => void): void;
+  onTabPlans(cb: (tabId: string) => void): void;
   /** Called by showView on EVERY route change, not only when entering the
    *  Workspace — a view left visible floats over whatever route follows. */
   setWorkspaceVisible(visible: boolean): Promise<void>;
@@ -619,6 +806,19 @@ export type RendererApi = {
    *  dialog: the renderer fires this and forgets it, exactly as it already
    *  does for the file listing. */
   openTerminalFile(paneKey: string, path: string): Promise<GitViewResult<void>>;
+  /** A new, empty file or folder named `name` inside `parentPath`, from the
+   *  file sidebar — see TerminalHandlers.createEntry. */
+  createTerminalEntry(
+    paneKey: string,
+    parentPath: string,
+    name: string,
+    kind: EntryKind,
+  ): Promise<FileOpResult>;
+  /** `path` renamed to `newName` in the same folder — see
+   *  TerminalHandlers.renameEntry. */
+  renameTerminalEntry(paneKey: string, path: string, newName: string): Promise<FileOpResult>;
+  /** `path` moved to the OS trash — see TerminalHandlers.trashEntry. */
+  trashTerminalEntry(paneKey: string, path: string): Promise<FileOpResult>;
   /** What the renderer needs to know about how terminals behave. Read once
    *  per pane; a change to jarvis.yaml takes effect on restart, like every
    *  other terminal setting. */
@@ -705,6 +905,8 @@ export type RendererApi = {
     project: string,
     request: Record<string, unknown>,
     variables: Record<string, string>,
+    /** Absent is cURL — what every caller meant before there was a choice. */
+    language?: SnippetLanguage,
   ): Promise<GitViewResult<string>>;
   createApiRequest(
     project: string,
@@ -852,6 +1054,75 @@ export type RendererApi = {
    *  notifier to weigh a push against — desktop-only, and never the
    *  command that ran. */
   reportCommandFinished(paneKey: string, seconds: number, ok: boolean): Promise<void>;
+  /** Every plan surface for `paneKey`'s pane: `session` is the plan a
+   *  session's own transcript last named for its project (if any),
+   *  `planMode` is Claude Code's own plan-mode scratch files, `repo` is
+   *  `docs/superpowers/{specs,plans}` under whatever directory `cwd`
+   *  resolves to. `cwd` is honoured only when it names a directory that
+   *  currently exists; the pane's own recorded start directory is the
+   *  fallback, so the renderer never has to track one of its own. */
+  plansList(paneKey: string, cwd?: string): Promise<PlanList>;
+  /** One plan file's parsed blocks, guarded the same way every plan read
+   *  is (dispatch.ts): a path outside the allowed plan directories comes
+   *  back `forbidden`. */
+  plansRead(path: string): Promise<PlanResult<PlanDoc>>;
+  /** Replaces one block's own source text. Refused with `conflict`
+   *  (carrying the file's current `doc` so the caller can rebase) on a
+   *  stale `baseMtimeMs` — the same optimistic-write discipline every
+   *  other editable panel in this app already follows. */
+  plansWriteBlock(
+    path: string,
+    blockId: string,
+    source: string,
+    baseMtimeMs: number,
+  ): Promise<PlanResult<PlanDoc>>;
+  /** Every comment on `path`, anchored against a fresh read of the plan —
+   *  a comment whose block moved or was removed comes back `orphaned`
+   *  rather than dropped. A forbidden path (outside the allowed plan
+   *  directories) returns `[]` — nothing stored under it is ever shown.
+   *  An allowed path whose file cannot currently be read (missing, too
+   *  large, an IO error) still returns whatever comments are on record
+   *  for it, all orphaned, never an error — the terminal chip row's own
+   *  "absent, never wrong" posture, applied to comments instead of git
+   *  status. */
+  plansComments(path: string): Promise<AnchoredComment[]>;
+  /** Adds one comment anchored to `blockId`, `quote` copied from the
+   *  plan's own rendered text (used only as a fallback anchor if
+   *  `blockId` no longer matches a block). */
+  plansAddComment(path: string, blockId: string, quote: string, body: string): Promise<PlanComment>;
+  /** Edits a comment's own body; `undefined` for an id that no longer
+   *  exists. Re-queues the comment for `plansSend` — editing a comment
+   *  that was already sent clears its own `sentAt`. */
+  plansUpdateComment(id: string, body: string): Promise<PlanComment | undefined>;
+  plansDeleteComment(id: string): Promise<boolean>;
+  /** Formats every named comment id still on `path` (an id for another
+   *  file, or one already deleted, is silently dropped — never an error on
+   *  its own) into one message and pastes it into `paneKey`'s shell the
+   *  same way terminal:input would, wrapped in a bracketed paste
+   *  (bracketed.ts's `bracketedSubmit`) so a multi-comment message lands
+   *  as one submitted block rather than one line per Enter. `no-comments`
+   *  covers both "the ids named nothing on this path" and "none were left
+   *  after filtering"; `no-pane` is an unknown or closed pane. */
+  plansSend(
+    paneKey: string,
+    path: string,
+    commentIds: string[],
+  ): Promise<
+    { ok: true; sent: number } | { ok: false; reason: "no-comments" | "forbidden" | "no-pane" }
+  >;
+  /** A plan file main is watching changed on disk. `path` is the file
+   *  itself, never its contents — the renderer re-reads with
+   *  plansRead/plansComments on receipt, the same "push says look again"
+   *  contract turn:new and workspace:update already follow. */
+  onPlansChanged(cb: (path: string) => void): void;
+  /** Task 8 (controller ruling): opens a plan block's own rendered link in
+   *  the OS browser, via Electron's `shell.openExternal` — main's
+   *  webContents deny every `target=_blank` outright, so a plan link has no
+   *  other route out of the window. Desktop-only, and refused for anything
+   *  but an `http:`/`https:`/`mailto:` URL under 2048 characters
+   *  (desktop-only.ts's own validator, never trusted from the renderer
+   *  alone since the renderer only renders what plansRead handed it). */
+  plansOpenLink(url: string): Promise<void>;
 };
 
 export type WiringDeps = {
@@ -1281,8 +1552,11 @@ export function createTranscriptHandler(
     const session = deps.history().find((candidate) => candidate.id === sessionId);
     const path = session?.transcriptPath;
     if (path === undefined || path === "") return [];
+    // A Copilot row points at its workspace.yaml; the conversation is the
+    // events.jsonl beside it, in Copilot's own format.
+    const source = transcriptSource(path);
     try {
-      return parseTranscript(await deps.readFile(path));
+      return source.parse(await deps.readFile(source.path));
     } catch {
       return [];
     }
@@ -1365,7 +1639,10 @@ export function createResumeInTerminalHandler(
 ): (
   sessionId: unknown,
   selectedProject: unknown,
-) => Promise<{ ok: boolean; text?: string; project?: string; language: "ar" | "en" }> {
+) => Promise<
+  | { ok: true; project: string; tabId: string; language: "ar" | "en" }
+  | { ok: false; text: string; language: "ar" | "en" }
+> {
   const refuse = (): { ok: false; text: string; language: "ar" | "en" } => ({
     ok: false,
     text: MESSAGES.cannotResumeSession(deps.language),
@@ -1402,7 +1679,7 @@ export function createResumeInTerminalHandler(
       return refuse();
     }
     deps.sendInput(tabId, `${command}\r`);
-    return { ok: true, project, language: deps.language };
+    return { ok: true, project, tabId, language: deps.language };
   };
 }
 
@@ -1713,6 +1990,88 @@ export function createDockerHandlers(deps: DockerHandlerDeps): DockerHandlers {
 /** One immediate child of a listed directory. */
 export type DirEntry = { name: string; directory: boolean };
 
+/** session:answer's reply. `gone`: the session is no longer at a prompt;
+ *  `changed`: it is at a different one than was shown. */
+export type SessionAnswerResult = { ok: true } | { ok: false; reason: "gone" | "changed" };
+
+export type EntryKind = "file" | "directory";
+
+/** Why the sidebar's create, rename or trash did nothing. `outside` covers
+ *  an unknown pane and a path that is not provably inside its project, the
+ *  same single refusal listDir gives both. */
+export type FileOpRefusal = "invalid-name" | "exists" | "outside" | "failed";
+
+export type FileOpResult = { ok: true; path: string } | { ok: false; reason: FileOpRefusal };
+
+/** A thrown fs error's `code` ("EEXIST", "ENOENT", …), or undefined. */
+function errorCode(error: unknown): string | undefined {
+  if (typeof error !== "object" || error === null || !("code" in error)) return undefined;
+  const code = (error as { code: unknown }).code;
+  return typeof code === "string" ? code : undefined;
+}
+
+/** A single path segment a user typed: not empty, not `.` or `..`, no
+ *  separator of either OS, no NUL, and within the 255 bytes every common
+ *  filesystem allows a name. Leading or trailing whitespace is refused
+ *  rather than trimmed — a name that differs from what was typed would be
+ *  a file the user cannot find by the name they gave it. */
+export function isValidEntryName(name: unknown): name is string {
+  if (typeof name !== "string") return false;
+  if (name === "" || name === "." || name === "..") return false;
+  if (name !== name.trim()) return false;
+  if (/[/\\\0]/.test(name)) return false;
+  return Buffer.byteLength(name, "utf8") <= 255;
+}
+
+/**
+ * A name the sidebar may *give* an entry: a valid entry name with no control
+ * character in it. Kept apart from isValidEntryName because that one also
+ * vets the name of an entry that already exists (entryWithin), and a file
+ * somebody already made with an odd name must stay renameable.
+ */
+export function isValidNewEntryName(name: unknown): name is string {
+  return isValidEntryName(name) && !hasControlCharacter(name);
+}
+
+/** True when `text` holds a C0 or C1 control character or DEL. A loop over
+ *  code units rather than a regex, which the linter rightly distrusts. */
+export function hasControlCharacter(text: string): boolean {
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) return true;
+  }
+  return false;
+}
+
+/** A path a paired phone sends is relative to the project root — it never
+ *  learns the laptop's absolute paths — so it is joined to `root` first, the
+ *  way listDir does. Absolute paths and non-strings pass through, and
+ *  entryWithin's containment check decides either way. */
+function underRoot(root: string, path: string): string {
+  return isString(path) && path !== "" && !isAbsolute(path) ? join(root, path) : path;
+}
+
+/**
+ * An existing entry the sidebar may rename or trash: its *parent* proven
+ * inside `root` by resolveWithin, and the entry itself kept by name rather
+ * than resolved. A symlink is renamed or trashed as the link — resolving
+ * it would act on whatever it points at, possibly outside the project.
+ * The root itself is never an entry: renaming or trashing the project's
+ * own directory from inside it is not something a sidebar offers.
+ */
+export function entryWithin(
+  root: string,
+  candidate: string,
+  realPath: (path: string) => string,
+): string | undefined {
+  if (!isString(candidate) || !isAbsolute(candidate)) return undefined;
+  const name = basename(candidate);
+  if (!isValidEntryName(name)) return undefined;
+  const parent = resolveWithin(root, dirname(candidate), realPath);
+  if (parent === undefined) return undefined;
+  return join(parent, name);
+}
+
 /**
  * The file sidebar's security boundary, and deliberately a named function
  * rather than four lines inside a handler: opening a file from that sidebar
@@ -1814,6 +2173,25 @@ export type TerminalHandlers = {
    *  `editor` integration configured, or a code-server that fails to start
    *  are all a click that opens nothing. */
   openFile(paneKey: string, path: string): Promise<GitViewResult<void>>;
+  /** A new, empty file or folder, from the file sidebar. `parentPath` goes
+   *  through the same resolveWithin boundary listDir applies, `name` must
+   *  be a single valid segment (isValidEntryName), and an existing entry
+   *  of that name is never overwritten — a file is created exclusively, so
+   *  a race with something writing the same name is refused too. Never
+   *  rejects: every failure is a `FileOpResult` the sidebar shows. */
+  createEntry(
+    paneKey: string,
+    parentPath: string,
+    name: string,
+    kind: EntryKind,
+  ): Promise<FileOpResult>;
+  /** Renames `path` within its own folder. The entry is located with
+   *  entryWithin, so a symlink is renamed as the link. Moving to another
+   *  folder is not offered: `newName` is a name, never a path. */
+  renameEntry(paneKey: string, path: string, newName: string): Promise<FileOpResult>;
+  /** Moves `path` to the OS trash — recoverable, which is why the sidebar
+   *  asks for no confirmation. Located with entryWithin like a rename. */
+  trashEntry(paneKey: string, path: string): Promise<FileOpResult>;
   /** What the renderer needs to know about how terminals behave. Read
    *  once per pane; a change to jarvis.yaml takes effect on restart, like
    *  every other terminal setting. */
@@ -1853,6 +2231,21 @@ export type TerminalHandlers = {
    *  be wrong rather than absent. Only a path that was never supplied
    *  falls back to that starting directory. */
   chips(paneKey: string, path?: string): Promise<TerminalChips | undefined>;
+  /** The directory `paneKey`'s shell was *started* in — the pane's own key
+   *  first, its tab as the fallback, the same resolution `chips`/
+   *  `suggest`/`history`/`listDir` all use. `undefined` for a pane this
+   *  process never started. A plain, synchronous read of `directories`
+   *  for a caller outside this closure: dispatch.ts's `plans:list` uses it
+   *  to pick a default project when the renderer supplies no `cwd` of its
+   *  own (or one that no longer exists). */
+  paneStartDir(paneKey: string): string | undefined;
+  /** Every distinct directory a currently-open pane's shell was started
+   *  in, deduplicated. main.ts's own answer to "which projects are open
+   *  right now" for `PlanFiles.watch`'s `cwds` accessor (@jarvis/platform),
+   *  so the plan watcher only follows `docs/superpowers/{specs,plans}`
+   *  under a project actually open in a terminal — never every configured
+   *  project, and never one that used to be open and has since closed. */
+  paneStartDirs(): readonly string[];
 };
 
 /** The chip row above a terminal's prompt — a runtime version, the
@@ -1898,6 +2291,19 @@ export type TerminalHandlerDeps = {
         readDir: (path: string) => DirEntry[];
         /** Resolves symlinks and `..`; `realpathSync` in production. */
         realPath: (path: string) => string;
+        /** The sidebar's writes. Each is optional so a listing-only
+         *  double (and an older wiring) stays valid; an absent one is a
+         *  `failed` answer, never a throw. */
+        /** Whether anything — a file, folder or dangling link — is at
+         *  `path`; `lstat`, not `stat`, so a broken link still counts. */
+        exists?: (path: string) => boolean;
+        /** A new folder; fails if one is already there. */
+        makeDir?: (path: string) => void;
+        /** A new empty file, created exclusively (`wx`). */
+        makeFile?: (path: string) => void;
+        rename?: (from: string, to: string) => void;
+        /** Into the OS trash; rejects when that cannot be done. */
+        trash?: (path: string) => Promise<void>;
       }
     | undefined;
   /** The file sidebar's route into the Editor tab — see `openFile`. Absent
@@ -2159,6 +2565,16 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
     return found;
   }
 
+  /** The directory every sidebar write is bounded by: the project of the
+   *  pane `paneKey` names, resolved the way listDir resolves it. Undefined
+   *  for an untyped or unknown key, or a pane in no configured project. */
+  function sidebarRoot(paneKey: unknown): string | undefined {
+    if (!isString(paneKey)) return undefined;
+    const paneCwd = directories.get(paneKey) ?? directoryOf(paneKey.split(":")[0] ?? paneKey);
+    if (paneCwd === undefined) return undefined;
+    return projectFor(paneCwd)?.dir;
+  }
+
   // The runtime probe's result, per directory — not per pane, so two panes
   // (or a pane revisited across chips() calls) sharing a directory cost at
   // most one `node -v` between them. A directory that comes back with no
@@ -2408,7 +2824,11 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
       if (paneCwd === undefined) return [];
       const project = projectFor(paneCwd);
       if (project === undefined) return [];
-      const target = resolveWithin(project.dir, path, files.realPath);
+      // A relative path is taken from the project's root — how a paired
+      // phone, which never learns the laptop's absolute paths, browses. It
+      // then passes the very same containment check an absolute one does.
+      const candidate = path === "" || !isAbsolute(path) ? join(project.dir, path) : path;
+      const target = resolveWithin(project.dir, candidate, files.realPath);
       if (target === undefined) return [];
       try {
         return files.readDir(target);
@@ -2416,6 +2836,75 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
         // An unreadable directory is an empty folder, not an error dialog.
         return [];
       }
+    },
+
+    async createEntry(paneKey, parentPath, name, kind) {
+      const files = deps.files;
+      if (files === undefined || (kind !== "file" && kind !== "directory")) {
+        return { ok: false, reason: "failed" };
+      }
+      if (!isString(parentPath)) return { ok: false, reason: "outside" };
+      if (!isValidNewEntryName(name)) return { ok: false, reason: "invalid-name" };
+      const root = sidebarRoot(paneKey);
+      if (root === undefined) return { ok: false, reason: "outside" };
+      const parent = resolveWithin(root, parentPath, files.realPath);
+      if (parent === undefined) return { ok: false, reason: "outside" };
+      const target = join(parent, name);
+      const make = kind === "file" ? files.makeFile : files.makeDir;
+      if (make === undefined || files.exists === undefined) return { ok: false, reason: "failed" };
+      if (files.exists(target)) return { ok: false, reason: "exists" };
+      try {
+        make(target);
+      } catch (error) {
+        // EEXIST here is the race the exists() check above could not
+        // close: something made the same name in between.
+        return { ok: false, reason: errorCode(error) === "EEXIST" ? "exists" : "failed" };
+      }
+      return { ok: true, path: target };
+    },
+
+    async renameEntry(paneKey, path, newName) {
+      const files = deps.files;
+      if (files === undefined) return { ok: false, reason: "failed" };
+      if (!isValidNewEntryName(newName)) return { ok: false, reason: "invalid-name" };
+      const root = sidebarRoot(paneKey);
+      if (root === undefined) return { ok: false, reason: "outside" };
+      const source = entryWithin(root, underRoot(root, path), files.realPath);
+      if (source === undefined || files.exists === undefined || !files.exists(source)) {
+        return { ok: false, reason: "outside" };
+      }
+      const target = join(dirname(source), newName);
+      if (target === source) return { ok: true, path: source };
+      // rename(2) replaces an existing file without a word, which is the
+      // one thing a sidebar rename must never do. A case-only rename on a
+      // case-insensitive volume (macOS, Windows) finds "itself" here, so
+      // that one is let through: the names differ, the entry does not.
+      const caseOnly = target.toLowerCase() === source.toLowerCase();
+      if (!caseOnly && files.exists(target)) return { ok: false, reason: "exists" };
+      if (files.rename === undefined) return { ok: false, reason: "failed" };
+      try {
+        files.rename(source, target);
+      } catch {
+        return { ok: false, reason: "failed" };
+      }
+      return { ok: true, path: target };
+    },
+
+    async trashEntry(paneKey, path) {
+      const files = deps.files;
+      if (files === undefined || files.trash === undefined) return { ok: false, reason: "failed" };
+      const root = sidebarRoot(paneKey);
+      if (root === undefined) return { ok: false, reason: "outside" };
+      const target = entryWithin(root, underRoot(root, path), files.realPath);
+      if (target === undefined || files.exists === undefined || !files.exists(target)) {
+        return { ok: false, reason: "outside" };
+      }
+      try {
+        await files.trash(target);
+      } catch {
+        return { ok: false, reason: "failed" };
+      }
+      return { ok: true, path: target };
     },
 
     async openFile(paneKey, path) {
@@ -2634,6 +3123,15 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
         runtime,
       };
     },
+
+    paneStartDir(paneKey) {
+      if (!isString(paneKey)) return undefined;
+      return directories.get(paneKey) ?? directoryOf(paneKey.split(":")[0] ?? paneKey);
+    },
+
+    paneStartDirs() {
+      return [...new Set(directories.values())];
+    },
   };
 }
 
@@ -2669,11 +3167,13 @@ export type ApiHandlers = ApiEditHandlers & {
   ): Promise<GitViewResult<Cookie[]>>;
   settings(project: string): Promise<GitViewResult<ApiSettings>>;
   saveSettings(project: string, settings: ApiSettings): Promise<GitViewResult<ApiSettings>>;
-  /** The request as a shell command, with variables resolved. */
+  /** The request as code — a shell command by default, or fetch or
+   *  Python — with variables resolved. */
   curl(
     project: string,
     request: Record<string, unknown>,
     variables: Record<string, string>,
+    language?: SnippetLanguage,
   ): Promise<GitViewResult<string>>;
 };
 
@@ -2748,7 +3248,11 @@ export type ApiHandlerDeps = {
     assertions: readonly { name?: string; value?: string; enabled?: boolean }[],
     subject: { status: number; headers: Record<string, string>; body: string; timeMs: number },
   ) => AssertionResult[];
-  toCurl: (request: Record<string, unknown>, variables: Record<string, string>) => string;
+  toSnippet: (
+    request: Record<string, unknown>,
+    variables: Record<string, string>,
+    language: SnippetLanguage,
+  ) => string;
   /** The project's persisted API state: history, cookies and settings. */
   store: {
     read: (
@@ -2871,13 +3375,17 @@ export function createApiHandlers(deps: ApiHandlerDeps): ApiHandlers {
   }
 
   return {
-    async curl(project, request, variables) {
+    async curl(project, request, variables, language) {
       if (rootFor(project) === undefined) return unknownProject();
       if (typeof request !== "object" || request === null) {
         return fail(MESSAGES.invalidArgument(deps.language));
       }
       try {
-        return { ok: true, value: deps.toCurl(request, variables ?? {}) };
+        // Anything but the two other names is cURL: an older client sends
+        // no language at all, and that is what it always got.
+        const chosen: SnippetLanguage =
+          language === "fetch" || language === "python" ? language : "curl";
+        return { ok: true, value: deps.toSnippet(request, variables ?? {}, chosen) };
       } catch {
         return fail(MESSAGES.apiUnavailable(deps.language));
       }
@@ -3357,6 +3865,9 @@ export type SettingsSaveResult =
 export type SettingsHandlers = {
   read(): Promise<JarvisConfig>;
   save(draft: unknown): Promise<SettingsSaveResult>;
+  /** What a paired phone's settings:save may do: replace the `sessions`
+   *  section of the config as it is on disk right now, nothing else. */
+  saveSessions(sessions: JarvisConfig["sessions"]): Promise<SettingsSaveResult>;
   testAgent(agent: unknown): Promise<AgentHealth>;
   restart(): void;
 };
@@ -3365,25 +3876,37 @@ export type SettingsHandlerDeps = {
   readConfig(): Promise<JarvisConfig>;
   /** settings-io.ts's writeSettingsFile, injected so this file's own tests
    *  never touch a real filesystem. */
-  writeConfig(draft: JarvisConfig): Promise<{ ok: true } | { ok: false; detail: string }>;
+  writeConfig(
+    draft: JarvisConfig | ((current: JarvisConfig) => JarvisConfig),
+  ): Promise<{ ok: true } | { ok: false; detail: string }>;
   run: CommandRunner;
   restart(): void;
   language: "ar" | "en";
 };
 
 export function createSettingsHandlers(deps: SettingsHandlerDeps): SettingsHandlers {
+  const saveResult = (result: { ok: true } | { ok: false; detail: string }): SettingsSaveResult =>
+    result.ok
+      ? { ok: true }
+      : {
+          ok: false,
+          text: MESSAGES.settingsSaveFailed(deps.language),
+          detail: result.detail,
+          language: deps.language,
+        };
+
   return {
     read: () => deps.readConfig(),
 
     async save(draft) {
-      const result = await deps.writeConfig(draft as JarvisConfig);
-      if (result.ok) return { ok: true };
-      return {
-        ok: false,
-        text: MESSAGES.settingsSaveFailed(deps.language),
-        detail: result.detail,
-        language: deps.language,
-      };
+      return saveResult(await deps.writeConfig(draft as JarvisConfig));
+    },
+
+    // An updater over the config the serialized write itself reads, so a
+    // change made on the laptop between the phone's read and this write
+    // (the bridge turned off, say) is never overwritten with a stale copy.
+    async saveSessions(sessions) {
+      return saveResult(await deps.writeConfig((current) => ({ ...current, sessions })));
     },
 
     // checkAgent never rejects — a malformed draft agent (missing command,

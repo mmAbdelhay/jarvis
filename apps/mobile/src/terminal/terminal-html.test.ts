@@ -68,6 +68,13 @@ describe("terminal-html.generated.ts drift", () => {
     },
   );
 
+  // A pty with fewer rows than the phone view leaves page showing under
+  // xterm's last row; it must be the terminal's own ground, not black.
+  it("paints the page in the terminal theme's background, never plain black", () => {
+    expect(TERMINAL_HTML).toContain("background:#060a0f;");
+    expect(TERMINAL_HTML).not.toContain("background:#000;");
+  });
+
   it("TERMINAL_SOURCE_SHA256 matches each input", async () => {
     const { inputs } = await regenerate();
     expect(TERMINAL_SOURCE_SHA256["xterm.mjs"]).toBe(sha256Hex(inputs.xtermJs));

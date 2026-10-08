@@ -15,6 +15,7 @@ import {
 } from "./dispatch.js";
 import { createDockerFollowers, DESKTOP_OWNER } from "./docker-followers.js";
 import { createGitHandlers } from "./ipc.js";
+import { createTerminalFitOverrides } from "./terminal-fit-overrides.js";
 import { MESSAGES } from "./messages.js";
 import { CHANNEL_POLICY, isRemoteAllowed } from "./remote-policy.js";
 
@@ -83,11 +84,13 @@ export function fakeDeps(overrides: Partial<DispatchDeps> = {}): DispatchDeps {
       workflows: vi.fn(async () => []),
       terminalAi: vi.fn(async () => ""),
       chips: vi.fn(async () => undefined),
+      paneStartDir: vi.fn(() => undefined),
     },
     shells: {
       log: vi.fn(() => "backlog"),
       snapshot: vi.fn(() => ({ text: "backlog", end: 7 })),
       panes: vi.fn(() => []),
+      write: vi.fn(),
     },
     followers: {
       follow: vi.fn(() => "following" as const),
@@ -166,10 +169,12 @@ export function fakeDeps(overrides: Partial<DispatchDeps> = {}): DispatchDeps {
     settings: {
       read: vi.fn(async () => ({}) as never),
       save: vi.fn(async () => ({ ok: true }) as never),
+      saveSessions: vi.fn(async () => ({ ok: true }) as never),
       testAgent: vi.fn(async () => ({}) as never),
       restart: vi.fn(),
     },
     providers: { refreshCapacity: vi.fn(async () => undefined) },
+    usageHistory: () => ({ capacity: [], sessionsPerDay: [] }),
     voiceControl: { start: vi.fn(), stop: vi.fn() },
     readFile: vi.fn(async () => "{}"),
     uploads: { readJson: vi.fn(async () => ({ ok: true, value: {} })) },
@@ -206,6 +211,32 @@ export function fakeDeps(overrides: Partial<DispatchDeps> = {}): DispatchDeps {
       })),
     },
     writeConfig: vi.fn(async () => ({ ok: true as const })),
+    plans: {
+      files: {
+        list: vi.fn(async () => ({ session: undefined, planMode: [], repo: [] })),
+        read: vi.fn(async () => ({ ok: false as const, reason: "not-found" as const })),
+        writeBlock: vi.fn(async () => ({ ok: false as const, reason: "not-found" as const })),
+        isAllowed: vi.fn(async () => true),
+        watch: vi.fn(() => () => {}),
+      },
+      comments: {
+        list: vi.fn(async () => []),
+        add: vi.fn(async () => ({
+          id: "c1",
+          path: "/plan.md",
+          blockId: "b1",
+          quote: "",
+          body: "note",
+          createdAt: 0,
+        })),
+        update: vi.fn(async () => undefined),
+        remove: vi.fn(async () => false),
+        markSent: vi.fn(async () => undefined),
+        updateBlockIds: vi.fn(async () => 0),
+      },
+      isDirectory: vi.fn(async () => false),
+      projectRoots: vi.fn(() => []),
+    },
     openExternal: vi.fn(async () => {}),
     ...overrides,
   } as DispatchDeps;
@@ -311,6 +342,50 @@ describe("dispatch table: sessions and git", () => {
     expect(deps.sessions.write).toHaveBeenCalledWith("s1", "ls\n");
   });
 
+  describe("a waiting prompt", () => {
+    const menu = "Do you want to proceed?\r\n❯ 1. Yes\r\n  2. No\r\n";
+
+    it("session:prompt reads the agent's own question and options", async () => {
+      const deps = fakeDeps();
+      vi.mocked(deps.sessions.log).mockReturnValue(menu);
+      const table = createDispatchTable(deps);
+      expect(await call(table, "session:prompt", "s1")).toMatchObject({
+        question: "Do you want to proceed?",
+        options: [{ label: "Yes" }, { label: "No" }],
+      });
+      vi.mocked(deps.sessions.log).mockReturnValue("just output");
+      expect(await call(table, "session:prompt", "s1")).toBeNull();
+    });
+
+    it("session:answer types the chosen option's keys when the prompt is still the one shown", async () => {
+      const deps = fakeDeps();
+      vi.mocked(deps.sessions.log).mockReturnValue(menu);
+      const table = createDispatchTable(deps);
+      expect(await call(table, "session:answer", "s1", 1, "No")).toEqual({ ok: true });
+      expect(deps.sessions.write).toHaveBeenCalledWith("s1", "\x1b[B\r");
+    });
+
+    it("session:answer refuses, typing nothing, when the prompt is gone or changed", async () => {
+      const deps = fakeDeps();
+      vi.mocked(deps.sessions.log).mockReturnValue(menu);
+      const table = createDispatchTable(deps);
+      expect(await call(table, "session:answer", "s1", 1, "Yes")).toEqual({
+        ok: false,
+        reason: "changed",
+      });
+      expect(await call(table, "session:answer", "s1", 9, "No")).toEqual({
+        ok: false,
+        reason: "changed",
+      });
+      vi.mocked(deps.sessions.log).mockReturnValue("done");
+      expect(await call(table, "session:answer", "s1", 1, "No")).toEqual({
+        ok: false,
+        reason: "gone",
+      });
+      expect(deps.sessions.write).not.toHaveBeenCalled();
+    });
+  });
+
   it("session:resize rejects a non-string id and non-finite sizes", async () => {
     const deps = fakeDeps();
     const table = createDispatchTable(deps);
@@ -403,6 +478,77 @@ describe("dispatch table: sessions and git", () => {
 
       expect(deps.sessions.resize).toHaveBeenCalledTimes(1);
       expect(deps.sessions.resize).toHaveBeenCalledWith("s1", 40, 100);
+    });
+
+    // Fit toggle: the phone's user asked for the phone's size outright, and
+    // gives the desktop's size back with a "restore" — answered with the
+    // size the pty has from the desktop's side.
+    it('applies a remote resize marked "fit" to a desktop-sized pane, and "restore" undoes it', async () => {
+      const deps = fakeDeps();
+      const table = createDispatchTable(deps);
+
+      await call(table, "terminal:resize", "t1", 120, 40);
+      await callAs(table, REMOTE_ORIGIN, "terminal:resize", "t1", 40, 100, "fit");
+      const restored = await callAs(table, REMOTE_ORIGIN, "terminal:resize", "t1", 1, 1, "restore");
+      await callAs(table, REMOTE_ORIGIN, "terminal:resize", "t1", 50, 90);
+      await callAs(table, REMOTE_ORIGIN, "terminal:resize", "t1", 50, 90, "FIT");
+
+      expect(restored).toEqual({ cols: 120, rows: 40 });
+      expect(deps.terminal.resize).toHaveBeenCalledTimes(3);
+      expect(deps.terminal.resize).toHaveBeenNthCalledWith(2, "t1", 40, 100);
+      expect(deps.terminal.resize).toHaveBeenNthCalledWith(3, "t1", 120, 40);
+    });
+
+    it("drops a stale restore after the desktop resized the pane during Fit", async () => {
+      const deps = fakeDeps();
+      const table = createDispatchTable(deps);
+
+      await call(table, "terminal:resize", "t1", 120, 40);
+      await callAs(table, REMOTE_ORIGIN, "terminal:resize", "t1", 40, 100, "fit");
+      await call(table, "terminal:resize", "t1", 150, 45);
+      const restored = await callAs(
+        table,
+        REMOTE_ORIGIN,
+        "terminal:resize",
+        "t1",
+        120,
+        40,
+        "restore",
+      );
+
+      expect(restored).toEqual({ cols: 150, rows: 45 });
+      expect(deps.terminal.resize).toHaveBeenCalledTimes(3);
+      expect(deps.terminal.resize).toHaveBeenLastCalledWith("t1", 150, 45);
+    });
+
+    it("a restore on a pane the desktop never sized is an ordinary remote resize", async () => {
+      const deps = fakeDeps();
+      const table = createDispatchTable(deps);
+
+      const restored = await callAs(
+        table,
+        REMOTE_ORIGIN,
+        "terminal:resize",
+        "t1",
+        80,
+        24,
+        "restore",
+      );
+
+      expect(restored).toEqual({ cols: 80, rows: 24 });
+      expect(deps.terminal.resize).toHaveBeenCalledWith("t1", 80, 24);
+    });
+
+    it("the fitting device's disconnect gives the desktop its size back", async () => {
+      const deps = fakeDeps();
+      const fitOverrides = createTerminalFitOverrides({ resize: deps.terminal.resize });
+      const table = createDispatchTable({ ...deps, fitOverrides });
+
+      await call(table, "terminal:resize", "t1", 120, 40);
+      await callAs(table, REMOTE_ORIGIN, "terminal:resize", "t1", 40, 100, "fit");
+      fitOverrides.deviceDisconnected("d1");
+
+      expect(deps.terminal.resize).toHaveBeenLastCalledWith("t1", 120, 40);
     });
 
     it("tracks ownership separately per pane/session id", async () => {
@@ -535,6 +681,78 @@ describe("dispatch table: workspace and docker", () => {
     expect(deps.workspace.rename).toHaveBeenCalledWith("tab-1", "Mine");
   });
 
+  it("workspace:rename from a remote origin refuses a non-string, empty, over-long, control or bidi-override title", async () => {
+    const deps = fakeDeps({
+      workspace: {
+        ...fakeDeps().workspace,
+        state: vi.fn(() => ({ tabs: [{ id: "tab-1" }], activeTabId: "tab-1" }) as never),
+      },
+    });
+    const table = createDispatchTable(deps);
+    const refused = [
+      7,
+      undefined,
+      "",
+      "   ",
+      "x".repeat(81),
+      "a\u0000b",
+      "a\u001fb",
+      "a\u007fb",
+      "a\u0085b",
+      "a\u202Eb",
+      "a\u202ab",
+      "a\u2066b",
+      "a\u2069b",
+    ];
+    for (const title of refused) {
+      expect(() => callAs(table, REMOTE_ORIGIN, "workspace:rename", "tab-1", title)).toThrow();
+    }
+    expect(deps.workspace.rename).not.toHaveBeenCalled();
+    await callAs(table, REMOTE_ORIGIN, "workspace:rename", "tab-1", "x".repeat(80));
+    await callAs(table, REMOTE_ORIGIN, "workspace:rename", "tab-1", "Ünï café");
+    expect(deps.workspace.rename).toHaveBeenCalledTimes(2);
+  });
+
+  it("workspace:rename from a remote origin refuses an id that is not an existing tab", async () => {
+    const deps = fakeDeps({
+      workspace: {
+        ...fakeDeps().workspace,
+        state: vi.fn(() => ({ tabs: [{ id: "t1" }], activeTabId: "t1" }) as never),
+      },
+    });
+    const table = createDispatchTable(deps);
+    expect(() => callAs(table, REMOTE_ORIGIN, "workspace:rename", "nope", "Fine")).toThrow();
+    expect(deps.workspace.rename).not.toHaveBeenCalled();
+    callAs(table, REMOTE_ORIGIN, "workspace:rename", "t1", "Fine");
+    expect(deps.workspace.rename).toHaveBeenCalledWith("t1", "Fine");
+  });
+
+  it("workspace:rename from the desktop keeps accepting any string title", async () => {
+    const deps = fakeDeps();
+    const table = createDispatchTable(deps);
+    await call(table, "workspace:rename", "tab-1", "");
+    await call(table, "workspace:rename", "tab-1", "x".repeat(200));
+    expect(deps.workspace.rename).toHaveBeenCalledTimes(2);
+  });
+
+  it("workspace:close from a remote origin refuses an id that is not an existing tab", async () => {
+    const deps = fakeDeps({
+      workspace: {
+        ...fakeDeps().workspace,
+        state: vi.fn(() => ({ tabs: [{ id: "t1" }], activeTabId: "t1" }) as never),
+        close: vi.fn(),
+      },
+    });
+    const table = createDispatchTable(deps);
+    expect(() => callAs(table, REMOTE_ORIGIN, "workspace:close", 5)).toThrow();
+    expect(() => callAs(table, REMOTE_ORIGIN, "workspace:close", "nope")).toThrow();
+    expect(deps.workspace.close).not.toHaveBeenCalled();
+    expect(deps.terminal.close).not.toHaveBeenCalled();
+    await callAs(table, REMOTE_ORIGIN, "workspace:close", "t1");
+    expect(deps.workspace.close).toHaveBeenCalledWith("t1");
+    expect(deps.terminal.close).toHaveBeenCalledWith("t1");
+  });
+
   it("workspace:move forwards typed arguments and drops a non-boolean after", async () => {
     const deps = fakeDeps();
     const table = createDispatchTable(deps);
@@ -566,6 +784,7 @@ describe("dispatch table: workspace and docker", () => {
           { paneKey: "tab-10:split-a", exited: false },
           { paneKey: "tab-1ish", exited: false },
         ]),
+        write: vi.fn(),
       },
     });
     const table = createDispatchTable(deps);
@@ -599,6 +818,7 @@ describe("dispatch table: workspace and docker", () => {
           { paneKey: "terminal-tab", exited: false },
           { paneKey: "closed-tab", exited: true },
         ]),
+        write: vi.fn(),
       },
     });
     const table = createDispatchTable(deps);
@@ -925,6 +1145,36 @@ describe("dispatch table: docker follow ownership", () => {
     expect(closes).toEqual([]);
     expect(followers.ownerOf("remote-x")).toBe("d1");
   });
+
+  it("workspace:close from a remote origin reaps the desktop's follower but never another device's", async () => {
+    const { followers, closes } = realFollowers();
+    const base = fakeDeps().workspace;
+    const deps = fakeDeps({
+      followers,
+      workspace: {
+        ...base,
+        state: vi.fn(
+          () => ({ tabs: [{ id: "tab-1" }, { id: "remote-x" }], activeTabId: "tab-1" }) as never,
+        ),
+      },
+    });
+    const table = createDispatchTable(deps);
+    await call(table, "docker:follow", "tab-1", "app", "web");
+    await callAs(
+      table,
+      { kind: "remote", deviceId: "d2", deviceName: "Other" },
+      "docker:follow",
+      "remote-x",
+      "app",
+      "web",
+    );
+    await callAs(table, REMOTE_ORIGIN, "workspace:close", "remote-x");
+    expect(closes).toEqual([]);
+    expect(followers.ownerOf("remote-x")).toBe("d2");
+    await callAs(table, REMOTE_ORIGIN, "workspace:close", "tab-1");
+    expect(closes).toHaveLength(1);
+    expect(followers.ownerOf("tab-1")).toBeUndefined();
+  });
 });
 
 describe("dispatch table: api, dialog, voices", () => {
@@ -1097,56 +1347,58 @@ describe("dispatch table: terminal, bookmarks, settings", () => {
     expect(deps.terminal.suggest).toHaveBeenNthCalledWith(2, "p1", "ls ", undefined, true);
   });
 
-  // [bite-proof] Reverting settings:save to `([draft]) => settings.save(draft)`
-  // fails this — the remote origin's draft.remote would reach save() as
-  // `false` instead of the on-disk `true`.
-  it("settings:save pins a remote-origin object draft's `remote` to what settings.read() returns", async () => {
-    const deps = fakeDeps({
-      settings: {
-        read: vi.fn(async () => ({ remote: { enabled: true } }) as never),
-        save: vi.fn(async () => ({ ok: true }) as never),
-        testAgent: vi.fn(async () => ({}) as never),
-        restart: vi.fn(),
-      },
-    });
+  // [bite-proof] Passing a remote draft through to settings.save (the old
+  // behaviour, with `remote` pinned) fails the first test: projects, agents
+  // and whisper would reach disk from a phone.
+  it("settings:save from a remote origin hands only the parsed `sessions` section on", async () => {
+    const deps = fakeDeps();
     const table = createDispatchTable(deps);
-    await callAs(table, REMOTE_ORIGIN, "settings:save", { remote: { enabled: false } });
-    expect(deps.settings.save).toHaveBeenCalledWith({ remote: { enabled: true } });
-    expect(deps.settings.read).toHaveBeenCalledTimes(1);
+    await callAs(table, REMOTE_ORIGIN, "settings:save", {
+      sessions: { importWindowDays: 7, worktrees: "always", extra: 1 },
+      projects: { evil: "/" },
+      registry: { agents: { x: { command: "rm" } } },
+      remote: { enabled: false },
+      whisper: { binaryPath: "/bin/sh", modelPath: "" },
+    });
+    expect(deps.settings.saveSessions).toHaveBeenCalledWith({
+      importWindowDays: 7,
+      worktrees: "always",
+    });
+    expect(deps.settings.save).not.toHaveBeenCalled();
+    expect(deps.settings.read).not.toHaveBeenCalled();
   });
 
-  it("settings:save leaves a desktop-origin draft's `remote` untouched and never reads", async () => {
+  it("settings:save from a remote origin refuses an invalid or missing `sessions`", async () => {
+    const deps = fakeDeps();
+    const table = createDispatchTable(deps);
+    const bad: unknown[] = [
+      "x",
+      null,
+      [],
+      {},
+      { remote: { enabled: false } },
+      { sessions: "x" },
+      { sessions: { worktrees: "sometimes" } },
+      { sessions: { importWindowDays: -1 } },
+      { sessions: { importWindowDays: "7" } },
+    ];
+    for (const draft of bad) {
+      const result = (await callAs(table, REMOTE_ORIGIN, "settings:save", draft)) as {
+        ok: boolean;
+      };
+      expect(result.ok).toBe(false);
+    }
+    expect(deps.settings.saveSessions).not.toHaveBeenCalled();
+    expect(deps.settings.save).not.toHaveBeenCalled();
+  });
+
+  it("settings:save leaves a desktop-origin draft untouched and never reads", async () => {
     const deps = fakeDeps();
     const table = createDispatchTable(deps);
     await call(table, "settings:save", { remote: { enabled: false } });
     expect(deps.settings.save).toHaveBeenCalledWith({ remote: { enabled: false } });
+    expect(deps.settings.saveSessions).not.toHaveBeenCalled();
     expect(deps.settings.read).not.toHaveBeenCalled();
-  });
-
-  it("settings:save passes a remote-origin non-object draft through unchanged", async () => {
-    const deps = fakeDeps();
-    const table = createDispatchTable(deps);
-    await callAs(table, REMOTE_ORIGIN, "settings:save", "x");
-    expect(deps.settings.save).toHaveBeenCalledWith("x");
-    expect(deps.settings.read).not.toHaveBeenCalled();
-  });
-
-  it("settings:save fails closed when settings.read() rejects on the remote path", async () => {
-    const deps = fakeDeps({
-      settings: {
-        read: vi.fn(async () => {
-          throw new Error("disk error");
-        }),
-        save: vi.fn(async () => ({ ok: true }) as never),
-        testAgent: vi.fn(async () => ({}) as never),
-        restart: vi.fn(),
-      },
-    });
-    const table = createDispatchTable(deps);
-    await expect(
-      callAs(table, REMOTE_ORIGIN, "settings:save", { remote: { enabled: false } }),
-    ).rejects.toThrow("disk error");
-    expect(deps.settings.save).not.toHaveBeenCalled();
   });
 
   it("voice:start / voice:stop drive the one voice implementation", async () => {
@@ -1555,6 +1807,22 @@ describe("dispatch table: git, setup and history (deferred M2 table tests)", () 
     const deps = fakeDeps({ sessionStore: { history: vi.fn(() => history), edit: vi.fn() } });
     const table = createDispatchTable(deps);
     expect(await call(table, "history:list")).toBe(history);
+  });
+
+  it("history:list answers one page for a page request", async () => {
+    const at = (id: string, lastActivityAt: number) => ({ id, lastActivityAt, summary: id });
+    const history = [at("c", 30), at("a", 20), at("b", 20), at("d", 10)];
+    const deps = fakeDeps({ sessionStore: { history: vi.fn(() => history), edit: vi.fn() } });
+    const table = createDispatchTable(deps);
+    expect(await call(table, "history:list", { limit: 2 })).toEqual({
+      sessions: [history[0], history[1]],
+      more: true,
+    });
+    expect(
+      await call(table, "history:list", { limit: 2, before: { lastActivityAt: 20, id: "a" } }),
+    ).toEqual({ sessions: [history[2], history[3]], more: false });
+    // A malformed request is no request at all.
+    expect(await call(table, "history:list", { limit: "x" })).toBe(history);
   });
 
   describe("history:edit (bug 7)", () => {

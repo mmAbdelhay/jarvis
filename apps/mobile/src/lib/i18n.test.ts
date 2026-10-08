@@ -3,6 +3,11 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
+  isApplePlatform,
+  paneCountText,
+  sendHintText,
+  sendNotesText,
+  todaySessionsText,
   type Language,
   type MessageKey,
   STRINGS,
@@ -230,5 +235,57 @@ describe("platformKey (D8)", () => {
       expect(STRINGS[key as MessageKey].en.toLowerCase()).not.toContain("phone");
       expect(STRINGS[key as MessageKey].ar).not.toContain("الهاتف");
     }
+  });
+});
+
+describe("paneCountText", () => {
+  it("counts panes in English", () => {
+    expect(paneCountText("en", 1)).toBe("1 pane");
+    expect(paneCountText("en", 3)).toBe("3 panes");
+  });
+  it("uses the Arabic singular, dual, plural and post-number singular", () => {
+    expect(paneCountText("ar", 1)).toBe("لوحة واحدة");
+    expect(paneCountText("ar", 2)).toBe("لوحتان");
+    expect(paneCountText("ar", 3)).toBe("3 لوحات");
+    expect(paneCountText("ar", 10)).toBe("10 لوحات");
+    expect(paneCountText("ar", 11)).toBe("11 لوحة");
+    expect(paneCountText("ar", 102)).toBe("102 لوحة");
+  });
+});
+
+describe("counted nouns and the send hint", () => {
+  it("todaySessionsText: English singular/plural, Arabic one/two/3-10/11+", () => {
+    expect(todaySessionsText("en", 1)).toBe("today: 1 session");
+    expect(todaySessionsText("en", 0)).toBe("today: 0 sessions");
+    expect(todaySessionsText("ar", 1)).toBe("اليوم: جلسة واحدة");
+    expect(todaySessionsText("ar", 2)).toBe("اليوم: جلستان");
+    expect(todaySessionsText("ar", 5)).toBe("اليوم: 5 جلسات");
+    expect(todaySessionsText("ar", 11)).toBe("اليوم: 11 جلسة");
+    expect(todaySessionsText("ar", 103)).toBe("اليوم: 103 جلسات");
+  });
+
+  it("sendNotesText: English singular/plural, Arabic one/two/3-10/11+", () => {
+    expect(sendNotesText("en", 1)).toBe("Send 1 note to Claude");
+    expect(sendNotesText("en", 3)).toBe("Send 3 notes to Claude");
+    expect(sendNotesText("ar", 1)).toBe("إرسال ملاحظة واحدة إلى Claude");
+    expect(sendNotesText("ar", 2)).toBe("إرسال ملاحظتين إلى Claude");
+    expect(sendNotesText("ar", 4)).toBe("إرسال 4 ملاحظات إلى Claude");
+    expect(sendNotesText("ar", 12)).toBe("إرسال 12 ملاحظة إلى Claude");
+  });
+
+  it("picks Cmd on Apple platforms and Ctrl elsewhere", () => {
+    expect(isApplePlatform({ platform: "MacIntel" })).toBe(true);
+    expect(isApplePlatform({ userAgent: "Mozilla/5.0 (iPad; CPU OS 17)" })).toBe(true);
+    expect(isApplePlatform({ platform: "Win32" })).toBe(false);
+    expect(isApplePlatform({ platform: "Linux x86_64" })).toBe(false);
+    expect(isApplePlatform({})).toBe(false);
+    expect(sendHintText("en", true)).toBe("( ⌘ Enter to send )");
+    expect(sendHintText("en", false)).toBe("( Ctrl Enter to send )");
+    expect(sendHintText("ar", false)).toBe("( Ctrl Enter للإرسال )");
+  });
+
+  it("names the paired device by platform", () => {
+    expect(t("en", platformKey("settings.thisDevice", "native"))).toBe("This device");
+    expect(t("en", platformKey("settings.thisDevice", "web"))).toBe("This browser");
   });
 });

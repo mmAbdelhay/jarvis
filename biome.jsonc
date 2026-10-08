@@ -11,6 +11,9 @@
       "!packages/desktop/src/vendor",
       "!spikes",
       "!design",
+      // The teaser's frame renderer: a page Chromium screenshots, not a page
+      // anyone reads, so the a11y rules have nothing to protect there.
+      "!docs/media/teaser",
       "!pnpm-lock.yaml",
       "!**/*.jsonl",
       "!os/go/**/testdata",

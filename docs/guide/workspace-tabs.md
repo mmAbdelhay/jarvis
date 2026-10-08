@@ -489,14 +489,96 @@ the project doesn't reopen the door. This is the feature's actual security
 boundary, not an incidental limit.
 
 It is dismissable from **⌘P → "Toggle file sidebar"** — there is no keyboard
-chord for it, only the palette entry. It does not watch the filesystem: the
-tree re-lists when the pane's directory changes, when you expand a folder,
-and on **⌘P → "Refresh file sidebar"**, and nothing else. So a file a command
-just created, deleted or renamed — a `git checkout` of a branch with
-different files — is not there until you refresh (expanded folders collapse
-when you do; a refresh is a fresh listing of the root). It cannot rename,
-delete, create or drag a file — it is a way to see and open, not a file
-manager.
+chord for it, only the palette entry.
+
+**It keeps itself current without watching the disk.** A recursive watch on
+a large repository costs more than a sidebar is worth, and behaves
+differently on every OS, so the tree re-reads instead: after every command
+(each prompt the shell draws), every few seconds while the sidebar is on
+screen, and on **⌘P → "Refresh file sidebar"**. A re-read keeps open folders
+open and leaves every row whose folder did not change exactly as it was, so
+nothing under the pointer jumps. A file an agent writes in another tab shows
+up within a few seconds; a `git checkout` shows up as soon as its prompt
+returns.
+
+**New file, New folder, Rename and Move to Trash.** Right-click a folder for
+all four, a file for the last two, or the empty space below the rows to
+create at the root; the two buttons beside the header create at the root
+too. A name is typed in place — **Enter** commits, **Escape** or clicking
+away cancels — and a rename preselects the name without its extension.
+Nothing is ever overwritten: a name that is already taken is refused, and
+says so under the tree. Move to Trash asks nothing, because it goes to the
+system trash and can be put back from there. The same boundary as listing
+applies to every one of them: the folder is checked against the project
+after symlinks are resolved, and a symlink is renamed or trashed as the
+link, never what it points to. These are desktop-only. A paired phone
+browses the same files from a terminal's **Files** button — folders open in
+place, and a file's path can be typed into the terminal — but cannot change
+them.
+
+### The plan panel
+
+A plan, rendered and editable beside the terminal, with comments you can hand
+back to the agent in one message.
+
+**Where it opens.** When the tab's Claude Code session writes a plan in plan
+mode, the panel opens beside the pane on its own, without taking focus from
+the terminal. Close it and it stays closed for that tab, splits included.
+Toggle it from **⌘P → "Toggle plan panel"** or the tab's right-click menu.
+
+**What it can show.** The header's file name opens a picker with three groups:
+
+- **This session** — the plan the session's own transcript last pointed at.
+- **Plan mode · recent** — Claude Code's plan-mode scratch files, under
+  `~/.claude/plans` (or each agent's `configDir`).
+- **Repo · docs/superpowers** — specs and plans committed under the
+  project's `docs/superpowers/specs` and `docs/superpowers/plans`.
+
+Nothing else can be opened, from the desktop or a phone: every read and write
+is checked against those folders after symlinks are resolved, only `.md`
+files, and nothing over 1 MB. **Source** shows the raw markdown instead of the
+rendered view. A plan with a checklist (`- [ ]` / `- [x]` items) shows how far
+through it is in the header — "3/7 done" and a small meter — which moves as
+the agent ticks items off.
+
+**Editing a section.** Click a heading, paragraph, list or code block to edit
+it in place; **⌘S** writes back that section and nothing else, so the rest of
+the file keeps its exact bytes. If the file changed on disk while you were
+typing — the agent revised the plan, say — the save is refused and a notice
+keeps your text, rather than one edit silently overwriting the other. Remote
+images in a plan are never loaded, and links open only if they are `http`,
+`https` or `mailto`.
+
+**Comments.** Select text and press **Comment**, or use the **+** in a
+section's gutter to comment on the whole section. Each comment becomes a
+numbered pin in the gutter: amber while it is **queued**, in the accent colour once it
+is **sent**. A comment follows its section through edits — by the section's
+identity first, then by the text it quoted — and one whose section was
+removed is listed as **Section changed** rather than dropped. Click a pin to
+edit or delete its comment. Comments are kept in
+`~/.config/jarvis/plan-comments.json`, so they survive restarts.
+
+**Sending them.** The tray at the bottom counts what is queued.
+**Send to Claude** pastes every queued comment into the tab as one message,
+and submits it:
+
+```
+Comments on /Users/you/projects/acme/docs/superpowers/plans/arabic-voice.md:
+
+1. On "fuzzy-match the transcript against project keys": also match transliterations.
+
+2. On the section "Tests first": add a test for mixed scripts.
+
+Please update the plan to address these.
+```
+
+**Keep for later** folds the tray away and leaves them queued. The message is
+pasted as one bracketed paste with control bytes stripped, so nothing in a
+plan or a comment can act as a keystroke in the terminal.
+
+**On the phone.** The terminal screen has a **Plan** sheet with the same
+picker, comments, per-section editing and Send — the same files, the same
+checks, and the same comment store as the desktop.
 
 ### The command palette
 

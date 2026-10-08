@@ -23,6 +23,12 @@ export type GitChanges = {
   files: GitFileChange[];
   insertions: number;
   deletions: number;
+  /** The branch this one tracks ("origin/main"), when it tracks one. */
+  upstream?: string;
+  /** Commits here and not on `upstream`, and the other way round. Both 0
+   *  (or absent) without an upstream. */
+  ahead?: number;
+  behind?: number;
 };
 
 // `beforeLine`/`afterLine` are written as explicit `| undefined` rather than
@@ -77,7 +83,19 @@ export type GitFailureCode =
   | "nothing-staged"
   | "empty-message"
   | "conflict"
-  | "failed";
+  | "failed"
+  // GitRemoteOps' own refusals.
+  | "invalid-branch"
+  | "no-upstream"
+  | "no-remote"
+  | "diverged"
+  | "rejected"
+  | "detached"
+  | "no-gh"
+  // GitWorktrees' own.
+  | "not-a-worktree"
+  | "base-dirty"
+  | "worktree-dirty";
 
 export type GitFailure = { code: GitFailureCode; detail: string };
 
@@ -86,6 +104,94 @@ export type GitFailure = { code: GitFailureCode; detail: string };
 // assistant" — a returned outcome makes that structural instead of relying
 // on every call site remembering a try/catch.
 export type GitOutcome<T> = { ok: true; value: T } | { ok: false; error: GitFailure };
+
+export type GitBranches = {
+  /** The checked-out branch; the short SHA when `detached`. */
+  current: string;
+  detached: boolean;
+  /** Every local branch, in git's own order. */
+  local: string[];
+};
+
+export type GitPullResult = {
+  /** Whether HEAD moved — false when there was nothing to bring in. */
+  updated: boolean;
+};
+
+export type GitPushResult = {
+  remote: string;
+  branch: string;
+  /** True when this push also made `remote/branch` the upstream. */
+  upstreamSet: boolean;
+};
+
+export type GitPullRequest = {
+  url: string;
+  /** False when one was already open for this branch and is reused. */
+  created: boolean;
+};
+
+/**
+ * The Changes view's branch, pull, push and pull-request controls — a
+ * separate seam from GitProvider because these reach the network (a
+ * remote, GitHub) and the other five never do. Every method answers with a
+ * GitOutcome, never a rejection, like GitProvider's.
+ */
+export interface GitRemoteOps {
+  branches(repoPath: string): Promise<GitOutcome<GitBranches>>;
+  /** Checks out `name`, creating it from HEAD first when `create`. Local
+   *  changes travel with the switch, as plain `git switch` does; git
+   *  itself refuses a switch they would be lost in. */
+  switchBranch(repoPath: string, name: string, create: boolean): Promise<GitOutcome<null>>;
+  /** Fast-forward only: never a merge commit, never a conflict. */
+  pull(repoPath: string): Promise<GitOutcome<GitPullResult>>;
+  /** Pushes the current branch; one with no upstream yet is pushed to
+   *  `origin` (or the only remote) and starts tracking it. Never forced. */
+  push(repoPath: string): Promise<GitOutcome<GitPushResult>>;
+  /** The open pull request for the current branch, or a new one (`gh pr
+   *  create --fill`) — pushing first when the branch has commits its
+   *  remote does not. */
+  pullRequest(repoPath: string): Promise<GitOutcome<GitPullRequest>>;
+}
+
+export type GitWorktree = {
+  /** Where the session should run: the new worktree, or the same
+   *  subdirectory of it when the project is a subdirectory of its repo. */
+  path: string;
+  branch: string;
+};
+
+export type GitWorktreeInfo = {
+  /** The repository the worktree was made from — its main checkout. */
+  base: string;
+  /** The worktree's own branch. */
+  branch: string;
+  /** What the main checkout has out: where a merge back would land. Empty
+   *  when it is detached. */
+  baseBranch: string;
+};
+
+/**
+ * One git worktree per agent session, so agents working the same project
+ * at once each have their own checkout and branch instead of writing over
+ * one another. Every method answers with a GitOutcome, never a rejection.
+ */
+export interface GitWorktrees {
+  /** A new worktree of `repoPath`'s repository on a new branch from HEAD,
+   *  named from `label`. */
+  create(repoPath: string, label: string): Promise<GitOutcome<GitWorktree>>;
+  /** What `path` is a worktree of — null when it is a main checkout (or no
+   *  repository's at all, which is the same "nothing to merge back"). */
+  info(path: string): Promise<GitOutcome<GitWorktreeInfo | null>>;
+  /** Merges the worktree's branch into whatever the main checkout has out
+   *  (`--no-ff`). Refused while either side has uncommitted changes, and
+   *  backed out completely on a conflict — the main checkout is never left
+   *  mid-merge. */
+  mergeBack(path: string): Promise<GitOutcome<{ into: string }>>;
+  /** Removes the worktree, keeping its branch. Refused while it has
+   *  uncommitted changes, as `git worktree remove` itself refuses. */
+  remove(path: string): Promise<GitOutcome<null>>;
+}
 
 export interface GitProvider {
   changes(repoPath: string): Promise<GitOutcome<GitChanges>>;

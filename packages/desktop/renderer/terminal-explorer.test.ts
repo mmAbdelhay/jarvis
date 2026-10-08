@@ -45,14 +45,33 @@ describe("the terminal explorer", () => {
   // The cwd event fires on every prompt, not only when the directory
   // changed: a shell printing its prompt in the same place re-emits it.
   // Without this, every prompt would re-list the whole directory.
-  it("does not re-list when the same pane reports the same directory", async () => {
-    const { view, list } = explorer();
-    view.setRoot("tab-1", "/proj");
-    await settle();
-    view.setRoot("tab-1", "/proj");
-    view.setRoot("tab-1", "/proj");
-    await settle();
-    expect(list).toHaveBeenCalledTimes(1);
+  // The cwd event fires on every prompt — a command just finished, the
+  // likeliest moment for files to have changed. The same pane in the same
+  // directory re-reads in place, once per burst, and keeps what is open.
+  it("re-reads in place, once per burst of prompts, keeping open folders open", async () => {
+    vi.useFakeTimers();
+    try {
+      const { view, list } = explorer();
+      view.setRoot("tab-1", "/proj");
+      await vi.runOnlyPendingTimersAsync();
+      view.element.querySelector<HTMLElement>('[data-path="/proj/src"]')?.click();
+      await vi.runOnlyPendingTimersAsync();
+      list.mockClear();
+
+      view.setRoot("tab-1", "/proj");
+      view.setRoot("tab-1", "/proj");
+      view.setRoot("tab-1", "/proj");
+      await vi.advanceTimersByTimeAsync(200);
+
+      // One re-read: the root, then the open folder — not one per prompt.
+      expect(list.mock.calls).toEqual([
+        ["tab-1", "/proj"],
+        ["tab-1", "/proj/src"],
+      ]);
+      expect(view.element.textContent).toContain("main.ts");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   // A different pane in the same directory is still a different shell: the
@@ -422,5 +441,175 @@ describe("the terminal explorer's header", () => {
 
     const header = view.element.querySelector(".terminal-explorer-header");
     expect(header?.textContent).toBe("/Users/xavier/work");
+  });
+});
+
+describe("the terminal explorer's writes", () => {
+  function build(results: Partial<Record<"create" | "rename" | "trash", unknown>> = {}) {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const list = vi.fn(async (_paneKey: string, path: string) => listing[path] ?? []);
+    const writes = {
+      create: vi.fn(async () => results.create ?? { ok: true, path: "/proj/x" }),
+      rename: vi.fn(async () => results.rename ?? { ok: true, path: "/proj/x" }),
+      trash: vi.fn(async () => results.trash ?? { ok: true, path: "/proj/x" }),
+      t: (key: string) => `«${key}»`,
+    };
+    const view = createTerminalExplorer(host, "", {
+      list,
+      choose: vi.fn(),
+      // biome-ignore lint/suspicious/noExplicitAny: the doubles return loose shapes on purpose.
+      writes: writes as any,
+      pollMs: 0,
+    });
+    return { view, list, writes };
+  }
+
+  const menuItems = () =>
+    [...document.querySelectorAll<HTMLButtonElement>(".terminal-explorer-menu-item")].map(
+      (item) => item.textContent,
+    );
+
+  function rightClick(target: Element | null | undefined) {
+    target?.dispatchEvent(
+      new MouseEvent("contextmenu", { bubbles: true, clientX: 10, clientY: 20 }),
+    );
+  }
+
+  function typeName(value: string) {
+    const input = document.querySelector<HTMLInputElement>(".file-tree-input");
+    if (input === null) throw new Error("no name field");
+    input.value = value;
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  }
+
+  it("offers new entries on a folder, rename and trash on any row, and only new at the root", async () => {
+    const { view } = build();
+    view.setRoot("tab-1", "/proj");
+    await settle();
+
+    rightClick(view.element.querySelector('[data-path="/proj/src"]'));
+    expect(menuItems()).toEqual([
+      "«explorerNewFile»",
+      "«explorerNewFolder»",
+      "«explorerRename»",
+      "«explorerTrash»",
+    ]);
+
+    rightClick(view.element.querySelector('[data-path="/proj/read me.md"]'));
+    expect(menuItems()).toEqual(["«explorerRename»", "«explorerTrash»"]);
+
+    rightClick(view.element.querySelector(".file-tree"));
+    expect(menuItems()).toEqual(["«explorerNewFile»", "«explorerNewFolder»"]);
+
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(document.querySelector(".terminal-explorer-menu")).toBeNull();
+    view.dispose();
+  });
+
+  it("creates through the menu for the pane it is rooted for, then re-reads", async () => {
+    const { view, list, writes } = build();
+    view.setRoot("tab-1", "/proj");
+    await settle();
+    list.mockClear();
+
+    rightClick(view.element.querySelector('[data-path="/proj/src"]'));
+    document.querySelector<HTMLButtonElement>(".terminal-explorer-menu-item")?.click();
+    await settle();
+    typeName("new.ts");
+    await settle();
+
+    expect(writes.create).toHaveBeenCalledWith("tab-1", "/proj/src", "new.ts", "file");
+    expect(list).toHaveBeenCalledWith("tab-1", "/proj");
+    view.dispose();
+  });
+
+  it("shows a refusal under the tree, in the language it is given", async () => {
+    const { view, writes } = build({ rename: { ok: false, reason: "exists" } });
+    view.setRoot("tab-1", "/proj");
+    await settle();
+
+    rightClick(view.element.querySelector('[data-path="/proj/read me.md"]'));
+    const rename = [
+      ...document.querySelectorAll<HTMLButtonElement>(".terminal-explorer-menu-item"),
+    ][0];
+    rename?.click();
+    typeName("src");
+    await settle();
+
+    expect(writes.rename).toHaveBeenCalledWith("tab-1", "/proj/read me.md", "src");
+    expect(view.element.querySelector(".terminal-explorer-error")?.textContent).toBe(
+      "«explorerErrorExists»",
+    );
+    view.dispose();
+  });
+
+  it("moves a row to the trash without asking, then re-reads", async () => {
+    const { view, writes } = build();
+    view.setRoot("tab-1", "/proj");
+    await settle();
+
+    rightClick(view.element.querySelector('[data-path="/proj/read me.md"]'));
+    document.querySelector<HTMLButtonElement>(".terminal-explorer-menu-item--danger")?.click();
+    await settle();
+
+    expect(writes.trash).toHaveBeenCalledWith("tab-1", "/proj/read me.md");
+    view.dispose();
+  });
+
+  it("has New file and New folder buttons that hold no text of their own", async () => {
+    const { view, writes } = build();
+    view.setRoot("tab-1", "/proj");
+    await settle();
+
+    const buttons = view.element.querySelectorAll<HTMLButtonElement>(".terminal-explorer-action");
+    expect([...buttons].map((b) => b.getAttribute("aria-label"))).toEqual([
+      "«explorerNewFile»",
+      "«explorerNewFolder»",
+    ]);
+    expect([...buttons].map((b) => b.textContent)).toEqual(["", ""]);
+
+    buttons[1]?.click();
+    await settle();
+    typeName("docs");
+    await settle();
+    expect(writes.create).toHaveBeenCalledWith("tab-1", "/proj", "docs", "directory");
+    view.dispose();
+  });
+
+  it("is read-only without writes: no buttons, no menu", async () => {
+    const { view } = explorer();
+    view.setRoot("tab-1", "/proj");
+    await settle();
+
+    expect(view.element.querySelector(".terminal-explorer-actions")).toBeNull();
+    rightClick(view.element.querySelector('[data-path="/proj/src"]'));
+    expect(document.querySelector(".terminal-explorer-menu")).toBeNull();
+  });
+});
+
+describe("the terminal explorer's on-screen check", () => {
+  it("re-reads on its interval only while it is on screen", async () => {
+    vi.useFakeTimers();
+    try {
+      const host = document.createElement("div");
+      document.body.append(host);
+      const list = vi.fn(async (_paneKey: string, path: string) => listing[path] ?? []);
+      const view = createTerminalExplorer(host, "", { list, choose: vi.fn(), pollMs: 1000 });
+      view.setRoot("tab-1", "/proj");
+      await vi.advanceTimersByTimeAsync(0);
+      list.mockClear();
+
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(list).toHaveBeenCalledTimes(1);
+
+      view.toggle(); // closed by the user: hidden, so nothing to read for
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(list).toHaveBeenCalledTimes(1);
+
+      view.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

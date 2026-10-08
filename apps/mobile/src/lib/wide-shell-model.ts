@@ -1,46 +1,69 @@
-// The WideShell top bar's logic (2026-09-28 wide layout, Task 1), kept out
-// of `WideShell.tsx` so it is unit testable without a renderer. Mirrors the
-// desktop topbar (packages/desktop/renderer): brand, nav, metrics readout,
-// "N running" pill, connection pill, clock.
+// The WideShell sidebar's logic, kept out of `WideShell.tsx` so it is unit
+// testable without a renderer: the nav list, which section is active, full
+// sidebar or icon rail, the waiting badge and the capacity card.
 
-import type { SessionState, SystemMetrics } from "@jarvis/core";
-import type { ConnectionPillModel } from "./connection-pill";
-import { connectionPillModel } from "./connection-pill";
-import type { ConnectionView } from "./connection-store";
-import { formatPercent } from "./format";
+import type { SessionState } from "@jarvis/core";
+import { type CapacityCard, capacityTone } from "./home-capacity";
 import type { Language } from "./i18n";
 import { t } from "./i18n";
+import type { IconName } from "./icon-paths";
 
-export type WideNavKey = "dashboard" | "sessions" | "workspace" | "voice" | "settings";
+export type WideNavKey =
+  | "dashboard"
+  | "sessions"
+  | "workspace"
+  | "changes"
+  | "history"
+  | "voice"
+  | "settings";
 
-export type WideNavItem = { key: WideNavKey; label: string; href: string };
+export type WideNavItem = { key: WideNavKey; label: string; href: string; icon: IconName };
 
 const NAV_ORDER: readonly WideNavKey[] = [
   "dashboard",
   "sessions",
   "workspace",
+  "changes",
+  "history",
   "voice",
   "settings",
 ];
 
+/** Each section's icon: drawn alone in the rail, not drawn in the full
+ *  sidebar (the mockup's items are text only). */
+const NAV_ICONS: Record<WideNavKey, IconName> = {
+  dashboard: "home",
+  sessions: "sessions",
+  workspace: "workspace",
+  changes: "changes",
+  history: "history",
+  voice: "mic",
+  settings: "settings",
+};
+
 /** The nav items in the desktop's order. RTL mirroring is the component's
  *  job (it lays the bar out right-to-left), not this list's. */
 export function wideNavItems(language: Language): WideNavItem[] {
-  return NAV_ORDER.map((key) => ({ key, label: t(language, `nav.${key}`), href: `/${key}` }));
+  return NAV_ORDER.map((key) => ({
+    key,
+    label: t(language, `nav.${key}`),
+    href: `/${key}`,
+    icon: NAV_ICONS[key],
+  }));
 }
 
 // Detail routes belong to the section they are opened from.
 const SECTION_OF: Record<string, WideNavKey> = {
   dashboard: "dashboard",
-  history: "dashboard",
-  transcript: "dashboard",
+  history: "history",
+  transcript: "history",
   sessions: "sessions",
   session: "sessions",
   workspace: "workspace",
   terminal: "workspace",
   docker: "workspace",
   api: "workspace",
-  changes: "workspace",
+  changes: "changes",
   sidecars: "workspace",
   "sidecar-view": "workspace",
   voice: "voice",
@@ -54,87 +77,58 @@ export function activeNavKey(pathname: string): WideNavKey | undefined {
   return SECTION_OF[first];
 }
 
-// The desktop's LIVE_STATES (renderer/app.ts): what the "N running" pill counts.
-const LIVE_STATES: ReadonlySet<SessionState> = new Set<SessionState>([
-  "starting",
-  "running",
-  "waiting",
-]);
-
-export function runningCountOf(sessions: readonly { state: SessionState }[]): number {
-  return sessions.filter((session) => LIVE_STATES.has(session.state)).length;
+/** Sessions waiting on the user, for the sidebar badge. Sessions found on
+ *  disk (origin "external") are not Jarvis's and are not counted. */
+export function waitingCountOf(
+  sessions: readonly { state: SessionState; origin?: string }[],
+): number {
+  return sessions.filter((session) => session.state === "waiting" && session.origin !== "external")
+    .length;
 }
 
-export type TopBarReadout = { cpu: string; ram: string; disk: string; net: string };
+/** The sidebar is an icon rail when the window is compact and always in the
+ *  Workspace section (the terminal wants the width). */
+export function sidebarMode(input: {
+  compact: boolean;
+  section: WideNavKey | undefined;
+}): "full" | "rail" {
+  return input.compact || input.section === "workspace" ? "rail" : "full";
+}
 
-export type TopBarModel = {
-  showMetrics: boolean;
-  // Compact widths (744–899) can't fit the full connection text beside the
-  // nav; the dot (with the text as its accessibility label) stays.
-  showPillLabel: boolean;
-  readout: TopBarReadout;
-  running: { count: number; idle: boolean };
-  pill: ConnectionPillModel;
-  /** The paired laptop's display name beside the connection pill (the
-   *  phone shows it in the Dashboard header), truncated to its slot. */
-  laptopName: string | undefined;
-  laptopNameMaxWidth: number;
+/** The number beside a nav item: only Sessions, only above zero. */
+export function navBadge(key: WideNavKey, waitingCount: number): number | undefined {
+  return key === "sessions" && waitingCount > 0 ? waitingCount : undefined;
+}
+
+/** The card above Settings in the full sidebar: the CAPACITY card on every
+ *  section but Home (whose tiles show capacity), once capacity is known. */
+export function sidebarCard(
+  section: WideNavKey | undefined,
+  capacity: readonly CapacityCard[],
+): "capacity" | undefined {
+  return section !== "dashboard" && capacity.length > 0 ? "capacity" : undefined;
+}
+
+export type CapacityRow = {
+  id: string;
+  label: string;
+  /** What is left, 0-100. */
+  percent: number;
+  tone: ReturnType<typeof capacityTone>;
 };
 
-function ratioPercent(used: number, total: number): string {
-  return total > 0 ? formatPercent((used / total) * 100) : "--%";
-}
+const WINDOW_KEYS = {
+  "5h": "home.window5h",
+  month: "home.windowMonth",
+  window: "home.windowOther",
+} as const;
 
-function mbps(value: number): string {
-  return (Number.isFinite(value) && value > 0 ? value : 0).toFixed(1);
-}
-
-function readoutOf(metrics: SystemMetrics | undefined): TopBarReadout {
-  if (metrics === undefined) {
-    return { cpu: "--%", ram: "--%", disk: "--%", net: "↓0.0 ↑0.0 Mbps" };
-  }
-  return {
-    cpu: formatPercent(metrics.cpuPercent),
-    ram: ratioPercent(metrics.memoryUsedBytes, metrics.memoryTotalBytes),
-    disk: ratioPercent(metrics.diskUsedBytes, metrics.diskTotalBytes),
-    net: `↓${mbps(metrics.networkDownMbps)} ↑${mbps(metrics.networkUpMbps)} Mbps`,
-  };
-}
-
-export function topBarModel(input: {
-  metrics?: SystemMetrics;
-  runningCount: number;
-  connection: ConnectionView;
-  compact: boolean;
-  laptopName?: string;
-}): TopBarModel {
-  const name = input.laptopName?.trim();
-  return {
-    showMetrics: !input.compact,
-    showPillLabel: !input.compact,
-    readout: readoutOf(input.metrics),
-    running: { count: input.runningCount, idle: input.runningCount === 0 },
-    pill: connectionPillModel(input.connection),
-    laptopName: name === undefined || name.length === 0 ? undefined : name,
-    laptopNameMaxWidth: input.compact ? 96 : 180,
-  };
-}
-
-/** The laptop name beside the connection pill: the record's display name,
- *  else the machine label of the certificate name a system-trust pairing
- *  dials (`studio` of `studio.tail1.ts.net`; no current pairing flow
- *  stores a display name). A pinned IP pairing has neither. */
-export function shellLaptopName(
-  record: { laptopName?: string; name?: string } | undefined,
-): string | undefined {
-  const display = record?.laptopName?.trim();
-  if (display !== undefined && display.length > 0) return display;
-  const label = record?.name?.split(".")[0]?.trim();
-  return label === undefined || label.length === 0 ? undefined : label;
-}
-
-/** The desktop clock: 24-hour HH:MM, Latin digits in both languages. */
-export function clockText(date: Date): string {
-  const pad = (value: number) => String(value).padStart(2, "0");
-  return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+/** One row per account: "Claude 5h", what is left, and the bar's tone. */
+export function capacityRows(capacity: readonly CapacityCard[], language: Language): CapacityRow[] {
+  return capacity.map((card) => ({
+    id: card.id,
+    label: `${card.id} ${t(language, WINDOW_KEYS[card.window])}`,
+    percent: card.left,
+    tone: capacityTone(card),
+  }));
 }

@@ -9,7 +9,8 @@ it, and its APIs.
 Jarvis is a single Electron app over a pnpm workspace. It runs on macOS,
 Linux and Windows. It speaks Arabic and English, and it is built for one person on one
 machine — there is no server, no account, and nothing leaves the laptop that
-was not already going to. It opens full screen.
+was not already going to, apart from a daily
+[update check](docs/guide/updates.md) to GitHub. It opens full screen.
 
 Everything in the Workspace belongs to a project, except the **Personal**
 browser, which belongs to none: somewhere to keep tabs that are not work,
@@ -89,6 +90,9 @@ pane splits; ⌘P reaches every action. A file sidebar follows the shell as it
 `cd`s, and a row of chips above the input names the directory, the branch and
 what is uncommitted. Re-run, workflows, history and the AI's suggestion all
 *fill* the line — you press Enter yourself, always.
+When Claude Code writes a plan, it opens beside the terminal: edit a section in
+place, pin comments to it, and send them all back as one message
+([the plan panel](docs/guide/workspace-tabs.md#the-plan-panel)).
 
 <p align="center">
   <img src="./docs/media/terminal.png" width="100%" alt="The Terminal tab: each command and its output as an addressable block with its own timing and working directory, a file sidebar on the left, and a row of chips naming the directory, branch and uncommitted count.">

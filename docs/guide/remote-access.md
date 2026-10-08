@@ -310,7 +310,7 @@ Pulling to refresh on the Sessions screen calls `sessions:refresh` (a `read` cha
 
 A project's Terminal tile on the Dashboard, and the Workspace screen's own "New terminal" button, open a new terminal tab on the laptop in that project and land the phone on it — the same `terminal:open` channel the desktop's own tab uses, remote-legal for exactly the projects the laptop has configured. It is a `mutate` channel, so every call is audited, the same weight as a Docker start or an API save.
 
-Tapping a session opens its terminal: the same output the laptop shows, rendered by the same terminal engine, with a key bar for Esc, Tab, Shift-Tab, Ctrl, arrows and Enter.
+Tapping a session opens its terminal: the same output the laptop shows, rendered by the same terminal engine, with a key bar for Esc, Tab, Shift-Tab, Ctrl, Alt, arrows and Enter. Ctrl and Alt stay lit after a tap and apply to the next key or text you send: Alt then ⌫ deletes a word, Alt then ← moves back one.
 
 Typed text is sent exactly as written and never presses Enter for you; the ⏎ key is the only thing that does.
 
@@ -336,18 +336,42 @@ and tapping them makes no request. A Cluster tab needs the cluster already
 connected on the laptop — opening it from the phone never starts a login
 flow or an MFA prompt there.
 
+**Acting on the laptop from the phone.** Beyond reading, the phone can
+resume a past session (`session:resume`: it opens a new terminal tab on the
+laptop running the session's own agent, in the session's own directory, and
+lands the phone on it), rename or trash a file in a project's file list, and
+change the laptop's worktree mode. Every one is a
+`mutate` channel and is audited on each call. What stays protected: file
+rename and trash only work inside a configured project root (the root itself
+is refused, and trash goes to the OS trash, never a hard delete); a settings
+save from the phone changes only the `sessions` section and ignores the rest
+of the request, so it cannot turn the bridge off or change project roots or
+command paths; testing an agent command and the API client's settings stay on
+the laptop.
+
 **Workspace, Changes, Docker, history and the API client, in M9.** The
-Workspace tab shows the laptop's open tabs grouped by project, read-only —
-tapping into an open Terminal tab attaches to one of its existing panes
-(never creates, splits or closes one) with the same terminal engine and key
+Workspace tab shows the laptop's open tabs grouped by project. A phone can
+close a tab or rename it (an 80-character title, no control characters), but
+never opens, moves or activates one on the laptop's screen — those stay on the
+laptop. Tapping into an open Terminal tab attaches to one of its existing panes
+(never creates or splits one) with the same terminal engine and key
 bar Sessions uses; a web or chat tab's row hands off to the system browser,
 behind the same URL safety check every external link on the phone goes
 through (an unresolvable or unsafe URL shows a notice instead of opening
 anything); an Editor, Database or Cluster tab's row links to the sidecar
 screens described above; a Docker or API tab's row opens the phone's own
-Docker or API screen, described next. The Changes tab shows a session's git
+Docker or API screen, described next. A terminal on the phone keeps its plan in a strip above the keys — how far
+along it is and the step it is on — and tapping it opens the plan. **Previous
+command** and **Next command** jump between the prompts the laptop's shell
+marks, **Latest** returns to the live end once you have scrolled back, the
+search button finds text in the output, and the arrow-pad button opens a pad
+you drag a thumb across to send arrow keys. The Changes tab shows a session's git
 status — staged and unstaged files, a diff per file — and lets you stage,
-unstage and commit from the phone; it refreshes on its own whenever the
+unstage and commit from the phone. It also shows where the branch stands
+against its remote (`origin/main ↑2 ↓1`) with Pull, Push and Pull request,
+lets you switch to another local branch or create one, and — for a session
+running in a worktree of its own — merge that worktree back or remove it.
+A pull request's address opens in the phone's browser. It refreshes on its own whenever the
 laptop's own file counts change, so it never shows a stale "clean" tree
 after a commit made elsewhere. The Docker tab lists a project's configured
 containers and their state, with start, stop, restart and compose up/down

@@ -15,7 +15,16 @@
 // releaseChildren did.
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  writeFileSync,
+} from "node:fs";
 import {
   access,
   chmod,
@@ -30,11 +39,12 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { homedir, networkInterfaces, tmpdir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, isAbsolute, join } from "node:path";
 import { createBroadcaster, type Broadcaster, type PushSink } from "../broadcast.js";
 import { createHostLink, type DesktopHost } from "./host-link.js";
 import { faviconIntake, type FaviconIntake } from "./favicon-intake.js";
 import { createDispatchTable, type DispatchTable } from "../dispatch.js";
+import { buildUsageHistory, CAPACITY_WINDOW_MS } from "../usage-history.js";
 import { TabHost } from "./tab-host.js";
 import { handleUtterance, type UtteranceDeps } from "../voice-turn.js";
 import { createBlobTable } from "../remote-blob.js";
@@ -69,6 +79,7 @@ import {
   Orchestrator,
   ProviderMonitor,
   ProviderStatusStore,
+  recordCapacityHistory,
   SessionManager,
   greetingText,
   scanDirtyProjects,
@@ -93,6 +104,9 @@ import {
   createFaviconStore,
   createFsImportDeps,
   createGitProvider,
+  createGitRemoteOps,
+  createSqliteUsageStore,
+  createGitWorktrees,
   createHeadlampManager,
   defaultHeadlampBinary,
   defaultHistoryPath,
@@ -104,6 +118,8 @@ import {
   parseZshHistory,
   createKubeContextLister,
   createMetricsReader,
+  createPlanCommentStore,
+  createPlanFiles,
   createPtySpawner,
   createRealCodeServerSpawner,
   createRealDockerClient,
@@ -112,6 +128,7 @@ import {
   createSessionImporter,
   listAgentProcesses,
   resolveProject,
+  transcriptsForProcesses,
   createShellManager,
   createCollection,
   createFolder,
@@ -134,7 +151,7 @@ import {
   renameFolder,
   renameRequest,
   sendRequest,
-  toCurl,
+  toSnippet,
   writeEnvironment,
   writeImported,
   writeRequest,
@@ -202,6 +219,7 @@ import { writeDaemonEnabled } from "../daemon/config-file.js";
 import { errorMessage, MESSAGES, PRIMARY_LANGUAGE } from "../messages.js";
 import { createRecorderDeps, Recorder } from "../recorder.js";
 import { capacityReport, startupReport } from "../startup.js";
+import { createTerminalFitOverrides } from "../terminal-fit-overrides.js";
 
 /** The `performance:` section states its timeouts in minutes, because that is
  *  the unit anybody reasons about "leave a tab alone for a while" in. Every
@@ -366,6 +384,10 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
   const registry = new AgentRegistry(config.registry);
 
   const providerStore = new ProviderStatusStore(registry.list());
+  // Every capacity reading the panel shows, kept for the Dashboard's
+  // history chart. Its own table in sessions.db (usage-store.ts).
+  const usageStore = createSqliteUsageStore(config.sessionsDbPath);
+  recordCapacityHistory(providerStore, usageStore);
   // agentEnv is declared here, ahead of the capacity reader that closes
   // over it; the comment explaining it sits with the health check below,
   // which is what it was first built for.
@@ -648,6 +670,14 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     onUsage: (agentId, reading) => providers.recordPiggyback(agentId, reading),
   });
 
+  // Worktrees live beside sessions.db, under the config directory —
+  // outside every repository, so none shows up in a main checkout's
+  // Changes view. Wired even when the mode is off: a session the user
+  // explicitly asks to isolate still gets one, and the Changes view needs
+  // these to merge one back or remove it.
+  const sessionWorktrees = createGitWorktrees({
+    root: join(dirname(config.sessionsDbPath), "worktrees"),
+  });
   const orchestrator = new Orchestrator({
     brain,
     registry,
@@ -656,6 +686,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     changes: () => changeTracker.snapshot(),
     speak: (text, language) => announceSpeaking(text, language),
     projects: config.projects,
+    worktrees: { mode: config.sessions.worktrees ?? "off", ops: sessionWorktrees },
     providers: {
       snapshot: () => providers.snapshot(),
       refresh: () => providers.refreshCapacity({ force: true }),
@@ -993,7 +1024,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     sendRequest: (request, variables, project, remote) =>
       sendApiRequest(request, variables, project, remote),
     evaluateAssertions,
-    toCurl,
+    toSnippet,
     createRequest,
     createFolder,
     renameRequest,
@@ -1028,6 +1059,21 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
           directory: entry.isDirectory(),
         })),
       realPath: (path) => realpathSync(path),
+      exists: (path) => {
+        try {
+          lstatSync(path);
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      makeDir: (path) => mkdirSync(path),
+      makeFile: (path) => writeFileSync(path, "", { flag: "wx" }),
+      rename: (from, to) => renameSync(from, to),
+      // The OS trash is the desktop app's to reach (Electron's shell), so
+      // it goes out through the host — which a headless daemon forwards to
+      // the app that asked, and refuses when no app is attached.
+      trash: (path) => host.trashItem(path),
     },
     // The file sidebar's route into the Editor tab — see
     // TerminalHandlerDeps.editor. `open` is codeServer.open bound
@@ -1166,6 +1212,29 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     toRenderer: hostLink.toClients,
   });
 
+  // Task 5 (plan panel): the one PlanFiles and one PlanCommentStore
+  // instance for the whole app — dispatch.ts's own `plans` dep group
+  // requires exactly one of each. `agents` is a live accessor, not a
+  // snapshot, the same reason dispatch.ts's own `agents.ids()` is one
+  // (registry.replace() on a Settings save can swap the registry after
+  // this is built). The comment store's file sits beside bookmarks.json,
+  // under the same ~/.config/jarvis/ tree every other small JSON store
+  // in this app already uses.
+  const planFiles = createPlanFiles({ agents: () => registry.list(), home: homedir() });
+  const planComments = createPlanCommentStore(join(homedir(), ".config/jarvis/plan-comments.json"));
+
+  // Task 5: started once, here — `cwds()` is read fresh on every
+  // reconcile (plans.ts's own watch()), so an opened or closed terminal
+  // tab changes which `docs/superpowers/{specs,plans}` directories are
+  // watched without this ever being re-armed. The push reaches the
+  // remote bridge too: REMOTE_PUSH_POLICY (remote-push-policy.ts)
+  // classifies "plans:changed" as an ordinary reliable channel, and
+  // broadcast.send already fans out to every sink remote-access.ts adds.
+  const stopPlanWatch = planFiles.watch(
+    (path) => broadcast.send("plans:changed", path),
+    () => terminal.paneStartDirs(),
+  );
+
   // Sessions the process scan (process-scan.ts) found running outside
   // Jarvis, keyed by "ext-<pid>" — rebuilt wholesale on every
   // refreshSessions() call, never written to sessionStore (session-
@@ -1243,15 +1312,32 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
         // running as also "running outside Jarvis".
         ownedPids: () => sessions.ownedPids(),
         jarvisPid: process.pid,
+        // An agent typed into a Terminal pane runs under that pane's shell
+        // — reported, tagged with the pane, rather than dropped with the
+        // rest of this process's own tree.
+        terminalShells: () => shells.shellPids(),
         now: () => Date.now(),
+      });
+
+      // Sessions Jarvis itself ran — live, or recorded without an imported
+      // transcript (an imported row always carries transcriptPath) — whose
+      // transcripts sit in the same directories and are never a scanned
+      // process's own.
+      const jarvisIds = new Set([
+        ...sessions.list().map((session) => session.id),
+        ...sessionStore
+          .history()
+          .filter((session) => session.transcriptPath === undefined)
+          .map((session) => session.id),
+      ]);
+      const transcripts = await transcriptsForProcesses(processes, {
+        byPid: (agentId, pid) => sessionImporter.transcriptForPid(agentId, pid),
+        latestInDir: (agentId, cwd) => sessionImporter.latestTranscriptFor(agentId, cwd, jarvisIds),
       });
 
       const next = new Map<string, CoreSession>();
       for (const found of processes) {
-        const transcript =
-          found.cwd === null
-            ? null
-            : await sessionImporter.latestTranscriptFor(found.agentId, found.cwd);
+        const transcript = transcripts.get(found.pid) ?? null;
         const id = `ext-${found.pid}`;
         next.set(id, {
           id,
@@ -1262,12 +1348,17 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
           summary:
             transcript !== null
               ? transcript.session.summary
-              : MESSAGES.sessionRunningOutsideJarvis(PRIMARY_LANGUAGE),
+              : found.terminalPaneKey !== undefined
+                ? MESSAGES.sessionRunningInJarvisTerminal(PRIMARY_LANGUAGE)
+                : MESSAGES.sessionRunningOutsideJarvis(PRIMARY_LANGUAGE),
           startedAt: found.startedAt,
           lastActivityAt: transcript?.session.lastActivityAt ?? Date.now(),
           ...(transcript === null ? {} : { transcriptPath: transcript.path }),
           origin: "external",
           pid: found.pid,
+          ...(found.terminalPaneKey === undefined
+            ? {}
+            : { terminalPaneKey: found.terminalPaneKey }),
         });
       }
       externalSessions = next;
@@ -1463,6 +1554,8 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     // are (remote-access.ts's own per-device cleanup).
     onDeviceDisconnected: (deviceId) => {
       followers.unfollowOwnedBy(deviceId);
+      // A phone that drops off with Fit on gives the desktop its size back.
+      fitOverrides.deviceDisconnected(deviceId);
     },
     // M9 Task 3: a revoked device's staged files and quota reservation
     // are reclaimed here — never on a plain disconnect, which leaves them
@@ -1523,8 +1616,8 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     // The same hoisted writeConfig instance createRemoteAccess's own
     // onIdleDisabled callback uses above — never a second writer to
     // jarvis.yaml. After a successful write, the file on disk is the
-    // only source of truth for `remote:` (settings:save already pins a
-    // remote-origin draft's own `remote` key to it — dispatch.ts) — so
+    // only source of truth for `remote:` (a remote-origin settings:save
+    // changes only `sessions`, as an update of that file — dispatch.ts) — so
     // writeConfig re-reads the file rather than trusting `draft.remote`,
     // and applies whatever that read finds to the live bridge, via the
     // queued applyFromDisk above it. A rejected re-read (or a rejected
@@ -1780,6 +1873,9 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     });
     // Each followed container log is a live `docker logs -f` child.
     safely("docker logs", () => followers.closeAll());
+    // Task 5: the plan directories' fs.watch handles and their rescan
+    // interval — same reasoning as "session importer" above.
+    safely("plan watcher", () => stopPlanWatch());
   };
 
   // A session started in a terminal has no pty backlog — only the
@@ -1837,6 +1933,10 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
   // createGitHandlers' own doc comment.
   const gitHandlers = createGitHandlers({
     git,
+    // Pull, push and `gh` run with agentEnv, the login-shell PATH, read
+    // per call because it is resolved after startup.
+    remote: createGitRemoteOps({ env: () => agentEnv }),
+    worktrees: sessionWorktrees,
     sessions: { get: (id) => sessions.get(id) },
     language: PRIMARY_LANGUAGE,
     refresh: () => changeTracker.refresh(),
@@ -1972,6 +2072,11 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     platform,
   };
 
+  // The phone's Fit toggle (terminal-fit-overrides.ts): shared with
+  // onDeviceDisconnected above, which runs only well after this is set.
+  const fitOverrides = createTerminalFitOverrides({
+    resize: (paneKey, cols, rows) => terminal.resize(paneKey, cols, rows),
+  });
   // Every request handler, in one table (dispatch.ts). Each host registers
   // it on its own transport; the remote bridge calls the same table with a
   // different Origin.
@@ -1979,6 +2084,17 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     setup,
     orchestrator,
     sessionStore,
+    // Read from what is already kept: capacity readings (usageStore, fed
+    // by recordCapacityHistory below) and sessions.db's own rows. Never a
+    // query that costs anything.
+    usageHistory: () => {
+      const now = Date.now();
+      return buildUsageHistory(
+        usageStore.samples(now - CAPACITY_WINDOW_MS),
+        sessionStore.history(),
+        now,
+      );
+    },
     // Bug 5: the platform's own global fetch, the same one the Expo push
     // sender (remote-access.ts) and api-executor.ts already rely on
     // existing, rather than @jarvis/platform's apiFetch or undici.
@@ -2011,6 +2127,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     git: gitHandlers,
     workspace,
     terminal,
+    fitOverrides,
     shells,
     followers,
     editor,
@@ -2040,6 +2157,27 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     writeConfig,
     // Phase 1: remote:openWebClient's system browser (dispatch.ts).
     openExternal: (url) => host.openExternal(url),
+    plans: {
+      files: planFiles,
+      comments: planComments,
+      // plans:list's own `cwd` argument: true only for an existing,
+      // statable directory. Absolute is checked first and cheaply,
+      // before ever touching the filesystem for a relative path (or any
+      // other string) that could never be trusted as a cwd regardless of
+      // what stat() says about it.
+      isDirectory: async (path) => {
+        if (!isAbsolute(path)) return false;
+        try {
+          return (await stat(path)).isDirectory();
+        } catch {
+          return false;
+        }
+      },
+      // Live, not a snapshot — config.projects is mutated in place on a
+      // Settings save (writeConfig above), so a project added or removed
+      // is reflected on the very next plans:list call.
+      projectRoots: () => Object.values(config.projects),
+    },
   });
 
   // The desktop side of handleUtterance's UtteranceDeps: everything after
@@ -2306,6 +2444,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
       // Last: sessions killed above still persist their ended rows first.
       // The store ignores any write that lands after this.
       sessionStore.close?.();
+      usageStore.close();
     },
   };
 }

@@ -563,7 +563,7 @@ describe("workspace.e2e: Workspace panes, Changes, uploads/Postman import, api:s
     historyStore.open();
     await flush();
     const historyReq = lastMatching(socket, (f) => f.t === "req" && f.ch === "history:list");
-    expect(historyReq.a).toEqual([]);
+    expect(historyReq.a).toEqual([{ limit: 50 }]);
     answerCh(socket, "history:list", [
       {
         id: "s1",

@@ -25,6 +25,7 @@ function mulberry32(seed: number): () => number {
 }
 
 class FakeShell implements ShellProcess {
+  pid: number | undefined;
   written: string[] = [];
   resized: [number, number][] = [];
   killed = false;
@@ -277,6 +278,26 @@ describe("createShellManager", () => {
     expect(second).toEqual(first);
     expect(second[0]).not.toBe(first[0]);
     expect(Object.keys(first[0] ?? {}).sort()).toEqual(["exited", "paneKey"]);
+  });
+
+  it("maps each live pane's shell pid to its pane key", () => {
+    const { instance, shells } = manager();
+    instance.start("tab-1", "/p/a");
+    instance.start("tab-1:split-a", "/p/a");
+    instance.start("tab-2", "/p/b");
+    if (shells[0] !== undefined) shells[0].pid = 600;
+    if (shells[1] !== undefined) shells[1].pid = 700;
+    // tab-2's shell reported no pid; an exited pane's pid is no one's now.
+    if (shells[1] !== undefined) shells[1].emitExit(0);
+    instance.start("tab-3", "/p/c");
+    if (shells[3] !== undefined) shells[3].pid = 800;
+
+    expect(instance.shellPids()).toEqual(
+      new Map([
+        [600, "tab-1"],
+        [800, "tab-3"],
+      ]),
+    );
   });
 
   it("does not list a pane after kill forgets it", () => {

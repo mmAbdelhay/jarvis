@@ -71,7 +71,12 @@ function stubJarvis(overrides: Partial<Jarvis> = {}): Jarvis {
   const api: Jarvis = {
     getSessionLog: vi.fn(async () => ""),
     getSessionTranscript: vi.fn(async () => []),
-    resumeSession: vi.fn(async () => ({ ok: true, project: "app", language: "en" as const })),
+    resumeSession: vi.fn(async () => ({
+      ok: true as const,
+      project: "app",
+      tabId: "t1",
+      language: "en" as const,
+    })),
     getHistory: vi.fn(async () => [] as Session[]),
     listSessions: vi.fn(async () => [] as Session[]),
     refreshSessions: vi.fn(async () => ({ jarvis: 0, external: 0, importedTranscripts: 0 })),
@@ -834,7 +839,12 @@ describe("resume", () => {
   });
 
   it("resumes the session that is on screen", async () => {
-    const resumeSession = vi.fn(async () => ({ ok: true, language: "en" as const }));
+    const resumeSession = vi.fn(async () => ({
+      ok: true as const,
+      project: "app",
+      tabId: "t1",
+      language: "en" as const,
+    }));
     stubJarvis({ resumeSession });
     const { openSession } = await import("./session-view.js");
     await openSession(makeSession({ id: "past-1", state: "done" }));
@@ -850,7 +860,7 @@ describe("resume", () => {
   it("says why when a resume is refused", async () => {
     stubJarvis({
       resumeSession: vi.fn(async () => ({
-        ok: false,
+        ok: false as const,
         text: "This session cannot be resumed.",
         language: "en" as const,
       })),
@@ -918,8 +928,9 @@ describe("session table", () => {
 
   it("resumes the row's own session, naming the selected project", async () => {
     const resumeSession = vi.fn(async () => ({
-      ok: true,
+      ok: true as const,
       project: "app",
+      tabId: "t1",
       language: "en" as const,
     }));
     stubJarvis({
@@ -1005,6 +1016,58 @@ describe("session table", () => {
     // touched for a row with no pty behind it.
     expect(getSessionTranscript).toHaveBeenCalledWith("ext-1234");
     expect(document.getElementById("session-terminal")?.hidden).toBe(true);
+  });
+
+  it("marks an agent typed into a Jarvis terminal as such, and a click goes to its pane", async () => {
+    const getSessionTranscript = vi.fn(async () => []);
+    stubJarvis({
+      getHistory: vi.fn(async () => []),
+      listSessions: vi.fn(async () => [
+        makeSession({
+          id: "ext-96359",
+          origin: "external",
+          pid: 96359,
+          terminalPaneKey: "tab-3:p2",
+        }),
+      ]),
+      getSessionTranscript,
+    });
+    const { renderSessionTable, setTerminalPaneFocuser } = await import("./session-view.js");
+    const focus = vi.fn(() => true);
+    setTerminalPaneFocuser(focus);
+    await renderSessionTable();
+
+    const row = rows()[0];
+    expect(row?.querySelector(".session-chip--terminal")?.textContent).toBe("in Jarvis terminal");
+    expect(row?.querySelector(".session-chip--external")).toBeNull();
+    expect(row?.querySelector("button")).toBeNull();
+
+    row?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(focus).toHaveBeenCalledWith("tab-3:p2");
+    expect(getSessionTranscript).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the transcript view when the terminal pane is gone", async () => {
+    const getSessionTranscript = vi.fn(async () => []);
+    stubJarvis({
+      getHistory: vi.fn(async () => []),
+      listSessions: vi.fn(async () => [
+        makeSession({ id: "ext-96359", origin: "external", pid: 96359, terminalPaneKey: "tab-3" }),
+      ]),
+      getSessionTranscript,
+    });
+    const { renderSessionTable, setTerminalPaneFocuser } = await import("./session-view.js");
+    setTerminalPaneFocuser(() => false);
+    await renderSessionTable();
+
+    rows()[0]?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(getSessionTranscript).toHaveBeenCalledWith("ext-96359");
   });
 
   it("shows a notice, not a blank terminal, for an external row with no matched transcript", async () => {

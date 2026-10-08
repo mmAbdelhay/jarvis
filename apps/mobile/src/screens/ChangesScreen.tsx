@@ -1,56 +1,108 @@
-import { useFocusEffect } from "expo-router";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useFocusEffect, useRouter } from "expo-router";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  KeyboardAvoidingView,
+  Platform,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
-import { failedText, noticeText, sessionIdToReopen, shouldClearDraft } from "@/lib/changes-screen";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { BranchCard } from "@/components/changes/BranchCard";
+import { BranchSheet } from "@/components/changes/BranchSheet";
+import { CommitFooter } from "@/components/changes/CommitFooter";
+import { DiffModeToggle } from "@/components/changes/DiffModeToggle";
+import { DiffView } from "@/components/changes/DiffView";
+import { FileList } from "@/components/changes/FileList";
+import { ScreenHeader } from "@/components/ScreenHeader";
+import { SessionPickerSheet } from "@/components/SessionPickerSheet";
+import {
+  changesSessions,
+  defaultChangesSession,
+  failedText,
+  noticeText,
+  sessionIdToReopen,
+  shouldClearDraft,
+} from "@/lib/changes-screen";
+import { loadDiffMode, setDiffMode, type DiffMode } from "@/lib/prefs";
+import { filePrefsStore } from "@/lib/prefs-file";
 import { createChangesStore, ENDED_SESSION_NOTICE, type ChangesState } from "@/lib/changes-store";
-import { historyListDisplay } from "@/lib/history-screen";
-import { createHistoryStore, type HistoryState } from "@/lib/history-store";
 import { t } from "@/lib/i18n";
+import { keyboardAvoidingBehavior, keyboardBottomPadding } from "@/lib/keyboard-offset";
 import { useLanguage } from "@/lib/language-context";
 import { useRpcClient } from "@/lib/rpc-context";
+import { findRow, isActiveRow, mergeSessions } from "@/lib/sessions-merge";
+import { createSessionsStore, type SessionsView } from "@/lib/sessions-store";
 import { theme } from "@/lib/theme";
+import { useKeyboardHeight } from "@/lib/use-keyboard-height";
+import { useLayoutClass } from "@/lib/use-layout-class";
 
 /** Git changes: the full-screen `/changes` route on a phone (with the
- *  session a detail link names), or an inline Workspace tab on a wide
- *  screen. The screen has no header of its own, so `embedded` changes
- *  nothing it draws today. */
-export function ChangesScreen(props: { sessionId: string | undefined; embedded: boolean }) {
+ *  session a detail link names, else the most recent one), or an inline
+ *  Workspace tab on a wide screen. On a phone the header's subtitle names
+ *  the session and opens a picker; wide and embedded keep a chip strip. */
+export function ChangesScreen(props: {
+  sessionId: string | undefined;
+  embedded: boolean;
+  /** "split" (the wide /changes route): the files column beside the diff.
+   *  Default "stack": the phone screen and the Workspace tab. */
+  layout?: "stack" | "split";
+}) {
   const language = useLanguage();
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const keyboardHeight = useKeyboardHeight();
+  // The wide panel and the Workspace tab carry their own titles.
+  const wideLayout = useLayoutClass().kind === "wide";
+  const split = props.layout === "split" && wideLayout;
+  const phoneHeader = !props.embedded && !wideLayout;
   const client = useRpcClient();
   const routeSessionId = props.sessionId;
-  const historyStore = useMemo(() => createHistoryStore({ client }), [client]);
+  const sessionsStore = useMemo(() => createSessionsStore({ client }), [client]);
   const changesStore = useMemo(() => createChangesStore({ client }), [client]);
-  const [history, setHistory] = useState<HistoryState>(historyStore.get());
+  const [sessions, setSessions] = useState<SessionsView>(sessionsStore.get());
   const [changes, setChanges] = useState<ChangesState>(changesStore.get());
   const [connection, setConnection] = useState(client.state());
   const [refreshing, setRefreshing] = useState(false);
   const [message, setMessage] = useState("");
+  const [branchesOpen, setBranchesOpen] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
   // Fix round 2 (New Breakage 1): the route id from a session-detail link
   // is consumed once, not on every refocus — otherwise it would keep
-  // overriding any chip the user taps afterward for the life of this
+  // overriding any session the user picks afterward for the life of this
   // screen instance. See sessionIdToReopen's doc comment.
+  const [diffMode, setDiffModeState] = useState<DiffMode>("unified");
   const consumedRouteIdRef = useRef<string | undefined>(undefined);
+
+  // The viewer's saved diff layout; a failing read keeps "unified".
+  useEffect(() => {
+    if (!split) return;
+    const locale = Intl.DateTimeFormat().resolvedOptions().locale;
+    loadDiffMode(filePrefsStore, locale)
+      .then(setDiffModeState)
+      .catch(() => undefined);
+  }, [split]);
+
+  function chooseDiffMode(mode: DiffMode): void {
+    setDiffModeState(mode);
+    const locale = Intl.DateTimeFormat().resolvedOptions().locale;
+    setDiffMode(filePrefsStore, locale, mode).catch(() => undefined);
+  }
 
   // Fix round 1 (Important 2): the store's own `sessionId` survives
   // `close()` — only its subscriptions and visible data are torn down — so
   // reopening it here (or a route id from a session-detail link, once)
-  // restores the chip highlight, the body and pull-to-refresh on every
-  // refocus, not just the first visit.
+  // restores the session, the body and pull-to-refresh on every refocus.
   useFocusEffect(
     useCallback(() => {
-      const unHistory = historyStore.subscribe(setHistory);
+      const unSessions = sessionsStore.subscribe(setSessions);
       const unChanges = changesStore.subscribe(setChanges);
       const unConnection = client.onState((state) => setConnection(state));
       setConnection(client.state());
-      historyStore.open();
+      sessionsStore.focus();
       const toOpen = sessionIdToReopen(
         changesStore.get(),
         routeSessionId,
@@ -58,28 +110,47 @@ export function ChangesScreen(props: { sessionId: string | undefined; embedded: 
       );
       if (routeSessionId !== undefined) consumedRouteIdRef.current = routeSessionId;
       if (toOpen !== undefined) changesStore.open(toOpen);
-      setHistory(historyStore.get());
+      setSessions(sessionsStore.get());
       setChanges(changesStore.get());
       return () => {
-        unHistory();
+        unSessions();
         unChanges();
         unConnection();
-        historyStore.close();
+        sessionsStore.blur();
         changesStore.close();
       };
-    }, [historyStore, changesStore, client, routeSessionId]),
+    }, [sessionsStore, changesStore, client, routeSessionId]),
   );
+
+  // Only sessions the laptop's own list holds: git:changes resolves a
+  // session through that list, so a History-only or imported session would
+  // answer "I don't know a session with that id".
+  const merged = useMemo(() => mergeSessions(changesSessions(sessions), []), [sessions]);
+  const defaultId = useMemo(
+    () =>
+      defaultChangesSession(
+        merged.filter(isActiveRow),
+        merged.filter((row) => !isActiveRow(row)),
+      ),
+    [merged],
+  );
+  // No route id and nothing chosen yet: open the default session as soon as
+  // the lists land, so the screen never sits on an empty picker.
+  useEffect(() => {
+    if (changes.sessionId === undefined && defaultId !== undefined) changesStore.open(defaultId);
+  }, [changes.sessionId, defaultId, changesStore]);
 
   const refresh = useCallback(() => {
     setRefreshing(true);
-    historyStore.refresh();
+    void sessionsStore.refresh();
     changesStore.refresh();
     setTimeout(() => setRefreshing(false), 250);
-  }, [historyStore, changesStore]);
+  }, [sessionsStore, changesStore]);
 
   const selectedFiles = changes.changes?.changes.files ?? [];
   const diff = changes.diff;
-  const sessionsDisplay = historyListDisplay(history, language);
+  const stagedCount = selectedFiles.filter((file) => file.staged).length;
+  const selectedRow = findRow(merged, changes.sessionId);
   // Fix round 2 (New Breakage 2): also gate on a session being chosen —
   // Commit/Stage previously reached the store's mutation queue with no
   // session at all, which the store now guards but the button shouldn't
@@ -91,42 +162,18 @@ export function ChangesScreen(props: { sessionId: string | undefined; embedded: 
     if (shouldClearDraft(changesStore.get())) setMessage("");
   }
 
-  return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.content}
-      refreshControl={
-        <RefreshControl
-          refreshing={refreshing}
-          onRefresh={refresh}
-          tintColor={theme.colors.primary}
-        />
-      }
-    >
-      <Text style={styles.sectionTitle}>{t(language, "changes.sessions")}</Text>
-      <ScrollView horizontal contentContainerStyle={styles.sessionStrip}>
-        {history.sessions.map((session) => (
-          <TouchableOpacity
-            key={session.id}
-            style={[styles.chip, changes.sessionId === session.id ? styles.chipActive : undefined]}
-            onPress={() => changesStore.open(session.id)}
-          >
-            <Text style={styles.chipText}>{session.summary}</Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
-      {sessionsDisplay.kind === "empty" && (
+  const subtitle =
+    selectedRow === undefined
+      ? undefined
+      : (phoneHeader || split) && merged.length > 1
+        ? `${selectedRow.summary} ▾`
+        : selectedRow.summary;
+  const footerBottom = phoneHeader ? (keyboardHeight > 0 ? 10 : Math.max(insets.bottom, 26)) : 10;
+
+  const statusBlock = (
+    <>
+      {merged.length === 0 && !sessions.loading && (
         <Text style={styles.empty}>{t(language, "changes.noSessions")}</Text>
-      )}
-      {sessionsDisplay.kind === "failed" && (
-        <View style={styles.failedBlock}>
-          <Text selectable style={styles.error}>
-            {sessionsDisplay.text}
-          </Text>
-          <TouchableOpacity onPress={() => historyStore.refresh()}>
-            <Text style={styles.retry}>{t(language, "common.retry")}</Text>
-          </TouchableOpacity>
-        </View>
       )}
 
       {changes.phase === "loading" && (
@@ -158,194 +205,230 @@ export function ChangesScreen(props: { sessionId: string | undefined; embedded: 
         <Text style={styles.empty}>{t(language, "common.stale")}</Text>
       )}
       {changes.uncertain && <Text style={styles.warning}>{t(language, "changes.uncertain")}</Text>}
+    </>
+  );
+  const cleanNote = changes.changes && selectedFiles.length === 0 && (
+    <Text style={styles.empty}>{t(language, "changes.clean")}</Text>
+  );
+  const sheets = (
+    <>
+      <BranchSheet
+        visible={branchesOpen}
+        language={language}
+        state={changes}
+        store={changesStore}
+        disabled={disabled}
+        onClose={() => setBranchesOpen(false)}
+      />
+      <SessionPickerSheet
+        visible={pickerOpen}
+        rows={merged}
+        selectedId={changes.sessionId}
+        onSelect={(id) => changesStore.open(id)}
+        onClose={() => setPickerOpen(false)}
+      />
+    </>
+  );
+  const refreshControl = (
+    <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={theme.colors.primary} />
+  );
+  const screenStyle = [
+    styles.screen,
+    { paddingBottom: keyboardBottomPadding(Platform.OS, keyboardHeight, insets.bottom) },
+  ];
 
-      {changes.changes && (
-        <View style={styles.repoBlock}>
-          <Text selectable style={styles.repoText}>
-            {changes.changes.changes.repoPath}
-          </Text>
-          <Text style={styles.meta}>
-            {changes.changes.changes.detached ? "HEAD" : changes.changes.changes.branch} · +
-            {changes.changes.changes.insertions} -{changes.changes.changes.deletions}
-          </Text>
-        </View>
-      )}
-
-      {selectedFiles.length > 0 && (
-        <View style={styles.fileList}>
-          {selectedFiles.map((file) => (
-            <View key={file.path} style={styles.fileRow}>
-              <TouchableOpacity
-                style={styles.fileName}
-                onPress={() => changesStore.selectFile(file.path)}
-              >
-                <Text selectable style={styles.path}>
-                  {file.path}
-                </Text>
-                <Text style={styles.meta}>
-                  {file.status} · +{file.insertions} -{file.deletions}
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                disabled={disabled}
-                style={[styles.smallButton, disabled ? styles.buttonDisabled : undefined]}
-                onPress={() => {
-                  void changesStore.setStaged(file.path, !file.staged);
-                }}
-              >
-                <Text style={styles.buttonText}>
-                  {file.staged ? t(language, "changes.unstage") : t(language, "changes.stage")}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          ))}
-        </View>
-      )}
-
-      {changes.changes && selectedFiles.length === 0 && (
-        <Text style={styles.empty}>{t(language, "changes.clean")}</Text>
-      )}
-
-      {diff && (
-        <View style={styles.diffBlock}>
-          <Text selectable style={styles.path}>
-            {diff.path}
-          </Text>
-          {diff.binary && <Text style={styles.empty}>{t(language, "changes.binary")}</Text>}
-          {diff.tooLarge && <Text style={styles.empty}>{t(language, "changes.tooLarge")}</Text>}
-          {!diff.binary && !diff.tooLarge && (
-            <ScrollView horizontal>
-              <View style={styles.diffContent}>
-                {diff.hunks.map((hunk) => (
-                  <View key={hunk.header} style={styles.hunk}>
-                    <Text selectable style={[styles.hunkHeader, { writingDirection: "ltr" }]}>
-                      {hunk.header}
+  if (split) {
+    const openFile = diff && selectedFiles.find((file) => file.path === diff.path);
+    return (
+      <KeyboardAvoidingView
+        style={[screenStyle, styles.splitRow]}
+        behavior={keyboardAvoidingBehavior(Platform.OS)}
+      >
+        <View style={styles.filesColumn}>
+          <ScrollView
+            style={styles.container}
+            contentContainerStyle={styles.columnContent}
+            refreshControl={refreshControl}
+          >
+            <View>
+              <Text style={styles.wideTitle}>{t(language, "changes.title")}</Text>
+              {subtitle !== undefined &&
+                (merged.length > 1 ? (
+                  <TouchableOpacity accessibilityRole="button" onPress={() => setPickerOpen(true)}>
+                    <Text style={styles.wideSubtitle} numberOfLines={1}>
+                      {subtitle}
                     </Text>
-                    {hunk.lines.map((line) => (
-                      <Text
-                        selectable
-                        key={`${hunk.header}:${line.kind}:${line.beforeLine ?? "-"}:${line.afterLine ?? "-"}`}
-                        style={[
-                          styles.diffLine,
-                          { writingDirection: "ltr" },
-                          line.kind === "added" ? styles.added : undefined,
-                          line.kind === "removed" ? styles.removed : undefined,
-                        ]}
-                      >
-                        {line.kind === "added" ? "+" : line.kind === "removed" ? "-" : " "}
-                        {String(line.beforeLine ?? "").padStart(4, " ")}{" "}
-                        {String(line.afterLine ?? "").padStart(4, " ")} {line.text}
-                      </Text>
-                    ))}
-                  </View>
+                  </TouchableOpacity>
+                ) : (
+                  <Text style={styles.wideSubtitle} numberOfLines={1}>
+                    {subtitle}
+                  </Text>
                 ))}
+            </View>
+            {statusBlock}
+            <BranchCard
+              language={language}
+              state={changes}
+              store={changesStore}
+              disabled={disabled}
+              showRepoPath={false}
+              density="compact"
+              onOpenBranches={() => setBranchesOpen(true)}
+            />
+            <FileList
+              language={language}
+              state={changes}
+              store={changesStore}
+              disabled={disabled}
+              density="compact"
+            />
+            {cleanNote}
+          </ScrollView>
+          <CommitFooter
+            language={language}
+            message={message}
+            onChangeMessage={setMessage}
+            stagedCount={stagedCount}
+            disabled={disabled}
+            bottomPadding={0}
+            variant="column"
+            onCommit={() => {
+              void commit();
+            }}
+          />
+        </View>
+        <View style={styles.diffPane}>
+          {diff && (
+            <>
+              <View style={styles.diffHeader}>
+                <Text selectable style={styles.diffPath} numberOfLines={1}>
+                  {diff.path}
+                  {openFile !== undefined && openFile.insertions > 0 && (
+                    <Text style={styles.added}> +{openFile.insertions}</Text>
+                  )}
+                  {openFile !== undefined && openFile.deletions > 0 && (
+                    <Text style={styles.removed}> −{openFile.deletions}</Text>
+                  )}
+                </Text>
+                <DiffModeToggle language={language} mode={diffMode} onChange={chooseDiffMode} />
               </View>
-            </ScrollView>
+              <ScrollView style={styles.container}>
+                <DiffView language={language} diff={diff} density="wide" mode={diffMode} />
+              </ScrollView>
+            </>
           )}
         </View>
-      )}
+        {sheets}
+      </KeyboardAvoidingView>
+    );
+  }
 
-      <TextInput
-        style={styles.input}
-        value={message}
-        onChangeText={setMessage}
-        placeholder={t(language, "changes.commitPlaceholder")}
-        placeholderTextColor={theme.colors.textMuted}
-        multiline
-      />
-      <TouchableOpacity
-        disabled={disabled || message.trim() === ""}
-        style={[
-          styles.button,
-          disabled || message.trim() === "" ? styles.buttonDisabled : undefined,
-        ]}
-        onPress={() => {
+  return (
+    <KeyboardAvoidingView style={screenStyle} behavior={keyboardAvoidingBehavior(Platform.OS)}>
+      {phoneHeader && (
+        <ScreenHeader
+          title={t(language, "changes.title")}
+          size="page"
+          bordered={false}
+          onBack={router.back}
+          {...(subtitle === undefined ? {} : { subtitle })}
+          {...(merged.length > 1 ? { onSubtitlePress: () => setPickerOpen(true) } : {})}
+        />
+      )}
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={styles.content}
+        refreshControl={refreshControl}
+      >
+        {!phoneHeader && merged.length > 0 && (
+          <ScrollView horizontal contentContainerStyle={styles.sessionStrip}>
+            {merged.map((row) => (
+              <TouchableOpacity
+                key={row.id}
+                style={[styles.chip, changes.sessionId === row.id && styles.chipActive]}
+                onPress={() => changesStore.open(row.id)}
+              >
+                <Text style={styles.chipText}>{row.summary}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        )}
+        {statusBlock}
+        <BranchCard
+          language={language}
+          state={changes}
+          store={changesStore}
+          disabled={disabled}
+          showRepoPath={!phoneHeader}
+          onOpenBranches={() => setBranchesOpen(true)}
+        />
+
+        <FileList language={language} state={changes} store={changesStore} disabled={disabled} />
+
+        {cleanNote}
+
+        {diff && <DiffView language={language} diff={diff} />}
+      </ScrollView>
+      <CommitFooter
+        language={language}
+        message={message}
+        onChangeMessage={setMessage}
+        stagedCount={stagedCount}
+        disabled={disabled}
+        bottomPadding={footerBottom}
+        onCommit={() => {
           void commit();
         }}
-      >
-        <Text style={styles.primaryButtonText}>{t(language, "changes.commit")}</Text>
-      </TouchableOpacity>
-    </ScrollView>
+      />
+      {sheets}
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
+  screen: { flex: 1, backgroundColor: theme.colors.background },
   container: { flex: 1, backgroundColor: theme.colors.background },
-  content: { padding: theme.spacing.lg, gap: theme.spacing.md },
-  sectionTitle: {
-    color: theme.colors.text,
-    fontSize: theme.font.size.lg,
-    fontWeight: theme.font.weight.bold,
-  },
+  content: { paddingHorizontal: 16, paddingBottom: 12, paddingTop: 4, gap: 12 },
   sessionStrip: { gap: theme.spacing.sm },
   chip: {
+    minHeight: 36,
+    justifyContent: "center",
     borderColor: theme.colors.border,
     borderWidth: 1,
-    borderRadius: theme.radius.sm,
-    padding: theme.spacing.sm,
+    borderRadius: theme.radius.pill,
+    paddingHorizontal: 14,
   },
-  chipActive: { borderColor: theme.colors.primary, backgroundColor: theme.colors.surfaceAlt },
-  chipText: { color: theme.colors.text, maxWidth: 220 },
-  empty: { color: theme.colors.textMuted },
-  warning: { color: theme.colors.warning },
-  error: { color: theme.colors.danger },
-  failedBlock: { gap: theme.spacing.xs },
-  retry: { color: theme.colors.primary, fontWeight: theme.font.weight.bold },
-  repoBlock: {
-    borderColor: theme.colors.border,
-    borderWidth: 1,
-    borderRadius: theme.radius.sm,
-    padding: theme.spacing.md,
-    gap: theme.spacing.xs,
+  chipActive: { borderColor: theme.colors.accent, backgroundColor: theme.colors.accentSoft },
+  chipText: { ...theme.type.chip, color: theme.colors.text, maxWidth: 220 },
+  empty: { color: theme.colors.textMuted, fontFamily: theme.font.body },
+  warning: { color: theme.colors.warning, fontFamily: theme.font.body },
+  error: { color: theme.colors.danger, fontFamily: theme.font.body },
+  splitRow: { flexDirection: "row" },
+  filesColumn: {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 360,
+    maxWidth: 420,
+    paddingVertical: 20,
+    paddingHorizontal: 16,
+    gap: 14,
+    borderEndWidth: 1,
+    borderEndColor: theme.colors.hairlineSoft,
   },
-  repoText: { color: theme.colors.text },
-  meta: { color: theme.colors.textMuted, fontSize: theme.font.size.sm },
-  fileList: { gap: theme.spacing.sm },
-  fileRow: { flexDirection: "row", alignItems: "center", gap: theme.spacing.sm },
-  fileName: {
-    flex: 1,
-    borderColor: theme.colors.border,
-    borderWidth: 1,
-    borderRadius: theme.radius.sm,
-    padding: theme.spacing.sm,
-  },
-  path: { color: theme.colors.text },
-  smallButton: {
-    backgroundColor: theme.colors.surfaceAlt,
-    borderRadius: theme.radius.sm,
-    padding: theme.spacing.sm,
-    minWidth: 76,
+  columnContent: { gap: 14 },
+  wideTitle: { ...theme.type.cardValue, color: theme.colors.text },
+  wideSubtitle: { fontFamily: theme.font.body, fontSize: 13, color: theme.colors.textMuted },
+  diffPane: { flex: 1, minWidth: 0, paddingVertical: 20, paddingHorizontal: 24, gap: 12 },
+  diffHeader: {
+    flexDirection: "row",
     alignItems: "center",
+    justifyContent: "space-between",
+    flexWrap: "wrap",
+    gap: 10,
   },
-  buttonText: { color: theme.colors.text },
-  diffBlock: { gap: theme.spacing.sm },
-  // Fix round 1 (Important 4): forced LTR, like the terminal
-  // (TerminalWebView.tsx) and key bar (KeyBar.tsx) — a unified diff's
-  // +/-, padded line numbers and monospace content must not be bidi
-  // reordered under the Arabic UI, even when the changed lines themselves
-  // contain Arabic text (constraint 7: real RTL stays outside code/
-  // terminal/diff content).
-  diffContent: { minWidth: 720, gap: theme.spacing.md, direction: "ltr" },
-  hunk: { gap: theme.spacing.xs },
-  hunkHeader: { color: theme.colors.primary, fontFamily: "monospace" },
-  diffLine: { color: theme.colors.text, fontFamily: "monospace" },
+  diffPath: { ...theme.type.mono, flexShrink: 1, fontSize: 14, color: theme.colors.text },
   added: { color: theme.colors.success },
-  removed: { color: theme.colors.danger },
-  input: {
-    minHeight: 72,
-    color: theme.colors.text,
-    borderColor: theme.colors.border,
-    borderWidth: 1,
-    borderRadius: theme.radius.sm,
-    padding: theme.spacing.sm,
-    textAlignVertical: "top",
-  },
-  button: {
-    backgroundColor: theme.colors.primary,
-    borderRadius: theme.radius.sm,
-    padding: theme.spacing.md,
-    alignItems: "center",
-  },
-  buttonDisabled: { opacity: 0.45 },
-  primaryButtonText: { color: theme.colors.primaryText, fontWeight: theme.font.weight.bold },
+  removed: { color: theme.colors.dangerText },
+  failedBlock: { gap: theme.spacing.xs },
+  retry: { color: theme.colors.accentText, fontFamily: theme.font.bold },
 });

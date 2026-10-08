@@ -16,14 +16,20 @@
 // process.platform (platform-convention.test.ts). Whatever needs either is
 // built in main.ts and handed in through DispatchDeps.
 import {
+  anchorComments,
+  formatFeedback,
   isSessionState,
+  readPrompt,
   type HandleOptions,
+  type PlanComment,
   type Session,
   type SessionEditPatch,
   type StreamSnapshot,
   type Turn,
 } from "@jarvis/core";
-import type { DockerConfig } from "@jarvis/platform";
+import type { DockerConfig, PlanCommentStore, PlanFiles, SnippetLanguage } from "@jarvis/platform";
+import { isWithin } from "@jarvis/platform";
+import { bracketedSubmit } from "./bracketed.js";
 import {
   isFileId,
   isSubscriptionKey,
@@ -43,7 +49,9 @@ import {
 import type { InvokeChannel } from "./channels.js";
 import type { IpLocateResult } from "./ip-locate.js";
 import type { TabHost } from "./core/tab-host.js";
+import type { UsageHistory } from "./usage-history.js";
 import type { JarvisConfig } from "./config.js";
+import { parseSessions, type SessionsConfig } from "./sessions-config.js";
 import {
   DESKTOP_OWNER,
   REMOTE_FOLLOW_TAB_PATTERN,
@@ -60,23 +68,43 @@ import {
   type DatabaseHandlers,
   type DockerHandlers,
   type EditorHandlers,
+  type EntryKind,
+  type SessionAnswerResult,
   type GitHandlers,
   type GitViewResult,
   type SettingsHandlers,
   type SetupHandlers,
   type TerminalHandlers,
+  hasControlCharacter,
 } from "./ipc.js";
 import { errorMessage, MESSAGES } from "./messages.js";
 import type { Notifier } from "./notify.js";
+import { historyPage, parseHistoryPageRequest } from "./history-page.js";
 import { remoteWebUrl } from "./remote-web.js";
 import type { SettingsWriteResult } from "./settings-io.js";
 import type { TailscaleCertResult } from "./tailscale-cert.js";
+import { createTerminalFitOverrides, type TerminalFitOverrides } from "./terminal-fit-overrides.js";
 
 export type Origin = { kind: "desktop" } | { kind: "remote"; deviceId: string; deviceName: string };
 
 export const DESKTOP_ORIGIN: Origin = { kind: "desktop" };
 
 export type Handler = (args: readonly unknown[], origin: Origin) => unknown | Promise<unknown>;
+
+const REMOTE_TAB_TITLE_MAX = 80;
+
+/** A title a remote origin may give a tab. */
+function isRemoteTabTitle(title: unknown): title is string {
+  return (
+    typeof title === "string" &&
+    title.trim() !== "" &&
+    title.length <= REMOTE_TAB_TITLE_MAX &&
+    !hasControlCharacter(title) &&
+    // Bidi override and isolate characters would let a title draw as
+    // something other than what it says on the laptop's tab strip.
+    !/[\u202A-\u202E\u2066-\u2069]/.test(title)
+  );
+}
 
 /** `{ ok:false, text: MESSAGES.invalidArgument(language), language }`, named
  *  once so a channel that only needs "the argument was the wrong shape"
@@ -156,7 +184,8 @@ export type SidecarPublisher = {
 };
 
 /** The handlers that hold a BrowserWindow, the screen, a native dialog, a
- *  native menu or a hosted page's WebContentsView (view-reconciler.ts).
+ *  native menu, a hosted page's WebContentsView (view-reconciler.ts), or
+ *  (plans:openLink, Task 8) the OS's own browser via Electron's `shell`.
  *  They can never run for a phone, nor in a headless core, so they never
  *  enter the table — desktop-only.ts registers them in the Electron host. */
 export type ElectronBoundChannel =
@@ -173,6 +202,13 @@ export type ElectronBoundChannel =
   | "workspace:hideAll"
   | "workspace:pip"
   | "dialog:pickFiles"
+  | "plans:openLink"
+  // The updater: downloads, swaps and quits this app (updater.ts).
+  | "update:check"
+  | "update:download"
+  | "update:cancel"
+  | "update:counts"
+  | "update:install"
   // Task 23: where the core runs is the host's to decide — these start,
   // stop and replace the core itself (daemon/mode.ts).
   | "background:status"
@@ -228,7 +264,21 @@ export type DispatchDeps = {
   sessionTranscript: ReturnType<typeof createTranscriptHandler>;
   sessionResume: ReturnType<typeof createResumeInTerminalHandler>;
   voice: { setTarget(sessionId: string | undefined): void };
-  git: Pick<GitHandlers, "changes" | "fileDiff" | "setStaged" | "commit">;
+  git: Pick<
+    GitHandlers,
+    | "changes"
+    | "fileDiff"
+    | "setStaged"
+    | "commit"
+    | "branches"
+    | "switchBranch"
+    | "pull"
+    | "push"
+    | "pullRequest"
+    | "worktree"
+    | "mergeWorktree"
+    | "removeWorktree"
+  >;
   /** The core's tab state (core/tab-host.ts). What only a hosted page's
    *  view can do — back, reload, DevTools, visibility — is not here: those
    *  channels are Electron-bound (desktop-only.ts). */
@@ -245,12 +295,22 @@ export type DispatchDeps = {
     | "state"
   >;
   terminal: TerminalHandlers;
+  // The phone's Fit toggle (terminal-fit-overrides.ts): which desktop-sized
+  // panes a phone has fitted. Passed in so the host can give a fitted pane
+  // back on that device's disconnect; made here when it is not.
+  fitOverrides?: TerminalFitOverrides;
   // terminal:attach's backlog read; not part of TerminalHandlers because it
   // reads the shell manager directly rather than going through terminal.ts.
+  // `write` backs plans:send (Task 5): the same ShellManager.write path
+  // terminal:input uses. plans:send finds a pane (and whether it has
+  // exited) through `panes()`, already declared below — never a separate
+  // `has`, which does not distinguish a live pane from an exited one still
+  // holding its retained log (ruling 12).
   shells: {
     log(paneKey: string): string;
     snapshot(paneKey: string): StreamSnapshot;
     panes(): readonly TerminalPaneInfo[];
+    write(paneKey: string, data: string): void;
   };
   followers: DockerFollowers;
   editor: EditorHandlers;
@@ -279,6 +339,8 @@ export type DispatchDeps = {
   bookmarks: BookmarksHandlers;
   settings: SettingsHandlers;
   providers: { refreshCapacity(options: { force: boolean }): Promise<unknown> };
+  // usage:history — usage-history.ts's builder over what is already kept.
+  usageHistory: () => UsageHistory;
   // startVoice / stopVoice from main.ts — the one voice implementation the
   // hotkey and the mic button both drive.
   voiceControl: { start(): void; stop(): void };
@@ -311,6 +373,30 @@ export type DispatchDeps = {
   // write is pinned to whatever `current.remote` already holds on disk,
   // the same discipline disableRemoteOnDisk follows.
   writeConfig(update: (current: JarvisConfig) => JarvisConfig): Promise<SettingsWriteResult>;
+  // Task 5 (plan panel): the one PlanFiles and one PlanCommentStore
+  // instance for the whole app — Tasks 3 and 4's own factories, built once
+  // in main.ts and handed in here, the same "exactly one instance" rule
+  // bookmarks' store and the api store already follow.
+  plans: {
+    files: PlanFiles;
+    comments: PlanCommentStore;
+    // plans:list's own `cwd` argument: true only for a path that is both
+    // absolute and, right now, an existing directory — the check that
+    // decides whether to trust the caller's cwd or fall back to the
+    // pane's own recorded start directory (deps.terminal.paneStartDir).
+    // Injected, like `readFile` above, so this file does no I/O of its
+    // own and stays testable without a real filesystem.
+    isDirectory(path: string): Promise<boolean>;
+    // Every configured project's own directory (config.projects' values,
+    // read live so a Settings save is picked up on the next call) — the
+    // other half of plans:list's own `cwd` containment check
+    // (resolvePlansCwd): a candidate must be, or live under, either the
+    // calling pane's own start directory or one of these, or it is
+    // refused. Without this a remote caller could hand plans:list any
+    // existing absolute directory on the host and have it probed for
+    // `docs/superpowers/{specs,plans}` — this is what stops that.
+    projectRoots(): readonly string[];
+  };
   // Phase 1: Electron's shell.openExternal — the system browser, never a
   // window inside Jarvis. Only remote:openWebClient calls it, with a URL
   // built from the bridge's own status.
@@ -329,6 +415,53 @@ function isDimension(value: unknown): value is number {
  *  as RECENT_TURNS_PER_DEVICE elsewhere: a phone reconnecting after a long
  *  gap gets a bounded catch-up, not the whole session's history. */
 export const TURNS_LIST_MAX = 50;
+
+/** Cap on any `path`/`blockId`/comment-id string argument a plans:* channel
+ *  accepts, checked at the handler boundary before any of it is used — the
+ *  defence-in-depth re-check remote-policy.ts's own plans entries call for,
+ *  same discipline as every other remote-reachable argument in this file.
+ *  Comfortably above any real path or markdown block id; a caller sending
+ *  more is refused, never truncated. */
+const MAX_PLAN_ARG_CHARS = 4096;
+
+/** Cap on `source` in plans:writeBlock, checked here in addition to (never
+ *  instead of) `PlanFiles.writeBlock`'s own MAX_PLAN_BYTES check —
+ *  @jarvis/platform's plans.ts enforces the same 1 MiB bound on the file
+ *  this becomes, so a source this large is refused before it is even
+ *  handed to the write queue. */
+const MAX_PLAN_SOURCE_BYTES = 1024 * 1024;
+
+/**
+ * plans:list's own `cwd` argument: used only when it is a string, at most
+ * MAX_PLAN_ARG_CHARS long, equal to or inside either the calling pane's
+ * own recorded start directory or one of the app's configured project
+ * roots, and — per `isDirectory` — names a directory that exists right
+ * now. The containment check runs before `isDirectory`'s own `stat`, so a
+ * candidate outside both never reaches the filesystem at all: a remote
+ * caller cannot use this argument to probe for the existence of an
+ * arbitrary directory elsewhere on the host.
+ *
+ * Anything that fails any of those falls back to `paneKey`'s own recorded
+ * start directory, and a `paneKey` this process never started falls back
+ * to `undefined`, the same "list what the agent-only directories hold"
+ * default `PlanFiles.list` already gives an unrooted caller.
+ */
+async function resolvePlansCwd(
+  candidate: unknown,
+  paneKey: string,
+  terminal: Pick<TerminalHandlers, "paneStartDir">,
+  isDirectory: (path: string) => Promise<boolean>,
+  projectRoots: readonly string[],
+): Promise<string | undefined> {
+  const startDir = terminal.paneStartDir(paneKey);
+  if (typeof candidate === "string" && candidate.length <= MAX_PLAN_ARG_CHARS) {
+    const withinKnownRoot =
+      (startDir !== undefined && isWithin(candidate, startDir)) ||
+      projectRoots.some((root) => isWithin(candidate, root));
+    if (withinKnownRoot && (await isDirectory(candidate))) return candidate;
+  }
+  return startDir;
+}
 
 export function createDispatchTable(deps: DispatchDeps): DispatchTable {
   const {
@@ -356,7 +489,13 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
   // the phone (never sized by the desktop). "Desktop" vs "remote" comes
   // from `origin`, which the dispatch path derives itself and a payload
   // cannot spoof — never a flag read out of `args`.
-  const desktopSizedPanes = new Set<string>();
+  // Panes live in `fitOverrides` instead — the same ownership, plus the
+  // desktop's size and the phone Fit that may be holding the pane.
+  const fitOverrides =
+    deps.fitOverrides ??
+    createTerminalFitOverrides({
+      resize: (paneKey, cols, rows) => deps.terminal.resize(paneKey, cols, rows),
+    });
   const desktopSizedSessions = new Set<string>();
   return {
     "setup:check": () => setup.check(),
@@ -384,7 +523,18 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
     // Pulled on demand when the renderer's history panel opens, not
     // pushed — there is no live subscriber to keep in sync for a past-
     // sessions view, only a snapshot to render once per open.
-    "history:list": () => sessionStore.history(),
+    // No argument: the whole list, as the desktop renderer reads it. A page
+    // request (history-page.ts) answers one page — a malformed one is
+    // treated as no request, never as an error.
+    "history:list": ([page]) => {
+      const request = parseHistoryPageRequest(page);
+      const all = sessionStore.history();
+      // The store's rows are Sessions (session-store.ts parses each one);
+      // the seam is typed loosely so test fakes can stay partial.
+      return request === undefined || !Array.isArray(all)
+        ? all
+        : historyPage(all as Session[], request);
+    },
     // Bug 5: ignores its args, same as sessions:list/sessions:refresh above
     // — the only "argument" is which laptop clicked "Use my location".
     "prayer:locateIp": () => deps.ipLocate.lookup(),
@@ -484,6 +634,22 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
       if (typeof sessionId !== "string" || typeof data !== "string") return;
       sessions.write(sessionId, data);
     },
+    "session:prompt": ([sessionId]) =>
+      typeof sessionId === "string" ? (readPrompt(sessions.log(sessionId)) ?? null) : null,
+    // Read again at the moment of answering, never trusted from the call:
+    // the prompt shown a minute ago may have been answered in the terminal
+    // or replaced by another, and keys meant for one must never land in
+    // the other. The caller names the option by index *and* label, and both
+    // have to match what is on screen now.
+    "session:answer": ([sessionId, index, label]): SessionAnswerResult => {
+      if (typeof sessionId !== "string") return { ok: false, reason: "gone" };
+      const prompt = readPrompt(sessions.log(sessionId));
+      if (prompt === undefined) return { ok: false, reason: "gone" };
+      const option = typeof index === "number" ? prompt.options[index] : undefined;
+      if (option === undefined || option.label !== label) return { ok: false, reason: "changed" };
+      sessions.write(sessionId, option.keys);
+      return { ok: true };
+    },
     // Where a spoken utterance goes. Normally the brain, which decides what
     // to do with it; but while a session's terminal is open, speaking is
     // meant to talk to THAT agent — the same thing as typing into it — so
@@ -509,6 +675,15 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
     "git:setStaged": ([sessionId, path, staged]) =>
       git.setStaged(sessionId as string, path as string, staged as boolean),
     "git:commit": ([sessionId, message]) => git.commit(sessionId as string, message as string),
+    "git:branches": ([sessionId]) => git.branches(sessionId as string),
+    "git:switchBranch": ([sessionId, name, create]) =>
+      git.switchBranch(sessionId as string, name as string, create as boolean),
+    "git:pull": ([sessionId]) => git.pull(sessionId as string),
+    "git:push": ([sessionId]) => git.push(sessionId as string),
+    "git:pullRequest": ([sessionId]) => git.pullRequest(sessionId as string),
+    "git:worktree": ([sessionId]) => git.worktree(sessionId as string),
+    "git:mergeWorktree": ([sessionId]) => git.mergeWorktree(sessionId as string),
+    "git:removeWorktree": ([sessionId]) => git.removeWorktree(sessionId as string),
     // Every argument here crosses an untyped IPC boundary. workspace.open
     // and .navigate go into normalizeInput either way, but a non-string
     // still must not reach it as if it were one.
@@ -521,16 +696,24 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
         typeof detail === "string" ? detail : undefined,
       );
     },
-    "workspace:close": ([id]) => {
-      if (typeof id !== "string") return;
+    "workspace:close": ([id], origin) => {
+      if (typeof id !== "string") {
+        if (origin.kind === "remote") throw new Error("workspace:close: invalid tab id");
+        return;
+      }
+      // A remote origin may only close a tab that exists: the id comes off
+      // the wire, and the reaping below acts on a shell and a follower by id.
+      if (origin.kind === "remote" && !workspace.state().tabs.some((tab) => tab.id === id)) {
+        throw new Error("workspace:close: unknown tab");
+      }
       // A terminal tab's shell and a Docker tab's `docker logs -f` are both
       // child processes of their own; closing the tab has to reap them.
       // Either call on a tab that has neither is a no-op, so this needs no
       // test of the tab's kind. The renderer unfollows too when it notices
       // the tab go away, but a guarantee about a live child process must not
-      // rest on the renderer alone. workspace:close is desktop-only by
-      // policy (remote-policy.ts), so the owner is always the desktop's own
-      // — never a phone's follower, which docker:unfollow reaps instead.
+      // rest on the renderer alone. The follower owner here is always the
+      // desktop's own — never a phone's follower, which docker:unfollow
+      // reaps instead — even when a phone asked for the close.
       deps.terminal.close(id);
       deps.followers.unfollow(id, DESKTOP_OWNER);
       workspace.close(id);
@@ -539,12 +722,26 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
       // here is what lets that fresh pane start unowned rather than
       // inheriting a stale "the desktop already sized this" from the tab
       // that used to have this id.
-      desktopSizedPanes.delete(id);
+      fitOverrides.forget(id);
     },
     "workspace:activate": ([id]) => {
       if (typeof id === "string") workspace.activate(id);
     },
-    "workspace:rename": ([id, title]) => {
+    "workspace:rename": ([id, title], origin) => {
+      if (origin.kind === "remote") {
+        // A phone-supplied title is shown on the laptop's own tab strip:
+        // bound it the way the phone's own prompt does (80 characters, no
+        // control characters, not blank) rather than trusting the client.
+        if (typeof id !== "string" || !isRemoteTabTitle(title)) {
+          throw new Error("workspace:rename: invalid argument");
+        }
+        // Same as close: the id must name a tab that exists.
+        if (!workspace.state().tabs.some((tab) => tab.id === id)) {
+          throw new Error("workspace:rename: unknown tab");
+        }
+        workspace.rename(id, title);
+        return;
+      }
       if (typeof id === "string" && typeof title === "string") workspace.rename(id, title);
     },
     "workspace:move": ([id, targetId, after]) => {
@@ -792,11 +989,12 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
       }
       return deps.uploads.readJson(origin.deviceId, fileId);
     },
-    "api:curl": ([p, request, variables]) =>
+    "api:curl": ([p, request, variables, language]) =>
       api.curl(
         p as string,
         request as Record<string, unknown>,
         variables as Record<string, string>,
+        language as SnippetLanguage,
       ),
     "api:createRequest": ([p, folder, name, seq]) =>
       api.createRequest(p as string, folder as string, name as string, seq as number),
@@ -857,7 +1055,7 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
       terminal.closePane(paneKey as string);
       // Bug 8: same reasoning as workspace:close above, for a split's own
       // pane key rather than its tab's.
-      desktopSizedPanes.delete(paneKey as string);
+      fitOverrides.forget(paneKey as string);
     },
     "terminal:suggest": ([paneKey, input, path], origin) =>
       terminal.suggest(
@@ -869,18 +1067,40 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
     "terminal:history": ([paneKey, limit]) => terminal.history(paneKey as string, limit as number),
     "terminal:listDir": ([paneKey, path]) => terminal.listDir(paneKey as string, path as string),
     "terminal:openFile": ([paneKey, path]) => terminal.openFile(paneKey as string, path as string),
+    "terminal:createEntry": ([paneKey, parentPath, name, kind]) =>
+      terminal.createEntry(
+        paneKey as string,
+        parentPath as string,
+        name as string,
+        kind as EntryKind,
+      ),
+    "terminal:renameEntry": ([paneKey, path, newName]) =>
+      terminal.renameEntry(paneKey as string, path as string, newName as string),
+    "terminal:trashEntry": ([paneKey, path]) =>
+      terminal.trashEntry(paneKey as string, path as string),
     "terminal:input": ([tabId, data]) => {
       terminal.input(tabId as string, data as string);
     },
-    "terminal:resize": ([tabId, cols, rows], origin) => {
+    "terminal:resize": ([tabId, cols, rows, mode], origin) => {
       if (typeof tabId !== "string") return;
       if (!isDimension(cols) || !isDimension(rows)) return;
       if (origin.kind === "remote") {
+        // The phone's Fit toggle: "fit" takes a desktop-sized pane's size
+        // outright; "restore" gives the desktop's back (or nothing, if the
+        // desktop resized the pane meanwhile) and answers with the size the
+        // pty has from the desktop's side, so the phone renders at that.
+        if (mode === "restore") {
+          const desktop = fitOverrides.restore(tabId);
+          if (desktop !== undefined) return desktop;
+          terminal.resize(tabId, cols, rows);
+          return { cols, rows };
+        }
+        if (mode === "fit" && fitOverrides.fit(tabId, origin.deviceId, { cols, rows })) return;
         // The desktop already claimed this pane's size — see the comment
-        // by `desktopSizedPanes`'s declaration.
-        if (desktopSizedPanes.has(tabId)) return;
+        // by `fitOverrides`'s declaration (bug 8).
+        if (fitOverrides.isDesktopSized(tabId)) return;
       } else {
-        desktopSizedPanes.add(tabId);
+        fitOverrides.desktopResized(tabId, { cols, rows });
       }
       terminal.resize(tabId, cols, rows);
     },
@@ -909,22 +1129,29 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
     "bookmarks:reorder": ([project, urls]) =>
       bookmarks.reorder(project as string, urls as string[]),
     "settings:read": () => settings.read(),
-    // A phone can propose the rest of jarvis.yaml, but never its own bridge
-    // configuration — a paired device deciding remote.enabled or its own
-    // idle timeout is the bridge granting itself more access than the
-    // laptop chose (ruling 28). So a remote-origin object draft has its
-    // `remote` key overwritten with whatever is on disk right now before
-    // the save, and only that key; every other origin/shape passes through
-    // exactly as it always has, including the desktop path, which must
-    // never call settings.read() (see settings:read for that path). If the
-    // read itself rejects, the save never runs — failing the same way a
-    // failed save already does today, rather than proceeding on stale trust.
+    // A phone may change one section of jarvis.yaml: `sessions`. Project
+    // roots, agent and binary paths, history locations and the bridge's own
+    // configuration (ruling 28) are the laptop's to decide, so a remote
+    // draft is read for `sessions` alone — field by field, with the rule the
+    // config parser applies — and everything else in it is ignored. The
+    // change is applied inside the serialized config write as an update of
+    // the file as it is then, so a laptop-side change made between the
+    // phone's read and this write is never undone. The desktop path is
+    // unchanged and never calls settings.read() (see settings:read).
     "settings:save": async ([draft], origin) => {
-      if (origin.kind === "remote" && typeof draft === "object" && draft !== null) {
-        const current = await settings.read();
-        return settings.save({ ...draft, remote: current.remote });
+      if (origin.kind !== "remote") return settings.save(draft);
+      if (typeof draft !== "object" || draft === null || Array.isArray(draft)) {
+        return invalidArgument(deps.language);
       }
-      return settings.save(draft);
+      const raw = (draft as Record<string, unknown>)["sessions"];
+      if (raw === undefined) return invalidArgument(deps.language);
+      let sessions: SessionsConfig;
+      try {
+        sessions = parseSessions(raw);
+      } catch {
+        return invalidArgument(deps.language);
+      }
+      return settings.saveSessions(sessions);
     },
     "settings:testAgent": ([agent]) => settings.testAgent(agent),
     "settings:restart": () => settings.restart(),
@@ -1076,6 +1303,7 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
     // so this handler never rejects on a normal per-account failure.
     "providers:refresh": (_args, origin) =>
       deps.providers.refreshCapacity({ force: origin.kind !== "remote" }),
+    "usage:history": () => deps.usageHistory(),
     // M-b: the renderer's mic button drives the exact same start/stop path
     // as the global hotkey, so voice has one implementation no matter which
     // control triggers it — never a second, unwired-looking "click to talk"
@@ -1107,6 +1335,253 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
         return { ok: false as const, kind: "failed" as const, detail: write.detail };
       }
       return result;
+    },
+
+    // Task 5 (plan panel): main's own read/write/comment surface for a
+    // plan file, remote-legal end to end (remote-policy.ts). Every `path`/
+    // `blockId`/comment-id argument is capped at MAX_PLAN_ARG_CHARS and
+    // every `path` is re-checked with `PlanFiles.isAllowed` here, in
+    // addition to (never instead of) the checks `read`/`writeBlock`
+    // already do internally — defence for a remote caller, the same
+    // posture every other path-bearing channel in this file takes.
+    "plans:list": async ([paneKeyArg, cwdArg]) => {
+      const paneKey =
+        typeof paneKeyArg === "string" && paneKeyArg.length <= MAX_PLAN_ARG_CHARS ? paneKeyArg : "";
+      const cwd = await resolvePlansCwd(
+        cwdArg,
+        paneKey,
+        deps.terminal,
+        deps.plans.isDirectory,
+        deps.plans.projectRoots(),
+      );
+      return deps.plans.files.list(cwd);
+    },
+
+    "plans:read": async ([pathArg]) => {
+      if (typeof pathArg !== "string" || pathArg.length > MAX_PLAN_ARG_CHARS) {
+        return { ok: false, reason: "forbidden" };
+      }
+      if (!(await deps.plans.files.isAllowed(pathArg))) return { ok: false, reason: "forbidden" };
+      return deps.plans.files.read(pathArg);
+    },
+
+    "plans:writeBlock": async ([pathArg, blockIdArg, sourceArg, baseMtimeArg]) => {
+      if (typeof pathArg !== "string" || pathArg.length > MAX_PLAN_ARG_CHARS) {
+        return { ok: false, reason: "forbidden" };
+      }
+      if (typeof blockIdArg !== "string" || blockIdArg.length > MAX_PLAN_ARG_CHARS) {
+        return { ok: false, reason: "forbidden" };
+      }
+      if (typeof sourceArg !== "string") return { ok: false, reason: "forbidden" };
+      if (Buffer.byteLength(sourceArg, "utf8") > MAX_PLAN_SOURCE_BYTES) {
+        return { ok: false, reason: "too-large" };
+      }
+      if (typeof baseMtimeArg !== "number" || !Number.isFinite(baseMtimeArg)) {
+        return { ok: false, reason: "forbidden" };
+      }
+      if (!(await deps.plans.files.isAllowed(pathArg))) return { ok: false, reason: "forbidden" };
+      // A block's id is a hash of its own content, so every successful edit
+      // gives it a new id — without this, every comment filed against the
+      // block would come back orphaned (or re-anchored only by its quote)
+      // right after its author's own save. The replaced block's start line
+      // is read before the write (writeBlock itself refuses unless the file
+      // still has `baseMtimeMs`, so this read describes the same content
+      // whenever its mtime matches), and the comments move to whichever new
+      // block starts on that same line.
+      const before = await deps.plans.files.read(pathArg);
+      const replaced =
+        before.ok && before.value.mtimeMs === baseMtimeArg
+          ? before.value.blocks.find((block) => block.id === blockIdArg)
+          : undefined;
+      const result = await deps.plans.files.writeBlock(
+        pathArg,
+        blockIdArg,
+        sourceArg,
+        baseMtimeArg,
+      );
+      if (result.ok && replaced !== undefined) {
+        const successor = result.value.blocks.find((block) => block.start === replaced.start);
+        if (successor !== undefined && successor.id !== replaced.id) {
+          try {
+            await deps.plans.comments.updateBlockIds(pathArg, replaced.id, successor.id);
+          } catch (error) {
+            // The write itself landed; failing to re-point comments only
+            // leaves them to the quote fallback, never a failed save.
+            console.error(`plans:writeBlock: re-pointing comments failed: ${errorMessage(error)}`);
+          }
+        }
+      }
+      return result;
+    },
+
+    // Computed fresh every call, never cached: `anchorComments` needs the
+    // plan's *current* blocks. Two different kinds of "can't read this
+    // path" are handled differently, deliberately:
+    //  - Not `isAllowed` at all (outside the allowed plan directories, or
+    //    simply not a path this process ever accepted) — the security
+    //    boundary every other path-bearing channel enforces. Nothing
+    //    stored under that path is shown, ever: `[]`, the same as if
+    //    nothing had ever been commented there.
+    //  - `isAllowed` but `read` still fails for some other reason (the
+    //    file was deleted, is temporarily too large, an IO error) —
+    //    `blocks` is just [] in that case, which `anchorComments` already
+    //    turns into every stored comment coming back `orphaned` rather
+    //    than dropped. This is graceful degradation for an allowed path
+    //    whose file merely is not there right now, not a security gate,
+    //    so it never empties the result the way the first case does.
+    // A store read that throws (a corrupt-beyond-repair file, an IO
+    // error) is mapped to "no stored comments" rather than left to reject
+    // this call — plans:comments has no failure shape of its own to
+    // report it through, and an empty result is exactly what a caller
+    // already treats "nothing on file" as.
+    "plans:comments": async ([pathArg]) => {
+      if (typeof pathArg !== "string" || pathArg.length > MAX_PLAN_ARG_CHARS) return [];
+      if (!(await deps.plans.files.isAllowed(pathArg))) return [];
+      let stored: PlanComment[];
+      try {
+        stored = await deps.plans.comments.list(pathArg);
+      } catch (error) {
+        console.error(`plans:comments: comment store read failed: ${errorMessage(error)}`);
+        stored = [];
+      }
+      const read = await deps.plans.files.read(pathArg);
+      const blocks = read.ok ? read.value.blocks : [];
+      return anchorComments(stored, blocks);
+    },
+
+    // No failure shape of its own (`Promise<PlanComment>`) — an invalid
+    // argument or a store validation failure (an empty or 4000+ character
+    // body) is a thrown/rejected promise, exactly the way every ordinary
+    // JS/Electron IPC failure already reaches a caller; nothing here
+    // catches it into some invented "ok: false" shape the type does not
+    // have room for.
+    "plans:addComment": async ([pathArg, blockIdArg, quoteArg, bodyArg]) => {
+      if (typeof pathArg !== "string" || pathArg.length > MAX_PLAN_ARG_CHARS) {
+        throw new Error("plans:addComment: invalid path");
+      }
+      if (typeof blockIdArg !== "string" || blockIdArg.length > MAX_PLAN_ARG_CHARS) {
+        throw new Error("plans:addComment: invalid blockId");
+      }
+      if (typeof quoteArg !== "string" || typeof bodyArg !== "string") {
+        throw new Error("plans:addComment: invalid comment text");
+      }
+      // Re-checked here the same as every other path-bearing channel
+      // (defence for a remote caller): a comment is never filed against a
+      // path outside the allowed plan directories, even though nothing
+      // downstream of `comments.add` would itself read that path from
+      // disk. Same rejection style as the type/length checks above — this
+      // channel has no failure shape of its own to return one through.
+      if (!(await deps.plans.files.isAllowed(pathArg))) {
+        throw new Error("plans:addComment: path not allowed");
+      }
+      return deps.plans.comments.add({
+        path: pathArg,
+        blockId: blockIdArg,
+        quote: quoteArg,
+        body: bodyArg,
+      });
+    },
+
+    // `undefined` already means "no such comment" in this return type, so
+    // a store throw (an invalid body) is caught and mapped onto that same
+    // value rather than rejecting — unlike addComment, there is a value
+    // here that already means "nothing happened".
+    "plans:updateComment": async ([idArg, bodyArg]) => {
+      if (typeof idArg !== "string" || idArg.length > MAX_PLAN_ARG_CHARS) return undefined;
+      if (typeof bodyArg !== "string") return undefined;
+      try {
+        return await deps.plans.comments.update(idArg, bodyArg);
+      } catch (error) {
+        console.error(`plans:updateComment failed: ${errorMessage(error)}`);
+        return undefined;
+      }
+    },
+
+    // `false` already means "no such comment" here, the same reasoning
+    // updateComment's `undefined` follows.
+    "plans:deleteComment": async ([idArg]) => {
+      if (typeof idArg !== "string" || idArg.length > MAX_PLAN_ARG_CHARS) return false;
+      try {
+        return await deps.plans.comments.remove(idArg);
+      } catch (error) {
+        console.error(`plans:deleteComment failed: ${errorMessage(error)}`);
+        return false;
+      }
+    },
+
+    // Loads the named comments still on `path` (an id for another file, or
+    // one already deleted, is dropped silently — "unknown ids ignored");
+    // none left is "no-comments" before anything else is even attempted.
+    // `path` is re-checked with isAllowed the same as read/writeBlock; the
+    // pane is checked only once there is something worth writing to it,
+    // so an unknown pane with no selected comments still answers
+    // "no-comments", not "no-pane" — the more specific reason of the two.
+    "plans:send": async ([paneKeyArg, pathArg, idsArg]) => {
+      if (typeof paneKeyArg !== "string" || paneKeyArg.length > MAX_PLAN_ARG_CHARS) {
+        return { ok: false, reason: "no-pane" };
+      }
+      if (typeof pathArg !== "string" || pathArg.length > MAX_PLAN_ARG_CHARS) {
+        return { ok: false, reason: "forbidden" };
+      }
+      if (!Array.isArray(idsArg)) return { ok: false, reason: "no-comments" };
+      const ids = idsArg.filter(
+        (id): id is string => typeof id === "string" && id.length <= MAX_PLAN_ARG_CHARS,
+      );
+      if (!(await deps.plans.files.isAllowed(pathArg))) return { ok: false, reason: "forbidden" };
+
+      let stored: PlanComment[];
+      try {
+        stored = await deps.plans.comments.list(pathArg);
+      } catch (error) {
+        console.error(`plans:send: comment store read failed: ${errorMessage(error)}`);
+        stored = [];
+      }
+      const wanted = new Set(ids);
+      const selected = stored.filter((comment) => wanted.has(comment.id));
+      if (selected.length === 0) return { ok: false, reason: "no-comments" };
+
+      // Not just "does this process know the pane" — ShellManager keeps a
+      // pane's retained log around after its shell exits (ruling 12), so
+      // an exited pane is still "known" and a write to it would silently
+      // no-op, leaving `markSent` called for a comment nothing actually
+      // delivered. `panes()` carries the live/exited distinction `has`
+      // alone does not.
+      const pane = deps.shells.panes().find((candidate) => candidate.paneKey === paneKeyArg);
+      // Not a terminal pane: a session's own screen sends to the session
+      // itself, the same input path session:input writes through — but
+      // only while SessionManager still owns it, so a finished session is
+      // "no pane" exactly as an exited shell is.
+      const sessionTarget =
+        pane === undefined && sessions.get(paneKeyArg) !== undefined ? paneKeyArg : undefined;
+      if ((pane === undefined || pane.exited) && sessionTarget === undefined) {
+        return { ok: false, reason: "no-pane" };
+      }
+
+      const read = await deps.plans.files.read(pathArg);
+      const blocks = read.ok ? read.value.blocks : [];
+      // Anchored (and so numbered) against every comment on the plan, the
+      // same list plans:comments numbers the user's own pins from — then
+      // narrowed to the selection, so "3." in the message is pin 3.
+      const anchored = anchorComments(stored, blocks).filter((comment) => wanted.has(comment.id));
+      // Never throws here: `selected` (and so `anchored`) is already
+      // proven non-empty above, and formatFeedback only ever throws on an
+      // empty comment list.
+      const feedback = formatFeedback(pathArg, anchored);
+
+      // The same path terminal:input writes through — ShellManager.write —
+      // so a plan comment lands in the pane exactly as if the user had
+      // pasted it themselves.
+      if (sessionTarget !== undefined) sessions.write(sessionTarget, bracketedSubmit(feedback));
+      else deps.shells.write(paneKeyArg, bracketedSubmit(feedback));
+      try {
+        await deps.plans.comments.markSent(selected.map((comment) => comment.id));
+      } catch (error) {
+        // The message is already in the pane; a store failure here is
+        // logged, never surfaced as a send failure the caller would
+        // reasonably read as "nothing was sent".
+        console.error(`plans:send: markSent failed: ${errorMessage(error)}`);
+      }
+      return { ok: true, sent: selected.length };
     },
   } satisfies Record<TableChannel, Handler>;
 }

@@ -1258,6 +1258,27 @@ describe("api collection editing", () => {
     expect(document.getElementById("api-status")?.textContent).toBe("Copied");
   });
 
+  it("offers cURL, fetch and Python from a menu when it is there", async () => {
+    const button = document.getElementById("api-curl");
+    const wrap = document.createElement("div");
+    wrap.innerHTML = `<div id="api-copy-menu" hidden>
+      <button id="api-copy-curl"></button><button id="api-copy-fetch"></button><button id="api-copy-python"></button>
+    </div>`;
+    button?.after(wrap);
+    const module = await load();
+    await show(module);
+    await openFirst();
+
+    document.getElementById("api-curl")?.click();
+    expect(document.getElementById("api-copy-menu")?.hidden).toBe(false);
+    document.getElementById("api-copy-python")?.click();
+    await settle();
+
+    const copy = calls.find((e) => e.call === "apiCurl");
+    expect(copy?.args[3]).toBe("python");
+    expect(document.getElementById("api-copy-menu")?.hidden).toBe(true);
+  });
+
   it("sends on Cmd+Enter and saves on Cmd+S", async () => {
     const module = await load();
     await show(module);

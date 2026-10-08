@@ -23,7 +23,15 @@ export type TerminalWebViewHandle = {
   write(data: string): void;
   reset(): void;
   fit(): void;
+  /** Scrolls to the live end, or to the previous / next command prompt. */
+  jump(to: "latest" | "prevCommand" | "nextCommand"): void;
+  /** Selects and shows the next (or previous) line holding `query`. */
+  find(query: string, direction: "next" | "prev"): void;
 };
+
+/** Where the viewport is: scrolled back or not, and whether command
+ *  prompts are marked to jump between. */
+export type TerminalView = { back: boolean; commands: boolean };
 
 export type TerminalWebViewProps = {
   onReady(size: { cols: number; rows: number }): void;
@@ -45,10 +53,15 @@ export type TerminalWebViewProps = {
   // its own focus target, never by the page. The browser build honours
   // this; the native WebView ignores it (the compose bar takes typing).
   onHardwareInput?: (input: TerminalKeyInput) => void;
+  onView?: (view: TerminalView) => void;
+  onFound?: (ok: boolean) => void;
 };
 
 export const TerminalWebView = forwardRef<TerminalWebViewHandle, TerminalWebViewProps>(
-  function TerminalWebView({ onReady, onResize, onModes, onNeedsReplay, onWheel, fixedSize }, ref) {
+  function TerminalWebView(
+    { onReady, onResize, onModes, onNeedsReplay, onWheel, fixedSize, onView, onFound },
+    ref,
+  ) {
     const webViewRef = useRef<WebView>(null);
     const [remountKey, setRemountKey] = useState(0);
 
@@ -160,7 +173,22 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, TerminalWebView
       postToPage({ t: "fit" });
     }, [postToPage]);
 
-    useImperativeHandle(ref, () => ({ write, reset, fit: postFit }), [write, reset, postFit]);
+    const jump = useCallback(
+      (to: "latest" | "prevCommand" | "nextCommand") => postToPage({ t: "jump", to }),
+      [postToPage],
+    );
+    const find = useCallback(
+      (query: string, direction: "next" | "prev") => postToPage({ t: "find", query, direction }),
+      [postToPage],
+    );
+
+    useImperativeHandle(ref, () => ({ write, reset, fit: postFit, jump, find }), [
+      write,
+      reset,
+      postFit,
+      jump,
+      find,
+    ]);
 
     const handleMessage = useCallback(
       (event: WebViewMessageEvent) => {
@@ -237,6 +265,12 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, TerminalWebView
           case "wheel":
             onWheel(message.direction);
             return;
+          case "view":
+            onView?.({ back: message.back, commands: message.commands });
+            return;
+          case "found":
+            onFound?.(message.ok);
+            return;
         }
       },
       [
@@ -248,6 +282,8 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, TerminalWebView
         postToPage,
         resetAttachState,
         getBatcher,
+        onView,
+        onFound,
       ],
     );
 
@@ -256,7 +292,12 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, TerminalWebView
     // arriving before the page has ever loaded has nowhere to go yet.
     // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on fixedSize's own cols/rows, deliberately not the object itself — a new object with the same values must not re-post.
     useEffect(() => {
-      if (!readyRef.current || fixedSize === undefined) return;
+      if (!readyRef.current) return;
+      // Fit toggle: a size taken away again sends the page back to fitting.
+      if (fixedSize === undefined) {
+        postToPage({ t: "free" });
+        return;
+      }
       postToPage({ t: "size", cols: fixedSize.cols, rows: fixedSize.rows });
     }, [fixedSize?.cols, fixedSize?.rows, postToPage]);
 

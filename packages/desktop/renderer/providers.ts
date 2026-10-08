@@ -1,6 +1,17 @@
 import type { ProviderStatus, RateWindow } from "@jarvis/core";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
+import type { UsageHistory } from "../src/usage-history.js";
 import { formatAgo } from "./format.js";
+import { capacitySparkline } from "./usage-charts.js";
+
+/** The last capacity history read (app.ts's refreshUsage), by account. A
+ *  row draws its sparkline from here, so a providers:update re-render keeps
+ *  the line without asking for the history again. */
+let capacityHistory = new Map<string, UsageHistory["capacity"][number]["points"]>();
+
+export function setCapacityHistory(history: UsageHistory["capacity"]): void {
+  capacityHistory = new Map(history.map((entry) => [entry.id, entry.points]));
+}
 
 // Deliberately NOT imported from @jarvis/core: the renderer has no bundler,
 // so a value import of a bare specifier (`@jarvis/core`) would fail to
@@ -97,6 +108,9 @@ function buildRow(status: ProviderStatus, now: number): HTMLElement {
     fill.style.width = `${left}%`;
     bar.append(fill);
     row.append(bar);
+    // Where the meter has been over the last day, under where it is now.
+    const spark = capacitySparkline(capacityHistory.get(status.id) ?? [], now);
+    if (spark !== undefined) row.append(spark);
 
     const parts = [
       MESSAGES.capacityResetsAt(

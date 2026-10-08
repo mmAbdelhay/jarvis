@@ -37,6 +37,14 @@ import {
 import { nodeDaemonModeDeps } from "./daemon/mode-node.js";
 import { answerDbGateChallenge } from "./dbgate-login.js";
 import { ELECTRON_BOUND_CHANNELS, registerDesktopOnly } from "./desktop-only.js";
+import {
+  countRunning,
+  createUpdater,
+  devOverrides,
+  nodeExec,
+  nodeUpdaterFs,
+  replayStateOnLoad,
+} from "./updater.js";
 import { webExportDir } from "./web-export.js";
 import { createElectronViewFactory } from "./electron-view.js";
 import { ViewReconciler } from "./view-reconciler.js";
@@ -289,6 +297,9 @@ function createDesktopHost(client: CoreClient) {
         open: (checked) => electronShell.openExternal(checked),
         log: (line) => console.error(line),
       }),
+    // The file sidebar's Move to Trash. The core has already proven the
+    // path inside a project (ipc.ts's trashEntry) before it gets here.
+    trashItem: (path) => electronShell.trashItem(path),
     // A restart the user did not ask for is the wrong kind of "helpful"
     // — this only ever fires from the renderer's own Restart button
     // click, after a save has already succeeded.
@@ -557,6 +568,54 @@ app.whenReady().then(async () => {
       ipcMain.handle(channel, (_event, ...args: unknown[]) => client.invoke(channel, args));
     }
 
+    // The updater (updater.ts): checks at launch (below, once the window is
+    // shown) and every 24h; installs only on the user's click.
+    const updater = createUpdater({
+      current: app.getVersion(),
+      packaged: app.isPackaged,
+      platform,
+      arch: process.arch,
+      pid: process.pid,
+      execPath: process.execPath,
+      ...(appImage === undefined ? {} : { appImage }),
+      ...devOverrides(process.env, app.isPackaged),
+      userData: app.getPath("userData"),
+      env: process.env,
+      fetch: (input, init) => fetch(input, init),
+      now: () => Date.now(),
+      setTimer: (fn, ms) => setTimeout(fn, ms),
+      clearTimer: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+      fs: nodeUpdaterFs,
+      exec: nodeExec,
+      spawnDetached(cmd, args, options) {
+        const child = spawn(cmd, args, {
+          cwd: options.cwd,
+          env: options.env,
+          detached: true,
+          stdio: "ignore",
+        });
+        child.on("error", (error) =>
+          console.error(`updater: swap script failed to start: ${errorMessage(error)}`),
+        );
+        child.unref();
+      },
+      openPath: (path) => electronShell.openPath(path),
+      quit: () => app.quit(),
+      runningCounts: () =>
+        countRunning({
+          terminalTabs: () =>
+            client.workspace
+              .state()
+              .tabs.filter((tab) => tab.kind === "terminal")
+              .map((tab) => tab.id),
+          panes: (tabId) => client.invoke("terminal:panes", [tabId]),
+          sessions: () => client.invoke("sessions:list", []),
+        }),
+      push: (state) => local("update:state", state),
+    });
+    app.on("will-quit", () => updater.stop());
+    replayStateOnLoad(window.webContents, updater, (state) => local("update:state", state));
+
     registerDesktopOnly({
       handle: (channel, listener) => ipcMain.handle(channel, listener),
       window,
@@ -578,6 +637,14 @@ app.whenReady().then(async () => {
           );
       },
       startTabRename: (tabId) => local("workspace:tabRename", tabId),
+      // Task 8: the tab menu's own Plans item — the renderer owns every
+      // tab's plan panel, so main only names which tab to toggle.
+      startTabPlans: (tabId) => local("workspace:tabPlans", tabId),
+      // Task 8 fix round 1: only a terminal tab has a plan panel at all.
+      isTerminalTab: (tabId) =>
+        client.workspace.state().tabs.some((tab) => tab.id === tabId && tab.kind === "terminal"),
+      shell: electronShell,
+      updater,
       language: PRIMARY_LANGUAGE,
       background: {
         status: () => mode.status(),
@@ -640,6 +707,9 @@ app.whenReady().then(async () => {
     // separate macOS fullscreen Space (see the BrowserWindow options above).
     window.maximize();
     window.show();
+    updater
+      .start()
+      .catch((error: unknown) => console.error(`updater: start failed: ${errorMessage(error)}`));
 
     // globalShortcut.register() does not throw on collision — a combo
     // already claimed by another app (window managers, Alfred, Raycast and

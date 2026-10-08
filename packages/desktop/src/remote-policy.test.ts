@@ -18,8 +18,6 @@ describe("remote policy", () => {
   // The spec's denied list ("Capability policy, fail-closed" + finding 3).
   it.each([
     "workspace:open",
-    "workspace:close",
-    "workspace:rename",
     "workspace:move",
     "workspace:activate",
     "workspace:navigate",
@@ -43,10 +41,8 @@ describe("remote policy", () => {
     "voice:start",
     "voice:stop",
     "voice:preview",
-    // M4 final review D1/D2: no phone Settings UI or API pane exists yet,
-    // and these persistently rewrite laptop state or run phone-controlled
-    // code/files on it.
-    "settings:save",
+    // M4 final review D1/D2: these persistently rewrite laptop state or run
+    // phone-controlled code/files on it.
     "settings:testAgent",
     "api:saveSettings",
     "remote:tailscaleCert",
@@ -55,9 +51,31 @@ describe("remote policy", () => {
     "prayer:locateIp",
     // Bug 7: no phone Sessions UI exists yet to edit a record from.
     "history:edit",
+    // Task 8: runs shell.openExternal on the laptop.
+    "plans:openLink",
   ])("denies %s remotely", (channel) => {
     expect(CHANNEL_POLICY[channel as keyof typeof CHANNEL_POLICY]).toBe("desktop-only");
     expect(isRemoteAllowed(channel)).toBe(false);
+  });
+
+  // Owner decision 2026-10-03: a phone may rename/close a laptop tab, save
+  // the laptop's settings, and rename/trash a file inside a project root.
+  it.each([
+    "workspace:close",
+    "workspace:rename",
+    "session:resume",
+    "settings:save",
+    "terminal:renameEntry",
+    "terminal:trashEntry",
+  ])("allows %s remotely and audits it as a mutation", (channel) => {
+    expect(CHANNEL_POLICY[channel as keyof typeof CHANNEL_POLICY]).toBe("remote");
+    expect(isRemoteAllowed(channel)).toBe(true);
+    expect(REMOTE_EFFECT[channel as keyof typeof REMOTE_EFFECT]).toBe("mutate");
+    expect(auditPolicyFor(channel, () => false)).toBe("always");
+  });
+
+  it("keeps terminal:createEntry desktop-only", () => {
+    expect(isRemoteAllowed("terminal:createEntry")).toBe(false);
   });
 
   it("allows the guarded api send path remotely", () => {

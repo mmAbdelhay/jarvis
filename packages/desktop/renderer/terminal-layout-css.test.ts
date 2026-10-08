@@ -82,4 +82,14 @@ describe("the terminal pane's layout", () => {
     // silently truncated into something that reads like another branch.
     expect(ruleBodyFor(".terminal-chip")).not.toMatch(/text-overflow/);
   });
+
+  // Task 8: the drag handle between a tab's panes and its plan panel — 5px
+  // wide, col-resize always (the panel only ever docks to the side), and
+  // hidden along with the panel it belongs to.
+  it("gives the plan panel's drag handle a 5px col-resize strip", () => {
+    const body = ruleBodyFor(".plan-panel-handle");
+    expect(body).toMatch(/flex\s*:\s*0\s+0\s+5px/);
+    expect(body).toMatch(/cursor\s*:\s*col-resize/);
+    expect(ruleBodyFor(".plan-panel-handle[hidden]")).toMatch(/display\s*:\s*none/);
+  });
 });

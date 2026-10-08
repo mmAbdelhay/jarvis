@@ -34,10 +34,14 @@ export function answersConnection(
     });
     socket.once("error", (error) => {
       socket.destroy();
-      // Refused, missing or not a socket: nobody home. Anything else (a full
-      // backlog, say) is someone there — busy is the safe reading.
+      // Refused, missing or not a socket: nobody home. So is EINVAL, a path
+      // too long for a socket (a deep HOME): listen fails on it the same way,
+      // so no daemon can be there. Anything else (a full backlog, say) is
+      // someone there — busy is the safe reading.
       const code = errorCode(error);
-      resolve(!(code === "ECONNREFUSED" || code === "ENOENT" || code === "ENOTSOCK"));
+      resolve(
+        !(code === "ECONNREFUSED" || code === "ENOENT" || code === "ENOTSOCK" || code === "EINVAL"),
+      );
     });
   });
 }

@@ -28,7 +28,10 @@ What every agent is doing, and what the machine is doing.
   Codex from the rate limits it records in its own session logs, Copilot
   from GitHub's quota endpoint through the signed-in `gh` (premium
   requests, resetting monthly, so its reset shows as a day). Each row says
-  "as of HH:MM", when its figure was actually taken. Three different unknowns are reported as three different sentences,
+  "as of HH:MM", when its figure was actually taken. Under each meter, a line
+  shows where it has been over the last day — every reading the panel has
+  shown is kept (in `sessions.db`, for 30 days), so the history costs no
+  query of its own. Hover a point for its time and value. Three different unknowns are reported as three different sentences,
   never collapsed into one "unknown": a provider that offers no capacity
   reading, one with no snapshot yet, and one not yet checked are distinct
   facts.
@@ -39,6 +42,16 @@ What every agent is doing, and what the machine is doing.
   every two seconds, memory every six, disk and uptime every minute. Reading
   all of them every tick cost a tenth of a core permanently, most of it
   enumerating two dozen mounted volumes to answer a number that had not moved.
+- **A session waiting on you** — a permission menu, a `(y/n)`, a "Press
+  Enter" — shows the agent's own question under its row, with one button per
+  option it offers. A button types exactly what you would: for a menu, Down
+  to that option and Enter. The prompt is read again at the moment you
+  answer, and if it has changed or gone (you answered it in the terminal),
+  nothing is typed and the row says so. The phone's session screen has the
+  same card, and by voice, "answer yes to acme" chooses an option the same
+  way.
+- **Sessions** carries a row of small bars in its header: sessions started on
+  each of the last 14 days, hover for the day and count.
 - **Conversation** and **History** — what has been said, and to whom.
 
 ## Changes
@@ -49,6 +62,32 @@ each (side by side or unified), staging, and committing.
 A session that has ended still shows its repository's *current* state, and the
 view says so — it is not a snapshot of what that agent did, and pretending
 otherwise would be the more comfortable lie.
+
+A row under the header carries the rest of the loop:
+
+- **The branch picker** switches branch; **New branch** creates one from where
+  you are and switches to it. Uncommitted changes come along, as they do with
+  `git switch`, and git itself refuses a switch they would be lost in.
+- **Where the branch stands** — `origin/main ↑2 ↓1` is two commits to push and
+  one to pull; a branch that tracks nothing yet says so.
+- **Pull** is fast-forward only. It never starts a merge or leaves conflicts
+  in the tree; a branch that has diverged from its remote is reported, to be
+  settled in the terminal.
+- **Push** pushes the current branch, and a branch's first push goes to
+  `origin` (or the only remote) and starts tracking it. It is never forced.
+- **Pull request** opens the branch's open pull request, or creates one with
+  `gh pr create --fill`, pushing first if the remote is missing commits. It
+  opens in the project's own browser tab. It needs the
+  [GitHub CLI](https://cli.github.com/), signed in.
+
+A session running in a [worktree of its own](configuration.md) also gets
+**Merge into** (the branch the project's main checkout has out) and **Remove
+worktree** (once the session has ended; the branch is kept).
+
+None of these ever waits on a password prompt: git and gh run with prompts
+switched off, so a remote that needs credentials it does not have says so at
+once instead of hanging. Credential helpers and SSH keys you already use work
+as they do in your terminal.
 
 ## Session
 
@@ -84,3 +123,8 @@ running session to apply it would be the wrong kind of helpful.
 
 A per-agent **Test** button runs the health probe against the *draft* command
 before it is ever saved.
+
+**Updates**, under General, shows the version you are running, when Jarvis
+last asked GitHub for a newer one, and — when there is one — its notes and an
+**Install update** button. [Updates](updates.md) covers what it checks, when,
+and what installing does.

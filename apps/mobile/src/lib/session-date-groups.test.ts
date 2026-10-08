@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { groupEndedByDate, sessionDateLabel } from "./session-date-groups";
+import { groupByDay, groupEndedByDate, sessionDateLabel } from "./session-date-groups";
+import type { MergedRow } from "./sessions-merge";
 import type { SessionRowView } from "./sessions-store";
 
 function row(overrides: Partial<SessionRowView> = {}): SessionRowView {
@@ -9,6 +10,8 @@ function row(overrides: Partial<SessionRowView> = {}): SessionRowView {
     summary: "fixing tests",
     state: "done",
     agentId: "claude-main",
+    project: null,
+    projectPath: "/code/acme",
     startedAt: 0,
     lastActivityAt: 0,
     ...overrides,
@@ -62,5 +65,40 @@ describe("groupEndedByDate", () => {
 
   it("returns [] for an empty list", () => {
     expect(groupEndedByDate([], NOW)).toEqual([]);
+  });
+});
+
+function merged(overrides: Partial<MergedRow> = {}): MergedRow {
+  return { ...row(), source: "live", imported: false, ...overrides };
+}
+
+describe("groupByDay", () => {
+  it("puts active rows first under today, then today's ended rows", () => {
+    const groups = groupByDay(
+      [
+        merged({ id: "run", state: "running", lastActivityAt: NOW }),
+        merged({ id: "done", endedAt: NOW - 3_600_000 }),
+        merged({ id: "yes", endedAt: YESTERDAY }),
+      ],
+      NOW,
+    );
+    expect(groups.map((group) => group.label.kind)).toEqual(["today", "yesterday"]);
+    expect(groups[0]?.rows.map((r) => r.id)).toEqual(["run", "done"]);
+  });
+
+  it("keeps active rows under today even when nothing ended today", () => {
+    const groups = groupByDay(
+      [merged({ id: "run", state: "running" }), merged({ id: "old", endedAt: TWO_DAYS_AGO })],
+      NOW,
+    );
+    expect(groups.map((group) => group.label.kind)).toEqual(["today", "date"]);
+  });
+
+  it("treats a history row that says running as ended", () => {
+    const groups = groupByDay(
+      [merged({ id: "h", source: "history", state: "dead", endedAt: YESTERDAY })],
+      NOW,
+    );
+    expect(groups.map((group) => group.label.kind)).toEqual(["yesterday"]);
   });
 });

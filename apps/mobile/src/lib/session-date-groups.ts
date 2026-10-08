@@ -7,6 +7,7 @@
 // `groupAndSort` sorts `ended` by `endedAt`/`lastActivityAt` descending, so
 // same-day rows are always contiguous; this never re-sorts them).
 
+import { isActiveRow, type MergedRow, rowMoment } from "./sessions-merge";
 import type { SessionRowView } from "./sessions-store";
 
 export type SessionDateLabel =
@@ -14,18 +15,12 @@ export type SessionDateLabel =
   | { kind: "yesterday" }
   | { kind: "date"; ms: number };
 
-export type SessionDateGroup = { label: SessionDateLabel; rows: SessionRowView[] };
+export type SessionDateGroup<T = SessionRowView> = { label: SessionDateLabel; rows: T[] };
 
 function startOfDay(ms: number): number {
   const date = new Date(ms);
   date.setHours(0, 0, 0, 0);
   return date.getTime();
-}
-
-/** The timestamp a row's group is keyed on: when it ended, else its last
- *  activity — the same fallback `groupAndSort` already sorts ended rows by. */
-function rowMoment(row: SessionRowView): number {
-  return row.endedAt ?? row.lastActivityAt;
 }
 
 export function sessionDateLabel(ms: number, nowMs: number): SessionDateLabel {
@@ -60,6 +55,28 @@ export function groupEndedByDate(
     } else {
       groups.push({ label, rows: [row] });
     }
+  }
+  return groups;
+}
+
+/**
+ * The Sessions list's day groups: every active row goes first under TODAY,
+ * whatever its dates, then the ended rows by the day they ended (today's
+ * after the active ones). `rows` arrives ordered by `mergeSessions`.
+ */
+export function groupByDay(
+  rows: readonly MergedRow[],
+  nowMs: number,
+): SessionDateGroup<MergedRow>[] {
+  const groups: SessionDateGroup<MergedRow>[] = [];
+  const active = rows.filter(isActiveRow);
+  if (active.length > 0) groups.push({ label: { kind: "today" }, rows: active });
+  for (const row of rows) {
+    if (isActiveRow(row)) continue;
+    const label = sessionDateLabel(rowMoment(row), nowMs);
+    const last = groups.at(-1);
+    if (last !== undefined && sameLabel(last.label, label)) last.rows.push(row);
+    else groups.push({ label, rows: [row] });
   }
   return groups;
 }

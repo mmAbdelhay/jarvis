@@ -338,6 +338,24 @@ export function applyStaticChrome(): void {
   if (message instanceof HTMLInputElement) {
     message.placeholder = MESSAGES.commitMessagePlaceholder(PRIMARY_LANGUAGE);
   }
+  const syncLabels: Array<[string, (language: "ar" | "en") => string]> = [
+    ["changes-new-branch", MESSAGES.changesNewBranch],
+    ["changes-pull", MESSAGES.changesPull],
+    ["changes-push", MESSAGES.changesPush],
+    ["changes-pr", MESSAGES.changesPullRequest],
+  ];
+  for (const [id, label] of syncLabels) {
+    const element = document.getElementById(id);
+    if (element !== null) element.textContent = label(PRIMARY_LANGUAGE);
+  }
+  const branchName = document.getElementById("changes-new-branch-name");
+  if (branchName instanceof HTMLInputElement) {
+    branchName.placeholder = MESSAGES.changesNewBranchPlaceholder(PRIMARY_LANGUAGE);
+  }
+  const branchSelect = document.getElementById("changes-branch-select");
+  if (branchSelect !== null) {
+    branchSelect.setAttribute("aria-label", MESSAGES.changesBranchLabel(PRIMARY_LANGUAGE));
+  }
 }
 
 /** Wires the Side-by-side / Unified toggle. Called once from app.ts.
@@ -558,6 +576,250 @@ export function wireCommitBar(): void {
   });
 }
 
+// ------------------------------------------------------------ branch & sync
+
+/** One branch, pull, push or pull-request call in flight at a time: each
+ *  moves the repository the others read, and two at once would race. */
+let syncing = false;
+
+const SYNC_BUTTONS = [
+  "changes-new-branch",
+  "changes-pull",
+  "changes-push",
+  "changes-pr",
+  "changes-merge-worktree",
+  "changes-remove-worktree",
+] as const;
+
+function setSyncBusy(busy: boolean): void {
+  syncing = busy;
+  for (const id of SYNC_BUTTONS) {
+    const button = document.getElementById(id);
+    if (button instanceof HTMLButtonElement) button.disabled = busy;
+  }
+  const select = document.getElementById("changes-branch-select");
+  if (select instanceof HTMLSelectElement) select.disabled = busy;
+  if (busy) showSyncStatus(MESSAGES.changesWorking(PRIMARY_LANGUAGE));
+}
+
+function showSyncStatus(text: string): void {
+  const status = document.getElementById("changes-sync-status");
+  if (status === null) return;
+  status.hidden = text === "";
+  setText(status, text);
+}
+
+/** `origin/main ↑2 ↓1`, or a plain note for a branch with no upstream. The
+ *  arrows and counts are the same in both languages, and the line is LTR
+ *  either way: it is a ref name and two numbers. */
+function trackingText(view: ChangesView): string {
+  const { upstream, ahead = 0, behind = 0 } = view.changes;
+  if (upstream === undefined) return MESSAGES.changesNoUpstream(PRIMARY_LANGUAGE);
+  const counts = [ahead > 0 ? `↑${ahead}` : "", behind > 0 ? `↓${behind}` : ""]
+    .filter((part) => part !== "")
+    .join(" ");
+  return counts === "" ? upstream : `${upstream} ${counts}`;
+}
+
+/** Draws the sync row for `view`, then fills the branch picker. The picker
+ *  is filled from its own call, so a slow one never holds up the file list;
+ *  an answer for a session no longer on screen is dropped. */
+async function renderSync(view: ChangesView): Promise<void> {
+  // Optional lookups, like the wire* functions: a harness without the row
+  // has a Changes view without it, never one that throws.
+  const row = document.getElementById("changes-sync");
+  const tracking = document.getElementById("changes-tracking");
+  const select = document.getElementById("changes-branch-select");
+  if (row === null || tracking === null || !(select instanceof HTMLSelectElement)) return;
+  row.hidden = false;
+  tracking.textContent = trackingText(view);
+  const result = await window.jarvis.gitBranches(view.session.id);
+  if (current?.session.id !== view.session.id || !result.ok) return;
+  const options = result.value.local.map((name) => {
+    const option = document.createElement("option");
+    option.value = name;
+    option.textContent = name;
+    return option;
+  });
+  if (result.value.detached) {
+    // No branch is checked out: the SHA is shown, and choosing it again
+    // means nothing, so it cannot be chosen.
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = result.value.current;
+    option.disabled = true;
+    options.unshift(option);
+  }
+  select.replaceChildren(...options);
+  select.value = result.value.detached ? "" : result.value.current;
+  await renderWorktree(view);
+}
+
+/** The worktree controls: shown only for a session running in a worktree
+ *  of its own, with Merge naming the branch the main checkout has out. */
+async function renderWorktree(view: ChangesView): Promise<void> {
+  const box = document.getElementById("changes-worktree");
+  const label = document.getElementById("changes-worktree-label");
+  const merge = document.getElementById("changes-merge-worktree");
+  const remove = document.getElementById("changes-remove-worktree");
+  if (box === null || label === null || merge === null || remove === null) return;
+  const result = await window.jarvis.gitWorktree(view.session.id);
+  if (current?.session.id !== view.session.id) return;
+  if (!result.ok || result.value === null) {
+    box.hidden = true;
+    return;
+  }
+  box.hidden = false;
+  label.textContent = MESSAGES.changesWorktree(PRIMARY_LANGUAGE);
+  label.title = result.value.base;
+  // A detached main checkout has no branch to merge into.
+  merge.hidden = result.value.baseBranch === "";
+  setText(merge, MESSAGES.changesMergeInto(result.value.baseBranch, PRIMARY_LANGUAGE));
+  remove.textContent = MESSAGES.changesRemoveWorktree(PRIMARY_LANGUAGE);
+}
+
+/** Runs one sync action for the session on screen: busy while it runs, the
+ *  error banner on a refusal, and a fresh read of the view after — the
+ *  branch, the counts and the files may all have moved. */
+async function runSync<T>(
+  call: (sessionId: string) => Promise<GitViewResult<T>>,
+  done: (value: T, view: ChangesView) => string,
+  /** False when the call leaves nothing to read again — a removed
+   *  worktree is a directory that no longer exists. */
+  reread = true,
+): Promise<void> {
+  const view = current;
+  if (view === undefined || syncing) return;
+  setSyncBusy(true);
+  let result: GitViewResult<T>;
+  try {
+    result = await call(view.session.id);
+  } catch {
+    setSyncBusy(false);
+    showSyncStatus("");
+    return;
+  }
+  setSyncBusy(false);
+  if (!result.ok) {
+    showSyncStatus("");
+    showError(result);
+    return;
+  }
+  clearError();
+  const message = done(result.value, view);
+  if (reread) await openChanges(view.session.id, selected);
+  showSyncStatus(message);
+}
+
+/** Wires the branch picker, New branch, Pull, Push and Pull request. Called
+ *  once from app.ts beside wireCommitBar; optional lookups for the same
+ *  reason that one uses them. */
+export function wireSyncBar(): void {
+  const select = document.getElementById("changes-branch-select");
+  const newBranch = document.getElementById("changes-new-branch");
+  const name = document.getElementById("changes-new-branch-name");
+  const pull = document.getElementById("changes-pull");
+  const push = document.getElementById("changes-push");
+  const pr = document.getElementById("changes-pr");
+  if (
+    !(select instanceof HTMLSelectElement) ||
+    !(name instanceof HTMLInputElement) ||
+    newBranch === null ||
+    pull === null ||
+    push === null ||
+    pr === null
+  ) {
+    return;
+  }
+
+  select.addEventListener("change", () => {
+    const target = select.value;
+    if (target === "") return;
+    void runSync(
+      (id) => window.jarvis.gitSwitchBranch(id, target, false),
+      () => MESSAGES.changesSwitched(PRIMARY_LANGUAGE),
+    );
+  });
+
+  newBranch.addEventListener("click", () => {
+    name.hidden = false;
+    name.value = "";
+    name.focus();
+  });
+  name.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      name.hidden = true;
+      return;
+    }
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    const branch = name.value.trim();
+    name.hidden = true;
+    if (branch === "") return;
+    void runSync(
+      (id) => window.jarvis.gitSwitchBranch(id, branch, true),
+      () => MESSAGES.changesSwitched(PRIMARY_LANGUAGE),
+    );
+  });
+  name.addEventListener("blur", () => {
+    name.hidden = true;
+  });
+
+  pull.addEventListener("click", () => {
+    void runSync(
+      (id) => window.jarvis.gitPull(id),
+      (value) =>
+        value.updated
+          ? MESSAGES.changesPulled(PRIMARY_LANGUAGE)
+          : MESSAGES.changesUpToDate(PRIMARY_LANGUAGE),
+    );
+  });
+
+  push.addEventListener("click", () => {
+    void runSync(
+      (id) => window.jarvis.gitPush(id),
+      () => MESSAGES.changesPushed(PRIMARY_LANGUAGE),
+    );
+  });
+
+  document.getElementById("changes-merge-worktree")?.addEventListener("click", () => {
+    void runSync(
+      (id) => window.jarvis.gitMergeWorktree(id),
+      (value) => MESSAGES.changesMerged(value.into, PRIMARY_LANGUAGE),
+    );
+  });
+  document.getElementById("changes-remove-worktree")?.addEventListener("click", () => {
+    void runSync(
+      (id) => window.jarvis.gitRemoveWorktree(id),
+      () => {
+        const box = document.getElementById("changes-worktree");
+        if (box !== null) box.hidden = true;
+        return MESSAGES.changesWorktreeRemoved(PRIMARY_LANGUAGE);
+      },
+      false,
+    );
+  });
+
+  pr.addEventListener("click", () => {
+    void runSync(
+      (id) => window.jarvis.gitPullRequest(id),
+      (value, view) => {
+        // In the project's own browser tab, like any link an agent prints:
+        // the pull request is part of the project's work. A session in no
+        // configured project has no browser tab to open it in, so the
+        // address is shown instead.
+        const project = view.session.projectKey;
+        if (project === undefined) {
+          return `${MESSAGES.changesPullRequestReady(PRIMARY_LANGUAGE)} ${value.url}`;
+        }
+        void window.jarvis.openTab(project, value.url);
+        showView("workspace");
+        return MESSAGES.changesPullRequestOpened(PRIMARY_LANGUAGE);
+      },
+    );
+  });
+}
+
 // I3: a failed gitChanges() (e.g. session B's project isn't a repo) must not
 // leave session A's file list, diff pane, filename or header on screen under
 // the error banner — that reads as B's data, and a click on one of A's still
@@ -571,6 +833,12 @@ function clearView(): void {
   $("changes-add").textContent = "";
   $("changes-del").textContent = "";
   setText($("changes-by"), "");
+  const syncRow = document.getElementById("changes-sync");
+  if (syncRow !== null) syncRow.hidden = true;
+  const tracking = document.getElementById("changes-tracking");
+  if (tracking !== null) tracking.textContent = "";
+  document.getElementById("changes-branch-select")?.replaceChildren();
+  showSyncStatus("");
   const staleNotice = $("changes-stale-notice");
   staleNotice.hidden = true;
   staleNotice.textContent = "";
@@ -594,8 +862,11 @@ export async function openChanges(sessionId: string, path?: string): Promise<voi
   }
 
   clearError();
+  const sessionChanged = current?.session.id !== result.value.session.id;
   current = result.value;
   renderHeader(result.value);
+  if (sessionChanged) showSyncStatus("");
+  void renderSync(result.value);
 
   const files = result.value.changes.files;
   const requested = files.find((file) => file.path === path);

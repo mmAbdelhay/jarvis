@@ -1,69 +1,175 @@
-import { ScrollView, StyleSheet, Text, TouchableOpacity } from "react-native";
+import { useState } from "react";
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Icon } from "@/components/Icon";
+import type { IconName } from "@/lib/icon-paths";
 import { t } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
 import { KEY_CAPS, KEY_LABEL_KEYS } from "@/lib/session-screen";
-import { KEY_BAR, type KeyName } from "@/lib/terminal-keys";
+import { anyLatch, type Latches } from "@/lib/session-input";
+import type { BarKey } from "@/lib/terminal-keys";
 import { theme } from "@/lib/theme";
 
-export function KeyBar(props: {
+/**
+ * A row of key caps. `moreKeys` hide behind a trailing "⋯" cap that opens a
+ * second row, so a short bar loses no key. `variant="footer"` draws no
+ * ground or border of its own: the screen's footer supplies them.
+ */
+export function KeyBar<K extends BarKey>(props: {
+  keys: readonly K[];
+  moreKeys?: readonly K[];
   disabled: boolean;
-  armed: boolean;
-  onKey(key: KeyName | "ctrl"): void;
+  armed: Latches;
+  variant?: "footer";
+  /** A "⋯" cap that the screen owns (a mode switch) rather than the extra row. */
+  modeToggle?: { open: boolean; onPress(): void };
+  /** The "⋯" row closed, so its caps (and any latch armed there) are gone. */
+  onMoreClose?(): void;
+  /** Icon caps ahead of the keys that act on the screen, not the pty (the
+   *  terminal's previous / next command). Never disabled with the keys. */
+  actions?: readonly { id: string; icon: IconName; label: string; onPress(): void }[];
+  onKey(key: K): void;
 }) {
   const language = useLanguage();
-  return (
-    <ScrollView horizontal style={styles.row} contentContainerStyle={styles.content}>
-      {KEY_BAR.map((key) => (
-        <TouchableOpacity
-          key={key}
-          disabled={props.disabled}
-          accessibilityRole="button"
-          accessibilityLabel={t(language, KEY_LABEL_KEYS[key])}
-          accessibilityHint={
-            key === "ctrl" && props.armed ? t(language, "session.ctrlArmed") : undefined
-          }
-          accessibilityState={{ disabled: props.disabled, selected: key === "ctrl" && props.armed }}
-          onPress={() => props.onKey(key)}
+  const [open, setOpen] = useState(false);
+  const footer = props.variant === "footer";
+  const more = props.moreKeys ?? [];
+  // A latch armed behind a "⋯" cap stays visible on that cap.
+  const latched = anyLatch(props.armed);
+
+  function cap(key: K) {
+    const armed = key === "ctrl" ? props.armed.ctrl : key === "alt" ? props.armed.alt : false;
+    return (
+      <TouchableOpacity
+        key={key}
+        disabled={props.disabled}
+        accessibilityRole="button"
+        accessibilityLabel={t(language, KEY_LABEL_KEYS[key])}
+        accessibilityHint={
+          armed ? t(language, key === "ctrl" ? "session.ctrlArmed" : "session.altArmed") : undefined
+        }
+        accessibilityState={{ disabled: props.disabled, selected: armed }}
+        onPress={() => props.onKey(key)}
+        style={[styles.cap, armed && styles.armed, props.disabled && styles.disabled]}
+      >
+        <Text
           style={[
-            styles.cap,
-            key === "enter" && styles.enter,
-            key === "ctrl" && props.armed && styles.armed,
-            props.disabled && styles.disabled,
+            styles.text,
+            key === "ctrlC" && styles.danger,
+            key === "ctrlR" && styles.link,
+            armed && styles.armedText,
           ]}
         >
-          <Text style={styles.text}>{KEY_CAPS[key]}</Text>
-        </TouchableOpacity>
-      ))}
-    </ScrollView>
+          {KEY_CAPS[key]}
+        </Text>
+      </TouchableOpacity>
+    );
+  }
+
+  return (
+    <View style={!footer && styles.frame}>
+      <ScrollView
+        horizontal
+        style={styles.row}
+        contentContainerStyle={footer ? styles.footerContent : styles.content}
+      >
+        {props.actions?.map((action) => (
+          <TouchableOpacity
+            key={action.id}
+            accessibilityRole="button"
+            accessibilityLabel={action.label}
+            onPress={action.onPress}
+            style={styles.cap}
+          >
+            <Icon
+              name={action.icon}
+              size={16}
+              color={theme.colors.textSecondary}
+              strokeWidth={2.4}
+            />
+          </TouchableOpacity>
+        ))}
+        {props.keys.map(cap)}
+        {props.modeToggle !== undefined && (
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel={t(language, props.modeToggle.open ? "keys.less" : "keys.more")}
+            accessibilityState={{ expanded: props.modeToggle.open }}
+            onPress={props.modeToggle.onPress}
+            style={[
+              styles.cap,
+              props.modeToggle.open && styles.open,
+              latched && !props.modeToggle.open && styles.armed,
+            ]}
+          >
+            <Text
+              style={[
+                styles.text,
+                props.modeToggle.open && styles.openText,
+                latched && !props.modeToggle.open && styles.armedText,
+              ]}
+            >
+              ⋯
+            </Text>
+          </TouchableOpacity>
+        )}
+        {more.length > 0 && (
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel={t(language, open ? "keys.less" : "keys.more")}
+            accessibilityState={{ expanded: open }}
+            onPress={() => {
+              if (open) props.onMoreClose?.();
+              setOpen((value) => !value);
+            }}
+            style={[styles.cap, open && styles.open, latched && !open && styles.armed]}
+          >
+            <Text
+              style={[styles.text, open && styles.openText, latched && !open && styles.armedText]}
+            >
+              ⋯
+            </Text>
+          </TouchableOpacity>
+        )}
+      </ScrollView>
+      {open && more.length > 0 && (
+        <View style={[styles.moreRow, footer ? styles.footerMore : styles.moreInset]}>
+          {more.map(cap)}
+        </View>
+      )}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  row: {
-    flexGrow: 0,
+  frame: {
     direction: "ltr",
     backgroundColor: theme.colors.ground,
     borderTopColor: theme.colors.hairlineSoft,
     borderTopWidth: 1,
   },
+  row: { flexGrow: 0, direction: "ltr" },
   content: { gap: 6, paddingVertical: 8, paddingHorizontal: 12 },
+  footerContent: { gap: 6 },
+  moreRow: { direction: "ltr", flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  moreInset: { paddingBottom: 8, paddingHorizontal: 12 },
+  footerMore: { paddingTop: 6 },
   cap: {
-    height: 44,
-    minWidth: 44,
+    minHeight: 36,
+    minWidth: 36,
+    paddingHorizontal: 12,
     alignItems: "center",
-    borderRadius: theme.radius.sm,
+    borderRadius: 9,
     justifyContent: "center",
     backgroundColor: theme.colors.surface,
     borderColor: theme.colors.border,
     borderWidth: 1,
   },
-  enter: {
-    minWidth: 56,
-    borderWidth: 1.5,
-    borderColor: theme.colors.textSecondary,
-    backgroundColor: theme.colors.ground,
-  },
-  armed: { backgroundColor: theme.colors.accentSoft, borderColor: theme.colors.accent },
+  armed: { backgroundColor: theme.colors.accent, borderColor: theme.colors.accent },
+  open: { backgroundColor: theme.colors.accentSoft, borderColor: theme.colors.accentBorder },
   disabled: { opacity: 0.4 },
-  text: { color: theme.colors.textSecondary, fontFamily: theme.font.monoSemibold, fontSize: 12 },
+  text: { ...theme.type.mono, color: theme.colors.textSecondary },
+  danger: { color: theme.colors.dangerText },
+  link: { color: theme.colors.link },
+  armedText: { color: theme.colors.primaryText },
+  openText: { color: theme.colors.link },
 });

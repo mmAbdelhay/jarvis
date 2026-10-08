@@ -118,7 +118,7 @@ describe("topBarStoreFor", () => {
     const store = topBarStoreFor(fake.client);
     store.subscribe(() => {});
     store.subscribe(() => {});
-    expect(fake.subscribeCalls).toEqual(["metrics:update", "sessions:update"]);
+    expect(fake.subscribeCalls).toEqual(["metrics:update", "sessions:update", "providers:update"]);
     expect(fake.callLog).toEqual(["sessions:list"]);
   });
 
@@ -134,11 +134,15 @@ describe("topBarStoreFor", () => {
     const store = topBarStoreFor(fake.client);
     const release = store.subscribe(() => {});
     fake.push("metrics:update", METRICS);
-    fake.push("sessions:update", [SESSION, { ...SESSION, id: "s2", state: "done" }]);
+    fake.push("sessions:update", [
+      SESSION,
+      { ...SESSION, id: "s2", state: "waiting" },
+      { ...SESSION, id: "s3", state: "waiting", origin: "external" },
+    ]);
     release();
     // Settings opening later reads the last values straight away.
     expect(store.get().metrics?.cpuPercent).toBe(10);
-    expect(store.get().runningCount).toBe(1);
+    expect(store.get().waitingCount).toBe(1);
   });
 
   it("notifies listeners on pushes", () => {
@@ -148,5 +152,22 @@ describe("topBarStoreFor", () => {
     store.subscribe((view) => seen.push(view.metrics?.cpuPercent ?? -1));
     fake.push("metrics:update", METRICS);
     expect(seen).toEqual([10]);
+  });
+
+  it("keeps the parsed account capacity from the providers push", () => {
+    const fake = createFakeClient();
+    const store = topBarStoreFor(fake.client);
+    store.subscribe(() => {});
+    fake.push("providers:update", [
+      {
+        id: "Claude",
+        vendor: "anthropic",
+        capacity: {
+          state: "known",
+          primary: { usedPercent: 38, resetsAt: "2026-10-03T12:00:00Z" },
+        },
+      },
+    ]);
+    expect(store.get().capacity.map((card) => [card.id, card.left])).toEqual([["Claude", 62]]);
   });
 });
