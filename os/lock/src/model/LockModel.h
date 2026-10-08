@@ -36,6 +36,9 @@ public:
     Q_INVOKABLE void tick(); // one second of cooldown (the timer calls it)
     static int cooldownFor(int failures);
 
+public slots:
+    void retranslate() { emit stateChanged(); } // the language changed: texts re-read
+
 signals:
     void stateChanged();
     void unlockRequested();

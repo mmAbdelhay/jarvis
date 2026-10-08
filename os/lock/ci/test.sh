@@ -14,6 +14,7 @@ DESTDIR="$PWD/os/lock/build/stage" cmake --install os/lock/build
 test -f os/lock/build/stage/etc/pam.d/jarvis-lock
 test -z "$(find os/lock/build/stage -path '*Jarvis/UI*' -print -quit)" # jarvis-ui ships separately
 test -x os/lock/build/stage/usr/bin/jarvis-lock
+test -f os/lock/build/stage/usr/share/jarvis/i18n/jarvis-lock_ar.qm
 test ! -e os/lock/build/stage/usr/bin/jarvis-lock-testhooks
 # Positive control: the marker must be findable in the hook build, else this check is vacuous.
 grep -a -q -- 'JARVIS_LOCK_TEST_HOOKS_PRESENT' os/lock/build/src/jarvis-lock-testhooks || {

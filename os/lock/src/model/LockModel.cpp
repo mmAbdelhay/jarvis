@@ -43,8 +43,8 @@ void LockModel::onFinished(bool ok, const QString& message)
     }
     ++m_failures;
     const QString why = message.trimmed().left(160);
-    m_errorText = why.isEmpty() ? u"That password didn't work. Try again."_s
-                                : u"That password didn't work: %1"_s.arg(why);
+    m_errorText = why.isEmpty() ? tr("That password didn't work. Try again.")
+                                : tr("That password didn't work: %1").arg(why);
     m_cooldown = cooldownFor(m_failures);
     if (m_cooldown > 0) {
         m_timer.start();

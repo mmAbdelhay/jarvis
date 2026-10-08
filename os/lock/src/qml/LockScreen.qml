@@ -9,6 +9,9 @@ Rectangle {
     required property LockModel lock
     property bool primary: true
 
+    LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft
+    LayoutMirroring.childrenInherit: true
+
     color: Theme.surfaceDeep
 
     function focusField() {
@@ -46,12 +49,12 @@ Rectangle {
         visible: root.primary
         initial: root.lock.initial
         displayName: root.lock.displayName
-        submitLabel: "Unlock"
+        submitLabel: qsTr("Unlock")
         busy: root.lock.state !== "ready"
         errorText: root.lock.state === "cooldown"
-                   ? root.lock.errorText + " Try again in " + root.lock.cooldownSeconds + " s."
+                   ? qsTr("%1 Try again in %2 s.").arg(root.lock.errorText).arg(root.lock.cooldownSeconds)
                    : root.lock.errorText
-        infoText: root.lock.state === "checking" ? "Checking…" : ""
+        infoText: root.lock.state === "checking" ? qsTr("Checking…") : ""
         onSubmitted: (secret) => root.lock.submit(secret)
     }
     RowLayout {
@@ -62,7 +65,7 @@ Rectangle {
         Icon { path: Icons.lock; color: Theme.muted; size: 16 }
         Text {
             objectName: "lockedLabel"
-            text: "Locked"
+            text: qsTr("Locked")
             color: Theme.muted
             font.pixelSize: Theme.fontSmall
         }
