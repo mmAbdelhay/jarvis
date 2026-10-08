@@ -27,6 +27,10 @@ dist: clean
 	$(BUILD) -o $(DIST)/usr/libexec/jarvis/jarvis-helper ./cmd/jarvis-helper
 	$(BUILD) -o $(DIST)/usr/libexec/jarvis/jarvis-installer-backend ./cmd/jarvis-installer-backend
 	$(BUILD) -o $(DIST)/usr/libexec/jarvis/jarvis-model-fetch ./cmd/jarvis-model-fetch
+	$(BUILD) -o $(DIST)/usr/lib/jarvis/mcp/jarvis-settings ./cmd/jarvis-settings
+	$(BUILD) -o $(DIST)/usr/lib/jarvis/mcp/jarvis-apps ./cmd/jarvis-apps
+	$(BUILD) -o $(DIST)/usr/lib/jarvis/mcp/jarvis-files ./cmd/jarvis-files-os
+	$(BUILD) -o $(DIST)/usr/libexec/jarvis/jarvis-wl ./cmd/jarvis-wl
 	mkdir -p $(DIST)/usr/share/dbus-1/system.d $(DIST)/usr/share/dbus-1/system-services \
 		$(DIST)/usr/lib/systemd/system $(DIST)/usr/share/polkit-1/actions
 	install -m 0644 data/os.jarvis.Helper1.conf $(DIST)/usr/share/dbus-1/system.d/os.jarvis.Helper1.conf
