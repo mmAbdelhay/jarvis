@@ -43,8 +43,18 @@ shlibs_depends() {
   probe=$(mktemp -d)
   mkdir "$probe/debian"
   printf 'Source: shlibs-probe\n\nPackage: shlibs-probe\nArchitecture: any\n' > "$probe/debian/control"
-  (cd "$probe" && dpkg-shlibdeps -O --ignore-missing-info "${libdirs[@]}" "${args[@]}" 2>/dev/null) |
-    sed -n 's/^shlibs:Depends=//p'
+  # A library dpkg-shlibdeps cannot resolve (not installed on the build host)
+  # must fail the build: silently dropping it shipped packages whose Depends
+  # missed what their binaries link (jarvis-workspace lost all of Electron's).
+  local out status=0
+  out=$(cd "$probe" && dpkg-shlibdeps -O --ignore-missing-info "${libdirs[@]}" "${args[@]}" 2>"$probe/err") || status=$?
+  if [ "$status" -ne 0 ]; then
+    echo "build-deb: dpkg-shlibdeps failed; install the libraries the staged binaries link on the build host:" >&2
+    grep -v '^dpkg-shlibdeps: warning' "$probe/err" >&2 || true
+    rm -rf "$probe"
+    return 1
+  fi
+  sed -n 's/^shlibs:Depends=//p' <<<"$out"
   rm -rf "$probe"
 }
 
@@ -94,7 +104,7 @@ if grep -q '@[A-Z_]*@' <<<"$text"; then
 fi
 printf '%s\n' "$text" > "$root/DEBIAN/control"
 
-shlibs=$(shlibs_depends "$root")
+shlibs=$(shlibs_depends "$root") || exit 1
 added=$(printf '%s\n%s\n' "$extra" "$shlibs" | awk 'NF' | paste -sd, - | sed 's/,\([^ ]\)/, \1/g')
 if [ -n "$added" ]; then
   if grep -q '^Depends:' "$root/DEBIAN/control"; then
