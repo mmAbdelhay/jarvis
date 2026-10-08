@@ -23,20 +23,26 @@ import tempfile
 from pathlib import Path
 
 REGISTRY = Path(__file__).resolve().parents[1] / "voice.json"
+CONFIGS = REGISTRY.parent / "voice-configs"
 VOICE_DIR = "usr/share/jarvis/voice"
 KINDS = ("stt", "tts", "wake")
-SUBDIR = {"stt": "whisper", "tts": "piper", "wake": "wake"}
+SUBDIR = {"stt": "stt", "tts": "tts", "wake": "wake"}
 KEYS = {"id", "kind", "file", "sha256", "license", "redistributable", "source", "notes"}
 REDISTRIBUTABLE = frozenset({"MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "CC0-1.0",
                              "CC-BY-4.0", "CC-BY-SA-4.0", "Public-Domain"})
 NOT_REDISTRIBUTABLE = frozenset({"CC-BY-NC-4.0", "CC-BY-NC-SA-4.0", "CC-BY-NC-ND-4.0", "CC-BY-ND-4.0",
                                  "Proprietary", "Blizzard-2013"})
 ID = re.compile(r"^[a-z0-9][A-Za-z0-9._-]{1,79}$")
-FILE = re.compile(r"^(whisper|piper|wake)/[A-Za-z0-9][A-Za-z0-9._-]*$")
+FILE = re.compile(r"^(stt|tts|wake)/[A-Za-z0-9][A-Za-z0-9._-]*$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 MODEL_NAME = re.compile(r"(\.onnx|\.tflite|\.ppn|\.pv)$|^ggml-.*\.bin$")
 METADATA_NAME = re.compile(r"(\.json|\.txt|\.md)$|^(LICENSE|COPYING|MODEL_CARD)")
 SKIP_TOP = {"proc", "sys"}
+
+
+def tts_config(m: dict, configs: Path | None = None) -> Path:
+    """The committed Piper config that ships beside a tts model."""
+    return (configs or CONFIGS) / (Path(m["file"]).name + ".json")
 
 
 def load(path: Path | None) -> dict:
@@ -67,7 +73,7 @@ def validate(reg) -> list[str]:
         if m["kind"] not in KINDS:
             p.append(f"{w}: kind must be one of {KINDS}")
         elif not isinstance(m["file"], str) or not FILE.match(m["file"]) or ".." in m["file"]:
-            p.append(f"{w}: file must be <whisper|piper|wake>/<name> under {VOICE_DIR}")
+            p.append(f"{w}: file must be <stt|tts|wake>/<name> under {VOICE_DIR} (M3 contracts §5.13)")
         elif not m["file"].startswith(SUBDIR[m["kind"]] + "/"):
             p.append(f"{w}: a {m['kind']} model lives under {SUBDIR[m['kind']]}/")
         if m["file"] in files:

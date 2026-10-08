@@ -1,10 +1,10 @@
 {
-  "version": 1,
+  "version": 2,
   "models": [
     {
       "id": "whisper-base",
       "kind": "stt",
-      "file": "whisper/ggml-base.bin",
+      "file": "stt/ggml-base.bin",
       "sha256": "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe",
       "license": "MIT",
       "redistributable": true,
@@ -14,7 +14,7 @@
     {
       "id": "whisper-small",
       "kind": "stt",
-      "file": "whisper/ggml-small.bin",
+      "file": "stt/ggml-small.bin",
       "sha256": "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
       "license": "MIT",
       "redistributable": true,
@@ -24,7 +24,7 @@
     {
       "id": "piper-en_US-ljspeech-medium",
       "kind": "tts",
-      "file": "piper/en_US-ljspeech-medium.onnx",
+      "file": "tts/en_US-ljspeech-medium.onnx",
       "sha256": "6f52a751e2349abe7a76735eb09dc1875298c77ea2342ffd2fef79ff81b87f22",
       "license": "Public-Domain",
       "redistributable": true,
