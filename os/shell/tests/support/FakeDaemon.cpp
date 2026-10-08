@@ -76,10 +76,41 @@ void FakeDaemon::sendTo(Peer* peer, const QJsonObject& message)
     peer->socket->write(encodeJsonFrame(message));
 }
 
+void FakeDaemon::answer(Peer* peer, quint64 id, const Reply& reply)
+{
+    if (reply.defer)
+        return;
+    if (reply.ok)
+        sendTo(peer, {{"t", "res"}, {"id", qint64(id)}, {"v", reply.value}});
+    else
+        sendTo(peer, {{"t", "err"}, {"id", qint64(id)}, {"code", reply.code}, {"text", reply.text}, {"language", "en"}});
+}
+
 void FakeDaemon::onData(Peer* peer)
 {
     peer->decoder.push(peer->socket->readAll());
     while (auto frame = peer->decoder.next()) {
+        if (peer->blob) {
+            // server.ts: only binary frames, each 1..262144 bytes, never past the declared total.
+            Peer::Blob& blob = *peer->blob;
+            const qsizetype size = frame->bytes.size();
+            if (frame->kind != FrameKind::Binary || size == 0 || size > 262'144 || blob.data.size() + size > blob.bytes) {
+                peer->socket->abort();
+                return;
+            }
+            blob.data += frame->bytes;
+            if (++blob.received < blob.chunks)
+                continue;
+            const Peer::Blob done = std::move(*peer->blob);
+            peer->blob.reset();
+            if (done.data.size() != done.bytes) {
+                peer->socket->abort();
+                return;
+            }
+            uploads.append({done.channel, done.args, done.data, done.chunks});
+            answer(peer, done.id, handler ? handler(done.channel, done.args, done.id) : Reply{});
+            continue;
+        }
         const QJsonObject m = frame->json;
         received.append(m);
         const QString t = m.value("t").toString();
@@ -117,13 +148,16 @@ void FakeDaemon::onData(Peer* peer)
             sendTo(peer, {{"t", "welcome"}, {"v", kControlProtocolVersion}, {"capabilities", QJsonArray{}}});
         } else if (peer->phase == Peer::Phase::Open && t == u"req") {
             const quint64 id = quint64(m.value("id").toDouble());
-            const Reply reply = handler ? handler(m.value("ch").toString(), m.value("a").toArray(), id) : Reply{};
-            if (reply.defer)
-                continue;
-            if (reply.ok)
-                sendTo(peer, {{"t", "res"}, {"id", qint64(id)}, {"v", reply.value}});
-            else
-                sendTo(peer, {{"t", "err"}, {"id", qint64(id)}, {"code", reply.code}, {"text", reply.text}, {"language", "en"}});
+            answer(peer, id, handler ? handler(m.value("ch").toString(), m.value("a").toArray(), id) : Reply{});
+        } else if (peer->phase == Peer::Phase::Open && t == u"blob") {
+            const qsizetype bytes = qsizetype(m.value("bytes").toDouble());
+            const int chunks = m.value("chunks").toInt();
+            if (bytes < 1 || bytes > 26'214'400 || chunks < 1 || chunks > 128 || qsizetype(chunks) * 262'144 < bytes || chunks > bytes) {
+                peer->socket->abort();
+                return;
+            }
+            peer->blob = Peer::Blob{quint64(m.value("id").toDouble()), m.value("ch").toString(),
+                                    m.value("a").toArray(), bytes, chunks, 0, {}};
         } else {
             peer->socket->abort();
             return;

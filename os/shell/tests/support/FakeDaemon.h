@@ -6,6 +6,7 @@
 #include <QLocalServer>
 #include <QTemporaryDir>
 #include <functional>
+#include <optional>
 
 #include "protocol/FrameCodec.h"
 
@@ -38,6 +39,14 @@ public:
     QByteArray rawChallenge;               // when set, sent verbatim instead of a challenge
     Handler handler;                       // default: {t:"res", v:null}
 
+    struct Upload {
+        QString channel;
+        QJsonArray args;
+        QByteArray bytes;
+        int chunks = 0;
+    };
+    QList<Upload> uploads; // every completed blob request, in order (also answered by `handler`)
+
     QList<QJsonObject> received; // every JSON frame from every client, in order
     int hellos = 0;
     int welcomes = 0;
@@ -55,11 +64,22 @@ private:
         QByteArray nonceC;
         QByteArray nonceS;
         QString helloBuild;
+        struct Blob {
+            quint64 id = 0;
+            QString channel;
+            QJsonArray args;
+            qsizetype bytes = 0;
+            int chunks = 0;
+            int received = 0;
+            QByteArray data;
+        };
+        std::optional<Blob> blob;
         enum class Phase { Hello, Auth, Open } phase = Phase::Hello;
     };
 
     void onConnection();
     void onData(Peer* peer);
+    void answer(Peer* peer, quint64 id, const Reply& reply);
     void sendTo(Peer* peer, const QJsonObject& message);
     void forget(Peer* peer);
 

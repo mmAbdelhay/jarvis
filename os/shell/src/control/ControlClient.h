@@ -63,6 +63,13 @@ public:
     // {ok:false, code:"closed"}, delivered asynchronously.
     void invoke(const QString& channel, const QJsonArray& args, ControlReply reply = {});
 
+    // jarvisd's blob lane (@jarvis/wire MAX_BLOB_BYTES / MAX_BLOB_CHUNK_BYTES):
+    // a {t:"blob"} header, then the bytes in binary frames. Same reply rules
+    // as invoke(): never queued across a reconnect.
+    static constexpr qsizetype kMaxBlobBytes = 26'214'400;
+    static constexpr qsizetype kMaxBlobChunkBytes = 262'144;
+    void upload(const QString& channel, const QJsonArray& args, const QByteArray& bytes, ControlReply reply = {});
+
 signals:
     void stateChanged();
     void opened();
