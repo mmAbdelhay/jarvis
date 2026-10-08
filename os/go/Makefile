@@ -7,7 +7,7 @@ VERSION ?= $(shell git describe --tags --match 'os-v*' --always 2>/dev/null || e
 DIST    := dist
 BUILD   := CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) $(GO) build -trimpath -ldflags '-s -w -X main.version=$(VERSION)'
 
-.PHONY: all check test dist clean
+.PHONY: all check test dist registry clean
 
 all: check test
 
@@ -39,5 +39,21 @@ dist: clean
 	install -m 0644 data/os.jarvis.installer.policy $(DIST)/usr/share/polkit-1/actions/os.jarvis.installer.policy
 	install -m 0644 data/jarvis-model-fetch.service $(DIST)/usr/lib/systemd/system/jarvis-model-fetch.service
 
+# Official registry servers (Rafiq M2.5 contracts section 3 and 7): static
+# linux binaries at dist-registry/<id>/server, deterministic artifacts under
+# dist-registry/artifacts/, and entries.json for the signed index.
+# -buildvcs=false keeps a dirty worktree from changing the bytes.
+REGISTRY_VERSION  ?= $(patsubst os-v%,%,$(VERSION))
+REGISTRY_BASE_URL ?= https://mmabdelhay.github.io/jarvis-apt/registry/artifacts
+REGISTRY_OUT      := dist-registry
+
+registry:
+	rm -rf $(REGISTRY_OUT)
+	$(BUILD) -buildvcs=false -o $(REGISTRY_OUT)/jarvis-clock/server ./cmd/jarvis-clock
+	$(BUILD) -buildvcs=false -o $(REGISTRY_OUT)/jarvis-files/server ./cmd/jarvis-files
+	$(BUILD) -buildvcs=false -o $(REGISTRY_OUT)/jarvis-web/server ./cmd/jarvis-web
+	$(GO) run ./tools/regpack -bin $(REGISTRY_OUT) -out $(REGISTRY_OUT) \
+		-version $(REGISTRY_VERSION) -base-url $(REGISTRY_BASE_URL) -license ../../LICENSE
+
 clean:
-	rm -rf $(DIST)
+	rm -rf $(DIST) $(REGISTRY_OUT)
