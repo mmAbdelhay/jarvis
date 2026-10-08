@@ -11,11 +11,11 @@ problems=()
 
 grep -q 'C-A-t' "$c/etc/xdg/labwc/rc.xml" 2>/dev/null ||
   problems+=("labwc rc.xml lacks the Ctrl+Alt+T terminal bind")
-grep -q 'command="jarvis-shell --focus"' "$c/etc/xdg/labwc/rc.xml" 2>/dev/null ||
-  problems+=("labwc rc.xml lacks the Super -> jarvis-shell --focus bind")
-grep -qx '. /usr/share/jarvis-shell/labwc/autostart' "$c/etc/xdg/labwc/autostart" 2>/dev/null ||
-  problems+=("labwc autostart does not source jarvis-shell's relaunch loop")
-[ -f "$c/usr/share/jarvis-shell/labwc/autostart" ] ||
+grep -q 'command="/usr/libexec/jarvis/jarvis-session-key --focus"' "$c/etc/xdg/labwc/rc.xml" 2>/dev/null ||
+  problems+=("labwc rc.xml lacks the Super -> jarvis-session-key --focus bind")
+grep -Fxq '. /usr/share/jarvis-session/labwc/autostart' "$c/etc/xdg/labwc/autostart" 2>/dev/null ||
+  problems+=("labwc autostart does not start the shell through jarvis-session's guard")
+[ -f "$c/usr/share/jarvis-shell/jarvis-shell-loop" ] ||
   problems+=("jarvis-shell's relaunch loop is not installed")
 [ -f "$c/usr/share/polkit-1/rules.d/50-jarvis.rules" ] ||
   problems+=("polkit rule 50-jarvis.rules missing")

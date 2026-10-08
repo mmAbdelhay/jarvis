@@ -60,4 +60,17 @@ check "missing stage.sh named in the error" grep -q 'stage.sh' <<<"$err"
 check "OS_VERSION wins" test "$(OS_VERSION=1.2.3 "$PACKAGING_DIR/version.sh")" = "1.2.3"
 check "default version is valid for dpkg" bash -c "v=\$(env -u OS_VERSION '$PACKAGING_DIR/version.sh'); dpkg --validate-version \"\$v\""
 
+# M4 Plan T: a stage may choose the data compression (.deb-compression).
+mkdir -p "$defs/raw"
+sed 's/^Package: demo$/Package: raw/' "$defs/demo/control.in" > "$defs/raw/control.in"
+printf '#!/usr/bin/env bash\nset -euo pipefail\ninstall -D -m0644 /dev/null "$1/usr/share/raw/blob"\necho none > "$1/.deb-compression"\n' > "$defs/raw/stage.sh"
+chmod +x "$defs/raw/stage.sh"
+JARVIS_PACKAGING_DEFS=$defs "$PACKAGING_DIR/build.sh" --out "$tmp/out" raw >/dev/null
+raw=$tmp/out/raw_${OS_VERSION}_amd64.deb
+check ".deb-compression none gives an uncompressed data.tar" grep -qx 'data.tar' <<<"$(ar t "$raw")"
+check ".deb-compression is not packed" bash -c "! dpkg-deb -c '$raw' | grep -q deb-compression"
+check "default compression stays xz" grep -qx 'data.tar.xz' <<<"$(ar t "$deb")"
+printf '#!/usr/bin/env bash\nset -euo pipefail\ninstall -D -m0644 /dev/null "$1/usr/share/raw/blob"\necho lzma9 > "$1/.deb-compression"\n' > "$defs/raw/stage.sh"
+check "an unknown compression is refused" bash -c "! JARVIS_PACKAGING_DEFS='$defs' '$PACKAGING_DIR/build.sh' --out '$tmp/out-bad' raw >/dev/null 2>&1"
+
 finish

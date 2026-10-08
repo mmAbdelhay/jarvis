@@ -1,0 +1,42 @@
+#!/bin/sh
+# Run by jarvis-shell-loop (JARVIS_SHELL_BIN) for the whole labwc session.
+# Starts jarvis-shell, or the classic desktop (M4 contracts §2):
+#  - in the classic session (chosen on the login screen);
+#  - once $XDG_RUNTIME_DIR/jarvis/classic-fallback exists. It is written here
+#    when jarvis-shell failed (non-zero exit) 3 times within 60 s.
+# Daemon outages are handled by the shell banner, not this guard.
+# A clean exit (e.g. a second instance that only raised the first) never
+# counts. The loop's back-off spaces the relaunches.
+# Test hooks: JARVIS_SHELL, JARVIS_CLASSIC, JARVIS_NOW.
+set -u
+shell=${JARVIS_SHELL:-jarvis-shell}
+classic=${JARVIS_CLASSIC:-/usr/bin/jarvis-classic}
+now_cmd=${JARVIS_NOW:-date +%s}
+state="${XDG_RUNTIME_DIR:?}/jarvis"
+marker=$state/classic-fallback
+failures=$state/shell-failures
+window=60
+limit=3
+
+private_state() { mkdir -p "$state" && chmod 0700 "$state"; }
+fall_back() { # fall_back REASON
+  private_state
+  printf 'reason=%s\nsince=%s\n' "$1" "$($now_cmd)" > "$marker"
+  logger -t jarvis-session "switching to the classic desktop: $1" 2>/dev/null || true
+}
+
+if [ "${JARVIS_SESSION_MODE:-full}" = classic ]; then exec "$classic"; fi
+if [ -e "$marker" ]; then exec "$classic"; fi
+
+"$shell"
+rc=$?
+[ "$rc" -eq 0 ] && exit 0
+now=$($now_cmd)
+private_state
+{ if [ -f "$failures" ]; then cat "$failures"; fi; echo "$now"; } |
+  awk -v now="$now" -v w="$window" '$1 > now - w' > "$failures.new"
+mv "$failures.new" "$failures"
+if [ "$(wc -l < "$failures")" -ge "$limit" ]; then
+  fall_back shell-failed
+fi
+exit "$rc"

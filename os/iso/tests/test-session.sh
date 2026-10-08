@@ -35,7 +35,7 @@ print("\n".join(sorted(rows)))
 PY
 }
 ours=$(keybinds "$inc/etc/xdg/labwc/rc.xml")
-check "Super focuses the shell (§6 #14)" grep -Fxq $'Super_L\tExecute\tjarvis-shell --focus' <<<"$ours"
+check "Super focuses the shell through the session dispatcher (§6 #14, M4 §2)" grep -Fxq $'Super_L\tExecute\t/usr/libexec/jarvis/jarvis-session-key --focus' <<<"$ours"
 check "Ctrl+Alt+T opens foot" grep -Fxq $'C-A-t\tExecute\tfoot' <<<"$ours"
 check "Super acts on release (so Super+key chords still work)" python3 - "$inc/etc/xdg/labwc/rc.xml" <<'PY'
 import sys, xml.etree.ElementTree as ET
@@ -43,7 +43,13 @@ kb = ET.parse(sys.argv[1]).getroot().find("keyboard")
 assert [b for b in kb.findall("keybind") if b.get("key") == "Super_L"][0].get("onRelease") == "yes"
 PY
 check "Super+L runs jarvis-lock directly (including live boots without jarvis-idle)" grep -Fxq $'W-l\tExecute\tjarvis-lock' <<<"$ours"
-check "Super+Space is push-to-talk" grep -Fxq $'W-space\tExecute\tjarvis-shell --voice' <<<"$ours"
+check "Super+Space is push-to-talk through the dispatcher (M3 §3, M4 §2)" grep -Fxq $'W-space\tExecute\t/usr/libexec/jarvis/jarvis-session-key --voice' <<<"$ours"
+check "no keybind calls jarvis-shell directly (it would cover the classic desktop)" \
+  python3 - "$inc/etc/xdg/labwc/rc.xml" <<'PYDIRECT'
+import sys, xml.etree.ElementTree as ET
+commands = [a.get("command", "") for a in ET.parse(sys.argv[1]).iter("action")]
+assert not any(c.split() and c.split()[0] == "jarvis-shell" for c in commands), commands
+PYDIRECT
 check "no key is bound twice" test -z "$(cut -f1 <<<"$ours" | sort | uniq -d)"
 auto=$inc/etc/xdg/labwc/autostart
 check "autostart hands the session to the user manager" \
@@ -58,19 +64,23 @@ t = open(sys.argv[1]).read()
 a = t.index("import-environment WAYLAND_DISPLAY")
 d = t.index("dbus-update-activation-environment --systemd")
 b = t.index(". /usr/share/jarvis-idle/labwc/autostart")
-c = t.index(". /usr/share/jarvis-shell/labwc/autostart")
+c = t.index(". /usr/share/jarvis-session/labwc/autostart")
 assert a < d < b < c, (a, d, b, c)
 PYORDER
 if [ -f "$c_labwc/rc.xml" ]; then
-  # Shell binds are a subset; the session also supplies the lock chord.
-  check "every jarvis-shell bind is ours, same action" \
-    test -z "$(comm -23 <(keybinds "$c_labwc/rc.xml") <(printf '%s\n' "$ours"))"
+  # Route the same shell arguments through the full/classic dispatcher.
+  routed=$(printf '%s\n' "${ours//\/usr\/libexec\/jarvis\/jarvis-session-key /jarvis-shell }" | sort)
+  check "every jarvis-shell bind is ours, same arguments" \
+    test -z "$(comm -23 <(keybinds "$c_labwc/rc.xml") <(printf '%s\n' "$routed"))"
 else
   echo "SKIP: Plan C's os/shell/data/labwc/rc.xml not landed yet" >&2
 fi
 
 check "autostart parses" sh -n "$inc/etc/xdg/labwc/autostart"
-check "autostart sources C's relaunch loop" grep -qx '. /usr/share/jarvis-shell/labwc/autostart' "$inc/etc/xdg/labwc/autostart"
+check "autostart starts the shell through the fallback guard (M4 §2)" \
+  grep -Fxq '. /usr/share/jarvis-session/labwc/autostart' "$auto"
+check "autostart no longer starts the bare loop" \
+  bash -c '! grep -Fxq ". /usr/share/jarvis-shell/labwc/autostart" "$1"' _ "$auto"
 check "environment is KEY=VALUE lines" bash -c "! grep -Ev '^(#.*|[A-Z_]+=.*)$|^$' '$inc/etc/xdg/labwc/environment'"
 check "Qt uses Wayland" grep -qx 'QT_QPA_PLATFORM=wayland' "$inc/etc/xdg/labwc/environment"
 # labwc applies this file with setenv(..., 1) after the /usr/local/bin/labwc

@@ -1,4 +1,4 @@
-"""Schema test for os/models/catalog.json (contracts §4)."""
+"""Schema test for os/models/catalog.json (M2 contracts §4; M4 contracts §1 role)."""
 from __future__ import annotations
 
 import copy
@@ -9,11 +9,16 @@ from pathlib import Path
 
 CATALOG = Path(__file__).resolve().parents[1] / "catalog.json"
 TIERS = ("small", "medium", "large", "gpu")
+ROLES = ("main", "backup")
 KEYS = {"id", "ollamaTag", "displayName", "sizeBytes", "minRamGB", "minVramGB", "tier",
-        "toolCalling", "languages", "recommendedFor"}
+        "toolCalling", "languages", "recommendedFor", "role"}
 ID = re.compile(r"^[a-z0-9][a-z0-9.-]*$")
 TAG = re.compile(r"^[a-z0-9][a-z0-9._/-]*:[a-z0-9][a-z0-9._-]*$")
 LANG = re.compile(r"^[a-z]{2,3}(-[A-Z]{2})?$")
+# M4 contracts §1: the backup brain is a ≈1–2B model that every target runs,
+# in both of the OS languages.
+BACKUP_MAX_BYTES = 2_500_000_000
+BACKUP_LANGS = {"en", "ar"}
 
 
 def is_int(v) -> bool:
@@ -35,7 +40,7 @@ def validate(catalog) -> list[str]:
         if not isinstance(m, dict):
             p.append(f"{where} is not an object"); continue
         if set(m) != KEYS:
-            p.append(f"{where} keys {sorted(set(m) ^ KEYS)} differ from contracts §4"); continue
+            p.append(f"{where} keys {sorted(set(m) ^ KEYS)} differ from contracts (M2 §4, M4 §1)"); continue
         where = f"{where} ({m['id']})"
         if not isinstance(m["id"], str) or not ID.match(m["id"]): p.append(f"{where}: bad id")
         if m["id"] in seen_ids: p.append(f"{where}: duplicate id")
@@ -54,11 +59,32 @@ def validate(catalog) -> list[str]:
         langs = m["languages"]
         if not isinstance(langs, list) or not langs or not all(isinstance(l, str) and LANG.match(l) for l in langs): p.append(f"{where}: languages must be BCP 47 codes")
         if not isinstance(m["recommendedFor"], str) or not m["recommendedFor"].strip(): p.append(f"{where}: recommendedFor empty")
+        if m["role"] not in ROLES: p.append(f"{where}: role must be one of {ROLES} (M4 contracts §1)")
         if is_int(m["sizeBytes"]) and is_int(m["minRamGB"]) and m["tier"] != "gpu" and m["sizeBytes"] > m["minRamGB"] * 1024**3 * 0.75:
             p.append(f"{where}: model is larger than 75% of minRamGB")
-    if not any(isinstance(m, dict) and m.get("tier") == "small" for m in models):
-        p.append("at least one small-tier model (8 GB machines) is required")
+    good = [m for m in models if isinstance(m, dict) and set(m) == KEYS]
+    mains = [m for m in good if m["role"] == "main"]
+    backups = [m for m in good if m["role"] == "backup"]
+    if len(backups) != 1:
+        p.append(f"exactly one backup model is required, found {len(backups)} (M4 contracts §1)")
+    main_ram = [m["minRamGB"] for m in mains if is_int(m["minRamGB"])]
+    for b in backups:
+        w = f"backup model {b['id']}"
+        if is_int(b["sizeBytes"]) and b["sizeBytes"] > BACKUP_MAX_BYTES:
+            p.append(f"{w}: larger than {BACKUP_MAX_BYTES} bytes (a ≈1–2B model)")
+        if b["tier"] != "small" or b["minVramGB"] is not None:
+            p.append(f"{w}: must be a small, CPU-only model")
+        if isinstance(b["languages"], list) and not BACKUP_LANGS <= set(b["languages"]):
+            p.append(f"{w}: must handle en and ar")
+        if main_ram and is_int(b["minRamGB"]) and b["minRamGB"] > min(main_ram):
+            p.append(f"{w}: needs more RAM than the smallest main model; it must run on every target")
+    if not any(m["tier"] == "small" for m in mains):
+        p.append("at least one small-tier main model (8 GB machines) is required")
     return p
+
+
+def backup(c: dict) -> dict:
+    return next(m for m in c["models"] if m["role"] == "backup")
 
 
 class CatalogTest(unittest.TestCase):
@@ -72,6 +98,12 @@ class CatalogTest(unittest.TestCase):
         order = [TIERS.index(m["tier"]) for m in self.catalog["models"]]
         self.assertEqual(order, sorted(order), "models are listed small → gpu (installer shows them in order)")
 
+    def test_one_backup_model_for_arabic_and_english(self):
+        b = backup(self.catalog)
+        self.assertEqual(b["ollamaTag"], "qwen3:1.7b")
+        self.assertTrue(BACKUP_LANGS <= set(b["languages"]))
+        self.assertEqual([m["role"] for m in self.catalog["models"]].count("backup"), 1)
+
     def test_validator_catches_contract_breaks(self):
         good = self.catalog
         cases = {
@@ -80,11 +112,19 @@ class CatalogTest(unittest.TestCase):
             "unverified": lambda c: c["models"][0].update(toolCalling="untested"),
             "bad tier": lambda c: c["models"][0].update(tier="huge"),
             "bool size": lambda c: c["models"][0].update(sizeBytes=True),
-            "dup id": lambda c: c["models"].append(copy.deepcopy(c["models"][0])),
+            "dup id": lambda c: c["models"].append(copy.deepcopy(c["models"][1])),
             "tag without version": lambda c: c["models"][0].update(ollamaTag="qwen3"),
             "gpu without vram": lambda c: c["models"][-1].update(tier="gpu", minVramGB=None),
             "string version": lambda c: c.update(version="1"),
             "empty langs": lambda c: c["models"][0].update(languages=[]),
+            "no role": lambda c: c["models"][1].pop("role"),
+            "bad role": lambda c: c["models"][1].update(role="spare"),
+            "two backups": lambda c: [m for m in c["models"] if m["role"] == "main"][0].update(role="backup"),
+            "no backup": lambda c: backup(c).update(role="main"),
+            "big backup": lambda c: backup(c).update(sizeBytes=BACKUP_MAX_BYTES + 1, minRamGB=8),
+            "backup without arabic": lambda c: backup(c).update(languages=["en"]),
+            "backup on gpu": lambda c: backup(c).update(tier="gpu", minVramGB=4),
+            "backup needs more RAM than mains": lambda c: backup(c).update(minRamGB=16),
         }
         for name, mutate in cases.items():
             c = copy.deepcopy(good)

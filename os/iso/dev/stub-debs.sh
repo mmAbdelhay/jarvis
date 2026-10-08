@@ -2,7 +2,7 @@
 # stub-debs.sh OUT — stand-in Jarvis packages, so the ISO can be built
 # and booted before the real E, F and G packages have landed. jarvisd keeps the real
 # maintainer scripts and a unit that runs /bin/true; jarvis-shell opens a
-# terminal (relaunch-loop snippet at the real package's path), which shows the
+# terminal (relaunch loop at the real package's path), which shows the
 # session works; jarvis-helper keeps its real postinst and polkit rule.
 set -euo pipefail
 out=$1
@@ -45,7 +45,19 @@ stub jarvisd "$packaging/jarvisd"
 mkdir -p "$tmp/jarvis-shell/usr/bin" "$tmp/jarvis-shell/usr/share/jarvis-shell/labwc"
 printf '#!/bin/sh\nexec foot\n' > "$tmp/jarvis-shell/usr/bin/jarvis-shell"
 chmod 0755 "$tmp/jarvis-shell/usr/bin/jarvis-shell"
-echo '(while true; do jarvis-shell; sleep 1; done) &' > "$tmp/jarvis-shell/usr/share/jarvis-shell/labwc/autostart"
+cat > "$tmp/jarvis-shell/usr/share/jarvis-shell/jarvis-shell-loop" <<'EOF'
+#!/bin/sh
+set -u
+shell_bin="${JARVIS_SHELL_BIN:-jarvis-shell}"
+socket="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/${WAYLAND_DISPLAY:-wayland-0}"
+while [ -e "$socket" ]; do
+  "$shell_bin"
+  [ -e "$socket" ] || break
+  sleep 1
+done
+EOF
+chmod 0755 "$tmp/jarvis-shell/usr/share/jarvis-shell/jarvis-shell-loop"
+echo '/usr/share/jarvis-shell/jarvis-shell-loop &' > "$tmp/jarvis-shell/usr/share/jarvis-shell/labwc/autostart"
 stub jarvis-shell
 stub jarvis-pkg
 stub jarvis-diag

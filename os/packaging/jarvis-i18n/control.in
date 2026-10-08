@@ -1,0 +1,11 @@
+Package: jarvis-i18n
+Version: @VERSION@
+Architecture: all
+Maintainer: Muhammad AbdElHay <mmAbdelhay@users.noreply.github.com>
+Installed-Size: @INSTALLED_SIZE@
+Section: localization
+Priority: optional
+Homepage: @HOME_URL@
+Description: English and Arabic translations of the @DISTRO_NAME@ interface
+ Compiled Qt translations for the shell, installer, login and lock screens
+ and the classic desktop, in /usr/share/jarvis/i18n.

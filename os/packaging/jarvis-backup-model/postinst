@@ -1,0 +1,15 @@
+#!/bin/sh
+# jarvis-backup-model (M4 contracts §1). dpkg creates the model store's
+# directories root-owned, but ollama (the service user) must keep adding
+# models there: the installer's and the first-boot pull of the main model
+# write into blobs/ and manifests/. The ollama user owns /var/lib/ollama and
+# could plant a symlink, so nothing is changed through one: a symlinked store
+# is skipped, find -P never follows links, chown -h never dereferences.
+set -e
+store=/var/lib/ollama/models
+if [ "$1" = configure ] && getent passwd ollama >/dev/null &&
+  [ ! -L /var/lib/ollama ] && [ ! -L "$store" ] && [ -d "$store" ]; then
+  chown -h ollama:ollama /var/lib/ollama "$store"
+  find -P "$store" -mindepth 1 -type d -exec chown -h ollama:ollama {} +
+fi
+exit 0

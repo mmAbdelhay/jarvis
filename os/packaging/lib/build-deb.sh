@@ -64,6 +64,17 @@ if [ -f "$root/.shlibs-libdirs" ]; then
   done < "$root/.shlibs-libdirs"
   rm -f "$root/.shlibs-libdirs"
 fi
+# Stage metadata picks the data compression (GGUF weights do not compress;
+# xz would spend many minutes for nothing).
+compression=xz
+if [ -f "$root/.deb-compression" ]; then
+  compression=$(tr -d '[:space:]' < "$root/.deb-compression")
+  rm -f "$root/.deb-compression"
+  case $compression in
+    xz|zstd|gzip|none) ;;
+    *) echo "build-deb: .deb-compression must be xz, zstd, gzip or none (got '$compression')" >&2; exit 1 ;;
+  esac
+fi
 chmod -R u+rwX,go+rX,go-w "$root"
 mkdir -p "$root/DEBIAN" "$out"
 
@@ -110,5 +121,5 @@ fi
 package=$(sed -n 's/^Package: //p' "$root/DEBIAN/control")
 arch=$(sed -n 's/^Architecture: //p' "$root/DEBIAN/control")
 deb="$out/${package}_${version}_${arch}.deb"
-dpkg-deb --root-owner-group -Zxz --build "$root" "$deb" >/dev/null
+dpkg-deb --root-owner-group -Z"$compression" --build "$root" "$deb" >/dev/null
 echo "$deb"

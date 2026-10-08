@@ -5,14 +5,14 @@
 #   brand_render IN OUT      file version; fails if a brand placeholder is left
 shopt -u patsub_replacement 2>/dev/null || true
 BRAND_ENV_DEFAULT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/brand.env
-BRAND_KEYS="DISTRO_NAME DISTRO_ID DISTRO_VERSION ISO_VOLUME HOME_URL"
+BRAND_KEYS="DISTRO_NAME DISTRO_NAME_AR DISTRO_ID DISTRO_VERSION ISO_VOLUME HOME_URL"
 
 brand_load() {
   local file=${1:-${BRAND_ENV:-$BRAND_ENV_DEFAULT}}
   if [ ! -f "$file" ]; then echo "brand: no brand file at $file" >&2; return 1; fi
-  # Data, not code: refuse anything but the five KEY="plain value" lines.
+  # Data, not code: refuse anything but the six KEY="plain value" lines.
   if grep -vE '^[[:space:]]*(#.*)?$' "$file" |
-    grep -vqE '^(DISTRO_NAME|DISTRO_ID|DISTRO_VERSION|ISO_VOLUME|HOME_URL)="[^"$`\\]*"$'; then
+    grep -vqE '^(DISTRO_NAME|DISTRO_NAME_AR|DISTRO_ID|DISTRO_VERSION|ISO_VOLUME|HOME_URL)="[^"$`\\]*"$'; then
     echo "brand: $file may only hold KEY=\"value\" lines for: $BRAND_KEYS" >&2
     return 1
   fi
@@ -34,7 +34,7 @@ brand_load() {
   fi
   if ! [[ $HOME_URL =~ ^https:// ]]; then echo "brand: HOME_URL must be https" >&2; return 1; fi
   PRETTY_NAME="$DISTRO_NAME $DISTRO_VERSION (trixie)"
-  export DISTRO_NAME DISTRO_ID DISTRO_VERSION ISO_VOLUME HOME_URL PRETTY_NAME
+  export DISTRO_NAME DISTRO_NAME_AR DISTRO_ID DISTRO_VERSION ISO_VOLUME HOME_URL PRETTY_NAME
 }
 
 brand_render_text() {
@@ -42,6 +42,7 @@ brand_render_text() {
   text=$(cat; printf x)
   text=${text%x}
   text=${text//@DISTRO_NAME@/$DISTRO_NAME}
+  text=${text//@DISTRO_NAME_AR@/$DISTRO_NAME_AR}
   text=${text//@DISTRO_ID@/$DISTRO_ID}
   text=${text//@DISTRO_VERSION@/$DISTRO_VERSION}
   text=${text//@ISO_VOLUME@/$ISO_VOLUME}

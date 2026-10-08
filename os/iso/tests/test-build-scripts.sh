@@ -98,9 +98,9 @@ mkchroot() { # mkchroot DIR — every piece of session wiring present
   ln -s /usr/lib/systemd/system/ollama.service "$c/etc/systemd/system/multi-user.target.wants/ollama.service"
   echo 'ConditionKernelCommandLine=!boot=live' > "$c/usr/lib/systemd/system/ollama.service"
   echo 'auth optional pam_gnome_keyring.so' > "$c/etc/pam.d/greetd"
-  printf '<keybind key="Super_L" onRelease="yes"><action name="Execute" command="jarvis-shell --focus" />\n<keybind key="C-A-t">\n' > "$c/etc/xdg/labwc/rc.xml"
-  echo '. /usr/share/jarvis-shell/labwc/autostart' > "$c/etc/xdg/labwc/autostart"
-  echo '(while true; do jarvis-shell; sleep 1; done) &' > "$c/usr/share/jarvis-shell/labwc/autostart"
+  printf '<keybind key="Super_L" onRelease="yes"><action name="Execute" command="/usr/libexec/jarvis/jarvis-session-key --focus" />\n<keybind key="C-A-t">\n' > "$c/etc/xdg/labwc/rc.xml"
+  echo '. /usr/share/jarvis-session/labwc/autostart' > "$c/etc/xdg/labwc/autostart"
+  echo '(while true; do jarvis-shell; sleep 1; done) &' > "$c/usr/share/jarvis-shell/jarvis-shell-loop"
   echo 'polkit.addRule(function (action, subject) {});' > "$c/usr/share/polkit-1/rules.d/50-jarvis.rules"
   printf 'sudo:x:27:jarvis\njarvis-admins:x:990:\n' > "$c/etc/group"
   ln -s /usr/lib/systemd/user/jarvisd.service "$c/etc/systemd/user/default.target.wants/jarvisd.service"
@@ -158,6 +158,38 @@ if command -v dpkg-deb >/dev/null; then
     jarvis-installer-backend jarvis-model-fetch; do
     check "stub $p built" test -f "$tmp/stubs/${p}_0.0.0~stub1_amd64.deb"
   done
+  dpkg-deb -x "$tmp/stubs/jarvis-shell_0.0.0~stub1_amd64.deb" "$tmp/shell-stub"
+  shell_loop=$tmp/shell-stub/usr/share/jarvis-shell/jarvis-shell-loop
+  check "stub shell ships an executable relaunch loop" test -x "$shell_loop"
+  check "stub loop honours JARVIS_SHELL_BIN, relaunches and stops with labwc" python3 - "$shell_loop" "$tmp" <<'PY'
+import os
+from pathlib import Path
+import subprocess
+import sys
+
+loop, tmp = sys.argv[1:]
+runtime = Path(tmp) / "stub-runtime"
+runtime.mkdir()
+socket = runtime / "wayland-test"
+socket.touch()
+calls = runtime / "calls"
+shell = runtime / "fake shell"
+shell.write_text('#!/bin/sh\necho launch >> "$XDG_RUNTIME_DIR/calls"\n'
+                 'if [ "$(wc -l < "$XDG_RUNTIME_DIR/calls")" -eq 2 ]; then\n'
+                 '  rm "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY"\nfi\nexit 1\n')
+shell.chmod(0o755)
+env = dict(os.environ, XDG_RUNTIME_DIR=str(runtime), WAYLAND_DISPLAY="wayland-test",
+           JARVIS_SHELL_BIN=str(shell))
+subprocess.run([loop], env=env, check=True, timeout=5)
+assert calls.read_text().splitlines() == ["launch", "launch"]
+# With the compositor gone, another invocation must not launch the shell.
+subprocess.run([loop], env=env, check=True, timeout=5)
+assert calls.read_text().splitlines() == ["launch", "launch"]
+PY
+  mkchroot "$tmp/c"
+  rm "$tmp/c/usr/share/jarvis-shell/jarvis-shell-loop"
+  cp -R "$tmp/shell-stub/usr/share/jarvis-shell/." "$tmp/c/usr/share/jarvis-shell/"
+  check "chroot with the packaged stub shell loop verifies" "$scripts/verify-chroot.sh" "$tmp/c"
   check "stub greeter ships the real greetd config" grep -q 'cage -s -- jarvis-greeter' \
     <<<"$(dpkg-deb --fsys-tarfile "$tmp/stubs/jarvis-greeter_0.0.0~stub1_amd64.deb" | tar -xO ./etc/greetd/config.toml)"
   check "stub greeter ships the keyboard wrapper its config runs" bash -c 'dpkg-deb -c "$1" | grep -q "^-rwxr-xr-x .* ./usr/lib/jarvis-greeter/with-keyboard$"' _ "$tmp/stubs/jarvis-greeter_0.0.0~stub1_amd64.deb"

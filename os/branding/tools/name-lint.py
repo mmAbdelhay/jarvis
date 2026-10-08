@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fail if an H-owned file hard-codes the distro name (contracts §9). The name
 lives only in os/branding/brand.env; everything else renders @DISTRO_NAME@ or
-reads $DISTRO_NAME. Flags the current DISTRO_NAME/DISTRO_ID (read from
+reads $DISTRO_NAME. Flags the current DISTRO_NAME/DISTRO_NAME_AR/DISTRO_ID (read from
 brand.env) and the retired "Jarvis OS" in any spelling. Comments, Markdown,
 tests (which pin the contract values on purpose) and references to
 docs/superpowers/… files are allowed."""
@@ -51,8 +51,8 @@ def wanted(rel: str) -> bool:
 
 
 def brand_pattern(brand_env: Path = BRAND_ENV) -> re.Pattern[str]:
-    values = dict(re.findall(r'^(DISTRO_NAME|DISTRO_ID)="([^"]+)"$', brand_env.read_text(), re.M))
-    words = [re.escape(values[k]) for k in ("DISTRO_NAME", "DISTRO_ID") if k in values]
+    values = dict(re.findall(r'^(DISTRO_NAME|DISTRO_NAME_AR|DISTRO_ID)="([^"]+)"$', brand_env.read_text(), re.M))
+    words = [re.escape(values[k]) for k in ("DISTRO_NAME", "DISTRO_NAME_AR", "DISTRO_ID") if k in values]
     current = rf"(?<![A-Za-z0-9])({'|'.join(words)})(?![A-Za-z0-9])" if words else None
     return re.compile(LEGACY + (f"|{current}" if current else ""), re.IGNORECASE)
 

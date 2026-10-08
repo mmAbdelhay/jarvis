@@ -1,0 +1,12 @@
+Package: jarvis-fonts
+Version: @VERSION@
+Architecture: all
+Maintainer: Muhammad AbdElHay <mmAbdelhay@users.noreply.github.com>
+Installed-Size: @INSTALLED_SIZE@
+Depends: fontconfig, fonts-inter, fonts-ibm-plex, fonts-noto-core
+Section: fonts
+Priority: optional
+Homepage: @HOME_URL@
+Description: Arabic and Latin fonts for @DISTRO_NAME@
+ IBM Plex and Noto Arabic faces (Sans, Naskh, Kufi) with fontconfig rules
+ so Arabic text in the @DISTRO_NAME@ interface never shows empty boxes.

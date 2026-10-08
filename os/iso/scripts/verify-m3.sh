@@ -28,7 +28,7 @@ binding() {
     END {exit !found}' "$rc"
 }
 binding W-l 'jarvis-lock' || problems+=("labwc rc.xml lacks the Super+L -> jarvis-lock bind")
-binding W-space 'jarvis-shell --voice' || problems+=("labwc rc.xml lacks the Super+Space push-to-talk bind")
+binding W-space '/usr/libexec/jarvis/jarvis-session-key --voice' || problems+=("labwc rc.xml lacks the Super+Space push-to-talk bind")
 as=$c/etc/xdg/labwc/autostart
 grep -qx '. /usr/share/jarvis-idle/labwc/autostart' "$as" 2>/dev/null || problems+=("labwc autostart does not start the idle lock")
 grep -q 'import-environment WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP' "$as" 2>/dev/null || problems+=("labwc autostart does not give WAYLAND_DISPLAY to the user manager")

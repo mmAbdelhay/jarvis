@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=@DISTRO_NAME@
+Name[ar]=@DISTRO_NAME_AR@
+Comment=Your desktop with Jarvis, your assistant
+Comment[ar]=سطح مكتبك مع جارفيس، مساعدك الشخصي
+Exec=/usr/libexec/jarvis/jarvis-session full
+TryExec=/usr/bin/labwc
+DesktopNames=labwc;wlroots

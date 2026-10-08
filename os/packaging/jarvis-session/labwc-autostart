@@ -1,0 +1,5 @@
+# jarvis-session line for labwc's autostart (Plan T owns /etc/xdg/labwc/autostart).
+# jarvis-shell's loop relaunches with back-off and stops with labwc; the guard
+# runs jarvis-shell, or jarvis-classic in the classic session or after a
+# fallback (M4 contracts §2).
+JARVIS_SHELL_BIN=/usr/libexec/jarvis/jarvis-shell-guard /usr/share/jarvis-shell/jarvis-shell-loop &

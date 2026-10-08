@@ -1,0 +1,30 @@
+{
+  "id": "python-dev",
+  "title": { "en": "Python development", "ar": "تطوير بايثون" },
+  "description": {
+    "en": "Python 3 with virtual environments, pip and pipx, plus Git and the build tools that packages built from source need.",
+    "ar": "بايثون 3 مع البيئات الافتراضية وأداتَي pip وpipx، إضافةً إلى Git وأدوات البناء اللازمة للحزم التي تُبنى من الشيفرة المصدرية."
+  },
+  "steps": [
+    {
+      "tool": "pkg.install",
+      "input": { "items": [
+        { "source": "apt", "id": "python3" },
+        { "source": "apt", "id": "python3-venv" },
+        { "source": "apt", "id": "python3-pip" },
+        { "source": "apt", "id": "python3-dev" }
+      ] },
+      "title": { "en": "Install Python 3, venv and pip", "ar": "تثبيت بايثون 3 وvenv وpip" }
+    },
+    {
+      "tool": "pkg.install",
+      "input": { "items": [
+        { "source": "apt", "id": "build-essential" },
+        { "source": "apt", "id": "pipx" },
+        { "source": "apt", "id": "git" }
+      ] },
+      "title": { "en": "Install build tools, pipx and Git", "ar": "تثبيت أدوات البناء وpipx وGit" }
+    }
+  ],
+  "requires": { "os": "rafiq" }
+}

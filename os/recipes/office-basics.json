@@ -1,0 +1,29 @@
+{
+  "id": "office-basics",
+  "title": { "en": "Office basics", "ar": "أساسيات المكتب" },
+  "description": {
+    "en": "LibreOffice for documents, spreadsheets and presentations, a PDF viewer, and fonts that keep Microsoft Office documents laid out as their authors intended.",
+    "ar": "ليبر أوفيس للمستندات وجداول البيانات والعروض التقديمية، وعارض لملفات PDF، وخطوط تحافظ على تنسيق مستندات مايكروسوفت أوفيس كما أرادها كاتبوها."
+  },
+  "steps": [
+    {
+      "tool": "pkg.install",
+      "input": { "items": [{ "source": "flatpak", "id": "org.libreoffice.LibreOffice" }] },
+      "title": { "en": "Install LibreOffice", "ar": "تثبيت ليبر أوفيس" }
+    },
+    {
+      "tool": "pkg.install",
+      "input": { "items": [{ "source": "flatpak", "id": "org.gnome.Evince" }] },
+      "title": { "en": "Install a PDF viewer", "ar": "تثبيت عارض لملفات PDF" }
+    },
+    {
+      "tool": "pkg.install",
+      "input": { "items": [
+        { "source": "apt", "id": "fonts-crosextra-carlito" },
+        { "source": "apt", "id": "fonts-crosextra-caladea" }
+      ] },
+      "title": { "en": "Install fonts compatible with Microsoft Office", "ar": "تثبيت خطوط متوافقة مع مايكروسوفت أوفيس" }
+    }
+  ],
+  "requires": { "os": "rafiq" }
+}

@@ -2,6 +2,19 @@
   "version": 1,
   "models": [
     {
+      "id": "qwen3-1.7b",
+      "ollamaTag": "qwen3:1.7b",
+      "displayName": "Qwen3 1.7B",
+      "sizeBytes": 1359293444,
+      "minRamGB": 4,
+      "minVramGB": null,
+      "tier": "small",
+      "toolCalling": "verified",
+      "languages": ["en", "ar", "zh", "fr", "de", "es"],
+      "recommendedFor": "Built-in backup: answers when every configured provider fails",
+      "role": "backup"
+    },
+    {
       "id": "llama3.2-3b",
       "ollamaTag": "llama3.2:3b",
       "displayName": "Llama 3.2 3B",
@@ -11,7 +24,8 @@
       "tier": "small",
       "toolCalling": "verified",
       "languages": ["en", "de", "fr", "it", "pt", "hi", "es", "th"],
-      "recommendedFor": "Laptops with 8 GB of memory; quick everyday tasks"
+      "recommendedFor": "Laptops with 8 GB of memory; quick everyday tasks",
+      "role": "main"
     },
     {
       "id": "qwen3-4b",
@@ -23,7 +37,8 @@
       "tier": "small",
       "toolCalling": "verified",
       "languages": ["en", "ar", "zh", "fr", "de", "es"],
-      "recommendedFor": "8 GB machines; best small model for Arabic"
+      "recommendedFor": "8 GB machines; best small model for Arabic",
+      "role": "main"
     },
     {
       "id": "qwen3-8b",
@@ -35,7 +50,8 @@
       "tier": "medium",
       "toolCalling": "verified",
       "languages": ["en", "ar", "zh", "fr", "de", "es"],
-      "recommendedFor": "16 GB machines; the recommended default"
+      "recommendedFor": "16 GB machines; the recommended default",
+      "role": "main"
     },
     {
       "id": "llama3.1-8b",
@@ -47,7 +63,8 @@
       "tier": "medium",
       "toolCalling": "verified",
       "languages": ["en", "de", "fr", "it", "pt", "hi", "es", "th"],
-      "recommendedFor": "16 GB machines; strong English tool use"
+      "recommendedFor": "16 GB machines; strong English tool use",
+      "role": "main"
     },
     {
       "id": "qwen3-14b",
@@ -59,7 +76,8 @@
       "tier": "large",
       "toolCalling": "verified",
       "languages": ["en", "ar", "zh", "fr", "de", "es"],
-      "recommendedFor": "32 GB machines; more careful multi-step tasks"
+      "recommendedFor": "32 GB machines; more careful multi-step tasks",
+      "role": "main"
     },
     {
       "id": "gpt-oss-20b",
@@ -71,7 +89,8 @@
       "tier": "large",
       "toolCalling": "verified",
       "languages": ["en"],
-      "recommendedFor": "32 GB machines; strongest local reasoning"
+      "recommendedFor": "32 GB machines; strongest local reasoning",
+      "role": "main"
     },
     {
       "id": "qwen3-30b-a3b",
@@ -83,7 +102,8 @@
       "tier": "gpu",
       "toolCalling": "verified",
       "languages": ["en", "ar", "zh", "fr", "de", "es"],
-      "recommendedFor": "Machines with a 24 GB graphics card"
+      "recommendedFor": "Machines with a 24 GB graphics card",
+      "role": "main"
     }
   ]
 }

@@ -1,0 +1,26 @@
+{
+  "id": "media-basics",
+  "title": { "en": "Media basics", "ar": "أساسيات الوسائط" },
+  "description": {
+    "en": "Play almost any audio or video file: the VLC player, FFmpeg and the common GStreamer codecs.",
+    "ar": "شغّل أي ملف صوتي أو مرئي تقريبًا: مشغّل VLC وأداة FFmpeg وبرامج الترميز الشائعة لـ GStreamer."
+  },
+  "steps": [
+    {
+      "tool": "pkg.install",
+      "input": { "items": [
+        { "source": "apt", "id": "ffmpeg" },
+        { "source": "apt", "id": "gstreamer1.0-libav" },
+        { "source": "apt", "id": "gstreamer1.0-plugins-good" },
+        { "source": "apt", "id": "gstreamer1.0-plugins-ugly" }
+      ] },
+      "title": { "en": "Install FFmpeg and GStreamer codecs", "ar": "تثبيت FFmpeg وبرامج ترميز GStreamer" }
+    },
+    {
+      "tool": "pkg.install",
+      "input": { "items": [{ "source": "flatpak", "id": "org.videolan.VLC" }] },
+      "title": { "en": "Install the VLC media player", "ar": "تثبيت مشغّل الوسائط VLC" }
+    }
+  ],
+  "requires": { "os": "rafiq" }
+}
