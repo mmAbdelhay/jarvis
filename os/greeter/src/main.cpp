@@ -11,6 +11,7 @@
 #include "JarvisFont.h"
 #include "KeyboardLabel.h"
 #include "LoginModel.h"
+#include "SessionChoice.h"
 #include "GreeterLanguage.h"
 #include "Language.h"
 #include "ModelStatus.h"
@@ -55,7 +56,9 @@ int main(int argc, char* argv[])
     PowerActions* power = new FakePower(&app);
 #endif
     auto* login = new LoginModel(client, power, readUsers(), &app);
-    login->setSessionFile(parser.value(session), parser.isSet(session));
+    login->setSessions(readSessions());
+    if (parser.isSet(session))
+        login->setSessionFile(parser.value(session), true);
     auto* status = new ModelStatus(ModelStatus::defaultStatePath(), ModelStatus::defaultCatalogPath(), &app);
     // greetd starts the session once the greeter exits after start_session succeeded.
     QObject::connect(login, &LoginModel::sessionStarted, &app, [] { QCoreApplication::exit(0); });

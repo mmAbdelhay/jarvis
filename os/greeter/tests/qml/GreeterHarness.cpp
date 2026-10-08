@@ -39,6 +39,8 @@ LoginModel* GreeterHarness::fresh(const QVariantMap& options)
         users = {{u"mohamed"_s, u"Mohamed Abdelhay"_s, 1000}};
     m_login = new LoginModel(m_client, m_power, users, this);
     m_login->setSessionExec(options.value(u"sessionExec"_s, u"labwc"_s).toString());
+    if (options.contains(u"sessionsDir"_s))
+        m_login->setSessions(readSessions(options.value(u"sessionsDir"_s).toString()));
     return m_login;
 }
 

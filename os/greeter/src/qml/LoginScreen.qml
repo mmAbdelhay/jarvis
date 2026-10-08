@@ -259,6 +259,44 @@ Rectangle {
         }
         Item { Layout.fillWidth: true }
         ActionButton {
+            id: sessionButton
+            objectName: "sessionButton"
+            readonly property var current: root.login.sessions.find(s => s.id === root.login.sessionId)
+            visible: root.login.sessions.length > 1
+            enabled: root.login.state === "idle"
+            implicitHeight: 44
+            leftPadding: 14
+            rightPadding: 14
+            font.pixelSize: Theme.fontSmall
+            text: current ? current.name : ""
+            Accessible.name: qsTr("Session: %1").arg(text)
+            onClicked: sessionMenu.open()
+            Menu {
+                id: sessionMenu
+                objectName: "sessionMenu"
+                y: -implicitHeight - 8
+                Repeater {
+                    model: root.login.sessions
+                    delegate: MenuItem {
+                        required property var modelData
+                        objectName: "session_" + modelData.id
+                        text: modelData.name
+                        checkable: true
+                        checked: modelData.id === root.login.sessionId
+                        contentItem: Text {
+                            text: parent.text
+                            textFormat: Text.PlainText
+                            font: parent.font
+                            color: Theme.text
+                            elide: Text.ElideRight
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        onTriggered: root.login.sessionId = modelData.id
+                    }
+                }
+            }
+        }
+        ActionButton {
             objectName: "languageButton"
             visible: root.language !== null
             implicitHeight: 44

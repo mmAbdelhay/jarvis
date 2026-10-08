@@ -128,6 +128,10 @@
             <source>Restart</source>
             <translation>إعادة التشغيل</translation>
         </message>
+        <message>
+            <source>Session: %1</source>
+            <translation>الجلسة: %1</translation>
+        </message>
     </context>
     <context>
         <name>ModelStatus</name>

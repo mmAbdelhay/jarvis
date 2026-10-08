@@ -1,0 +1,5 @@
+[Desktop Entry]
+Type=Application
+Name=Rafiq (classic)
+Name[ar]=رفيق (الكلاسيكي)
+Exec=labwc -C /etc/xdg/labwc-classic

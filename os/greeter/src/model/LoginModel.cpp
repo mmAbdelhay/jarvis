@@ -236,6 +236,7 @@ void LoginModel::retranslate()
     }
     emit userChanged();
     emit stateChanged();
+    emit sessionsChanged();
 }
 
 QString LoginModel::translatedError(const char* source, const QString& argument)
@@ -252,4 +253,35 @@ void LoginModel::clearError()
     m_errorSource = nullptr;
     m_errorArgument.clear();
     m_errorText.clear();
+}
+
+void LoginModel::setSessions(QList<SessionEntry> sessions)
+{
+    m_sessions = std::move(sessions);
+    m_sessionId = m_sessions.isEmpty() ? QString() : m_sessions.first().id;
+    m_sessionCommand = m_sessions.isEmpty() ? QStringList{u"labwc"_s} : m_sessions.first().command;
+    emit sessionsChanged();
+}
+
+QVariantList LoginModel::sessions() const
+{
+    QVariantList out;
+    const QString lang = jarvis::ui::currentLanguage();
+    for (const SessionEntry& s : m_sessions)
+        out.append(QVariantMap{{u"id"_s, s.id}, {u"name"_s, s.name(lang)}});
+    return out;
+}
+
+void LoginModel::setSessionId(const QString& id)
+{
+    if (id == m_sessionId || m_state != u"idle")
+        return;
+    for (const SessionEntry& s : std::as_const(m_sessions)) {
+        if (s.id == id) {
+            m_sessionId = id;
+            m_sessionCommand = s.command;
+            emit sessionsChanged();
+            return;
+        }
+    }
 }

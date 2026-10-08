@@ -22,6 +22,7 @@ public:
 
     void setLanguageManager(jarvis::ui::LanguageManager* manager);
     Q_INVOKABLE GreeterLanguage* language() const { return m_language; }
+    Q_INVOKABLE QString sessionsDir() const { return QStringLiteral(JARVIS_GREETER_TEST_DATA "/sessions"); }
     Q_INVOKABLE QVariantMap startRequest() const;
     Q_INVOKABLE LoginModel* fresh(const QVariantMap& options = {});
     Q_INVOKABLE ModelStatus* status(const QString& stateJson);

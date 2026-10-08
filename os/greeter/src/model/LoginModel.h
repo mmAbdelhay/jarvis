@@ -6,6 +6,8 @@
 #include <QtQml/qqmlregistration.h>
 
 #include "UserList.h"
+#include "SessionChoice.h"
+#include <QVariantList>
 
 class GreetdClient;
 class PowerActions;
@@ -32,6 +34,9 @@ class LoginModel : public QObject {
     Q_PROPERTY(bool powerAvailable READ powerAvailable CONSTANT)
     Q_PROPERTY(int failures READ failures NOTIFY failuresChanged)
 
+    Q_PROPERTY(QVariantList sessions READ sessions NOTIFY sessionsChanged)
+    Q_PROPERTY(QString sessionId READ sessionId WRITE setSessionId NOTIFY sessionsChanged)
+
 public:
     LoginModel(GreetdClient* client, PowerActions* power, QList<UserEntry> users, QObject* parent = nullptr);
     ~LoginModel() override;
@@ -50,6 +55,11 @@ public:
     QString infoText() const { return m_infoText; }
     bool powerAvailable() const;
     int failures() const { return m_failures; }
+
+    void setSessions(QList<SessionEntry> sessions);
+    QVariantList sessions() const;
+    QString sessionId() const { return m_sessionId; }
+    void setSessionId(const QString& id);
 
     void setSessionExec(const QString& exec);
     // Only an explicitly chosen unavailable session blocks login.
@@ -70,6 +80,7 @@ signals:
     void stateChanged();
     void failuresChanged();
     void sessionStarted();
+    void sessionsChanged();
 
 private:
     enum class Phase { None, Creating, Answering, Starting, Cancelling };
@@ -84,7 +95,9 @@ private:
     GreetdClient* m_client;
     PowerActions* m_power;
     QList<UserEntry> m_users;
-    QStringList m_sessionCommand;
+    QList<SessionEntry> m_sessions;
+    QString m_sessionId;
+    QStringList m_sessionCommand{QStringLiteral("labwc")};
     QString m_username;
     bool m_otherUser = false;
     QString m_state = QStringLiteral("idle");
