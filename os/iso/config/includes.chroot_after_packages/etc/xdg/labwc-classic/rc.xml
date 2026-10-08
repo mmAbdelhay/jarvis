@@ -2,9 +2,9 @@
 <!-- labwc for the Rafiq classic session (labwc -C /etc/xdg/labwc-classic).
      Same binds as /etc/xdg/labwc/rc.xml, deliberately: Super and Super+Space go
      through jarvis-session-key, which opens the docked chat of jarvis-classic
-     here (Plan R's rc.xml, which calls jarvis-classic --chat directly and has
+     here (Plan R's rc.xml, which calls jarvis-classic with its chat flag directly and has
      no Super+Space, is not used), and Super+L runs jarvis-lock.
-     Original notes: labwc for Rafiq. <default/> keeps the stock key binds.
+     <default/> keeps the stock key binds.
      Super alone on release focuses Jarvis; Super+key chords cancel it.
      Super+Space toggles push-to-talk; Super+L runs jarvis-lock directly,
      including live boots without jarvis-idle (deliberate deviation from
