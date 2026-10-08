@@ -18,6 +18,8 @@ class ProviderModel : public QObject {
     Q_PROPERTY(QString activeModel READ activeModel NOTIFY activeChanged)
     Q_PROPERTY(QString activeLabel READ activeLabel NOTIFY activeChanged)
     Q_PROPERTY(bool activeHasKey READ activeHasKey NOTIFY activeChanged)
+    Q_PROPERTY(QString activeId READ activeId NOTIFY activeChanged)
+    Q_PROPERTY(QString editingId READ editingId NOTIFY draftChanged)
     Q_PROPERTY(QString mode READ mode WRITE setMode NOTIFY draftChanged)
     Q_PROPERTY(QString preset READ preset WRITE setPreset NOTIFY draftChanged)
     Q_PROPERTY(QString kind READ kind WRITE setKind NOTIFY draftChanged)
@@ -42,6 +44,13 @@ public:
     QString activeModel() const { return m_activeModel; }
     QString activeLabel() const;
     bool activeHasKey() const { return m_activeHasKey; }
+    QString activeId() const { return m_activeId; }
+    QString editingId() const { return m_editingId; }
+    QString suggestedId() const; // a provider id for a new draft: local, lan, or the preset in lower case
+
+    // Shared with ProviderListModel: where a provider runs, and how the top bar names it.
+    static QString providerMode(const QString& kind, const QString& url);
+    static QString providerLabel(const QString& kind, const QString& url);
 
     QString mode() const { return m_mode; }
     QString preset() const { return m_preset; }
@@ -66,6 +75,9 @@ public:
 
     Q_INVOKABLE void loadList(const QJsonObject& list);
     Q_INVOKABLE void editActive();
+    Q_INVOKABLE void editProvider(const QJsonObject& config); // {id, kind, baseUrl, model, hasKey}
+    Q_INVOKABLE void startNew();
+    void loadActive(const QJsonObject& config);
     Q_INVOKABLE void probe();
     Q_INVOKABLE void save();
     Q_INVOKABLE void applyProbeResult(const QJsonObject& result);
@@ -87,11 +99,15 @@ private:
     void wipeKey();
     QString displayName() const;
     bool keepsSavedKey() const;
+    void loadDraft(const QJsonObject& config);
 
     bool m_known = false;
     bool m_hasActive = false;
     QString m_activeKind, m_activeBaseUrl, m_activeModel;
     bool m_activeHasKey = false;
+    QString m_activeId;
+    QString m_editingId, m_editingKind, m_editingBaseUrl;
+    bool m_editingHasKey = false;
 
     QString m_mode, m_preset, m_kind, m_baseUrl, m_model, m_apiKey;
     QStringList m_models;

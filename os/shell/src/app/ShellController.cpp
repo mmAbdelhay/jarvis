@@ -18,6 +18,7 @@ ShellController::ShellController(ControlClient* client, QObject* parent)
     , m_chatCard(new CardModel(this))
     , m_doctorCard(new CardModel(this))
     , m_provider(new ProviderModel(this))
+    , m_providers(new ProviderListModel(this))
     , m_doctor(new DoctorModel(this))
     , m_audit(new AuditModel(this))
     , m_system(new SystemModel(this))
@@ -36,17 +37,32 @@ ShellController::ShellController(ControlClient* client, QObject* parent)
         });
     });
     connect(m_provider, &ProviderModel::saveRequested, this, [this](const QJsonObject& draft) {
-        request(u"provider:save"_s, QJsonArray{draft}, [this](const ControlResult& r) {
+        QString id = m_provider->editingId();
+        if (id.isEmpty())
+            id = m_providers->uniqueId(m_provider->suggestedId());
+        QJsonObject withId = draft;
+        withId.insert("id", id);
+        request(u"provider:save"_s, QJsonArray{m_providers->payloadWith(withId)}, [this, id](const ControlResult& r) {
             if (r.ok)
-                m_provider->applySaveResult(r.value.toObject());
+                m_provider->applySaveResult(ProviderListModel::resultFor(r.value.toObject(), id));
             else
                 m_provider->applyRequestError(r.text);
         });
     });
     connect(m_provider, &ProviderModel::saved, this, [this] {
-        setView(u"chat"_s);
+        if (m_view != u"settings")
+            setView(u"chat"_s);
         refreshProviders();
     });
+    connect(m_providers, &ProviderListModel::saveRequested, this, [this](const QJsonObject& payload) {
+        request(u"provider:save"_s, QJsonArray{payload}, [this](const ControlResult& r) {
+            if (r.ok)
+                m_providers->applySaveResult(r.value.toObject());
+            else
+                m_providers->applyRequestError(r.text);
+        });
+    });
+    connect(m_providers, &ProviderListModel::saved, this, &ShellController::refreshProviders);
     connect(m_provider, &ProviderModel::activeChanged, this, &ShellController::bannerChanged);
     connect(m_system, &SystemModel::changed, this, &ShellController::providerStatusChanged);
 
@@ -104,6 +120,8 @@ QString ShellController::bannerText() const
         return m_providerError.isEmpty() ? u"Can't reach %1."_s.arg(who)
                                          : u"Can't reach %1: %2"_s.arg(who, m_providerError);
     }
+    if (!m_fallbackReason.isEmpty()) // design §3.5: "Using <provider> — <reason>"
+        return u"Using %1 — %2"_s.arg(m_providers->displayName(m_providers->activeId()), m_fallbackReason);
     return {};
 }
 
@@ -133,6 +151,7 @@ void ShellController::refreshProviders()
         if (!r.ok)
             return;
         m_provider->loadList(r.value.toObject());
+        m_providers->loadList(r.value.toObject());
         if (!m_provider->hasActive() && m_view != u"doctor") // the doctor may run before any provider exists
             setView(u"setup"_s);
         else if (m_view == u"loading" || m_view == u"setup")
@@ -172,6 +191,14 @@ void ShellController::onPush(const QString& channel, const QJsonValue& payload)
         const QJsonObject status = payload.toObject();
         m_providerReachable = status.value("reachable").toBool(true);
         m_providerError = status.value("error").toString();
+        m_fallbackReason = status.value("fallbackReason").toString();
+        const QString activeId = status.value("activeId").toString();
+        if (!activeId.isEmpty()) {
+            m_providers->setActiveId(activeId);
+            const QJsonObject config = m_providers->configFor(activeId);
+            if (!config.isEmpty())
+                m_provider->loadActive(config);
+        }
         emit providerStatusChanged();
         emit bannerChanged();
         return maybeLeaveDoctor();
@@ -284,8 +311,10 @@ void ShellController::showView(const QString& view)
         return;
     if (view == u"audit")
         m_audit->refresh();
-    if (view == u"settings")
+    if (view == u"settings") {
         m_provider->editActive();
+        refreshProviders();
+    }
     setView(view);
 }
 

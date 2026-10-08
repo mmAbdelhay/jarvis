@@ -86,22 +86,41 @@ QStringList ProviderModel::presetNames() const
     return names;
 }
 
-QString ProviderModel::activeLabel() const
+QString ProviderModel::providerMode(const QString& kind, const QString& url)
 {
-    if (!m_hasActive)
-        return {};
-    const QString mode = modeFor(m_activeKind, m_activeBaseUrl);
+    return modeFor(kind, url);
+}
+
+QString ProviderModel::providerLabel(const QString& kind, const QString& url)
+{
+    const QString mode = modeFor(kind, url);
     if (mode == u"local")
         return u"On this computer"_s;
     if (mode == u"lan")
         return u"On your network"_s;
-    if (m_activeKind == u"anthropic")
+    if (kind == u"anthropic")
         return u"Anthropic"_s;
-    if (m_activeKind == u"gemini")
+    if (kind == u"gemini")
         return u"Gemini"_s;
-    if (const Preset* preset = presetFor(m_activeKind, m_activeBaseUrl))
+    if (const Preset* preset = presetFor(kind, url))
         return preset->name.toString();
-    return QUrl(m_activeBaseUrl).host();
+    return QUrl(url).host();
+}
+
+QString ProviderModel::activeLabel() const
+{
+    return m_hasActive ? providerLabel(m_activeKind, m_activeBaseUrl) : QString();
+}
+
+QString ProviderModel::suggestedId() const
+{
+    if (m_mode != u"cloud")
+        return m_mode;
+    QString slug;
+    for (const QChar c : m_preset.toLower())
+        if (c.unicode() < 128 && c.isLetterOrNumber())
+            slug.append(c);
+    return slug.isEmpty() || slug == u"customurl" ? u"cloud"_s : slug.left(32);
 }
 
 void ProviderModel::setMode(const QString& mode)
@@ -222,7 +241,7 @@ bool ProviderModel::canSave() const
 
 bool ProviderModel::keepsSavedKey() const
 {
-    return m_hasActive && m_activeHasKey && m_kind == m_activeKind && m_baseUrl.trimmed() == m_activeBaseUrl;
+    return m_editingHasKey && m_kind == m_editingKind && m_baseUrl.trimmed() == m_editingBaseUrl;
 }
 
 QJsonObject ProviderModel::draft() const
@@ -256,9 +275,26 @@ void ProviderModel::wipeKey()
 
 void ProviderModel::loadList(const QJsonObject& list)
 {
-    const QJsonObject active = list.value("active").toObject();
+    QJsonObject active = list.value("active").toObject(); // jarvisd before M2.5
+    const QJsonValue providers = list.value("providers");
+    if (providers.isArray()) {
+        const QJsonArray rows = providers.toArray();
+        const QString activeId = list.value("activeId").toString();
+        active = {};
+        for (const QJsonValue& row : rows)
+            if (!activeId.isEmpty() && row.toObject().value("id").toString() == activeId)
+                active = row.toObject();
+        if (active.isEmpty() && !rows.isEmpty())
+            active = rows.first().toObject();
+    }
     m_known = true;
+    loadActive(active);
+}
+
+void ProviderModel::loadActive(const QJsonObject& active)
+{
     m_hasActive = !active.isEmpty();
+    m_activeId = active.value("id").toString();
     m_activeKind = active.value("kind").toString();
     m_activeBaseUrl = active.value("baseUrl").toString();
     m_activeModel = active.value("model").toString();
@@ -269,25 +305,54 @@ void ProviderModel::loadList(const QJsonObject& list)
 void ProviderModel::editActive()
 {
     if (!m_hasActive)
-        return setMode(u"cloud"_s);
-    m_mode = modeFor(m_activeKind, m_activeBaseUrl);
+        return startNew();
+    loadDraft(QJsonObject{{"id", m_activeId}, {"kind", m_activeKind}, {"baseUrl", m_activeBaseUrl},
+                          {"model", m_activeModel}, {"hasKey", m_activeHasKey}});
+}
+
+void ProviderModel::editProvider(const QJsonObject& config)
+{
+    if (config.value("kind").toString().isEmpty())
+        return startNew();
+    loadDraft(config);
+}
+
+void ProviderModel::startNew()
+{
+    m_editingId.clear();
+    m_editingKind.clear();
+    m_editingBaseUrl.clear();
+    m_editingHasKey = false;
+    wipeKey();
+    setMode(u"cloud"_s);
+}
+
+void ProviderModel::loadDraft(const QJsonObject& config)
+{
+    const QString kind = config.value("kind").toString();
+    const QString baseUrl = config.value("baseUrl").toString();
+    const QString model = config.value("model").toString();
+    m_editingId = config.value("id").toString();
+    m_editingKind = kind;
+    m_editingBaseUrl = baseUrl;
+    m_editingHasKey = config.value("hasKey").toBool();
+    m_mode = modeFor(kind, baseUrl);
     m_preset.clear();
     if (m_mode == u"cloud") {
-        const Preset* preset = presetFor(m_activeKind, m_activeBaseUrl);
+        const Preset* preset = presetFor(kind, baseUrl);
         m_preset = preset ? preset->name.toString()
-                 : m_activeKind == u"anthropic" ? u"Anthropic"_s
-                 : m_activeKind == u"gemini" ? u"Gemini"_s
+                 : kind == u"anthropic" ? u"Anthropic"_s
+                 : kind == u"gemini" ? u"Gemini"_s
                  : u"Custom URL"_s;
     }
-    m_kind = m_activeKind;
-    m_baseUrl = m_activeBaseUrl;
-    m_model = m_activeModel;
-    m_models = m_activeModel.isEmpty() ? QStringList{} : QStringList{m_activeModel};
+    m_kind = kind;
+    m_baseUrl = baseUrl;
+    m_model = model;
+    m_models = model.isEmpty() ? QStringList{} : QStringList{model};
     wipeKey();
     resetProbe();
     emit draftChanged();
 }
-
 void ProviderModel::probe()
 {
     if (m_baseUrl.trimmed().isEmpty())

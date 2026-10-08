@@ -10,6 +10,7 @@
 #include "models/CardModel.h"
 #include "models/Conversation.h"
 #include "models/DoctorModel.h"
+#include "models/ProviderListModel.h"
 #include "models/ProviderModel.h"
 #include "models/SystemModel.h"
 
@@ -32,6 +33,24 @@ QJsonObject installItem(const QString& id, const QString& title, const QString& 
 QJsonObject activeProvider()
 {
     return {{"kind", "ollama"}, {"baseUrl", "http://localhost:11434"}, {"model", "qwen3:8b"}, {"hasKey", false}};
+}
+
+QJsonObject workProvider()
+{
+    return {{"id", "work"}, {"kind", "anthropic"}, {"baseUrl", "https://api.anthropic.com"}, {"model", "claude-sonnet-5-5"}, {"hasKey", true}};
+}
+
+QJsonObject newShapeList()
+{
+    QJsonObject local = activeProvider();
+    local.insert("id", "local");
+    return {{"providers", QJsonArray{local, workProvider()}}, {"activeId", "local"}, {"allowCloudFallback", false},
+            {"kinds", QJsonArray{"anthropic", "openai-compatible", "ollama", "gemini"}}};
+}
+
+QJsonObject okProbe()
+{
+    return {{"ok", true}, {"supportsTools", true}, {"models", QJsonArray{"qwen3:8b"}}};
 }
 
 QJsonObject card(const QString& cardId, const QJsonValue& turnId)
@@ -388,11 +407,13 @@ private slots:
         Fixture f;
         QVERIFY(f.open());
         QTRY_COMPARE(f.shell->view(), u"setup"_s);
-        f.daemon.handler = [&f](const QString& channel, const QJsonArray&, quint64) -> FakeDaemon::Reply {
-            if (channel == u"provider:probe" || channel == u"provider:save")
-                return {true, QJsonObject{{"ok", true}, {"supportsTools", true}, {"models", QJsonArray{"qwen3:8b"}}}};
+        f.daemon.handler = [](const QString& channel, const QJsonArray&, quint64) -> FakeDaemon::Reply {
+            if (channel == u"provider:probe")
+                return {true, okProbe()};
+            if (channel == u"provider:save")
+                return {true, QJsonObject{{"ok", true}, {"results", QJsonObject{{"local", okProbe()}}}}};
             if (channel == u"provider:list")
-                return {true, QJsonObject{{"active", activeProvider()}, {"kinds", QJsonArray{}}}};
+                return {true, newShapeList()};
             return {true, QJsonArray{}};
         };
         ProviderModel* provider = f.shell->provider();
@@ -402,7 +423,71 @@ private slots:
         QTRY_COMPARE(provider->probeState(), u"ok"_s);
         provider->save();
         QTRY_COMPARE(f.shell->view(), u"chat"_s);
-        QCOMPARE(f.daemon.requests(u"provider:save"_s).size(), 1);
+        const QList<QJsonObject> saves = f.daemon.requests(u"provider:save"_s);
+        QCOMPARE(saves.size(), 1);
+        QCOMPARE(saves.first()["a"].toArray(), (QJsonArray{QJsonObject{
+            {"providers", QJsonArray{QJsonObject{{"kind", "ollama"}, {"baseUrl", "http://localhost:11434"}, {"model", "qwen3:8b"}, {"id", "local"}}}},
+            {"allowCloudFallback", false}}}));
+    }
+
+    void savingFromSettingsStaysInSettings()
+    {
+        Fixture f;
+        f.providerList = newShapeList();
+        QVERIFY(f.open());
+        QTRY_COMPARE(f.shell->view(), u"chat"_s);
+        f.shell->showView(u"settings"_s);
+        QTRY_COMPARE(f.daemon.requests(u"provider:list"_s).size(), 2); // on open, and on opening Settings
+        auto base = f.daemon.handler;
+        f.daemon.handler = [base](const QString& channel, const QJsonArray& a, quint64 id) -> FakeDaemon::Reply {
+            if (channel == u"provider:probe")
+                return {true, okProbe()};
+            if (channel == u"provider:save")
+                return {true, QJsonObject{{"ok", true}, {"results", QJsonObject{{"local", okProbe()}, {"work", okProbe()}}}}};
+            return base(channel, a, id);
+        };
+        ProviderModel* provider = f.shell->provider();
+        provider->editProvider(f.shell->providers()->config(1));
+        provider->setModel(u"claude-b"_s);
+        provider->probe();
+        QTRY_COMPARE(provider->probeState(), u"ok"_s);
+        const int lists = f.daemon.requests(u"provider:list"_s).size();
+        provider->save();
+        QTRY_COMPARE(f.daemon.requests(u"provider:list"_s).size(), lists + 1);
+        QCOMPARE(f.shell->view(), u"settings"_s);
+        const QJsonArray sent = f.daemon.requests(u"provider:save"_s).first()["a"].toArray().first().toObject().value("providers").toArray();
+        QCOMPARE(sent.size(), 2);
+        QCOMPARE(sent.at(1).toObject().value("model").toString(), u"claude-b"_s);
+        QVERIFY(!sent.at(1).toObject().contains("apiKey"));
+    }
+
+    void fallbackShowsWhichProviderAndWhy()
+    {
+        Fixture f;
+        f.providerList = newShapeList();
+        QVERIFY(f.open());
+        QTRY_COMPARE(f.shell->view(), u"chat"_s);
+        f.daemon.sendPush(u"provider:status"_s, QJsonObject{{"reachable", true}, {"activeId", "work"}, {"fallbackReason", "local timed out"}});
+        QTRY_COMPARE(f.shell->bannerText(), u"Using claude-sonnet-5-5 · Anthropic — local timed out"_s);
+        QCOMPARE(f.shell->provider()->activeModel(), u"claude-sonnet-5-5"_s);
+        f.daemon.sendPush(u"provider:status"_s, QJsonObject{{"reachable", true}, {"activeId", "local"}, {"fallbackReason", QJsonValue::Null}});
+        QTRY_COMPARE(f.shell->bannerText(), QString());
+        QCOMPARE(f.shell->provider()->activeModel(), u"qwen3:8b"_s);
+    }
+
+    void reorderingFromSettingsSavesTheWholeList()
+    {
+        Fixture f;
+        f.providerList = newShapeList();
+        QVERIFY(f.open());
+        QTRY_COMPARE(f.shell->providers()->rowCount(), 2);
+        f.shell->providers()->moveDown(0);
+        f.shell->providers()->setAllowCloudFallback(true);
+        f.shell->providers()->save();
+        QTRY_COMPARE(f.daemon.requests(u"provider:save"_s).size(), 1);
+        const QJsonObject payload = f.daemon.requests(u"provider:save"_s).first()["a"].toArray().first().toObject();
+        QCOMPARE(payload.value("allowCloudFallback").toBool(), true);
+        QCOMPARE(payload.value("providers").toArray().first().toObject().value("id").toString(), u"work"_s);
     }
 
     void checkForUpdatesAppliesTheCounts()

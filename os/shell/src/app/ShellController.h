@@ -11,6 +11,7 @@
 #include "models/CardModel.h"
 #include "models/Conversation.h"
 #include "models/DoctorModel.h"
+#include "models/ProviderListModel.h"
 #include "models/ProviderModel.h"
 #include "models/SystemModel.h"
 
@@ -28,6 +29,7 @@ class ShellController : public QObject {
     Q_PROPERTY(CardModel* chatCard READ chatCard CONSTANT)
     Q_PROPERTY(CardModel* doctorCard READ doctorCard CONSTANT)
     Q_PROPERTY(ProviderModel* provider READ provider CONSTANT)
+    Q_PROPERTY(ProviderListModel* providers READ providers CONSTANT)
     Q_PROPERTY(DoctorModel* doctor READ doctor CONSTANT)
     Q_PROPERTY(AuditModel* audit READ audit CONSTANT)
     Q_PROPERTY(SystemModel* system READ system CONSTANT)
@@ -49,6 +51,7 @@ public:
     CardModel* chatCard() const { return m_chatCard; }
     CardModel* doctorCard() const { return m_doctorCard; }
     ProviderModel* provider() const { return m_provider; }
+    ProviderListModel* providers() const { return m_providers; }
     DoctorModel* doctor() const { return m_doctor; }
     AuditModel* audit() const { return m_audit; }
     SystemModel* system() const { return m_system; }
@@ -100,6 +103,8 @@ private:
     CardModel* m_chatCard;
     CardModel* m_doctorCard;
     ProviderModel* m_provider;
+    ProviderListModel* m_providers;
+    QString m_fallbackReason;
     DoctorModel* m_doctor;
     AuditModel* m_audit;
     SystemModel* m_system;

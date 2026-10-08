@@ -255,6 +255,63 @@ private slots:
         QCOMPARE(model.preset(), u"Gemini"_s);
         QCOMPARE(model.baseUrl(), u"https://proxy.example.com"_s);
     }
+    void newShapeListPicksTheActiveProvider()
+    {
+        ProviderModel model;
+        model.loadList(QJsonObject{
+            {"providers", QJsonArray{
+                QJsonObject{{"id", "local"}, {"kind", "ollama"}, {"baseUrl", "http://localhost:11434"}, {"model", "qwen3:8b"}, {"hasKey", false}},
+                QJsonObject{{"id", "work"}, {"kind", "anthropic"}, {"baseUrl", "https://api.anthropic.com"}, {"model", "claude-sonnet-5-5"}, {"hasKey", true}}}},
+            {"activeId", "work"}, {"allowCloudFallback", false}, {"kinds", QJsonArray{"anthropic", "openai-compatible", "ollama", "gemini"}}});
+        QVERIFY(model.known());
+        QVERIFY(model.hasActive());
+        QCOMPARE(model.activeId(), u"work"_s);
+        QCOMPARE(model.activeModel(), u"claude-sonnet-5-5"_s);
+        QCOMPARE(model.activeLabel(), u"Anthropic"_s);
+        model.loadList(QJsonObject{{"providers", QJsonArray{}}, {"activeId", QJsonValue::Null}});
+        QVERIFY(!model.hasActive());
+    }
+
+    void editProviderLoadsThatRowAndKeepsItsKey()
+    {
+        ProviderModel model;
+        QSignalSpy probes(&model, &ProviderModel::probeRequested);
+        model.editProvider(QJsonObject{{"id", "work"}, {"kind", "anthropic"}, {"baseUrl", "https://api.anthropic.com"}, {"model", "claude-a"}, {"hasKey", true}});
+        QCOMPARE(model.editingId(), u"work"_s);
+        QCOMPARE(model.mode(), u"cloud"_s);
+        QCOMPARE(model.preset(), u"Anthropic"_s);
+        QCOMPARE(model.model(), u"claude-a"_s);
+        model.probe();
+        QCOMPARE(probes.size(), 1);
+        QVERIFY(!probes.first().first().value<QJsonObject>().contains("apiKey"));
+    }
+
+    void startNewForgetsTheEditedProvider()
+    {
+        ProviderModel model;
+        model.editProvider(QJsonObject{{"id", "work"}, {"kind", "anthropic"}, {"baseUrl", "https://api.anthropic.com"}, {"model", "claude-a"}, {"hasKey", true}});
+        model.startNew();
+        QCOMPARE(model.editingId(), QString());
+        QCOMPARE(model.preset(), u"Anthropic"_s);
+        model.probe();
+        QCOMPARE(model.probeState(), u"error"_s); // a new cloud provider needs its own key
+    }
+
+    void suggestedIdFollowsTheChoice()
+    {
+        ProviderModel model;
+        model.setMode(u"local"_s);
+        QCOMPARE(model.suggestedId(), u"local"_s);
+        model.setMode(u"lan"_s);
+        QCOMPARE(model.suggestedId(), u"lan"_s);
+        model.setMode(u"cloud"_s);
+        model.setPreset(u"Gemini"_s);
+        QCOMPARE(model.suggestedId(), u"gemini"_s);
+        model.setPreset(u"OpenAI"_s);
+        QCOMPARE(model.suggestedId(), u"openai"_s);
+        model.setPreset(u"Custom URL"_s);
+        QCOMPARE(model.suggestedId(), u"cloud"_s);
+    }
 };
 
 QTEST_GUILESS_MAIN(TestProviderModel)
