@@ -1,4 +1,5 @@
 import QtQuick
+import Jarvis.UI
 import QtQuick.Layouts
 import QtQuick.Controls.Basic
 
@@ -160,7 +161,7 @@ Item {
                     footer: Item {
                         width: list.width
                         implicitHeight: root.audit.hasMore ? 64 : 0
-                        ShellButton {
+                        ActionButton {
                             objectName: "loadMore"
                             anchors.centerIn: parent
                             visible: root.audit.hasMore

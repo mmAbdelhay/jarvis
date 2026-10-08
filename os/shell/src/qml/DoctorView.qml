@@ -1,4 +1,5 @@
 import QtQuick
+import Jarvis.UI
 import QtQuick.Layouts
 import QtQuick.Controls.Basic
 
@@ -38,7 +39,7 @@ Item {
                     color: Theme.warnBannerText
                     wrapMode: Text.Wrap
                 }
-                ShellButton {
+                ActionButton {
                     objectName: "backButton"
                     variant: "ghost"
                     implicitHeight: 36
@@ -133,7 +134,7 @@ Item {
                                             font.pixelSize: Theme.fontSmall
                                         }
                                     }
-                                    ShellButton {
+                                    ActionButton {
                                         objectName: "skip_" + stepRow.stepId
                                         visible: stepRow.problem && !root.card.active
                                         variant: "ghost"
@@ -220,7 +221,7 @@ Item {
                             color: root.doctor.done === "fixed" ? Theme.accent : Theme.warnBannerText
                             wrapMode: Text.Wrap
                         }
-                        ShellButton {
+                        ActionButton {
                             objectName: "runAgain"
                             visible: root.doctor.done === "unfixed"
                             variant: "ghost"

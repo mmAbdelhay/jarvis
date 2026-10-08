@@ -1,0 +1,13 @@
+# Runtime packages of jarvis-installer (live ISO only; shared-library deps come from dh_shlibdeps).
+jarvis-ui
+jarvis-installer-backend
+qml6-module-qtqml
+qml6-module-qtqml-workerscript
+qml6-module-qtquick
+qml6-module-qtquick-window
+qml6-module-qtquick-layouts
+qml6-module-qtquick-shapes
+qml6-module-qtquick-templates
+qml6-module-qtquick-controls
+qt6-wayland
+fonts-ibm-plex

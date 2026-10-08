@@ -58,6 +58,39 @@ QString SystemModel::modelDetail() const
                             m_modelTools ? u"can control the OS"_s : u"can chat, can't control the OS"_s);
 }
 
+void SystemModel::setUpdateCounts(int count, int security)
+{
+    m_updatesCount = std::max(0, count);
+    m_updatesSecurity = std::clamp(security, 0, m_updatesCount);
+}
+
+void SystemModel::applyUpdateCounts(int count, int security)
+{
+    setUpdateCounts(count, security);
+    emit changed();
+}
+
+QString SystemModel::updatesText() const
+{
+    if (m_updatesCount == 0)
+        return {};
+    QString text = m_updatesCount == 1 ? u"1 update"_s : u"%1 updates"_s.arg(m_updatesCount);
+    if (m_updatesSecurity > 0)
+        text += u" · %1 security"_s.arg(m_updatesSecurity);
+    return text;
+}
+
+QString SystemModel::modelDownloadText() const
+{
+    if (m_downloadState == u"downloading")
+        return u"Downloading · %1%"_s.arg(m_downloadPercent);
+    if (m_downloadState == u"pending")
+        return u"Waiting for the network to download"_s;
+    if (m_downloadState == u"failed")
+        return u"Download failed. It will try again."_s;
+    return {};
+}
+
 void SystemModel::applySnapshot(const QJsonObject& snapshot)
 {
     m_known = true;
@@ -78,6 +111,11 @@ void SystemModel::applySnapshot(const QJsonObject& snapshot)
     m_modelName = model.value("model").toString();
     m_modelLocal = model.value("local").toBool();
     m_modelTools = model.value("supportsTools").toBool();
+    const QJsonObject updates = snapshot.value("updates").toObject(); // absent from M1 daemons → 0
+    setUpdateCounts(updates.value("count").toInt(), updates.value("security").toInt());
+    const QJsonObject download = model.value("download").toObject();
+    m_downloadState = download.value("state").toString();
+    m_downloadPercent = std::clamp(int(download.value("percent").toDouble()), 0, 100);
     emit changed();
 }
 
@@ -90,5 +128,8 @@ void SystemModel::reset()
     m_memTotal = m_memUsed = m_diskSize = m_diskUsed = 0;
     m_failedUnits.clear();
     m_modelName.clear();
+    m_updatesCount = m_updatesSecurity = 0;
+    m_downloadState.clear();
+    m_downloadPercent = 0;
     emit changed();
 }

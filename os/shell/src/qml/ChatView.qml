@@ -1,4 +1,5 @@
 import QtQuick
+import Jarvis.UI
 import QtQuick.Layouts
 import QtQuick.Controls.Basic
 

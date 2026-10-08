@@ -124,6 +124,20 @@ private slots:
         QCOMPARE(f.shell->provider()->activeModel(), u"qwen3:8b"_s);
     }
 
+    void askForUpdatesSendsOnePrompt()
+    {
+        Fixture f;
+        f.providerList["active"] = activeProvider();
+        QVERIFY(f.open());
+        QTRY_COMPARE(f.shell->view(), u"chat"_s);
+        f.shell->showView(u"audit"_s);
+        f.shell->askForUpdates();
+        QCOMPARE(f.shell->view(), u"chat"_s);
+        QTRY_COMPARE(f.daemon.requests(u"agent:prompt"_s).size(), 1);
+        QCOMPARE(f.daemon.requests(u"agent:prompt"_s).first()["a"].toArray().at(0).toObject().value("text").toString(),
+                 u"Update my computer"_s);
+    }
+
     void agentEventsReachTheConversation()
     {
         Fixture f;

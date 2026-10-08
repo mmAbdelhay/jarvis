@@ -1,5 +1,5 @@
 # QML import (or implicit dependency) -> Debian 13 package providing it at runtime.
-# tests/check_qml_imports.cmake fails the build when a QML file imports a
+# os/ui/cmake/check_qml_imports.cmake fails the build when a QML file imports a
 # module missing here. Contracts §6.18: Plan D's jarvis-shell Depends lists
 # every package in the second column.
 QtQml                  qml6-module-qtqml
@@ -11,3 +11,4 @@ QtQuick.Shapes         qml6-module-qtquick-shapes
 QtQuick.Templates      qml6-module-qtquick-templates
 QtQuick.Controls       qml6-module-qtquick-controls
 QtQuick.Controls.Basic qml6-module-qtquick-controls
+Jarvis.UI              jarvis-ui

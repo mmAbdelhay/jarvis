@@ -22,6 +22,7 @@ class CardModel : public QAbstractListModel {
     Q_PROPERTY(QString headline READ headline NOTIFY changed)
     Q_PROPERTY(QString approveLabel READ approveLabel NOTIFY changed)
     Q_PROPERTY(bool canApprove READ canApprove NOTIFY changed)
+    Q_PROPERTY(bool allTicked READ allTicked NOTIFY changed)
     Q_PROPERTY(int secondsLeft READ secondsLeft NOTIFY changed)
     Q_PROPERTY(bool expired READ expired NOTIFY changed)
     Q_PROPERTY(QString countdownText READ countdownText NOTIFY changed)
@@ -49,6 +50,7 @@ public:
     QString headline() const;
     QString approveLabel() const;
     bool canApprove() const;
+    bool allTicked() const { return !m_items.isEmpty() && tickedCount() == itemCount(); }
     int secondsLeft() const { return m_secondsLeft; }
     bool expired() const { return active() && m_secondsLeft == 0; }
     QString countdownText() const;
@@ -56,6 +58,7 @@ public:
     Q_INVOKABLE bool load(const QJsonObject& card);
     Q_INVOKABLE void setTicked(int row, bool ticked);
     Q_INVOKABLE void toggle(int row);
+    Q_INVOKABLE void setAllTicked(bool ticked);
     Q_INVOKABLE void setSecret(int row, const QString& field, const QString& value);
     Q_INVOKABLE QJsonObject decision(bool approve) const;
     Q_INVOKABLE void close();

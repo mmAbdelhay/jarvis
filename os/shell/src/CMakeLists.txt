@@ -10,7 +10,6 @@ foreach(qml_file IN LISTS JARVIS_SHELL_QML)
   get_filename_component(qml_name ${qml_file} NAME)
   set_source_files_properties(${qml_file} PROPERTIES QT_RESOURCE_ALIAS ${qml_name})
 endforeach()
-set_source_files_properties(qml/Theme.qml qml/Icons.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 
 qt_add_library(jarvis_shell_core STATIC)
 qt_add_qml_module(jarvis_shell_core
@@ -21,6 +20,7 @@ qt_add_qml_module(jarvis_shell_core
   SOURCES ${JARVIS_SHELL_CPP}
   QML_FILES ${JARVIS_SHELL_QML}
 )
+add_dependencies(jarvis_shell_core jarvis_ui) # qmlcachegen reads Jarvis.UI's qmltypes
 target_include_directories(jarvis_shell_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
   ${CMAKE_CURRENT_SOURCE_DIR}/models ${CMAKE_CURRENT_SOURCE_DIR}/app)
 target_link_libraries(jarvis_shell_core PUBLIC

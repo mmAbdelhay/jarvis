@@ -1,4 +1,5 @@
 import QtQuick
+import Jarvis.UI
 import QtQuick.Layouts
 import QtQuick.Controls.Basic
 
@@ -49,7 +50,7 @@ Item {
             RowLayout {
                 Layout.fillWidth: true
                 spacing: 12
-                ShellButton {
+                ActionButton {
                     objectName: "setupDoctor"
                     visible: root.provider.probeState === "error" && root.doctorAvailable
                     variant: "ghost"
@@ -57,7 +58,7 @@ Item {
                     onClicked: root.doctorRequested()
                 }
                 Item { Layout.fillWidth: true }
-                ShellButton {
+                ActionButton {
                     objectName: "startButton"
                     variant: "primary"
                     implicitHeight: 48

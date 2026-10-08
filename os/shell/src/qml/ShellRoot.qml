@@ -1,4 +1,5 @@
 import QtQuick
+import Jarvis.UI
 import QtQuick.Layouts
 
 // The whole shell surface: top bar, banner, nav rail, the current view and

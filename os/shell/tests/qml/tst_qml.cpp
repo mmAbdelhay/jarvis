@@ -21,6 +21,7 @@ public slots:
 
     void qmlEngineAvailable(QQmlEngine* engine)
     {
+        engine->addImportPath(QStringLiteral(JARVIS_QML_DIR)); // Jarvis.UI from this build
         // A controller whose client never connects: views can be driven
         // without a daemon. Launches are recorded, never executed.
         ControlOptions options;

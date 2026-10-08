@@ -16,6 +16,7 @@ struct Preset {
 
 constexpr Preset kPresets[] = {
     {u"Anthropic", u"anthropic", u"https://api.anthropic.com"},
+    {u"Gemini", u"gemini", u"https://generativelanguage.googleapis.com"},
     {u"OpenAI", u"openai-compatible", u"https://api.openai.com/v1"},
     {u"OpenRouter", u"openai-compatible", u"https://openrouter.ai/api/v1"},
     {u"Groq", u"openai-compatible", u"https://api.groq.com/openai/v1"},
@@ -59,7 +60,7 @@ QString modeFor(const QString& kind, const QString& url)
     const QString host = QUrl(url).host();
     if (kind == u"ollama")
         return isLoopbackHost(host) ? u"local"_s : u"lan"_s;
-    if (kind == u"anthropic" || presetFor(kind, url))
+    if (kind == u"anthropic" || kind == u"gemini" || presetFor(kind, url))
         return u"cloud"_s;
     return isLoopbackHost(host) || isPrivateHost(host) ? u"lan"_s : u"cloud"_s;
 }
@@ -96,6 +97,8 @@ QString ProviderModel::activeLabel() const
         return u"On your network"_s;
     if (m_activeKind == u"anthropic")
         return u"Anthropic"_s;
+    if (m_activeKind == u"gemini")
+        return u"Gemini"_s;
     if (const Preset* preset = presetFor(m_activeKind, m_activeBaseUrl))
         return preset->name.toString();
     return QUrl(m_activeBaseUrl).host();
@@ -138,7 +141,7 @@ void ProviderModel::setPreset(const QString& name)
 
 void ProviderModel::setKind(const QString& kind)
 {
-    if (kind == m_kind || (kind != u"anthropic" && kind != u"openai-compatible" && kind != u"ollama"))
+    if (kind == m_kind || (kind != u"anthropic" && kind != u"gemini" && kind != u"openai-compatible" && kind != u"ollama"))
         return;
     m_kind = kind;
     m_models.clear();
@@ -272,7 +275,9 @@ void ProviderModel::editActive()
     if (m_mode == u"cloud") {
         const Preset* preset = presetFor(m_activeKind, m_activeBaseUrl);
         m_preset = preset ? preset->name.toString()
-                          : (m_activeKind == u"anthropic" ? u"Anthropic"_s : u"Custom URL"_s);
+                 : m_activeKind == u"anthropic" ? u"Anthropic"_s
+                 : m_activeKind == u"gemini" ? u"Gemini"_s
+                 : u"Custom URL"_s;
     }
     m_kind = m_activeKind;
     m_baseUrl = m_activeBaseUrl;

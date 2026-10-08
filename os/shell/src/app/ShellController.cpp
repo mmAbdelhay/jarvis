@@ -308,3 +308,10 @@ void ShellController::requestComposerFocus()
 {
     emit composerFocusRequested();
 }
+
+void ShellController::askForUpdates()
+{
+    // Spec §8: "update my computer" -> jarvisd runs updates.list and shows one batch card.
+    showView(u"chat"_s);
+    sendPrompt(u"Update my computer"_s);
+}
