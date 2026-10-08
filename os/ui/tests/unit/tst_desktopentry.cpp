@@ -105,7 +105,7 @@ private slots:
         QTest::addColumn<QString>("exec");
         for (const QString& bad : {u"true; rm -rf ~"_s, u"app | tee x"_s, u"app && evil"_s, u"app $(id)"_s,
                                    u"app `id`"_s, u"app > /tmp/x"_s, u"app < /etc/passwd"_s, u"\"unbalanced"_s,
-                                   u"app %z"_s, u"app %"_s, u""_s, u"   "_s, u"app \\x"_s, u"\"\" -x"_s})
+                                   u"app %z"_s, u"app %"_s, u""_s, u"   "_s, u"app \\x"_s, u"\"\" -x"_s, u"@@u"_s, u"@@u %U @@"_s, u"@@ %U @@"_s, u"@@ evil"_s, u"%f"_s})
             QTest::newRow(qPrintable(bad.isEmpty() ? u"(empty)"_s : bad)) << bad;
     }
     void shellMetacharactersAreRejected()
@@ -129,7 +129,7 @@ private slots:
         }
         QCOMPARE(firefoxName, u"My Firefox"_s);
         QCOMPARE(ids.count(u"firefox"_s), 1);
-        QVERIFY(ids.contains(u"flatpak"_s));
+        QVERIFY(!ids.contains(u"flatpak"_s)); // user Hidden=true tombstone hides the system entry
         QVERIFY(!ids.contains(u"noname"_s)); // unparsable files are left out
     }
 

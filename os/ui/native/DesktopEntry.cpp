@@ -130,6 +130,8 @@ std::optional<DesktopEntry> parseDesktopEntry(const QString& path)
         else if (key == u"Terminal")
             entry.terminal = value == u"true";
     }
+    if (sawMain && entry.hidden)
+        return entry; // a tombstone: Hidden=true deletes the id, even without Name/Exec
     if (!sawMain || entry.names.value(QString()).trimmed().isEmpty() || entry.exec.trimmed().isEmpty())
         return std::nullopt;
     return entry;
@@ -188,9 +190,13 @@ std::optional<QStringList> splitExec(const QString& exec)
         return std::nullopt;
     if (haveArg)
         args << current;
-    if (args.isEmpty() || args.first().isEmpty())
+    // The program must be a real token: an empty or marker-only first token is rejected
+    // before the markers are dropped, so "@@ evil" cannot promote "evil" to the program.
+    if (args.isEmpty() || args.first().isEmpty() || args.first() == u"@@" || args.first() == u"@@u")
         return std::nullopt;
     args.removeIf([](const QString& a) { return a.isEmpty() || a == u"@@" || a == u"@@u"; });
+    if (args.isEmpty() || args.first().isEmpty())
+        return std::nullopt;
     return args;
 }
 
@@ -206,7 +212,8 @@ QList<DesktopEntry> readDesktopEntries(const QStringList& dirs)
                 continue;
             if (auto entry = parseDesktopEntry(info.absoluteFilePath())) {
                 seen.insert(id);
-                out.append(*entry);
+                if (!entry->hidden) // Hidden=true deletes the id from later dirs too
+                    out.append(*entry);
             }
         }
     }
