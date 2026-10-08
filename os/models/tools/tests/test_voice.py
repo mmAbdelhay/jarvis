@@ -129,6 +129,15 @@ class ScanTest(unittest.TestCase):
         self.put("usr/share/jarvis/voice/wake/model.dat", WAKE)
         self.assertNotEqual(voice.scan(self.tmp, self.reg), [])
 
+    def test_scan_non_redistributable_bytes_hidden_by_name(self):
+        for rel in ("opt/x/model.dat", "usr/share/jarvis/voice/wake/LICENSE.bin",
+                    "usr/share/jarvis/voice/wake/notes.txt", "run/x.onnx"):
+            with self.subTest(rel=rel):
+                p = self.put(rel, WAKE)
+                problems = voice.scan(self.tmp, self.reg)
+                self.assertTrue(any(rel in x and "CC-BY-NC-SA-4.0" in x for x in problems), problems)
+                p.unlink()
+
     def test_scan_non_redistributable_stem_other_format(self):
         self.put("usr/lib/y/hey_jarvis_v0.1.tflite", b"different bytes, same model")
         problems = voice.scan(self.tmp, self.reg)

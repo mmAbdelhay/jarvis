@@ -36,7 +36,7 @@ FILE = re.compile(r"^(whisper|piper|wake)/[A-Za-z0-9][A-Za-z0-9._-]*$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 MODEL_NAME = re.compile(r"(\.onnx|\.tflite|\.ppn|\.pv)$|^ggml-.*\.bin$")
 METADATA_NAME = re.compile(r"(\.json|\.txt|\.md)$|^(LICENSE|COPYING|MODEL_CARD)")
-SKIP_TOP = {"proc", "sys", "dev", "run"}
+SKIP_TOP = {"proc", "sys"}
 
 
 def load(path: Path | None) -> dict:
@@ -132,15 +132,17 @@ def scan(tree: Path, reg: dict) -> list[str]:
         if hit is not None:
             problems.append(f"{rel}: looks like {hit['id']} ({hit['license']}, not redistributable)")
             continue
-        model_like = bool(MODEL_NAME.search(name))
-        if not (in_voice or model_like):
-            continue
-        if in_voice and not model_like and METADATA_NAME.search(name):
-            continue
+        # Hash every regular file first: a banned model is caught by content whatever its
+        # name or location (metadata-looking names, odd extensions, run/ in a .deb).
         digest = sha256_file(path)
         if digest in banned_sha:
             m = banned_sha[digest]
             problems.append(f"{rel}: is {m['id']} ({m['license']}, not redistributable)")
+            continue
+        model_like = bool(MODEL_NAME.search(name))
+        if not (in_voice or model_like):
+            continue
+        if in_voice and not model_like and METADATA_NAME.search(name):
             continue
         m = registered.get(rel)
         if m is not None:
