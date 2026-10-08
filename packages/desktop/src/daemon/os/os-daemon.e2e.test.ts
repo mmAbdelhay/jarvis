@@ -56,6 +56,7 @@ describe.skipIf(WINDOWS)("jarvisd OS mode over the real control socket", () => {
         writeFile: async () => {},
       },
       secrets: createMemorySecretStore(),
+      providerKeys: createMemorySecretStore(),
       readModelState: async () => null,
       makeProvider: () => {
         throw new Error("the fake provider is active");
@@ -136,7 +137,9 @@ describe.skipIf(WINDOWS)("jarvisd OS mode over the real control socket", () => {
     });
 
     await expect(client.invoke("provider:list", [])).resolves.toEqual({
-      active: null,
+      providers: [],
+      activeId: null,
+      allowCloudFallback: false,
       kinds: ["anthropic", "openai-compatible", "ollama", "gemini"],
     });
     await expect(client.invoke("agent:prompt", [{}])).rejects.toMatchObject({

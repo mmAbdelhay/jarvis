@@ -7,6 +7,14 @@
 // No electron here (core/no-electron.test.ts).
 import {
   AGENT_TEXT,
+  CONTEXT_TOKENS,
+  DEFAULT_CONTEXT_TOKENS,
+  createFailoverProvider,
+  type FailoverProvider,
+  isLocalBaseUrl,
+  type ProviderListResult,
+  type ProviderSaveRequest,
+  type ProviderSaveResult,
   type AgentEvent,
   type AuditEntry,
   type AuditQuery,
@@ -31,24 +39,25 @@ import {
   buildSysSnapshot,
   type SysSnapshot,
   type ProbeResult,
-  type ProviderConfig,
   type ProviderDraft,
-  type ProviderKind,
   runTurn,
   type ToolRegistry,
   TRUSTED_MCP_SERVERS,
   trimHistory,
   type UpdatesCheckResult,
 } from "@jarvis/core";
-import { providerAccount, type SecretStore } from "@jarvis/platform/model";
+import type { SecretStore } from "@jarvis/platform/model";
 import { OS_CONTROL_PUSHES } from "@jarvis/wire";
-import {
-  type ConfigIo,
-  type ProviderSection,
-  readProviderSection,
-  writeProviderSection,
-} from "./provider-config.js";
+import type { ConfigIo, ProviderSection } from "./provider-config.js";
 import { createLazyKeyProvider, unavailableProvider } from "./provider-factory.js";
+import { hasProviderKey, type ProviderKeyStores, readProviderKey } from "./provider-keys.js";
+import {
+  emptyBrain,
+  type OsBrainConfig,
+  type ProviderEntry,
+  readOsBrainConfig,
+  writeOsProviders,
+} from "./provider-list-config.js";
 import { createProviderMonitor } from "./provider-monitor.js";
 import { createSysMonitor } from "./sys-monitor.js";
 import { createUpdatesMonitor, UpdatesCheckError } from "./updates-monitor.js";
@@ -68,6 +77,9 @@ export type OsAgentDeps = {
   configPath: string;
   configIo: ConfigIo;
   secrets: SecretStore;
+  /** Provider keys by id (M2.5 contracts §1: attribute provider=<id>). `secrets`
+   *  stays the account-keyed store (M1 keys, read once for migration). */
+  providerKeys: SecretStore;
   makeProvider(section: ProviderSection, apiKey: string | undefined): ModelProvider;
   /** Set only from JARVIS_FAKE_PROVIDER (contracts §5). */
   fakeScript?: readonly FakeTurn[];
@@ -95,9 +107,9 @@ export interface OsAgent {
   prompt(text: string): { turnId: string };
   stop(turnId: string): null;
   confirm(answer: ConfirmAnswer): null;
-  providerList(): Promise<{ active: ProviderConfig | null; kinds: ProviderKind[] }>;
-  probe(draft: ProviderDraft): Promise<ProbeResult>;
-  save(draft: ProviderDraft): Promise<ProbeResult>;
+  providerList(): Promise<ProviderListResult>;
+  probe(draft: ProviderDraft & { id?: string }): Promise<ProbeResult>;
+  save(request: ProviderSaveRequest): Promise<ProviderSaveResult>;
   doctorStart(): DoctorState;
   doctorSkip(stepId: DoctorStepId): DoctorState;
   auditList(query: AuditQuery): Promise<AuditEntry[]>;
@@ -121,7 +133,26 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
     }
   };
   let provider: ModelProvider = unavailableProvider(AGENT_TEXT.noProvider);
-  let section: ProviderSection | null = null;
+  let brain: OsBrainConfig = emptyBrain();
+  let failover: FailoverProvider | undefined;
+  const keyStores = (): ProviderKeyStores => ({
+    providerKeys: deps.providerKeys,
+    legacy: deps.secrets,
+    migrateLegacy: brain.migratedFromLegacy,
+    log: deps.log,
+  });
+  /** The provider answering now; the first one before any answer. */
+  function activeEntry(): ProviderEntry | null {
+    const id = failover?.status().activeId;
+    return brain.providers.find((entry) => entry.id === id) ?? brain.providers[0] ?? null;
+  }
+  /** The smallest context in the list: a failover mid-turn must still fit. */
+  function contextTokens(): number {
+    const sizes = brain.providers.map(
+      (entry) => CONTEXT_TOKENS[entry.kind] ?? DEFAULT_CONTEXT_TOKENS,
+    );
+    return sizes.length === 0 ? DEFAULT_CONTEXT_TOKENS : Math.min(...sizes);
+  }
   let sessions: McpSession[] = [];
   let registry: ToolRegistry | undefined;
   let loading: Promise<ToolRegistry> | undefined;
@@ -165,6 +196,7 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
 
   const monitor = createProviderMonitor({
     check: () => provider.reachable(),
+    active: () => failover?.status() ?? { activeId: null, fallbackReason: null },
     push: (status) => deps.push(OS_CONTROL_PUSHES.providerStatus, status),
     timers: deps.timers,
   });
@@ -205,16 +237,18 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
       ...(parsedHealth === undefined ? {} : { health: parsedHealth }),
       ...(parsedNet === undefined ? {} : { net: parsedNet }),
       failedUnits,
-      model:
-        section === null
+      model: (() => {
+        const active = activeEntry();
+        return active === null
           ? null
           : {
-              kind: section.kind,
-              model: section.model,
-              baseUrl: section.baseUrl,
-              supportsTools: section.supportsTools,
-              download: modelDownloadFor(section, modelState),
-            },
+              kind: active.kind,
+              model: active.model,
+              baseUrl: active.baseUrl,
+              supportsTools: active.supportsTools,
+              download: modelDownloadFor(active, modelState),
+            };
+      })(),
       updates: updates.current(),
     });
   }
@@ -240,11 +274,10 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
       deps.timers.setTimeout(resolve, ms);
     });
 
-  /** The key is read at first use and retried (contracts §6 #12): the
-   *  keyring unlocks with the session, possibly after jarvisd started. */
-  function keyedProvider(target: ProviderSection): ModelProvider {
+  /** The key is read at first use and retried (contracts §6 #12). */
+  function keyedProvider(target: ProviderSection, keyOf: ProviderEntry): ModelProvider {
     return createLazyKeyProvider({
-      readKey: () => deps.secrets.get(providerAccount(target.kind, target.baseUrl)),
+      readKey: () => readProviderKey(keyOf, keyStores()),
       build: (key) => deps.makeProvider(target, key),
       sleep,
     });
@@ -252,22 +285,41 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
 
   async function loadProvider(): Promise<void> {
     try {
-      section = await readProviderSection(deps.configPath, deps.configIo);
+      brain = await readOsBrainConfig(deps.configPath, deps.configIo);
     } catch (error) {
       deps.log(`[agent] ${describeError(error)}`);
-      section = null;
+      brain = emptyBrain();
     }
-    // JARVIS_FAKE_PROVIDER replaces the configured provider entirely, and
-    // works with none configured (contracts §6 #11).
+    failover = undefined;
+    // JARVIS_FAKE_PROVIDER replaces the configured providers entirely (contracts §6 #11).
     if (deps.fakeScript !== undefined) {
       provider = createFakeProvider(deps.fakeScript);
       return;
     }
-    provider =
-      section === null ? unavailableProvider(AGENT_TEXT.noProvider) : keyedProvider(section);
+    if (brain.providers.length === 0) {
+      provider = unavailableProvider(AGENT_TEXT.noProvider);
+      return;
+    }
+    failover = createFailoverProvider({
+      entries: brain.providers.map((entry) => ({
+        id: entry.id,
+        locality: isLocalBaseUrl(entry.baseUrl) ? ("local" as const) : ("cloud" as const),
+        provider: keyedProvider(entry, entry),
+      })),
+      allowCloudFallback: brain.allowCloudFallback,
+      timers: deps.timers,
+      onSwitch: (change) => {
+        deps.log(`[provider] ${change.fromId} -> ${change.toId}: ${change.reason}`);
+        monitor.noteActive();
+      },
+    });
+    provider = failover;
   }
 
-  function draftProvider(draft: ProviderDraft): ModelProvider {
+  /** A stored key is reused only from a saved entry with the same kind and
+   *  base URL (and the same id when one is given): a changed URL never
+   *  receives the old key. */
+  function draftProvider(draft: ProviderDraft & { id?: string }): ModelProvider {
     const target: ProviderSection = {
       kind: draft.kind,
       baseUrl: draft.baseUrl,
@@ -275,10 +327,16 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
       auth: "api-key",
       supportsTools: true,
     };
-    // No apiKey in the draft: use the stored one (contracts §6 #10).
-    return draft.apiKey === undefined
-      ? keyedProvider(target)
-      : deps.makeProvider(target, draft.apiKey);
+    if (draft.apiKey !== undefined) return deps.makeProvider(target, draft.apiKey);
+    const saved = brain.providers.find(
+      (entry) =>
+        (draft.id === undefined || entry.id === draft.id) &&
+        entry.kind === draft.kind &&
+        entry.baseUrl === draft.baseUrl,
+    );
+    return saved === undefined
+      ? deps.makeProvider(target, undefined)
+      : keyedProvider(target, saved);
   }
 
   return {
@@ -301,12 +359,14 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
       void (async () => {
         try {
           const tools = await ensureRegistry();
+          failover?.beginTurn();
           const result = await runTurn(
             {
               provider,
               registry: tools,
               gate,
-              toolsEnabled: deps.fakeScript !== undefined || section?.supportsTools !== false,
+              contextTokens: contextTokens(),
+              toolsEnabled: deps.fakeScript !== undefined || activeEntry()?.supportsTools !== false,
               emit,
               newId: deps.newId,
             },
@@ -348,18 +408,20 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
     },
 
     async providerList() {
-      const kinds = [...PROVIDER_KINDS];
-      if (section === null) return { active: null, kinds };
-      let hasKey = false;
-      try {
-        hasKey =
-          (await deps.secrets.get(providerAccount(section.kind, section.baseUrl))) !== undefined;
-      } catch {
-        hasKey = false;
-      }
+      const providers = await Promise.all(
+        brain.providers.map(async (entry) => ({
+          id: entry.id,
+          kind: entry.kind,
+          baseUrl: entry.baseUrl,
+          model: entry.model,
+          hasKey: await hasProviderKey(entry, keyStores()),
+        })),
+      );
       return {
-        active: { kind: section.kind, baseUrl: section.baseUrl, model: section.model, hasKey },
-        kinds,
+        providers,
+        activeId: failover?.status().activeId ?? null,
+        allowCloudFallback: brain.allowCloudFallback,
+        kinds: [...PROVIDER_KINDS],
       };
     },
 
@@ -376,32 +438,57 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
       return candidate.probe();
     },
 
-    async save(draft) {
-      if (draft.model === "") throw new OsAgentError("bad-request", "Pick a model before saving");
-      const result = await draftProvider(draft).probe();
-      if (!result.ok) return result;
+    async save(request) {
+      if (request.providers.some((draft) => draft.model === "")) {
+        throw new OsAgentError("bad-request", "Pick a model before saving");
+      }
+      const probed = await Promise.all(
+        request.providers.map(
+          async (draft) => [draft.id, await draftProvider(draft).probe()] as const,
+        ),
+      );
+      const results: Record<string, ProbeResult> = Object.fromEntries(probed);
+      if (!probed.every(([, result]) => result.ok)) return { ok: false, results };
+      const previous = brain.providers;
       try {
-        if (draft.apiKey !== undefined) {
-          await deps.secrets.set(providerAccount(draft.kind, draft.baseUrl), draft.apiKey);
+        for (const draft of request.providers) {
+          if (draft.apiKey !== undefined) await deps.providerKeys.set(draft.id, draft.apiKey);
         }
-        await writeProviderSection(
+        await writeOsProviders(
           deps.configPath,
           {
-            kind: draft.kind,
-            baseUrl: draft.baseUrl,
-            model: draft.model,
-            auth: "api-key",
-            supportsTools: result.supportsTools,
+            providers: request.providers.map((draft) => ({
+              id: draft.id,
+              kind: draft.kind,
+              baseUrl: draft.baseUrl,
+              model: draft.model,
+              auth: "api-key" as const,
+              supportsTools: results[draft.id]?.supportsTools ?? true,
+            })),
+            allowCloudFallback: request.allowCloudFallback,
           },
           deps.configIo,
         );
       } catch (error) {
-        return { ...result, ok: false, error: describeError(error) };
+        const message = describeError(error);
+        return {
+          ok: false,
+          results: Object.fromEntries(
+            probed.map(([id, result]) => [id, { ...result, ok: false, error: message }]),
+          ),
+        };
+      }
+      const kept = new Set(request.providers.map((draft) => draft.id));
+      for (const old of previous) {
+        if (kept.has(old.id)) continue;
+        await deps.providerKeys.remove(old.id).catch((error: unknown) => {
+          deps.log(`[keys] could not remove the key of ${old.id}: ${describeError(error)}`);
+        });
       }
       await loadProvider();
       void monitor.recheck();
       void sys.refresh();
-      return result;
+      return { ok: true, results };
     },
 
     doctorStart() {

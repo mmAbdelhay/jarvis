@@ -15,6 +15,7 @@ import {
   parseDoctorSkip,
   parseNoArgs,
   parseProviderDraft,
+  parseProviderSave,
 } from "@jarvis/wire";
 import { ControlRequestError } from "../control/messages.js";
 import type { ControlHandlers } from "../control/server.js";
@@ -42,13 +43,8 @@ export function createOsBinding(
         return agent.providerList();
       case OS_CONTROL_REQUESTS.providerProbe:
         return agent.probe(value(parseProviderDraft(args)));
-      case OS_CONTROL_REQUESTS.providerSave: {
-        const draft = value(parseProviderDraft(args));
-        // "" is only for provider:probe's list-models mode (contracts §6 #10).
-        if (draft.model === "")
-          throw new ControlRequestError("bad-request", "model must not be empty when saving");
-        return agent.save(draft);
-      }
+      case OS_CONTROL_REQUESTS.providerSave:
+        return agent.save(value(parseProviderSave(args)));
       case OS_CONTROL_REQUESTS.doctorStart:
         value(parseNoArgs(args));
         return agent.doctorStart();

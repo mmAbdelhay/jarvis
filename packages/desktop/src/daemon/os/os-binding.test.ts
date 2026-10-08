@@ -22,16 +22,13 @@ function fakeAgent() {
     confirm: record("confirm", null) as OsAgent["confirm"],
     providerList: record(
       "providerList",
-      Promise.resolve({ active: null, kinds: [] }),
+      Promise.resolve({ providers: [], activeId: null, allowCloudFallback: false, kinds: [] }),
     ) as OsAgent["providerList"],
     probe: record(
       "probe",
       Promise.resolve({ ok: true, supportsTools: true, models: [] }),
     ) as OsAgent["probe"],
-    save: record(
-      "save",
-      Promise.resolve({ ok: true, supportsTools: true, models: [] }),
-    ) as OsAgent["save"],
+    save: record("save", Promise.resolve({ ok: true, results: {} })) as OsAgent["save"],
     doctorStart: record("doctorStart", idle) as OsAgent["doctorStart"],
     doctorSkip: record("doctorSkip", idle) as OsAgent["doctorSkip"],
     auditList: record("auditList", Promise.resolve([])) as OsAgent["auditList"],
@@ -66,7 +63,14 @@ describe("createOsBinding", () => {
     );
     await handlers.invoke(
       "provider:save",
-      [{ kind: "ollama", baseUrl: "http://localhost:11434", model: "qwen3:8b" }],
+      [
+        {
+          providers: [
+            { id: "local", kind: "ollama", baseUrl: "http://localhost:11434", model: "qwen3:8b" },
+          ],
+          allowCloudFallback: false,
+        },
+      ],
       connection,
     );
     await handlers.invoke("doctor:start", [], connection);
@@ -103,7 +107,7 @@ describe("createOsBinding", () => {
     await expect(
       handlers.invoke(
         "provider:save",
-        [{ kind: "ollama", baseUrl: "http://localhost:11434", model: "" }],
+        [{ kind: "ollama", baseUrl: "http://localhost:11434", model: "m" }],
         connection,
       ),
     ).rejects.toMatchObject({ code: "bad-request" });

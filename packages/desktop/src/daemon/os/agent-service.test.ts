@@ -5,8 +5,10 @@ import {
   type DoctorState,
   type McpSession,
   type McpTool,
+  type ModelEvent,
   type ModelProvider,
   parseFakeScript,
+  ProviderError,
   type SysSnapshot,
 } from "@jarvis/core";
 import { createMemorySecretStore, providerAccount } from "@jarvis/platform/model";
@@ -156,11 +158,13 @@ function harness(overrides: Partial<OsAgentDeps> = {}) {
   const alive = { value: true };
   let ids = 0;
   const secrets = createMemorySecretStore();
+  const providerKeys = createMemorySecretStore();
   const agent = createOsAgent({
     push: (channel, payload) => pushes.push({ channel, payload }),
     configPath: "/home/jarvis/.config/jarvis/jarvis.yaml",
     configIo,
     secrets,
+    providerKeys,
     makeProvider: () => {
       throw new Error("makeProvider not expected in this test");
     },
@@ -210,6 +214,7 @@ function harness(overrides: Partial<OsAgentDeps> = {}) {
     events,
     until,
     secrets,
+    providerKeys,
     connects: () => connects,
     alive,
   };
@@ -227,34 +232,6 @@ const installScript = parseFakeScript([
 ]);
 
 describe("createOsAgent", () => {
-  it("saves a gemini provider: key in the keyring under its own account, kind in jarvis.yaml", async () => {
-    const stub: ModelProvider = {
-      async *chat() {
-        yield { type: "done", usage: { inputTokens: 0, outputTokens: 0 } };
-      },
-      probe: async () => ({ ok: true, supportsTools: true, models: ["gemini-2.5-flash"] }),
-      listModels: async () => ["gemini-2.5-flash"],
-      reachable: async () => ({ ok: true }),
-    };
-    const h = harness({ makeProvider: () => stub });
-    await h.agent.start();
-    await expect(
-      h.agent.save({
-        kind: "gemini",
-        baseUrl: "https://generativelanguage.googleapis.com",
-        model: "gemini-2.5-flash",
-        apiKey: "AIza-k",
-      }),
-    ).resolves.toMatchObject({ ok: true });
-    await expect(
-      h.secrets.get(providerAccount("gemini", "https://generativelanguage.googleapis.com")),
-    ).resolves.toBe("AIza-k");
-    expect(h.files.get("/home/jarvis/.config/jarvis/jarvis.yaml")).toContain("kind: gemini");
-    await expect(h.agent.providerList()).resolves.toMatchObject({
-      active: { kind: "gemini", hasKey: true },
-    });
-  });
-
   it("runs a prompt through a card to the installed answer, and audits it", async () => {
     const h = harness({ fakeScript: installScript });
     await h.agent.start();
@@ -275,7 +252,7 @@ describe("createOsAgent", () => {
       via: "desktop",
     });
     // The fake provider works with no provider configured (contracts §6 #11).
-    await expect(h.agent.providerList()).resolves.toMatchObject({ active: null });
+    await expect(h.agent.providerList()).resolves.toMatchObject({ providers: [], activeId: null });
   });
 
   it("lets the fake provider replace a configured one (contracts §6 #11)", async () => {
@@ -382,136 +359,6 @@ describe("createOsAgent", () => {
     await h.until(() => h.events().some((e) => e.type === "turn-end"));
     expect(h.events().at(-1)).toEqual({ type: "turn-end", turnId, reason: "stopped" });
     expect(h.toolCalls.filter((t) => t === "pkg.install")).toEqual([]);
-  });
-
-  it("lists no provider, saves one after a good probe (key to the keyring, not the file), lists it", async () => {
-    const probed: { key: string | undefined }[] = [];
-    const provider: ModelProvider = {
-      // biome-ignore lint/correctness/useYield: never called here.
-      async *chat() {
-        throw new Error("unused");
-      },
-      probe: async () => ({ ok: true, supportsTools: true, models: ["claude-sonnet-4-5"] }),
-      listModels: async () => ["claude-sonnet-4-5"],
-      reachable: async () => ({ ok: true }),
-    };
-    const h = harness({
-      makeProvider: (_section, key) => {
-        probed.push({ key });
-        return provider;
-      },
-    });
-    await h.agent.start();
-    await expect(h.agent.providerList()).resolves.toEqual({
-      active: null,
-      kinds: ["anthropic", "openai-compatible", "ollama", "gemini"],
-    });
-    const draft = {
-      kind: "anthropic",
-      baseUrl: "https://api.anthropic.com",
-      model: "claude-sonnet-4-5",
-      apiKey: "sk-ant-123",
-    } as const;
-    await expect(h.agent.save(draft)).resolves.toEqual({
-      ok: true,
-      supportsTools: true,
-      models: ["claude-sonnet-4-5"],
-    });
-    await expect(
-      h.secrets.get(providerAccount("anthropic", "https://api.anthropic.com")),
-    ).resolves.toBe("sk-ant-123");
-    const yaml = h.files.get("/home/jarvis/.config/jarvis/jarvis.yaml") ?? "";
-    expect(yaml).toContain("kind: anthropic");
-    expect(yaml).not.toContain("sk-ant-123");
-    await expect(h.agent.providerList()).resolves.toEqual({
-      active: {
-        kind: "anthropic",
-        baseUrl: "https://api.anthropic.com",
-        model: "claude-sonnet-4-5",
-        hasKey: true,
-      },
-      kinds: ["anthropic", "openai-compatible", "ollama", "gemini"],
-    });
-    // A probe without a key in the draft uses the stored one.
-    await h.agent.probe({
-      kind: "anthropic",
-      baseUrl: "https://api.anthropic.com",
-      model: "claude-sonnet-4-5",
-    });
-    expect(probed.at(-1)?.key).toBe("sk-ant-123");
-    // Saving again without apiKey keeps the stored key (contracts §6 #10).
-    await h.agent.save({
-      kind: "anthropic",
-      baseUrl: "https://api.anthropic.com",
-      model: "claude-haiku-4-5",
-    });
-    await expect(
-      h.secrets.get(providerAccount("anthropic", "https://api.anthropic.com")),
-    ).resolves.toBe("sk-ant-123");
-    await expect(h.agent.providerList()).resolves.toMatchObject({
-      active: { model: "claude-haiku-4-5", hasKey: true },
-    });
-  });
-
-  it('probes with model "" by listing models only, and refuses to save it (contracts §6 #10)', async () => {
-    let probes = 0;
-    const provider: ModelProvider = {
-      // biome-ignore lint/correctness/useYield: never called here.
-      async *chat() {
-        throw new Error("unused");
-      },
-      probe: async () => {
-        probes++;
-        return { ok: true, supportsTools: true, models: [] };
-      },
-      listModels: async () => ["qwen3:8b", "gemma3:4b"],
-      reachable: async () => ({ ok: true }),
-    };
-    const h = harness({ makeProvider: () => provider });
-    await h.agent.start();
-    await expect(
-      h.agent.probe({ kind: "ollama", baseUrl: "http://10.0.0.2:11434", model: "" }),
-    ).resolves.toEqual({
-      ok: true,
-      supportsTools: false,
-      models: ["qwen3:8b", "gemma3:4b"],
-    });
-    expect(probes).toBe(0);
-    await expect(
-      h.agent.save({ kind: "ollama", baseUrl: "http://10.0.0.2:11434", model: "" }),
-    ).rejects.toBeInstanceOf(OsAgentError);
-  });
-
-  it("does not save when the probe fails", async () => {
-    const failing: ModelProvider = {
-      // biome-ignore lint/correctness/useYield: never called here.
-      async *chat() {
-        throw new Error("unused");
-      },
-      probe: async () => ({
-        ok: false,
-        supportsTools: false,
-        models: [],
-        error: "401 invalid x-api-key",
-      }),
-      listModels: async () => {
-        throw new Error("401 invalid x-api-key");
-      },
-      reachable: async () => ({ ok: false, error: "401" }),
-    };
-    const h = harness({ makeProvider: () => failing });
-    await h.agent.start();
-    const result = await h.agent.save({
-      kind: "anthropic",
-      baseUrl: "https://api.anthropic.com",
-      model: "m",
-      apiKey: "bad",
-    });
-    expect(result.ok).toBe(false);
-    expect(h.files.size).toBe(0);
-    await expect(
-      h.secrets.get(providerAccount("anthropic", "https://api.anthropic.com")),
-    ).resolves.toBeUndefined();
   });
 
   it("pushes provider:status unreachable when there is no provider and a turn fails", async () => {
@@ -701,5 +548,292 @@ describe("updates and model download (M2 contracts §2, §5)", () => {
       supportsTools: true,
       download: { state: "downloading", percent: 42 },
     });
+  });
+});
+
+const KINDS = ["anthropic", "openai-compatible", "ollama", "gemini"];
+const YAML = "/home/jarvis/.config/jarvis/jarvis.yaml";
+
+function okProvider(models: string[] = ["m"]): ModelProvider {
+  return {
+    async *chat() {
+      yield { type: "text", delta: "hi" };
+      yield { type: "done", usage: { inputTokens: 0, outputTokens: 0 } };
+    },
+    probe: async () => ({ ok: true, supportsTools: true, models }),
+    listModels: async () => models,
+    reachable: async () => ({ ok: true }),
+  };
+}
+
+describe("provider list and failover (M2.5 contracts §1-§2, design §3.5)", () => {
+  it("lists nothing, saves an ordered list with keys by id, lists it", async () => {
+    const built: { baseUrl: string; key: string | undefined }[] = [];
+    const h = harness({
+      makeProvider: (section, key) => {
+        built.push({ baseUrl: section.baseUrl, key });
+        return okProvider();
+      },
+    });
+    await h.agent.start();
+    await expect(h.agent.providerList()).resolves.toEqual({
+      providers: [],
+      activeId: null,
+      allowCloudFallback: false,
+      kinds: KINDS,
+    });
+    const result = await h.agent.save({
+      providers: [
+        { id: "local", kind: "ollama", baseUrl: "http://127.0.0.1:11434", model: "qwen3:8b" },
+        {
+          id: "work",
+          kind: "anthropic",
+          baseUrl: "https://api.anthropic.com",
+          model: "claude-sonnet-5-5",
+          apiKey: "sk-ant-123",
+        },
+      ],
+      allowCloudFallback: true,
+    });
+    expect(result).toEqual({
+      ok: true,
+      results: {
+        local: { ok: true, supportsTools: true, models: ["m"] },
+        work: { ok: true, supportsTools: true, models: ["m"] },
+      },
+    });
+    await expect(h.providerKeys.get("work")).resolves.toBe("sk-ant-123");
+    const yaml = h.files.get(YAML) ?? "";
+    expect(yaml).toContain("providers:");
+    expect(yaml).not.toContain("sk-ant-123");
+    await expect(h.agent.providerList()).resolves.toEqual({
+      providers: [
+        {
+          id: "local",
+          kind: "ollama",
+          baseUrl: "http://127.0.0.1:11434",
+          model: "qwen3:8b",
+          hasKey: false,
+        },
+        {
+          id: "work",
+          kind: "anthropic",
+          baseUrl: "https://api.anthropic.com",
+          model: "claude-sonnet-5-5",
+          hasKey: true,
+        },
+      ],
+      activeId: "local",
+      allowCloudFallback: true,
+      kinds: KINDS,
+    });
+  });
+
+  it("keeps an M2 machine working: legacy provider + key show up as `default`", async () => {
+    const h = harness({
+      secrets: createMemorySecretStore({
+        [providerAccount("anthropic", "https://api.anthropic.com")]: "sk-old",
+      }),
+      makeProvider: () => okProvider(),
+    });
+    h.files.set(
+      YAML,
+      "provider:\n  kind: anthropic\n  baseUrl: https://api.anthropic.com\n  model: claude-sonnet-5-5\n",
+    );
+    await h.agent.start();
+    await expect(h.agent.providerList()).resolves.toMatchObject({
+      providers: [{ id: "default", kind: "anthropic", hasKey: true }],
+      activeId: "default",
+    });
+    await expect(h.providerKeys.get("default")).resolves.toBe("sk-old");
+    // Saving the same entry without a key keeps it and writes the new layout.
+    const saved = await h.agent.save({
+      providers: [
+        {
+          id: "default",
+          kind: "anthropic",
+          baseUrl: "https://api.anthropic.com",
+          model: "claude-haiku-5",
+        },
+      ],
+      allowCloudFallback: false,
+    });
+    expect(saved.ok).toBe(true);
+    expect(h.files.get(YAML)).not.toMatch(/^provider:/m);
+    await expect(h.providerKeys.get("default")).resolves.toBe("sk-old");
+  });
+
+  it("saves nothing when one probe fails, and says which", async () => {
+    const h = harness({
+      makeProvider: (section) =>
+        section.baseUrl.includes("10.0.0.9")
+          ? {
+              ...okProvider(),
+              probe: async () => ({
+                ok: false,
+                supportsTools: false,
+                models: [],
+                error: "Cannot reach 10.0.0.9",
+              }),
+            }
+          : okProvider(),
+    });
+    await h.agent.start();
+    const result = await h.agent.save({
+      providers: [
+        { id: "local", kind: "ollama", baseUrl: "http://127.0.0.1:11434", model: "m" },
+        { id: "lan", kind: "ollama", baseUrl: "http://10.0.0.9:11434", model: "m" },
+      ],
+      allowCloudFallback: false,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.results["lan"]?.error).toBe("Cannot reach 10.0.0.9");
+    expect(h.files.size).toBe(0);
+  });
+
+  it("removes the keys of providers dropped from the list", async () => {
+    const h = harness({ makeProvider: () => okProvider() });
+    await h.agent.start();
+    const work = {
+      id: "work",
+      kind: "anthropic" as const,
+      baseUrl: "https://api.anthropic.com",
+      model: "m",
+      apiKey: "sk-1",
+    };
+    await h.agent.save({ providers: [work], allowCloudFallback: false });
+    await h.agent.save({
+      providers: [{ id: "local", kind: "ollama", baseUrl: "http://127.0.0.1:11434", model: "m" }],
+      allowCloudFallback: false,
+    });
+    await expect(h.providerKeys.get("work")).resolves.toBeUndefined();
+  });
+
+  it("reuses a stored key only for the same kind and base URL", async () => {
+    // Only probes use model "p", so the failover provider's own builds are not recorded.
+    const keys: (string | undefined)[] = [];
+    const h = harness({
+      makeProvider: (section, key) => {
+        if (section.model === "p") keys.push(key);
+        return okProvider();
+      },
+    });
+    await h.agent.start();
+    await h.agent.save({
+      providers: [
+        {
+          id: "work",
+          kind: "anthropic",
+          baseUrl: "https://api.anthropic.com",
+          model: "m",
+          apiKey: "sk-1",
+        },
+      ],
+      allowCloudFallback: false,
+    });
+    await h.agent.probe({
+      id: "work",
+      kind: "anthropic",
+      baseUrl: "https://api.anthropic.com",
+      model: "p",
+    });
+    await h.agent.probe({ kind: "anthropic", baseUrl: "https://api.anthropic.com", model: "p" });
+    await h.agent.probe({
+      id: "work",
+      kind: "anthropic",
+      baseUrl: "https://evil.example",
+      model: "p",
+    });
+    await h.agent.probe({
+      id: "other",
+      kind: "anthropic",
+      baseUrl: "https://api.anthropic.com",
+      model: "p",
+    });
+    expect(keys).toEqual(["sk-1", "sk-1", undefined, undefined]);
+  });
+
+  it("completes a turn on the LAN provider when the cloud returns 503, and pushes why", async () => {
+    const h = harness({
+      makeProvider: (section) =>
+        section.baseUrl.startsWith("https://")
+          ? {
+              ...okProvider(),
+              // biome-ignore lint/correctness/useYield: it fails before it yields anything.
+              async *chat() {
+                throw new ProviderError("http", "503 unavailable", 503);
+              },
+            }
+          : okProvider(),
+    });
+    h.files.set(
+      YAML,
+      [
+        "os:",
+        "  providers:",
+        "    - { id: cloud, kind: openai-compatible, baseUrl: https://api.example.com, model: m }",
+        "    - { id: lan, kind: ollama, baseUrl: http://10.0.0.2:11434, model: m }",
+        "",
+      ].join("\n"),
+    );
+    await h.agent.start();
+    const { turnId } = h.agent.prompt("hello");
+    await h.until(() => h.events().some((e) => e.type === "turn-end"));
+    expect(h.events()).toContainEqual({ type: "text", turnId, delta: "hi" });
+    const statuses = h.pushes.filter((p) => p.channel === "provider:status").map((p) => p.payload);
+    expect(statuses).toContainEqual({
+      reachable: true,
+      activeId: "lan",
+      fallbackReason: "cloud returned an error (503)",
+    });
+  });
+
+  it("keeps a local user's turn off the cloud without the opt-in", async () => {
+    let cloudCalls = 0;
+    const h = harness({
+      makeProvider: (section) =>
+        section.kind === "anthropic"
+          ? {
+              ...okProvider(),
+              async *chat() {
+                cloudCalls++;
+                yield { type: "done", usage: { inputTokens: 0, outputTokens: 0 } } as ModelEvent;
+              },
+            }
+          : {
+              ...okProvider(),
+              // biome-ignore lint/correctness/useYield: it fails before it yields anything.
+              async *chat() {
+                throw new ProviderError("network", "Cannot reach 127.0.0.1");
+              },
+            },
+    });
+    await h.providerKeys.set("work", "sk-1");
+    h.files.set(
+      YAML,
+      [
+        "os:",
+        "  providers:",
+        "    - { id: local, kind: ollama, baseUrl: http://127.0.0.1:11434, model: m }",
+        "    - { id: work, kind: anthropic, baseUrl: https://api.anthropic.com, model: m }",
+        "",
+      ].join("\n"),
+    );
+    await h.agent.start();
+    h.agent.prompt("hello");
+    await h.until(() => h.events().some((e) => e.type === "turn-end"));
+    expect(h.events().at(-1)).toMatchObject({ type: "turn-end", reason: "error" });
+    expect(cloudCalls).toBe(0);
+  });
+
+  it("refuses an empty model on save", async () => {
+    const h = harness({ makeProvider: () => okProvider() });
+    await h.agent.start();
+    await expect(
+      h.agent.save({
+        providers: [{ id: "lan", kind: "ollama", baseUrl: "http://10.0.0.2:11434", model: "" }],
+        allowCloudFallback: false,
+      }),
+    ).rejects.toBeInstanceOf(OsAgentError);
   });
 });

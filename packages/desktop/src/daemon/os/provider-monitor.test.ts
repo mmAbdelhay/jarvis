@@ -79,4 +79,23 @@ describe("createProviderMonitor", () => {
       fallbackReason: null,
     });
   });
+
+  it("carries the active provider and the fallback reason, and re-pushes when they change", async () => {
+    const pushed: unknown[] = [];
+    let active = { activeId: "cloud" as string | null, fallbackReason: null as string | null };
+    const monitor = createProviderMonitor({
+      check: async () => ({ ok: true }),
+      active: () => active,
+      push: (status) => pushed.push(status),
+      timers: { setTimeout: () => 0, clearTimeout: () => {} },
+    });
+    await monitor.recheck();
+    active = { activeId: "lan", fallbackReason: "cloud returned an error (503)" };
+    monitor.noteActive();
+    monitor.noteActive();
+    expect(pushed).toEqual([
+      { reachable: true, activeId: "cloud", fallbackReason: null },
+      { reachable: true, activeId: "lan", fallbackReason: "cloud returned an error (503)" },
+    ]);
+  });
 });

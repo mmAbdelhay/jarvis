@@ -27,6 +27,7 @@ import {
   nodeAuditFs,
   nodeMcpSpawn,
   nodeSecretToolExec,
+  PROVIDER_KEY_ATTRIBUTE,
 } from "@jarvis/platform/model";
 import { DAEMON_EXIT, DAEMON_USAGE, parseDaemonArgs } from "../args.js";
 import { nodeControlDeps } from "../control/deps.js";
@@ -138,6 +139,9 @@ async function main(argv: readonly string[]): Promise<void> {
     configPath: osConfigPath(home),
     configIo: { readFile: (path) => readFile(path, "utf8"), writeFile: writeAtomically },
     secrets: createSecretToolStore(nodeSecretToolExec(env)),
+    providerKeys: createSecretToolStore(nodeSecretToolExec(env), {
+      attribute: PROVIDER_KEY_ATTRIBUTE,
+    }),
     makeProvider: (section, apiKey) =>
       buildProvider(section, apiKey, { fetch: (url, init) => fetch(url, init) }),
     ...(fakeScript === undefined ? {} : { fakeScript }),

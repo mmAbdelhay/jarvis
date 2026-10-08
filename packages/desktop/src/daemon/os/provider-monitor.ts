@@ -14,11 +14,18 @@ export type ProviderMonitor = {
   recheck(): Promise<ProviderReachability>;
   reportOk(): void;
   reportFailure(error: string): void;
+  /** The failover provider switched: re-push if activeId/fallbackReason changed. */
+  noteActive(): void;
   current(): ProviderReachability | undefined;
 };
 
+type Base = { reachable: boolean; error?: string };
+const NO_ACTIVE = { activeId: null, fallbackReason: null };
+
 export function createProviderMonitor(deps: {
   check(): Promise<{ ok: boolean; error?: string }>;
+  /** M2.5 §2: which provider answers and why it is not the first. */
+  active?(): { activeId: string | null; fallbackReason: string | null };
   push(status: ProviderReachability): void;
   timers: {
     setTimeout(callback: () => void, ms: number): unknown;
@@ -34,12 +41,15 @@ export function createProviderMonitor(deps: {
     timer = undefined;
   };
 
-  function set(status: ProviderReachability): void {
+  function set(base: Base): void {
     if (stopped) return;
+    const status: ProviderReachability = { ...base, ...(deps.active?.() ?? NO_ACTIVE) };
     const changed =
       current === undefined ||
       current.reachable !== status.reachable ||
-      current.error !== status.error;
+      current.error !== status.error ||
+      current.activeId !== status.activeId ||
+      current.fallbackReason !== status.fallbackReason;
     current = status;
     if (changed) deps.push(status);
     clear();
@@ -52,27 +62,17 @@ export function createProviderMonitor(deps: {
   }
 
   async function recheck(): Promise<ProviderReachability> {
-    let status: ProviderReachability;
+    let base: Base;
     try {
       const result = await deps.check();
-      status = result.ok
-        ? { reachable: true, activeId: null, fallbackReason: null }
-        : {
-            reachable: false,
-            error: result.error ?? "unreachable",
-            activeId: null,
-            fallbackReason: null,
-          };
+      base = result.ok
+        ? { reachable: true }
+        : { reachable: false, error: result.error ?? "unreachable" };
     } catch (error) {
-      status = {
-        reachable: false,
-        error: error instanceof Error ? error.message : String(error),
-        activeId: null,
-        fallbackReason: null,
-      };
+      base = { reachable: false, error: error instanceof Error ? error.message : String(error) };
     }
-    set(status);
-    return status;
+    set(base);
+    return current ?? { ...base, ...NO_ACTIVE };
   }
 
   return {
@@ -84,9 +84,15 @@ export function createProviderMonitor(deps: {
       clear();
     },
     recheck,
-    reportOk: () => set({ reachable: true, activeId: null, fallbackReason: null }),
-    reportFailure: (error) =>
-      set({ reachable: false, error, activeId: null, fallbackReason: null }),
+    reportOk: () => set({ reachable: true }),
+    reportFailure: (error) => set({ reachable: false, error }),
+    noteActive() {
+      if (current === undefined) return;
+      set({
+        reachable: current.reachable,
+        ...(current.error === undefined ? {} : { error: current.error }),
+      });
+    },
     current: () => current,
   };
 }
