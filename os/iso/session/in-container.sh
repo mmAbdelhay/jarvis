@@ -4,9 +4,11 @@
 # wtype is the keyboard. Results in /out.
 set -euo pipefail
 inc=/src/os/iso/config/includes.chroot_after_packages
+# jarvis-ui depends on fonts-ibm-plex, which trixie has in contrib only.
+sed -i 's/^Components: main$/Components: main contrib/' /etc/apt/sources.list.d/debian.sources
 apt-get update -qq
 apt-get install -y -qq --no-install-recommends labwc wtype procps passwd libpam-modules-bin libpam-runtime \
-  libgl1-mesa-dri fonts-inter /debs/jarvis-ui_*.deb /debs/jarvis-lock_*.deb /debs/jarvis-idle_*.deb /debs/jarvis-session_*.deb >/dev/null
+  libgl1-mesa-dri fonts-inter /debs/jarvis-i18n_*.deb /debs/jarvis-ui_*.deb /debs/jarvis-lock_*.deb /debs/jarvis-idle_*.deb /debs/jarvis-session_*.deb >/dev/null
 
 useradd -m -s /bin/bash tester
 echo 'tester:correct horse' | chpasswd

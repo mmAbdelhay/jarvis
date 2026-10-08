@@ -18,7 +18,7 @@ repo=$(cd "$(dirname "$0")/../../.." && pwd)
 debs=$(cd "$debs" && pwd)
 out=${out:-$(mktemp -d)}
 mkdir -p "$out"; out=$(cd "$out" && pwd)
-for p in jarvis-ui jarvis-lock jarvis-idle jarvis-session; do
+for p in jarvis-i18n jarvis-ui jarvis-lock jarvis-idle jarvis-session; do
   compgen -G "$debs/${p}_*.deb" >/dev/null || { echo "run.sh: no $p .deb in $debs" >&2; exit 1; }
 done
 exec docker run --rm --platform linux/amd64 -e DEBIAN_FRONTEND=noninteractive \
