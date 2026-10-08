@@ -7,6 +7,8 @@ import QtQuick.Controls.Basic
 ColumnLayout {
     id: root
     property bool busy: false
+    property bool undoAvailable: false
+    signal undoRequested()
     signal submit(string text)
     signal stopRequested()
 
@@ -45,6 +47,17 @@ ColumnLayout {
                 background: null
                 Accessible.name: "Message Jarvis"
                 onAccepted: root.send()
+            }
+            IconButton {
+                objectName: "undoButton"
+                visible: root.undoAvailable && !root.busy
+                implicitWidth: 44
+                implicitHeight: 44
+                text: "Undo the last change"
+                iconPath: Icons.undo
+                fill: Theme.surfaceRaised
+                ink: Theme.textSoft
+                onClicked: root.undoRequested()
             }
             IconButton {
                 objectName: "sendButton"

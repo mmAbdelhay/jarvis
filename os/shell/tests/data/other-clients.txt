@@ -1,0 +1,3 @@
+# Control requests made by Rafiq clients other than jarvis-shell, one per line.
+# os/lock's lock_channels_listed ctest checks jarvis-lock sends exactly these.
+sys:setLocked

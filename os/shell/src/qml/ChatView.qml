@@ -14,6 +14,9 @@ Item {
     signal stopRequested()
     signal decided(bool approve)
 
+    property bool undoAvailable: false
+    signal undoRequested()
+
     function focusComposer() { composer.focusInput() }
 
     ColumnLayout {
@@ -174,6 +177,8 @@ Item {
             Layout.leftMargin: 40
             Layout.rightMargin: 40
             busy: root.conversation.busy
+            undoAvailable: root.undoAvailable
+            onUndoRequested: root.undoRequested()
             onSubmit: (text) => root.submit(text)
             onStopRequested: root.stopRequested()
         }

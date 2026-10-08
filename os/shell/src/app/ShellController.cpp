@@ -237,6 +237,10 @@ void ShellController::onPush(const QString& channel, const QJsonValue& payload)
 {
     if (channel == u"agent:events")
         return onAgentEvent(payload.toObject());
+    if (channel == u"voice:state")
+        return emit voiceStatePushed(payload.toObject());
+    if (channel == u"pairing:pending")
+        return emit pairingPushed(payload.toObject());
     if (channel == u"provider:status") {
         const QJsonObject status = payload.toObject();
         m_providerReachable = status.value("reachable").toBool(true);
@@ -285,8 +289,11 @@ void ShellController::onAgentEvent(const QJsonObject& event)
             m_doctorCard->close();
         if (m_chatCardIds.remove(cardId)) {
             const QString decision = event.value("decision").toString();
-            if (decision == u"approved")
+            if (decision == u"approved") {
                 m_conversation->addNotice(u"Approved."_s);
+                m_undoAvailable = true; // agent:undo can now restore it (M3 contracts §2)
+                emit undoChanged();
+            }
             else if (decision == u"timeout")
                 m_conversation->addNotice(u"No answer in 5 minutes. Nothing was changed."_s);
             else
@@ -348,6 +355,7 @@ void ShellController::applyLockState()
     if (locked == m_locked)
         return;
     m_locked = locked;
+    emit undoChanged();
     emit lockedChanged();
 }
 
@@ -373,6 +381,49 @@ void ShellController::decide(CardModel* card, bool approve)
         }
         m_conversation->addNotice(
             u"Couldn't send your answer to Jarvis (%1). An unanswered card counts as Deny."_s.arg(r.text));
+    });
+}
+
+void ShellController::undo()
+{
+    if (m_undoing || !undoAvailable())
+        return;
+    m_undoing = true;
+    emit undoChanged();
+    request(u"agent:undo"_s, QJsonArray{}, [this](const ControlResult& r) {
+        m_undoing = false;
+        if (!r.ok) {
+            m_conversation->addNotice(u"Couldn't undo: %1"_s.arg(r.text));
+        } else if (const QString title = r.value.toObject().value("undone").toString(); title.isEmpty()) {
+            m_undoAvailable = false;
+            m_conversation->addNotice(u"Nothing left to undo."_s);
+        } else {
+            m_conversation->addNotice(u"Undid: %1"_s.arg(title.left(200)));
+        }
+        emit undoChanged();
+    });
+}
+
+void ShellController::stopSpeaking()
+{
+    request(u"voice:stop"_s, QJsonArray{});
+}
+
+void ShellController::answerPairing(bool approve)
+{
+    request(u"pairing:answer"_s, QJsonArray{QJsonObject{{"approve", approve}}}, [this](const ControlResult& r) {
+        if (!r.ok)
+            m_conversation->addNotice(u"Couldn't send the pairing answer (%1)."_s.arg(r.text));
+    });
+}
+
+void ShellController::sendUtterance(const QByteArray& wav, const QJsonObject& header,
+                                    std::function<void(const ControlResult&)> done)
+{
+    QPointer<ShellController> self(this);
+    m_client->upload(u"voice:utterance"_s, QJsonArray{header}, wav, [self, done = std::move(done)](const ControlResult& r) {
+        if (self && done)
+            done(r);
     });
 }
 

@@ -39,7 +39,8 @@ set_tests_properties(qml_imports_listed PROPERTIES LABELS unit)
 
 # Design §3.1: the channels the shell hard-codes match @jarvis/wire's list.
 # (cmake -P reads only the -D options that come before it.)
-set(JARVIS_CHANNEL_CHECK ${CMAKE_COMMAND} -DSRC_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../src)
+set(JARVIS_CHANNEL_CHECK ${CMAKE_COMMAND} -DSRC_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../src
+    -DOTHER_CLIENTS=${CMAKE_CURRENT_SOURCE_DIR}/data/other-clients.txt)
 set(JARVIS_CHANNEL_SCRIPT -P ${CMAKE_CURRENT_SOURCE_DIR}/check_control_channels.cmake)
 add_test(NAME control_channels_match_wire
   COMMAND ${JARVIS_CHANNEL_CHECK} -DWIRE_JSON=${CMAKE_CURRENT_SOURCE_DIR}/../../../packages/wire/os-control.json

@@ -87,6 +87,8 @@ Rectangle {
                     id: chat
                     conversation: root.shell.conversation
                     card: root.shell.chatCard
+                    undoAvailable: root.shell.undoAvailable && !root.shell.undoing
+                    onUndoRequested: root.shell.undo()
                     onSubmit: (text) => root.shell.sendPrompt(text)
                     onStopRequested: root.shell.stop()
                     onDecided: (approve) => root.shell.decide(root.shell.chatCard, approve)

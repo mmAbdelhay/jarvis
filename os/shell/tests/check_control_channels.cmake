@@ -1,9 +1,13 @@
-# ctest (design §3.1): the control-socket channels jarvis-shell hard-codes must
-# be exactly the ones packages/wire/os-control.json lists (which
-# packages/desktop/src/daemon/os/os-control-json.test.ts keeps equal to
-# @jarvis/wire). Requests are the `request(u"<ch>"` calls, pushes the
-# `channel == u"<ch>"` checks in ShellController.
-# Usage: cmake -DSRC_DIR=<os/shell/src> -DWIRE_JSON=<packages/wire/os-control.json> -P check_control_channels.cmake
+# ctest (design §3.1, Rafiq M3 contracts §2–§3): the control channels the
+# Rafiq clients hard-code must be exactly the ones packages/wire/os-control.json
+# lists (packages/desktop/src/daemon/os/os-control-json.test.ts keeps that file
+# equal to @jarvis/wire).
+#   requests: jarvis-shell's `request(u"<ch>"` calls + the lines of OTHER_CLIENTS
+#             (requests sent by jarvis-lock; os/lock's own test checks that file);
+#   uploads:  jarvis-shell's `upload(u"<ch>"` calls — compared with "blobs" when
+#             the JSON has that key, otherwise counted as requests;
+#   pushes:   the `channel == u"<ch>"` checks in ShellController.
+# Usage: cmake -DSRC_DIR=<os/shell/src> -DWIRE_JSON=<os-control.json> [-DOTHER_CLIENTS=<file>] -P check_control_channels.cmake
 cmake_minimum_required(VERSION 3.24)
 
 file(READ "${WIRE_JSON}" wire)
@@ -22,9 +26,16 @@ function(json_list key out)
 endfunction()
 json_list(requests wire_requests)
 json_list(pushes wire_pushes)
+string(JSON blobs_type ERROR_VARIABLE no_blobs TYPE "${wire}" blobs)
+set(wire_has_blobs FALSE)
+if(NOT no_blobs AND blobs_type STREQUAL "ARRAY")
+  set(wire_has_blobs TRUE)
+  json_list(blobs wire_blobs)
+endif()
 
 file(GLOB_RECURSE sources "${SRC_DIR}/*.cpp" "${SRC_DIR}/*.h")
 set(shell_requests "")
+set(shell_uploads "")
 set(shell_pushes "")
 foreach(source IN LISTS sources)
   file(READ "${source}" text)
@@ -33,25 +44,40 @@ foreach(source IN LISTS sources)
     string(REGEX REPLACE "^request\\(u\"([^\"]+)\"$" "\\1" ch "${call}")
     list(APPEND shell_requests "${ch}")
   endforeach()
+  string(REGEX MATCHALL "upload\\(u\"[^\"]+\"" uploads "${text}")
+  foreach(call IN LISTS uploads)
+    string(REGEX REPLACE "^upload\\(u\"([^\"]+)\"$" "\\1" ch "${call}")
+    list(APPEND shell_uploads "${ch}")
+  endforeach()
   string(REGEX MATCHALL "channel == u\"[^\"]+\"" checks "${text}")
   foreach(check IN LISTS checks)
     string(REGEX REPLACE "^channel == u\"([^\"]+)\"$" "\\1" ch "${check}")
     list(APPEND shell_pushes "${ch}")
   endforeach()
 endforeach()
-list(REMOVE_DUPLICATES shell_requests)
-list(REMOVE_DUPLICATES shell_pushes)
-list(SORT shell_requests)
-list(SORT shell_pushes)
+if(OTHER_CLIENTS)
+  file(STRINGS "${OTHER_CLIENTS}" other_requests REGEX "^[a-z][a-zA-Z0-9:._-]*$")
+  list(APPEND shell_requests ${other_requests})
+endif()
+if(NOT wire_has_blobs)
+  list(APPEND shell_requests ${shell_uploads})
+endif()
+foreach(name shell_requests shell_uploads shell_pushes)
+  list(REMOVE_DUPLICATES ${name})
+  list(SORT ${name})
+endforeach()
 
 set(errors "")
 if(NOT shell_requests STREQUAL wire_requests)
-  string(APPEND errors "\n  requests: shell [${shell_requests}]\n            wire  [${wire_requests}]")
+  string(APPEND errors "\n  requests: clients [${shell_requests}]\n            wire    [${wire_requests}]")
+endif()
+if(wire_has_blobs AND NOT shell_uploads STREQUAL wire_blobs)
+  string(APPEND errors "\n  blobs:    shell   [${shell_uploads}]\n            wire    [${wire_blobs}]")
 endif()
 if(NOT shell_pushes STREQUAL wire_pushes)
-  string(APPEND errors "\n  pushes:   shell [${shell_pushes}]\n            wire  [${wire_pushes}]")
+  string(APPEND errors "\n  pushes:   shell   [${shell_pushes}]\n            wire    [${wire_pushes}]")
 endif()
 if(errors)
-  message(FATAL_ERROR "jarvis-shell channels differ from ${WIRE_JSON}:${errors}")
+  message(FATAL_ERROR "Rafiq client channels differ from ${WIRE_JSON}:${errors}")
 endif()
-message(STATUS "jarvis-shell uses exactly the channels in os-control.json")
+message(STATUS "jarvis-shell and the other clients use exactly the channels in os-control.json")

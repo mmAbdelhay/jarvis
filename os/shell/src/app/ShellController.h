@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QByteArray>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QObject>
@@ -27,6 +28,8 @@ class ShellController : public QObject {
     Q_OBJECT
     QML_ELEMENT
     QML_UNCREATABLE("Created by main()")
+    Q_PROPERTY(bool undoAvailable READ undoAvailable NOTIFY undoChanged)
+    Q_PROPERTY(bool undoing READ undoing NOTIFY undoChanged)
     Q_PROPERTY(Conversation* conversation READ conversation CONSTANT)
     Q_PROPERTY(CardModel* chatCard READ chatCard CONSTANT)
     Q_PROPERTY(bool locked READ locked NOTIFY lockedChanged)
@@ -55,6 +58,8 @@ public:
     Conversation* conversation() const { return m_conversation; }
     CardModel* chatCard() const { return m_chatCard; }
     bool locked() const { return m_locked; }
+    bool undoAvailable() const { return m_undoAvailable && !m_locked; }
+    bool undoing() const { return m_undoing; }
     CardModel* doctorCard() const { return m_doctorCard; }
     ProviderModel* provider() const { return m_provider; }
     ProviderListModel* providers() const { return m_providers; }
@@ -83,10 +88,18 @@ public:
     Q_INVOKABLE void openDoctor();
     Q_INVOKABLE void openTerminal();
     Q_INVOKABLE void requestComposerFocus();
+    Q_INVOKABLE void undo();
+    Q_INVOKABLE void stopSpeaking();
+    Q_INVOKABLE void answerPairing(bool approve);
+    // voice:utterance (M3 contracts §2): one 16 kHz mono WAV, header {lang, cardId?}.
+    void sendUtterance(const QByteArray& wav, const QJsonObject& header, std::function<void(const ControlResult&)> done);
     Q_INVOKABLE void askForUpdates();
     Q_INVOKABLE void checkForUpdates();
 
 signals:
+    void undoChanged();
+    void voiceStatePushed(const QJsonObject& state);
+    void pairingPushed(const QJsonObject& pending);
     void viewChanged();
     void connectionChanged();
     void providerStatusChanged();
@@ -113,6 +126,8 @@ private:
     Conversation* m_conversation;
     CardModel* m_chatCard;
     bool m_locked = false;
+    bool m_undoAvailable = false;
+    bool m_undoing = false;
     CardModel* m_doctorCard;
     ProviderModel* m_provider;
     ProviderListModel* m_providers;
