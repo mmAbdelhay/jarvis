@@ -188,4 +188,18 @@ describe("jarvis setup", () => {
     expect(await setup(await daemons.connect(d), piped)).toBe(2);
     expect(piped.output).toContain("needs an interactive terminal");
   });
+
+  it("prints the jarvis-admins command only when the user is not in the group", async () => {
+    const d: TestDaemon = await daemons.start((channel) =>
+      channel === "provider:list" ? listOf([local]) : null,
+    );
+    const outside = new FakeTerminal({ lines: ["q"] });
+    expect(await setup(await daemons.connect(d), outside, () => false)).toBe(0);
+    expect(outside.output).toContain(
+      "To let Jarvis change this computer, run: sudo usermod -aG jarvis-admins $USER",
+    );
+    const inside = new FakeTerminal({ lines: ["q"] });
+    expect(await setup(await daemons.connect(d), inside, () => true)).toBe(0);
+    expect(inside.output).not.toContain("usermod");
+  });
 });

@@ -2,6 +2,7 @@
 // fails over through, and the cloud-fallback switch. Keys are typed with no
 // echo, kept only in this process until the save, and sent only for new
 // providers (a draft without apiKey keeps that id's stored key, M1 §6 #10).
+import { execFileSync } from "node:child_process";
 import type { ControlClient } from "../../desktop/src/daemon/control/client.js";
 import { terminalLine } from "./sanitize.js";
 import type { Terminal } from "./terminal.js";
@@ -121,13 +122,32 @@ export function moveUp(state: SetupState, index: number): { state: SetupState; m
   return { state: { ...state, providers, dirty: true } };
 }
 
-export async function setup(client: ControlClient, term: Terminal): Promise<number> {
+export const ADMINS_GROUP = "jarvis-admins";
+export const ADMINS_HINT = `To let Jarvis change this computer, run: sudo usermod -aG ${ADMINS_GROUP} $USER\nThen log out and back in.\n`;
+
+// True when the current user already belongs to jarvis-admins (contracts §7.14).
+// If the groups can't be read we stay quiet rather than print a wrong hint.
+export function inAdminsGroup(): boolean {
+  try {
+    const groups = execFileSync("id", ["-Gn"], { encoding: "utf8", timeout: 2000 });
+    return groups.split(/\s+/).includes(ADMINS_GROUP);
+  } catch {
+    return true;
+  }
+}
+
+export async function setup(
+  client: ControlClient,
+  term: Terminal,
+  isAdmin: () => boolean = inAdminsGroup,
+): Promise<number> {
   if (!term.interactive) {
     term.write("jarvis setup needs an interactive terminal.\n");
     return 2;
   }
   let state = parseProviderList(await client.invoke("provider:list", []));
   term.write(renderProviders(state));
+  if (!isAdmin()) term.write(ADMINS_HINT);
   for (;;) {
     const line = await term.readLine("setup › ");
     if (line === null) return 0;
