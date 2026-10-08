@@ -29,7 +29,7 @@ die() { echo "build.sh: $*" >&2; exit 1; }
 . "$here/../branding/lib/brand.sh"
 brand_load
 required="jarvisd jarvis-shell jarvis-pkg jarvis-diag jarvis-helper jarvis-ui jarvis-installer jarvis-greeter
-  jarvis-installer-backend jarvis-model-fetch jarvis-ollama jarvis-models-catalog jarvis-archive-keyring jarvis-branding"
+  jarvis-installer-backend jarvis-model-fetch jarvis-ollama jarvis-models-catalog jarvis-archive-keyring jarvis-branding jarvis-cli"
 for p in $required; do
   compgen -G "$debs/${p}_*.deb" >/dev/null || die "no $p .deb in $debs"
 done
@@ -39,6 +39,10 @@ if ! command -v lb >/dev/null; then
   DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
     live-build xorriso squashfs-tools ca-certificates dpkg-dev gpg >/dev/null
 fi
+command -v python3 >/dev/null || {
+  apt-get update -qq
+  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends python3 >/dev/null
+}
 
 mkdir -p "$out"
 rm -rf "$work"
@@ -60,6 +64,10 @@ lb config
 lb build 2>&1 | tee "$out/build.log"
 
 "$here/scripts/verify-chroot.sh" "$work/chroot" 2>&1 | tee -a "$out/build.log"
+# Voice-model license gate (M2.5 design §3.6, contracts §4): every STT/TTS/
+# wake-word model in the image is registered in os/models/voice.json and
+# redistributable. pipefail makes a gate failure fail the build.
+python3 "$here/../models/tools/voice.py" scan "$work/chroot" 2>&1 | tee -a "$out/build.log"
 if [ "${JARVIS_RELEASE:-0}" = 1 ]; then
   "$here/scripts/release-guard.sh" "$work/chroot" "$work/binary" --release "$here/../repo/keys"
 else

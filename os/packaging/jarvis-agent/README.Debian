@@ -1,0 +1,36 @@
+jarvis-agent on Debian and Ubuntu
+=================================
+
+Start
+  systemctl --user start jarvisd   (it also starts by itself at every login)
+  jarvis setup                     choose a model provider: local Ollama, LAN or cloud
+  jarvis                           chat; jarvis ask "..." for a single request
+
+Approving actions
+  Jarvis asks before it changes anything. The terminal shows a numbered
+  list: type a number to tick or untick an item, a to approve the ticked
+  items, d to deny. Passwords are asked for without echo, never in chat.
+
+Installing and removing packages, restarting services
+  Approved actions run through jarvis-helper (system D-Bus, as root),
+  guarded by polkit. jarvisd runs as a user service, outside your login
+  session, so polkit only lets members of the group jarvis-admins use the
+  helper:
+
+    sudo adduser "$USER" jarvis-admins     (then log out and back in)
+
+  Only add accounts you would also give sudo: a member can
+  install and remove packages and restart allowlisted services through
+  Jarvis, after approving the card, without typing a password. Without the group,
+  approved package and service actions are refused.
+
+Provider keys
+  Cloud API keys are kept in your login keyring (Secret Service). Without a
+  running keyring (for example over SSH without a desktop session) use a
+  local or LAN provider.
+
+Removing
+  Installing jarvis-agent also adds the Jarvis APT repository
+  (/etc/apt/sources.list.d/jarvis.sources) through jarvis-archive-keyring;
+  purging that package removes the source and its signing key.
+  sudo apt purge jarvis-agent jarvis-cli jarvisd jarvis-pkg jarvis-diag jarvis-helper jarvis-archive-keyring

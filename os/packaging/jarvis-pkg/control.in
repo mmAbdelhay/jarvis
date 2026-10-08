@@ -7,7 +7,7 @@ Depends: jarvis-helper (= @VERSION@), apt, flatpak
 Section: admin
 Priority: optional
 Homepage: https://github.com/mmAbdelhay/jarvis
-Description: @DISTRO_NAME@ package tools (MCP server)
+Description: Jarvis package tools (MCP server)
  Package search, info and install/remove requests across APT and Flathub,
  and disk usage, for the Jarvis agent. Installs and removals are carried out
  by jarvis-helper after the user approves them.

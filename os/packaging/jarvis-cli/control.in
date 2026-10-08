@@ -1,0 +1,13 @@
+Package: jarvis-cli
+Version: @VERSION@
+Architecture: all
+Maintainer: Muhammad AbdElHay <mmAbdelhay@users.noreply.github.com>
+Installed-Size: @INSTALLED_SIZE@
+Depends: jarvisd (= @VERSION@)
+Section: utils
+Priority: optional
+Homepage: https://github.com/mmAbdelhay/jarvis
+Description: Jarvis assistant in the terminal
+ The jarvis command: chat with the Jarvis agent, send one-shot requests
+ and approve or deny its actions from a terminal. It talks to the jarvisd
+ user service over its control socket and runs on jarvisd's Node.
