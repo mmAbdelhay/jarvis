@@ -6,7 +6,10 @@
      contracts §5.15). Trade-off: jarvis-idle relaunches only lockers it
      started, so a Super+L locker that crashes or loses its lock leaves the
      session locked with no lock surface until a VT switch (fails closed;
-     docs/os/threat-model.md R6). Ctrl+Alt+T opens foot. -->
+     docs/os/threat-model.md R6). Ctrl+Alt+T opens foot.
+     Super and Super+Space go through jarvis-session-key (M4 contracts §2):
+     jarvis-shell in the full session, the docked chat of jarvis-classic
+     in the classic one. -->
 <labwc_config>
   <core>
     <decoration>server</decoration>
@@ -17,10 +20,10 @@
   <keyboard>
     <default />
     <keybind key="Super_L" onRelease="yes">
-      <action name="Execute" command="jarvis-shell --focus" />
+      <action name="Execute" command="/usr/libexec/jarvis/jarvis-session-key --focus" />
     </keybind>
     <keybind key="W-space">
-      <action name="Execute" command="jarvis-shell --voice" />
+      <action name="Execute" command="/usr/libexec/jarvis/jarvis-session-key --voice" />
     </keybind>
     <keybind key="W-l">
       <action name="Execute" command="jarvis-lock" />

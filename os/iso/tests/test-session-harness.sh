@@ -17,4 +17,7 @@ for case in "Super alone focuses the shell" "Super+Space runs push-to-talk" "Sup
   "the loop restarts jarvis-idle"; do
   check "covers: $case" grep -qF "\"$case\"" "$h/in-container.sh"
 done
+check "the M3 session test installs jarvis-session (keybinds go through jarvis-session-key)" \
+  grep -qF '/debs/jarvis-session_*.deb' "$h/in-container.sh"
+check "run.sh requires the jarvis-session .deb" grep -q 'jarvis-session' "$h/run.sh"
 finish

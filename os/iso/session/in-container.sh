@@ -6,7 +6,7 @@ set -euo pipefail
 inc=/src/os/iso/config/includes.chroot_after_packages
 apt-get update -qq
 apt-get install -y -qq --no-install-recommends labwc wtype procps passwd libpam-modules-bin libpam-runtime \
-  libgl1-mesa-dri fonts-inter /debs/jarvis-ui_*.deb /debs/jarvis-lock_*.deb /debs/jarvis-idle_*.deb >/dev/null
+  libgl1-mesa-dri fonts-inter /debs/jarvis-ui_*.deb /debs/jarvis-lock_*.deb /debs/jarvis-idle_*.deb /debs/jarvis-session_*.deb >/dev/null
 
 useradd -m -s /bin/bash tester
 echo 'tester:correct horse' | chpasswd
@@ -14,7 +14,7 @@ install -d -m0755 /etc/xdg/labwc
 cp "$inc/etc/xdg/labwc/rc.xml" "$inc/etc/xdg/labwc/environment" /etc/xdg/labwc/
 # The real autostart minus what this container does not have (shell, mako,
 # installer). The jarvis-idle fragment is the one the .deb installed.
-grep -v -e 'jarvis-shell/labwc/autostart' -e 'jarvis-installer' -e '^mako' "$inc/etc/xdg/labwc/autostart" > /etc/xdg/labwc/autostart
+grep -v -e 'jarvis-shell/labwc/autostart' -e 'jarvis-session/labwc/autostart' -e 'jarvis-installer' -e '^mako' "$inc/etc/xdg/labwc/autostart" > /etc/xdg/labwc/autostart
 install -m0755 "$inc/usr/local/bin/labwc" /usr/local/bin/labwc
 # jarvis-shell stand-in: records how the keybinds called it.
 printf '#!/bin/sh\necho "$*" >> /out/shell-calls\n' > /usr/local/bin/jarvis-shell

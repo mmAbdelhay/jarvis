@@ -19,8 +19,9 @@ mako &
 # Handle session lock requests, idle, lid and suspend; off on live boots.
 . /usr/share/jarvis-idle/labwc/autostart
 
-# jarvis-shell and the loop that relaunches it (Plan C/E).
-. /usr/share/jarvis-shell/labwc/autostart
+# jarvis-shell under its relaunch loop, through the classic-fallback guard
+# (M4 contracts §2); the classic session runs jarvis-classic instead.
+. /usr/share/jarvis-session/labwc/autostart
 
 # The installer exists only on the live ISO (removed on installed systems).
 if [ -x /usr/bin/jarvis-installer ]; then jarvis-installer & fi
