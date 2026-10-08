@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# stub-debs.sh OUT — eleven stand-in Jarvis packages, so the ISO can be built
+# stub-debs.sh OUT — stand-in Jarvis packages, so the ISO can be built
 # and booted before the real E, F and G packages have landed. jarvisd keeps the real
 # maintainer scripts and a unit that runs /bin/true; jarvis-shell opens a
 # terminal (relaunch-loop snippet at the real package's path), which shows the
@@ -78,3 +78,26 @@ stub jarvis-model-fetch "$packaging/jarvis-model-fetch"
 mkdir -p "$tmp/cli-dist"
 echo 'console.log("jarvis (stub)");' > "$tmp/cli-dist/jarvis.mjs"
 OS_VERSION=$version CLI_DIST=$tmp/cli-dist "$packaging/build.sh" --out "$out" jarvis-cli >/dev/null
+
+# --- Rafiq M3 (Plan P): stand-ins that keep the real security-relevant pieces ---
+mkdir -p "$tmp/jarvis-settings/usr/share/polkit-1/rules.d"
+cp "$packaging/jarvis-settings/51-jarvis-settings.rules" "$tmp/jarvis-settings/usr/share/polkit-1/rules.d/"
+stub jarvis-settings
+stub jarvis-apps
+stub jarvis-wl
+# An ELF that exits (cannot lock) and the real PAM service.
+install -D -m0755 /bin/true "$tmp/jarvis-lock/usr/bin/jarvis-lock"
+install -D -m0644 "$packaging/jarvis-lock/pam" "$tmp/jarvis-lock/etc/pam.d/jarvis-lock"
+stub jarvis-lock
+# The real loop and autostart fragment; the daemon only sleeps.
+install -D -m0755 "$packaging/jarvis-idle/jarvis-idle-loop" "$tmp/jarvis-idle/usr/libexec/jarvis/jarvis-idle-loop"
+install -D -m0644 "$packaging/jarvis-idle/labwc-autostart" "$tmp/jarvis-idle/usr/share/jarvis-idle/labwc/autostart"
+printf '#!/bin/sh\nexec sleep infinity\n' > "$tmp/jarvis-idle/usr/libexec/jarvis/jarvis-idle"
+chmod 0755 "$tmp/jarvis-idle/usr/libexec/jarvis/jarvis-idle"
+stub jarvis-idle
+mkdir -p "$tmp/jarvis-voice-models/usr/share/jarvis/voice"
+echo '{"version":1,"stt":[],"tts":[]}' > "$tmp/jarvis-voice-models/usr/share/jarvis/voice/manifest.json"
+stub jarvis-voice-models
+install -D -m0755 /bin/true "$tmp/jarvis-voice-engines/usr/lib/jarvis/voice/bin/whisper-cli"
+install -D -m0755 /bin/true "$tmp/jarvis-voice-engines/usr/lib/jarvis/voice/bin/piper"
+stub jarvis-voice-engines

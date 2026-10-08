@@ -7,3 +7,9 @@ rfkill
 pciutils
 usbutils
 flatpak
+
+# Rafiq M3 runtime packages.
+bluez
+power-profiles-daemon
+udisks2
+exfatprogs

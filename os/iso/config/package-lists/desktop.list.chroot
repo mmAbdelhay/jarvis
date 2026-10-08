@@ -14,3 +14,10 @@ polkitd
 gnome-keyring
 # secret-tool, to inspect the keyring from the Ctrl+Alt+T terminal.
 libsecret-tools
+
+# Rafiq M3 runtime packages.
+brightnessctl
+wlsunset
+wlr-randr
+mako-notifier
+xdg-utils
