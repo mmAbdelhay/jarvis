@@ -212,6 +212,18 @@ func (r Resolver) New(p string) (Path, error) {
 	} else if mcp.AsToolError(err).Code != mcp.CodeNotFound {
 		return Path{}, err
 	}
+	// Existing reports a dangling symlink as not found. Something is still
+	// there, and a rename or create-without-O_EXCL would replace or follow
+	// it, so a broken link counts as existing (Link set, Target = itself).
+	lexical := filepath.Join(append([]string{home}, parts...)...)
+	if par, err := filepath.EvalSymlinks(filepath.Dir(lexical)); err == nil {
+		if inside(home, par, p) == nil {
+			abs := filepath.Join(par, parts[len(parts)-1])
+			if st, err := os.Lstat(abs); err == nil {
+				return Path{Abs: abs, Display: display(home, abs), Link: st.Mode()&fs.ModeSymlink != 0, Target: abs, Exists: true}, nil
+			}
+		}
+	}
 	// Walk up to the deepest existing ancestor.
 	n := len(parts) - 1
 	for ; n > 0; n-- {

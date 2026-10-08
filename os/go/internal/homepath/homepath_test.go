@@ -105,6 +105,13 @@ func TestNew(t *testing.T) {
 	if !p.Exists {
 		t.Fatalf("existing destination must say so: %+v", p)
 	}
+	// A dangling link at the destination is something there: never "missing".
+	must(t, os.Symlink("/nonexistent/evil", filepath.Join(home, "Documents", "dang")))
+	p, err = r.New("~/Documents/dang")
+	must(t, err)
+	if !p.Exists || !p.Link || p.Display != "~/Documents/dang" {
+		t.Fatalf("dangling destination link must exist: %+v", p)
+	}
 	for in, want := range map[string]mcp.Code{
 		"~/Out/new.txt":            mcp.CodeDenied,
 		"~/Keys/new":               mcp.CodeDenied,
