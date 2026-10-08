@@ -20,6 +20,7 @@ import {
   parseNoArgs,
   parseProviderDraft,
   parseProviderSave,
+  parseSetLocked,
 } from "@jarvis/wire";
 import { ControlRequestError } from "../control/messages.js";
 import type { ControlConnection, ControlHandlers } from "../control/server.js";
@@ -35,7 +36,11 @@ export type OsOrigin =
   | { kind: "phone"; device: { id: string; name: string } };
 
 /** What the router serves. Later M3 tasks add optional services here. */
-export type OsServices = { agent: OsAgent };
+export type OsServices = {
+  agent: OsAgent;
+  /** Rafiq M3 §3: true only for /usr/bin/jarvis-lock (peer-checked). */
+  isLockClient?(connection: ControlConnection): Promise<boolean>;
+};
 
 export type OsRouter = {
   invoke(channel: string, args: unknown[], origin: OsOrigin): Promise<unknown>;
@@ -84,14 +89,26 @@ export function requireLocal(origin: OsOrigin): void {
 export function createOsRouter(services: OsServices): OsRouter {
   const { agent } = services;
 
-  async function route(channel: string, args: unknown[], _origin: OsOrigin): Promise<unknown> {
+  async function route(channel: string, args: unknown[], origin: OsOrigin): Promise<unknown> {
     switch (channel) {
       case OS_CONTROL_REQUESTS.agentPrompt:
-        return agent.prompt(value(parseAgentPrompt(args)).text);
+        return agent.prompt(value(parseAgentPrompt(args)).text, confirmFrom(origin));
       case OS_CONTROL_REQUESTS.agentStop:
         return agent.stop(value(parseAgentStop(args)).turnId);
       case OS_CONTROL_REQUESTS.agentConfirm:
-        return agent.confirm(value(parseAgentConfirm(args)));
+        return agent.confirm(value(parseAgentConfirm(args)), confirmFrom(origin));
+      case OS_CONTROL_REQUESTS.agentUndo:
+        value(parseNoArgs(args));
+        return agent.undo(confirmFrom(origin));
+      case OS_CONTROL_REQUESTS.sysSetLocked: {
+        requireLocal(origin);
+        const isLockClient =
+          origin.kind === "local" && services.isLockClient !== undefined
+            ? await services.isLockClient(origin.connection)
+            : false;
+        if (!isLockClient) throw new ControlRequestError("forbidden", CONTROL_TEXT.lockClientOnly);
+        return agent.setLocked(value(parseSetLocked(args)).locked);
+      }
       case OS_CONTROL_REQUESTS.providerList:
         value(parseNoArgs(args));
         return agent.providerList();

@@ -70,3 +70,14 @@ export function memoryDbPath(home: string): string {
 export function toolIndexPath(home: string): string {
   return posix.join(home, ".cache", "jarvis", "tool-index.sqlite");
 }
+
+/** Rafiq M3 §3: the only program whose sys:setLocked is accepted. */
+export const LOCK_CLIENT_PATH = "/usr/bin/jarvis-lock";
+
+/** Per-login tmpfs; undefined without an absolute $XDG_RUNTIME_DIR (then the
+ *  lock state is memory-only). */
+export function lockStatePath(env: { XDG_RUNTIME_DIR?: string | undefined }): string | undefined {
+  const dir = env.XDG_RUNTIME_DIR;
+  if (dir === undefined || !posix.isAbsolute(dir)) return undefined;
+  return posix.join(dir, "jarvis", "lock-state.json");
+}

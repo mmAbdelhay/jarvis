@@ -28,6 +28,12 @@ function fakeAgent() {
     prompt: record("prompt", { turnId: "t1" }) as OsAgent["prompt"],
     stop: record("stop", null) as OsAgent["stop"],
     confirm: record("confirm", null) as OsAgent["confirm"],
+    undo: record("undo", Promise.resolve({ undone: null })) as OsAgent["undo"],
+    setLocked: record("setLocked", Promise.resolve(null)) as OsAgent["setLocked"],
+    isLocked: () => false,
+    card: () => undefined,
+    currentTurnId: () => undefined,
+    onEvent: () => () => {},
     providerList: record(
       "providerList",
       Promise.resolve({ providers: [], activeId: null, allowCloudFallback: false, kinds: [] }),
@@ -124,7 +130,7 @@ describe("createOsBinding", () => {
       "memorySetEnabled",
       "checkUpdates",
     ]);
-    expect(calls[0]?.args).toEqual(["install vlc"]);
+    expect(calls[0]?.args).toEqual(["install vlc", { via: "desktop", allowPassword: true }]);
     expect(calls.find((c) => c.method === "memoryList")?.args).toEqual([50]);
     expect(calls.find((c) => c.method === "memoryDelete")?.args).toEqual(["m1"]);
     expect(calls.find((c) => c.method === "memorySetEnabled")?.args).toEqual([false]);
@@ -310,5 +316,98 @@ describe("OS router adapters", () => {
       ["test", [1], { kind: "local", connection }],
       ["blob", [2], bytes, { kind: "local", connection }],
     ]);
+  });
+});
+
+describe("lock and undo channels (Rafiq M3 §2, §3)", () => {
+  const phone = { kind: "phone" as const, device: { id: "d".repeat(32), name: "Pixel 8" } };
+
+  it("accepts sys:setLocked only from /usr/bin/jarvis-lock on a local connection", async () => {
+    const { agent, calls } = fakeAgent();
+    const lockConnection = {
+      id: 2,
+      onClose: () => {},
+      peerExecutable: async () => "/usr/bin/jarvis-lock",
+    };
+    const shellConnection = {
+      id: 3,
+      onClose: () => {},
+      peerExecutable: async () => "/usr/bin/jarvis-shell",
+    };
+    const router = createOsRouter({
+      agent,
+      isLockClient: async (c) => (await c.peerExecutable?.()) === "/usr/bin/jarvis-lock",
+    });
+    await router.invoke("sys:setLocked", [{ locked: true }], {
+      kind: "local",
+      connection: lockConnection,
+    });
+    await expect(
+      router.invoke("sys:setLocked", [{ locked: false }], {
+        kind: "local",
+        connection: shellConnection,
+      }),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    await expect(
+      router.invoke("sys:setLocked", [{ locked: false }], { kind: "local", connection }),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    await expect(router.invoke("sys:setLocked", [{ locked: false }], phone)).rejects.toMatchObject({
+      code: "forbidden",
+    });
+    expect(calls.filter((c) => c.method === "setLocked").map((c) => c.args)).toEqual([[true]]);
+  });
+
+  it("stays locked when the lock client disconnects (nothing unlocks on close)", async () => {
+    const { agent, calls } = fakeAgent();
+    const closeListeners: Array<() => void> = [];
+    const lockConnection = {
+      id: 4,
+      onClose: (listener: () => void) => {
+        closeListeners.push(listener);
+      },
+      peerExecutable: async () => "/usr/bin/jarvis-lock",
+    };
+    const router = createOsRouter({
+      agent,
+      isLockClient: async (c) => (await c.peerExecutable?.()) === "/usr/bin/jarvis-lock",
+    });
+    await router.invoke("sys:setLocked", [{ locked: true }], {
+      kind: "local",
+      connection: lockConnection,
+    });
+    for (const listener of closeListeners) listener();
+    expect(calls.filter((c) => c.method === "setLocked").map((c) => c.args)).toEqual([[true]]);
+  });
+
+  it("passes who is answering to agent:confirm, agent:prompt and agent:undo", async () => {
+    const { agent, calls } = fakeAgent();
+    const router = createOsRouter({ agent });
+    await router.invoke(
+      "agent:confirm",
+      [{ cardId: "c1", approve: true, ticked: [], secrets: {} }],
+      phone,
+    );
+    await router.invoke("agent:undo", [], phone);
+    await router.invoke("agent:prompt", [{ text: "undo" }], { kind: "local", connection });
+    expect(calls.map((c) => [c.method, c.args.at(-1)])).toEqual([
+      ["confirm", { via: "phone:Pixel 8", allowPassword: false }],
+      ["undo", { via: "phone:Pixel 8", allowPassword: false }],
+      ["prompt", { via: "desktop", allowPassword: true }],
+    ]);
+  });
+
+  it("maps a locked agent to err locked", async () => {
+    const { agent } = fakeAgent();
+    agent.confirm = () => {
+      throw new OsAgentError("locked", "The screen is locked.");
+    };
+    const router = createOsRouter({ agent });
+    await expect(
+      router.invoke(
+        "agent:confirm",
+        [{ cardId: "c1", approve: true, ticked: [], secrets: {} }],
+        phone,
+      ),
+    ).rejects.toMatchObject({ code: "locked" });
   });
 });

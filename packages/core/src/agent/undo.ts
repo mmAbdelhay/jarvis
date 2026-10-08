@@ -27,6 +27,8 @@ export type UndoStack = {
   push(step: UndoStep): void;
   /** The newest step (that `match` accepts), removed from the stack. */
   pop(match?: (step: UndoStep) => boolean): UndoStep | undefined;
+  /** The newest step, left in place (sys:snapshot.undo). */
+  peek(): UndoStep | undefined;
   size(): number;
   clear(): void;
 };
@@ -79,6 +81,7 @@ export function createUndoStack(limit = UNDO_LIMIT): UndoStack {
       }
       return undefined;
     },
+    peek: () => steps.at(-1),
     size: () => steps.length,
     clear() {
       steps.length = 0;

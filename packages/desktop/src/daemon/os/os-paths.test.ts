@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildStampCandidates,
+  lockStatePath,
   DEFAULT_MCP_DIR,
   mcpConfigDir,
   mcpDirFrom,
@@ -60,5 +61,15 @@ describe("os paths", () => {
 describe("MODEL_STATE_PATH", () => {
   it("is the M2 contracts §5 path", () => {
     expect(MODEL_STATE_PATH).toBe("/var/lib/jarvis/model-state.json");
+  });
+});
+
+describe("lockStatePath", () => {
+  it("lives in the per-login runtime directory, never in ~/.config", () => {
+    expect(lockStatePath({ XDG_RUNTIME_DIR: "/run/user/1000" })).toBe(
+      "/run/user/1000/jarvis/lock-state.json",
+    );
+    expect(lockStatePath({})).toBeUndefined();
+    expect(lockStatePath({ XDG_RUNTIME_DIR: "relative" })).toBeUndefined();
   });
 });

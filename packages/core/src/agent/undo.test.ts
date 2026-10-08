@@ -130,6 +130,15 @@ describe("createUndoStack", () => {
     expect(rest.at(-1)).toBe("step 6");
   });
 
+  it("peeks at the newest step without removing it", () => {
+    const stack = createUndoStack();
+    expect(stack.peek()).toBeUndefined();
+    stack.push(step(1));
+    stack.push(step(2));
+    expect(stack.peek()?.title).toBe("step 2");
+    expect(stack.size()).toBe(2);
+  });
+
   it("pops the newest matching step and leaves the rest", () => {
     const stack = createUndoStack();
     stack.push(step(1, "files."));
