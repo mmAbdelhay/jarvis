@@ -135,4 +135,16 @@ for n in ("repo", "release"):
 assert "-size +95M" in d("repo")
 assert "build-workspace" in needs("release") and "workspace/*.deb" in d("release")
 PY
+check "jarvis.sources is enabled only with the real key, the signing secret and a live repo" python3 - "$wf" <<'PY'
+import sys, yaml
+steps = yaml.safe_load(open(sys.argv[1]))["jobs"]["build-distro"]["steps"]
+ids = [s.get("id") for s in steps]
+gate = steps[ids.index("aptrepo")]
+assert "secrets.JARVIS_APT_SIGNING_KEY" in gate["env"]["SIGN"], gate
+for s in ('= real ]', '[ -n "$SIGN" ]', "jarvis-apt/dists/trixie/InRelease",
+          "JARVIS_APT_REPO_ENABLED=1", "JARVIS_APT_REPO_ENABLED=0"):
+    assert s in gate["run"], s
+build = next(i for i, s in enumerate(steps) if "build.sh" in s.get("run", "") and "jarvis-archive-keyring" in s.get("run", ""))
+assert ids.index("aptrepo") < build, "the gate must run before the keyring package is built"
+PY
 finish

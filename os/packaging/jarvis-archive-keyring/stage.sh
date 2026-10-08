@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Stage the archive keyring and APT source (contracts §7). The public key is
 # $JARVIS_ARCHIVE_PUBKEY (CI throwaway) or the owner's committed key, which
-# must match the committed FINGERPRINT.
+# must match the committed FINGERPRINT. The source ships "Enabled: no" until
+# the repository is published; JARVIS_APT_REPO_ENABLED=1 (the os workflow sets
+# it once JARVIS_APT_SIGNING_KEY exists) ships it enabled.
 set -euo pipefail
 stage=$1
 here=$(cd "$(dirname "$0")" && pwd)
@@ -32,4 +34,12 @@ esac
 mkdir -p "$stage/usr/share/keyrings"
 gpg --homedir "$tmp" --dearmor < "$src" > "$stage/usr/share/keyrings/jarvis-archive-keyring.gpg"
 chmod 0644 "$stage/usr/share/keyrings/jarvis-archive-keyring.gpg"
-install -D -m0644 "$here/jarvis.sources" "$stage/etc/apt/sources.list.d/jarvis.sources"
+case ${JARVIS_APT_REPO_ENABLED:-0} in
+  0) enabled=no ;;
+  1) enabled=yes ;;
+  *) echo "jarvis-archive-keyring: JARVIS_APT_REPO_ENABLED must be 0 or 1, got '$JARVIS_APT_REPO_ENABLED'" >&2; exit 1 ;;
+esac
+mkdir -p "$stage/etc/apt/sources.list.d"
+sed "s/^Enabled: no\$/Enabled: $enabled/" "$here/jarvis.sources" > "$stage/etc/apt/sources.list.d/jarvis.sources"
+chmod 0644 "$stage/etc/apt/sources.list.d/jarvis.sources"
+grep -qx "Enabled: $enabled" "$stage/etc/apt/sources.list.d/jarvis.sources"

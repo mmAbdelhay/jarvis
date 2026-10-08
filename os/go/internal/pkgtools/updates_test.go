@@ -88,6 +88,22 @@ func TestUpdatesListAptFailureIsFailedWithAptMessage(t *testing.T) {
 	}
 }
 
+// jarvis.sources ships "Enabled: no" until the Jarvis repo is published, and
+// an enabled source without fetched lists only warns: Debian updates are
+// still listed (only a non-zero apt exit is a failure).
+func TestUpdatesListToleratesJarvisSourceWarnings(t *testing.T) {
+	res := execx.OK(simUpgrade)
+	res.Stderr = []byte("W: The repository 'https://mmabdelhay.github.io/jarvis-apt trixie Release' does not have a Release file.\n")
+	run := (&execx.Fake{}).On(res, "apt-get", simArgs...)
+	got, err := call(t, updatesDeps(run, &helperapi.Fake{}), "updates.list", `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if items := asJSON(t, got)["items"].([]any); len(items) != 2 {
+		t.Fatalf("items = %v", items)
+	}
+}
+
 func TestUpdatesListWithoutFlatpakStillListsApt(t *testing.T) {
 	run := (&execx.Fake{}).On(execx.OK(simUpgrade), "apt-get", simArgs...) // flatpak argv unregistered: "not found"
 	got, err := call(t, updatesDeps(run, &helperapi.Fake{}), "updates.list", `{}`)

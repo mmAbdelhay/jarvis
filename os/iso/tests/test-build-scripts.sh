@@ -94,7 +94,8 @@ mkchroot() { # mkchroot DIR — every piece of session wiring present
   printf 'NAME="Rafiq"\nID=rafiq\nID_LIKE=debian\nPRETTY_NAME="Rafiq 0.2 (trixie)"\n' > "$c/etc/os-release"
   echo 'Theme=jarvis' > "$c/etc/plymouth/plymouthd.conf"
   : > "$c/boot/initrd.img-6.12.0-amd64"
-  touch "$c/usr/share/keyrings/jarvis-archive-keyring.gpg" "$c/etc/apt/sources.list.d/jarvis.sources" \
+  printf 'Types: deb\nURIs: https://mmabdelhay.github.io/jarvis-apt\nEnabled: no\n' > "$c/etc/apt/sources.list.d/jarvis.sources"
+  touch "$c/usr/share/keyrings/jarvis-archive-keyring.gpg" \
     "$c/usr/share/jarvis/models/catalog.json" "$c/usr/share/grub/themes/jarvis/theme.txt"
   ln -s /usr/lib/systemd/system/ollama.service "$c/etc/systemd/system/multi-user.target.wants/ollama.service"
   echo 'ConditionKernelCommandLine=!boot=live' > "$c/usr/lib/systemd/system/ollama.service"
@@ -152,6 +153,12 @@ check "first-boot appstream unit not enabled is caught" bash -c "! '$scripts/ver
 mkchroot "$tmp/c"
 sed -i '/Super_L/d' "$tmp/c/etc/xdg/labwc/rc.xml"
 check "missing Super keybind is caught" bash -c "! '$scripts/verify-chroot.sh' '$tmp/c' 2>/dev/null"
+mkchroot "$tmp/c"
+sed -i '/^Enabled:/d' "$tmp/c/etc/apt/sources.list.d/jarvis.sources"
+check "jarvis.sources without an Enabled field is caught" bash -c "! '$scripts/verify-chroot.sh' '$tmp/c' 2>/dev/null"
+mkchroot "$tmp/c"
+sed -i 's/^Enabled: no$/Enabled: yes/' "$tmp/c/etc/apt/sources.list.d/jarvis.sources"
+check "an enabled jarvis.sources verifies" "$scripts/verify-chroot.sh" "$tmp/c"
 
 # --- stub debs ---
 if command -v dpkg-deb >/dev/null; then

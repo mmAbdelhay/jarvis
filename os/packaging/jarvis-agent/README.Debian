@@ -31,6 +31,7 @@ Provider keys
 
 Removing
   Installing jarvis-agent also adds the Jarvis APT repository
-  (/etc/apt/sources.list.d/jarvis.sources) through jarvis-archive-keyring;
+  (/etc/apt/sources.list.d/jarvis.sources, "Enabled: no" until the
+  repository is published) through jarvis-archive-keyring;
   purging that package removes the source and its signing key.
   sudo apt purge jarvis-agent jarvis-cli jarvisd jarvis-pkg jarvis-diag jarvis-helper jarvis-archive-keyring

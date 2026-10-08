@@ -5,6 +5,11 @@ GitHub Pages of the separate repo `mmAbdelhay/jarvis-apt`
 (https://mmabdelhay.github.io/jarvis-apt). Suites: `trixie` (each `os-v*`
 tag) and `trixie-testing` (each push to `master`). Installed systems read it
 through `/etc/apt/sources.list.d/jarvis.sources` from `jarvis-archive-keyring`.
+That source ships `Enabled: no` until the repository is published: the
+`build-distro` job builds the package with `JARVIS_APT_REPO_ENABLED=1` only
+with the committed public key, the `JARVIS_APT_SIGNING_KEY` secret and a
+reachable `dists/trixie/InRelease` (the first `os-v*` release publishes it;
+the following build ships the source enabled).
 
 ## One-time key setup (owner only, on your own machine)
 
@@ -37,7 +42,8 @@ files in a PR; CI's keyring package now carries the real key.
 ## What CI does without the secrets
 
 - No `JARVIS_APT_SIGNING_KEY` or no `JARVIS_APT_DEPLOY_KEY`: the `repo` job
-  prints a warning and stops. Nothing is published.
+  prints a warning and stops. Nothing is published, and `jarvis.sources`
+  ships `Enabled: no` (apt, the ISO build and `updates.list` use Debian only).
 - No committed public key: `jarvis-archive-keyring` is built from a throwaway
   key generated in the run (`test-key.sh`, uid "NOT FOR RELEASE"), so tests
   still verify signatures end to end. An `os-v*` tag build fails instead.

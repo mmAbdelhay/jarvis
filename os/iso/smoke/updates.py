@@ -17,7 +17,9 @@ SOURCES = "/etc/apt/sources.list.d/jarvis.sources"
 
 
 def point_at_good() -> str:
-    return f"sed -i 's#^URIs: .*#URIs: http://10.0.2.2:{PORT}/good#' {SOURCES}"
+    # The package ships the source "Enabled: no" until the public repo exists.
+    return (f"sed -i -e 's#^URIs: .*#URIs: http://10.0.2.2:{PORT}/good#' "
+            f"-e 's/^Enabled: .*/Enabled: yes/' {SOURCES}")
 
 
 def rogue_source() -> str:

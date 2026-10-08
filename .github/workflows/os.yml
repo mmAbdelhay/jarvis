@@ -257,6 +257,21 @@ jobs:
             echo "keyring=throwaway" >> "$GITHUB_OUTPUT"
             echo "Archive keyring: throwaway CI key $fpr (NOT FOR RELEASE)" >> "$GITHUB_STEP_SUMMARY"
           fi
+      # jarvis.sources ships "Enabled: no" until the repo is published: only with
+      # the real key, the signing secret and a live trixie suite (else the ISO's
+      # chroot apt-get update fails on the missing Release file).
+      - id: aptrepo
+        env:
+          SIGN: ${{ secrets.JARVIS_APT_SIGNING_KEY }}
+        run: |
+          if [ "${{ steps.key.outputs.keyring }}" = real ] && [ -n "$SIGN" ] &&
+             curl -fsI https://mmabdelhay.github.io/jarvis-apt/dists/trixie/InRelease >/dev/null; then
+            echo "JARVIS_APT_REPO_ENABLED=1" >> "$GITHUB_ENV"
+            echo "APT source jarvis.sources: enabled" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "JARVIS_APT_REPO_ENABLED=0" >> "$GITHUB_ENV"
+            echo "APT source jarvis.sources: shipped disabled (repo not published yet, os/repo/README.md)" >> "$GITHUB_STEP_SUMMARY"
+          fi
       - run: os/packaging/build.sh --out out/debs jarvis-branding jarvis-models-catalog jarvis-archive-keyring jarvis-ollama jarvis-agent jarvis-session jarvis-fonts jarvis-recipes
       - uses: actions/upload-artifact@v4
         with:

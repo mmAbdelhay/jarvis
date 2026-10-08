@@ -145,7 +145,8 @@ four scenarios, KVM required), `repo` (publishes the APT repository) and `releas
 on `os-v*` tags (draft release; the tag `X.Y` must equal `DISTRO_VERSION`).
 
 Without the secrets `JARVIS_APT_SIGNING_KEY` / `JARVIS_APT_DEPLOY_KEY` the
-`repo` job is skipped with a `::warning::`, tests use a throwaway key
+`repo` job is skipped with a `::warning::`, `jarvis.sources` ships
+`Enabled: no` (`JARVIS_APT_REPO_ENABLED`, `os/repo/README.md`), tests use a throwaway key
 generated in CI (uid contains `NOT FOR RELEASE`), and `os-v*` release builds
 refuse a throwaway keyring. Key setup and rotation: `os/repo/README.md`. The
 model catalog has its own workflow, `os-models.yml` (`os/models/README.md`).

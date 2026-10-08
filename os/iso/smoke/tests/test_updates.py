@@ -23,6 +23,8 @@ class UpdatesTest(unittest.TestCase):
         self.assertIn("Signed-By: /usr/share/keyrings/jarvis-archive-keyring.gpg", updates.rogue_source())
         self.assertIn("http://10.0.2.2:8098/rogue", updates.rogue_source())
         self.assertIn("s#^URIs: .*#URIs: http://10.0.2.2:8098/good#", updates.point_at_good())
+        # The shipped source is "Enabled: no" until the repo is published.
+        self.assertIn("s/^Enabled: .*/Enabled: yes/", updates.point_at_good())
 
     def test_one_card_with_the_update(self):
         lines = [

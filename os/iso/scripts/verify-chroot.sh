@@ -66,7 +66,12 @@ fi
 grep -q 'usr/share/plymouth/themes/jarvis/jarvis.script' <<<"$listing" || problems+=("initramfs lacks the jarvis Plymouth theme")
 grep -q 'cryptsetup' <<<"$listing" || problems+=("initramfs lacks cryptsetup")
 [ -f "$c/usr/share/keyrings/jarvis-archive-keyring.gpg" ] || problems+=("archive keyring missing")
-[ -f "$c/etc/apt/sources.list.d/jarvis.sources" ] || problems+=("APT source jarvis.sources missing")
+if [ ! -f "$c/etc/apt/sources.list.d/jarvis.sources" ]; then
+  problems+=("APT source jarvis.sources missing")
+elif ! grep -qxE 'Enabled: (yes|no)' "$c/etc/apt/sources.list.d/jarvis.sources"; then
+  # "Enabled: no" until the repo is published (jarvis-archive-keyring, JARVIS_APT_REPO_ENABLED).
+  problems+=("APT source jarvis.sources does not say Enabled: yes or no")
+fi
 [ -f "$c/usr/share/jarvis/models/catalog.json" ] || problems+=("model catalog missing")
 [ -L "$c/etc/systemd/system/multi-user.target.wants/ollama.service" ] || problems+=("ollama.service not enabled")
 grep -qx 'ConditionKernelCommandLine=!boot=live' "$c/usr/lib/systemd/system/ollama.service" 2>/dev/null ||
