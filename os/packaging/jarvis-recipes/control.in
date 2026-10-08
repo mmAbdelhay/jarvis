@@ -1,0 +1,11 @@
+Package: jarvis-recipes
+Version: @VERSION@
+Architecture: all
+Maintainer: Muhammad AbdElHay <mmAbdelhay@users.noreply.github.com>
+Installed-Size: @INSTALLED_SIZE@
+Section: misc
+Priority: optional
+Homepage: @HOME_URL@
+Description: Reviewed setup recipes for the Jarvis assistant on @DISTRO_NAME@
+ Multi-step setups (Python, Node.js, Docker, Go, media, office, Jarvis
+ Workspace) that Jarvis shows as one card listing every step.
