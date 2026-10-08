@@ -7,7 +7,8 @@ check "the repository is clean" python3 "$lint" --root "$REPO_ROOT"
 check "a hard-coded name is caught" bash -c "! python3 '$lint' --root '$fx/bad' >/dev/null"
 out=$(python3 "$lint" --root "$fx/bad" || true)
 check "report names file and line" grep -q '^os/iso/x.sh:3: ' <<<"$out"
-check "legacy variants and the current name caught" test "$(wc -l <<<"$out")" -eq 4
+check "legacy variants and the current name caught" test "$(wc -l <<<"$out")" -eq 5
 check "current name caught" grep -q '^os/iso/x.sh:6: ' <<<"$out"
+check "Arabic name caught" grep -q '^os/iso/x.sh:7: ' <<<"$out"
 check "comments, Markdown, tests and spec paths allowed" python3 "$lint" --root "$fx/good"
 finish
