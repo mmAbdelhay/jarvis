@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Helper
+Exec=helper
+NoDisplay=true
+OnlyShowIn=GNOME;KDE;

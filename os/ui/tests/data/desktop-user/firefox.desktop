@@ -1,0 +1,4 @@
+[Desktop Entry]
+Type=Application
+Name=My Firefox
+Exec=firefox-esr --private-window %u

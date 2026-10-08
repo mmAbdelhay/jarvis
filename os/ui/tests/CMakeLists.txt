@@ -68,3 +68,9 @@ find_package(Python3 3.9 REQUIRED COMPONENTS Interpreter)
 add_test(NAME i18n_tools
   COMMAND ${Python3_EXECUTABLE} -m unittest discover -s ${CMAKE_CURRENT_SOURCE_DIR}/../i18n/tests -v)
 set_tests_properties(i18n_tools PROPERTIES LABELS "unit;i18n" TIMEOUT 60)
+
+qt_add_executable(tst_desktopentry unit/tst_desktopentry.cpp)
+target_link_libraries(tst_desktopentry PRIVATE jarvis_ui_native Qt6::Test)
+target_compile_definitions(tst_desktopentry PRIVATE JARVIS_TEST_DESKTOP_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
+add_test(NAME tst_desktopentry COMMAND tst_desktopentry)
+set_tests_properties(tst_desktopentry PROPERTIES LABELS unit)
