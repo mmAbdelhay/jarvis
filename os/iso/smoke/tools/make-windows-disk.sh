@@ -21,6 +21,8 @@ mkntfs -Q -L Windows "${loop}p3" >/dev/null
 mount "${loop}p1" "$mnt"
 mkdir -p "$mnt/EFI/Microsoft/Boot"
 printf 'MZ stand-in for the Windows Boot Manager\n' > "$mnt/EFI/Microsoft/Boot/bootmgfw.efi"
+# os-prober lists "Windows Boot Manager" only when the BCD store sits next to it.
+printf 'regf stand-in for the boot configuration data\n' > "$mnt/EFI/Microsoft/Boot/BCD"
 umount "$mnt"
 ntfs-3g "${loop}p3" "$mnt"
 mkdir -p "$mnt/Windows/System32" "$mnt/Users/Test"

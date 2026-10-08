@@ -277,7 +277,7 @@ def scenario_erase(args, run: Run, work: Path, out: Path, ovmf: firmware.Ovmf) -
             return
         for name, command in target_checks(b):
             run.check(name, lambda c=command: run.sh(c, 200))
-        run.check("GRUB menu hidden with no other OS (design §7)", lambda: run.sh("! grep -q 'set timeout=3' /boot/grub/grub.cfg"))
+        run.check("GRUB menu hidden with no other OS (design §7)", lambda: run.sh("! grep -qx 'set timeout=3' /boot/grub/grub.cfg"))
         kb = keyboard_checks(ERASE_KEYBOARD)
         for name, command in kb[:2]:
             run.check(name, lambda c=command: run.sh(c, 120))
