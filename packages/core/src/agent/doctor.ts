@@ -123,7 +123,12 @@ export interface NetworkDoctor {
   cancel(): void;
 }
 
-type StepResult = { status: "ok" | "fixed" | "problem" | "skipped"; detail: string };
+type StepResult = {
+  status: "ok" | "fixed" | "problem" | "skipped";
+  detail: string;
+  /** English detail of a fix, for the model-facing note. */
+  en?: string;
+};
 type FixOutcome = "fixed" | "declined" | "failed" | "unavailable" | "skipped";
 
 function idleState(text: DoctorText): DoctorState {
@@ -221,10 +226,10 @@ export function createNetworkDoctor(deps: DoctorDeps): NetworkDoctor {
     return ran.some((result) => result.outcome?.ok === true) ? "fixed" : "failed";
   }
 
-  function settle(outcome: FixOutcome, fixedDetail: string): StepResult {
+  function settle(outcome: FixOutcome, fixedDetail: (m: DoctorText) => string): StepResult {
     switch (outcome) {
       case "fixed":
-        return { status: "fixed", detail: fixedDetail };
+        return { status: "fixed", detail: fixedDetail(msg), en: fixedDetail(DOCTOR_TEXT.en) };
       case "declined":
         return { status: "problem", detail: msg.declined };
       case "failed":
@@ -252,7 +257,7 @@ export function createNetworkDoctor(deps: DoctorDeps): NetworkDoctor {
       };
     }
     if (skipped.has(id)) result = { status: "skipped", detail: msg.skipped };
-    if (result.status === "fixed") fixes.push(`${msg.labels[id]}: ${result.detail}`);
+    if (result.status === "fixed") fixes.push(`${DOCTOR_TEXT.en.labels[id]}: ${result.en ?? result.detail}`);
     setStep(id, result.status, result.detail);
   }
 
@@ -292,7 +297,7 @@ export function createNetworkDoctor(deps: DoctorDeps): NetworkDoctor {
       setStep("radio", "problem", msg.radioOff);
       const outcome = await propose("radio", [{ tool: "net.radio_on", input: {} }]);
       await refresh();
-      return settle(outcome, msg.radioFixed);
+      return settle(outcome, (m) => m.radioFixed);
     });
 
     await step("nm", async () => {
@@ -302,7 +307,7 @@ export function createNetworkDoctor(deps: DoctorDeps): NetworkDoctor {
         { tool: "svc.restart", input: { unit: "NetworkManager" } },
       ]);
       await refresh();
-      return settle(outcome, msg.nmFixed);
+      return settle(outcome, (m) => m.nmFixed);
     });
 
     let visible: WifiNetwork[] | undefined;
@@ -319,7 +324,7 @@ export function createNetworkDoctor(deps: DoctorDeps): NetworkDoctor {
         { tool: "net.connection_up", input: { id: known.ssid } },
       ]);
       await refresh();
-      return settle(outcome, msg.connectionFixed(known.ssid));
+      return settle(outcome, (m) => m.connectionFixed(known.ssid));
     });
 
     await step("wifi", async () => {
@@ -340,7 +345,7 @@ export function createNetworkDoctor(deps: DoctorDeps): NetworkDoctor {
         { maxTicked: 1 },
       );
       await refresh();
-      return settle(outcome, msg.wifiFixed);
+      return settle(outcome, (m) => m.wifiFixed);
     });
 
     await step("dns", async () => {
@@ -353,7 +358,7 @@ export function createNetworkDoctor(deps: DoctorDeps): NetworkDoctor {
         !resolved.ok && resolved.code === "not_found" ? "NetworkManager" : "systemd-resolved";
       const outcome = await propose("dns", [{ tool: "svc.restart", input: { unit } }]);
       await refresh();
-      return settle(outcome, unit === "NetworkManager" ? msg.dnsFixedViaNm : msg.dnsFixed);
+      return settle(outcome, (m) => (unit === "NetworkManager" ? m.dnsFixedViaNm : m.dnsFixed));
     });
 
     await finalStep(net);
@@ -377,7 +382,7 @@ export function createNetworkDoctor(deps: DoctorDeps): NetworkDoctor {
         })
         .finally(() => {
           running = false;
-          deps.onFinished(msg.summary(state.done === "fixed" ? "fixed" : "unfixed", fixes));
+          deps.onFinished(DOCTOR_TEXT.en.summary(state.done === "fixed" ? "fixed" : "unfixed", fixes));
         });
       return snapshot();
     },

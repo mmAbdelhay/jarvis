@@ -78,7 +78,7 @@ const USER_AR: UserText = {
   turnRunning: "هناك طلب قيد التنفيذ بالفعل. أوقفه أولًا.",
   doctorRunning: "مُشخِّص الشبكة يعمل الآن.",
   subscriptionUnavailable:
-    "تسجيل الدخول باشتراك Claude غير متاح في Jarvis OS. استخدم مفتاح API بدلًا من ذلك.",
+    "تسجيل الدخول باشتراك Claude غير متاح في رفيق. استخدم مفتاح API بدلًا من ذلك.",
   memoryOff: "الذاكرة متوقفة",
   updatesUnavailable: "التحقق من التحديثات غير متاح على هذا النظام.",
   updatesCheckFailed: (message) => `تعذّر التحقق من التحديثات: ${message}`,
@@ -448,7 +448,7 @@ const CONTROL_AR: ControlText = {
   voiceUnavailable: "الصوت غير مثبّت على هذا الحاسوب.",
   badAudio:
     "يجب أن يكون التسجيل ملف WAV أحادي القناة بتردد 16 كيلوهرتز ودقة 16 بت، وحجمه 4 ميغابايت على الأكثر.",
-  transcriptionFailed: "لم يتمكن Jarvis من فهم التسجيل.",
+  transcriptionFailed: "لم يتمكن جارفيس من فهم التسجيل.",
   noPairingRequest: "لا يوجد هاتف ينتظر الاقتران.",
   pairingChanged: "هاتف آخر يطلب الاقتران الآن. تحقّق من اسمه مرة أخرى.",
   pairingUnavailable: "فعّل الوصول من الهاتف وعيّن كلمة مرور المالك أولًا.",
