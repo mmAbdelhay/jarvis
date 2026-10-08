@@ -5,7 +5,7 @@ package filestools
 var writeText = struct {
 	MoveTitle, CopyTitle, RenameTitle, MkdirTitle, TrashTitle, RestoreTitle string // base, place
 	TrashDetail, RestoreDetail, UndoTitle, UndoDetail                       string
-	Cannot, BadItems, BadItem, BadJournal, UnknownJournal                   string
+	Cannot, BadTrashList, BadItems, BadItem, BadJournal, UnknownJournal     string
 }{
 	MoveTitle:      "Move %s to %s",
 	CopyTitle:      "Copy %s to %s",
@@ -18,6 +18,7 @@ var writeText = struct {
 	UndoTitle:      "Undo the last file change",
 	UndoDetail:     "%d change(s) are reversed. Files changed since are left as they are.",
 	Cannot:         "This will be refused: %s",
+	BadTrashList:   "query is at most 100 characters and limit is 1 to 100",
 	BadItems:       "items must hold 1 to 200 entries",
 	BadItem:        "every item needs a from path of at most 4096 characters",
 	BadJournal:     "journalId must be the id a file tool returned",

@@ -69,6 +69,12 @@ func TestWriteToolsMatchContract(t *testing.T) {
 	var names []string
 	for _, tool := range WriteTools(WriteDeps{}) {
 		names = append(names, tool.Name)
+		if tool.Name == "files.trash_list" {
+			if tool.Risk != mcp.RiskSafe || tool.Hidden || tool.Batch != "" {
+				t.Errorf("files.trash_list must be a visible safe tool")
+			}
+			continue
+		}
 		if tool.Risk != mcp.RiskConfirm || tool.Describe == nil || len(tool.Secrets) != 0 {
 			t.Errorf("%s must be confirm with a Describe", tool.Name)
 		}
@@ -80,7 +86,7 @@ func TestWriteToolsMatchContract(t *testing.T) {
 			t.Errorf("%s: batch %q hidden %v", tool.Name, tool.Batch, tool.Hidden)
 		}
 	}
-	want := []string{"files.move", "files.copy", "files.rename", "files.mkdir", "files.trash", "files.restore", "files.undo"}
+	want := []string{"files.move", "files.copy", "files.rename", "files.mkdir", "files.trash", "files.restore", "files.trash_list", "files.undo"}
 	if !reflect.DeepEqual(names, want) {
 		t.Fatalf("tools %v", names)
 	}
@@ -157,5 +163,43 @@ func TestDescribeCardLines(t *testing.T) {
 	d := describeW(t, w, "files.move", `{"items":[{"from":"~/Documents/a.txt","to":"/etc/"}]}`)
 	if !strings.Contains(d.Detail, "This will be refused") {
 		t.Fatalf("a refused item says so on the card: %+v", d)
+	}
+}
+
+func TestTrashListFindsRestorableItems(t *testing.T) {
+	w, home := writeDeps(t)
+	write(t, home, ".ssh/id_rsa", []byte("k"))
+	write(t, home, "Documents/server.key", []byte("k"))
+	for _, p := range []string{"~/Documents/a.txt", "~/Desktop/shot.png", "~/.ssh/id_rsa", "~/Documents/server.key"} {
+		if _, err := callW(t, w, "files.trash", `{"items":[{"from":"`+p+`"}]}`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	res, err := callW(t, w, "files.trash_list", `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := res["items"].([]any)
+	if len(items) != 2 {
+		t.Fatalf("private originals must be hidden: %v", items)
+	}
+	first := items[0].(map[string]any)
+	if first["trash"] != "trash:a.txt" && first["trash"] != "trash:shot.png" {
+		t.Fatalf("%v", first)
+	}
+	if first["deletedAt"] != "2026-10-09T10:00:00Z" && first["deletedAt"] != "2026-10-09T09:00:00Z" {
+		t.Logf("deletedAt %v", first["deletedAt"])
+	}
+	res, _ = callW(t, w, "files.trash_list", `{"query":"DOCUMENTS a.txt"}`)
+	got := res["items"].([]any)
+	if len(got) != 1 || got[0].(map[string]any)["originalPath"] != "~/Documents/a.txt" {
+		t.Fatalf("query: %v", got)
+	}
+	res, _ = callW(t, w, "files.trash_list", `{"limit":1}`)
+	if len(res["items"].([]any)) != 1 {
+		t.Fatal("limit")
+	}
+	if _, err := callW(t, w, "files.trash_list", `{"limit":0,"x":1}`); codeOf(err) != mcp.CodeInvalid {
+		t.Fatalf("bad args: %v", err)
 	}
 }
