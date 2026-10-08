@@ -1,0 +1,7 @@
+# jarvis-voice-models (M3 contracts §4). One os/models/voice.json id per line.
+# "<id> ?" is optional: shipped only if the registry lists it as redistributable.
+# Wake-word models are refused here even if listed.
+whisper-base
+whisper-small
+piper-en_US-amy-medium
+piper-ar_JO-kareem-medium ?

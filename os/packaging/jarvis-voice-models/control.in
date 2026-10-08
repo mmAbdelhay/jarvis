@@ -1,0 +1,12 @@
+Package: jarvis-voice-models
+Version: @VERSION@
+Architecture: all
+Maintainer: Muhammad AbdElHay <mmAbdelhay@users.noreply.github.com>
+Installed-Size: @INSTALLED_SIZE@
+Section: sound
+Priority: optional
+Homepage: @HOME_URL@
+Description: Speech models for the Jarvis assistant
+ Whisper speech-recognition models (base and small) and Piper voices, all
+ under redistributable licenses listed in
+ /usr/share/doc/jarvis-voice-models/MODELS. No wake-word model is included.
