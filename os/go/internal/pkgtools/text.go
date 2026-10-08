@@ -39,3 +39,33 @@ var cardText = struct {
 	SecuritySuffix:     ", security",
 	SecurityNote:       " (security update)",
 }
+
+// registryText is every string jarvis-pkg puts on a registry card
+// (Rafiq M2.5 contracts §3). English only; the M4 Arabic pass translates it.
+var registryText = struct {
+	InstallTitle  string // name, version
+	RemoveTitle   string // id
+	RemoveDetail  string // version
+	TierOfficial  string
+	TierReviewed  string
+	TierCommunity string
+	ToolsLine     string // comma-separated tool names
+	NetworkYes    string
+	NetworkNo     string
+	FilesReadOnly string
+	FilesWritable string // comma-separated "~/" paths
+	Separator     string
+}{
+	InstallTitle:  "Add tool server %s %s",
+	RemoveTitle:   "Remove tool server %s",
+	RemoveDetail:  "Version %s and its files are deleted; its tools stop working.",
+	TierOfficial:  "Official: made by the Rafiq project",
+	TierReviewed:  "Reviewed: checked by the Rafiq project",
+	TierCommunity: "Community: not reviewed by the Rafiq project; every action it takes will ask you first",
+	ToolsLine:     "Tools: %s",
+	NetworkYes:    "Can use the internet",
+	NetworkNo:     "No internet access",
+	FilesReadOnly: "Can read your home folder, cannot change it",
+	FilesWritable: "Can read your home folder; can change: %s",
+	Separator:     " · ",
+}

@@ -8,6 +8,7 @@ import (
 	"github.com/mmAbdelhay/jarvis/os/go/internal/execx"
 	"github.com/mmAbdelhay/jarvis/os/go/internal/helperapi"
 	"github.com/mmAbdelhay/jarvis/os/go/internal/mcp"
+	"github.com/mmAbdelhay/jarvis/os/go/internal/registry"
 )
 
 // Deps are jarvis-pkg's side effects, injected.
@@ -20,6 +21,9 @@ type Deps struct {
 	// Updates caches the last updates.list result for the updates.apply
 	// card; Tools creates it when nil.
 	Updates *UpdateCache
+	// Registry installs and removes tool servers from the signed registry
+	// (Rafiq M2.5 contracts §3); nil makes the registry tools fail cleanly.
+	Registry *registry.Store
 }
 
 func (d Deps) now() time.Time {
@@ -37,7 +41,8 @@ func Tools(d Deps) []mcp.Tool {
 		d.Updates = &UpdateCache{}
 	}
 	tools := append(d.readTools(), d.changeTools()...)
-	return append(tools, d.updateTools()...)
+	tools = append(tools, d.updateTools()...)
+	return append(tools, d.registryTools()...)
 }
 
 func (d Deps) readTools() []mcp.Tool {

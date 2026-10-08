@@ -1,6 +1,7 @@
 // Package contract pins both MCP servers' tools/list output to
 // docs/superpowers/specs/2026-10-07-jarvis-os-m1-contracts.md §1 and §6.1
-// and 2026-10-08-jarvis-os-m2-contracts.md §2. If
+// and 2026-10-08-jarvis-os-m2-contracts.md §2 and
+// 2026-10-09-rafiq-m2.5-contracts.md §3. If
 // a tool, risk, secret, batch or input property changes, this test fails until the
 // contract file is changed first (the contract says: change it there first).
 package contract
@@ -34,6 +35,10 @@ var pkgContract = map[string]want{
 	"pkg.remove":         {"confirm", nil, []string{"items"}, []string{"items"}},
 	"updates.list":       {"safe", nil, nil, nil},
 	"updates.apply":      {"confirm", nil, []string{"items"}, []string{"items"}},
+	// Rafiq M2.5 contracts §3.
+	"registry.search":  {"safe", nil, []string{"query"}, []string{"query"}},
+	"registry.install": {"confirm", nil, []string{"id", "version"}, []string{"id", "version"}},
+	"registry.remove":  {"confirm", nil, []string{"id"}, []string{"id"}},
 }
 
 // batchTools declare _meta.jarvis.batch (contracts §6.1); no other tool may.
