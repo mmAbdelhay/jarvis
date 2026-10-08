@@ -1,0 +1,14 @@
+Package: jarvis-session
+Version: @VERSION@
+Architecture: all
+Maintainer: Muhammad AbdElHay <mmAbdelhay@users.noreply.github.com>
+Installed-Size: @INSTALLED_SIZE@
+Depends: labwc
+Section: x11
+Priority: optional
+Homepage: @HOME_URL@
+Description: @DISTRO_NAME@ and classic Wayland sessions with automatic fallback
+ Login-screen entries for the full @DISTRO_NAME@ session and the classic
+ desktop. In the full session, when the Jarvis shell fails three times
+ within a minute, the session switches to the
+ classic desktop on its own.

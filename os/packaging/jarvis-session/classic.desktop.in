@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=@DISTRO_NAME@ (classic)
+Name[ar]=@DISTRO_NAME_AR@ (الوضع الكلاسيكي)
+Comment=A simple desktop with a taskbar; Jarvis stays one click away
+Comment[ar]=سطح مكتب بسيط بشريط مهام، ويبقى جارفيس على بُعد نقرة واحدة
+Exec=/usr/libexec/jarvis/jarvis-session classic
+TryExec=/usr/bin/labwc
+DesktopNames=labwc;wlroots
