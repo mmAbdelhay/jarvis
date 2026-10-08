@@ -1,4 +1,5 @@
-// Package admintools implements the users and disks tools of Rafiq M3
+// Package admintools implements the users and disks tools (plus the safe
+// users.list and disks.list, contracts §5.3) of Rafiq M3
 // contracts §1, served by jarvis-settings: users.add, users.remove and
 // disks.format_removable (risk password, through jarvis-helper's admin
 // methods) and disks.mount / disks.unmount (confirm, through udisks2).
@@ -9,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"regexp"
 	"strings"
 	"time"
@@ -23,6 +25,7 @@ import (
 type Deps struct {
 	Run    execx.Runner
 	Helper helperapi.Admin
+	FS     fs.FS // root of the file system, for etc/passwd (users.list)
 }
 
 // Undo is the undo object (contracts §1).
@@ -33,7 +36,7 @@ type Undo struct {
 
 // Tools returns the users and disks tools.
 func Tools(d Deps) []mcp.Tool {
-	return []mcp.Tool{
+	return append(listTools(d), []mcp.Tool{
 		{
 			Name:        "users.add",
 			Description: "Create a standard user account (lowercase login name, optional full name). Needs an administrator password and a password for the new account, both entered by the user on the card, never by you.",
@@ -64,7 +67,7 @@ func Tools(d Deps) []mcp.Tool {
 			InputSchema: deviceSchema,
 			Risk:        mcp.RiskConfirm, Call: d.unmount, Describe: d.describeUnmount,
 		},
-	}
+	}...)
 }
 
 const deviceSchema = `{"type":"object","properties":{"device":{"type":"string","minLength":8,"maxLength":20}},"required":["device"],"additionalProperties":false}`

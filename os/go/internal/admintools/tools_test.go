@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/mmAbdelhay/jarvis/os/go/internal/execx"
 	"github.com/mmAbdelhay/jarvis/os/go/internal/helperapi"
@@ -64,7 +65,7 @@ func TestToolsMatchContract(t *testing.T) {
 			t.Errorf("%s: secrets %v, want %v", tool.Name, tool.Secrets, wantSecrets)
 		}
 	}
-	want := map[string]mcp.Risk{"users.add": mcp.RiskPassword, "users.remove": mcp.RiskPassword, "disks.format_removable": mcp.RiskPassword, "disks.mount": mcp.RiskConfirm, "disks.unmount": mcp.RiskConfirm}
+	want := map[string]mcp.Risk{"users.list": mcp.RiskSafe, "disks.list": mcp.RiskSafe, "users.add": mcp.RiskPassword, "users.remove": mcp.RiskPassword, "disks.format_removable": mcp.RiskPassword, "disks.mount": mcp.RiskConfirm, "disks.unmount": mcp.RiskConfirm}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("tools %v", got)
 	}
@@ -172,5 +173,41 @@ func TestPasswordsNeverLeakIntoErrorsOrCards(t *testing.T) {
 	}
 	if strings.Join(h.Called(), "") != "" {
 		t.Fatal("invalid input reached the helper")
+	}
+}
+
+func TestUsersListHumansOnly(t *testing.T) {
+	d := Deps{FS: fstest.MapFS{"etc/passwd": {Data: []byte("root:x:0:0:root:/root:/bin/bash\nlina:x:1000:1000:Lina Ali,,,:/home/lina:/bin/bash\nnobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin\nsvc:x:999:999::/var/lib/svc:/usr/sbin/nologin\nbob:x:1001:1001::/home/bob:/bin/bash\n")}}}
+	v, err := call(t, d, "users.list", `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal(v["users"])
+	if string(b) != `[{"fullName":"","username":"bob"},{"fullName":"Lina Ali","username":"lina"}]` {
+		t.Fatalf("users %s", b)
+	}
+	if _, err := call(t, Deps{}, "users.list", `{}`); codeOf(err) != mcp.CodeFailed {
+		t.Fatalf("no FS: %v", err)
+	}
+	if _, err := call(t, d, "users.list", `{"x":1}`); codeOf(err) != mcp.CodeInvalid {
+		t.Fatalf("extra arg: %v", err)
+	}
+}
+
+func TestDisksListRemovableOnly(t *testing.T) {
+	lsblk := `{"blockdevices":[
+	 {"path":"/dev/sda","type":"disk","size":500107862016,"model":"Internal SSD","tran":"sata","rm":false,"hotplug":false,"children":[{"path":"/dev/sda1","type":"part","size":1,"fstype":"ext4","mountpoint":"/"}]},
+	 {"path":"/dev/sdb","type":"disk","size":32017047552,"model":"SanDisk Ultra  ","tran":"usb","rm":"1","hotplug":true,"children":[
+	   {"path":"/dev/sdb1","type":"part","size":32000000000,"label":"PHOTOS","fstype":"exfat","mountpoint":"/media/lina/PHOTOS"}]},
+	 {"path":"/dev/loop0","type":"loop","size":5,"rm":false,"hotplug":false}]}`
+	run := (&execx.Fake{}).On(execx.OK(lsblk), "lsblk", "--json", "--bytes", "--paths", "--output", "PATH,TYPE,SIZE,MODEL,LABEL,FSTYPE,MOUNTPOINT,TRAN,RM,HOTPLUG")
+	v, err := call(t, Deps{Run: run}, "disks.list", `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal(v["disks"])
+	want := `[{"device":"/dev/sdb","name":"SanDisk Ultra","partitions":[{"device":"/dev/sdb1","fs":"exfat","label":"PHOTOS","mountpoint":"/media/lina/PHOTOS","sizeBytes":32000000000}],"sizeBytes":32017047552}]`
+	if string(b) != want {
+		t.Fatalf("disks %s", b)
 	}
 }

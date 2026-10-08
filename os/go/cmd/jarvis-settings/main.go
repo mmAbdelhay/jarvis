@@ -81,7 +81,7 @@ func main() {
 		}
 		return
 	}
-	admin := admintools.Deps{Run: d.Sys.Run, Helper: helperclient.New()}
+	admin := admintools.Deps{Run: d.Sys.Run, Helper: helperclient.New(), FS: os.DirFS("/")}
 	tools := append(settingstools.Tools(d), admintools.Tools(admin)...)
 	srv := &mcp.Server{Name: "jarvis-settings", Version: version, Tools: tools, Redact: redact.String}
 	if err := srv.Serve(ctx, os.Stdin, os.Stdout); err != nil {
