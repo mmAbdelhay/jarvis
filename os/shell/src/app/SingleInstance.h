@@ -12,6 +12,7 @@ public:
     explicit SingleInstance(QString name, QObject* parent = nullptr);
 
     // $XDG_RUNTIME_DIR/jarvis-shell.sock, else <tmp>/jarvis-shell-<uid>.sock.
+    static QString nameFor(const QString& base);
     static QString defaultName();
 
     // True when a running shell accepted the message.

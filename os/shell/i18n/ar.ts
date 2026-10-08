@@ -1396,4 +1396,11 @@
             <translation>توقف مسجّل الميكروفون دون التقاط أي صوت.</translation>
         </message>
     </context>
+<context>
+    <name>SettingsWindow</name>
+    <message>
+        <source>Jarvis Settings</source>
+        <translation>إعدادات جارفيس</translation>
+    </message>
+</context>
 </TS>

@@ -109,15 +109,8 @@ Rectangle {
                     audit: root.shell.audit
                     onBackRequested: root.shell.showView("chat")
                 }
-                SettingsView {
+                SettingsPage {
                     shell: root.shell
-                    provider: root.shell.provider
-                    providers: root.shell.providers
-                    memory: root.shell.memory
-                    registry: root.shell.registry
-                    voice: root.shell.voice
-                    phone: root.shell.phone
-                    doctorAvailable: root.shell.system.known && !root.shell.system.online
                     onDoctorRequested: root.shell.openDoctor()
                 }
             }

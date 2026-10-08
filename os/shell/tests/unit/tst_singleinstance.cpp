@@ -9,6 +9,17 @@ using namespace Qt::StringLiterals;
 class TestSingleInstance : public QObject {
     Q_OBJECT
 private slots:
+    void namesShareTheRuntimeDir()
+    {
+        const auto previousRuntime = qgetenv("XDG_RUNTIME_DIR");
+        qputenv("XDG_RUNTIME_DIR", "/run/user/1000");
+        QCOMPARE(SingleInstance::nameFor(u"jarvis-shell-settings"_s), u"/run/user/1000/jarvis-shell-settings.sock"_s);
+        QCOMPARE(SingleInstance::defaultName(), u"/run/user/1000/jarvis-shell.sock"_s);
+        if (previousRuntime.isNull())
+            qunsetenv("XDG_RUNTIME_DIR");
+        else
+            qputenv("XDG_RUNTIME_DIR", previousRuntime);
+    }
     void forwardFailsWithoutARunningShell()
     {
         QTemporaryDir dir(u"/tmp/jsh-si-XXXXXX"_s);

@@ -10,6 +10,7 @@
 #include "app/ShellController.h"
 #include "app/ShellSurface.h"
 #include "app/SingleInstance.h"
+#include "app/SettingsMode.h"
 #include "control/ControlClient.h"
 #include "protocol/BuildId.h"
 #include "protocol/ControlPaths.h"
@@ -34,7 +35,13 @@ int main(int argc, char* argv[])
     const QCommandLineOption pttOption(QStringList{u"voice"_s, u"ptt"_s},
                                        u"Push-to-talk: start, or send, a voice message (Super+Space)."_s);
     parser.addOptions({focusOption, windowedOption, pttOption});
+    const QCommandLineOption settingsOption(u"settings"_s, u"Open Settings in its own window (classic mode)."_s);
+    const QCommandLineOption quitAfterOption(u"quit-after"_s, u"With --settings: quit after <ms> (smoke tests)."_s, u"ms"_s);
+    parser.addOptions({settingsOption, quitAfterOption});
     parser.process(app);
+
+    if (parser.isSet(settingsOption))
+        return runSettingsWindow(app, parser.isSet(quitAfterOption) ? parser.value(quitAfterOption).toInt() : -1);
 
     // A shell is already running (Super keybind, or a second launch): hand over and exit.
     SingleInstance instance(SingleInstance::defaultName());

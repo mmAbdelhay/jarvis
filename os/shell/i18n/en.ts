@@ -1384,4 +1384,11 @@
             <translation>The microphone recorder stopped without any audio.</translation>
         </message>
     </context>
+<context>
+    <name>SettingsWindow</name>
+    <message>
+        <source>Jarvis Settings</source>
+        <translation>Jarvis Settings</translation>
+    </message>
+</context>
 </TS>

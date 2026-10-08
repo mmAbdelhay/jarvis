@@ -26,16 +26,21 @@ SingleInstance::SingleInstance(QString name, QObject* parent)
     });
 }
 
-QString SingleInstance::defaultName()
+QString SingleInstance::nameFor(const QString& base)
 {
     const QString runtime = qEnvironmentVariable("XDG_RUNTIME_DIR");
     if (!runtime.isEmpty())
-        return runtime + u"/jarvis-shell.sock"_s;
+        return runtime + u'/' + base + u".sock"_s;
 #ifdef Q_OS_UNIX
-    return QDir::tempPath() + u"/jarvis-shell-%1.sock"_s.arg(::getuid());
+    return QDir::tempPath() + u'/' + base + u"-%1.sock"_s.arg(::getuid());
 #else
-    return QDir::tempPath() + u"/jarvis-shell.sock"_s;
+    return QDir::tempPath() + u'/' + base + u".sock"_s;
 #endif
+}
+
+QString SingleInstance::defaultName()
+{
+    return nameFor(u"jarvis-shell"_s);
 }
 
 bool SingleInstance::forward(const QByteArray& message, int timeoutMs)

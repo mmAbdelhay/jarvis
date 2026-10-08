@@ -66,3 +66,11 @@ endif()
 add_test(NAME cli_has_voice_option COMMAND jarvis-shell --help)
 set_tests_properties(cli_has_voice_option PROPERTIES
   ENVIRONMENT "QT_QPA_PLATFORM=offscreen" LABELS unit PASS_REGULAR_EXPRESSION "--voice")
+
+# `jarvis-shell --settings` starts with no jarvisd, shows the window and quits.
+add_test(NAME settings_window_smoke
+  COMMAND $<TARGET_FILE:jarvis-shell> --settings --quit-after 1500)
+set_tests_properties(settings_window_smoke PROPERTIES LABELS smoke TIMEOUT 30
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QML_IMPORT_PATH=${QT_QML_OUTPUT_DIRECTORY};XDG_RUNTIME_DIR=${CMAKE_CURRENT_BINARY_DIR}/settings-smoke;JARVIS_I18N_DIR=${JARVIS_I18N_BUILD_DIR}"
+  FAIL_REGULAR_EXPRESSION "is not installed|is not a type|ReferenceError|TypeError|Cannot assign")
+file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/settings-smoke)
