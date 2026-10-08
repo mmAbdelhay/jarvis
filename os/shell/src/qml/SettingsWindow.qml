@@ -17,6 +17,14 @@ Window {
     color: Theme.bg
     visible: false
 
+    Connections {
+        target: window.shell
+        function onConnectionChanged() {
+            if (window.shell.connection === "open")
+                window.shell.showView("settings")
+        }
+    }
+
     Rectangle {
         objectName: "settingsRoot"
         anchors.fill: parent

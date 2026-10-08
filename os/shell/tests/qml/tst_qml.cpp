@@ -39,6 +39,12 @@ public slots:
         shell->setLanguageApplier([language](const QString& code) { return language->setLanguage(code); }, language->language());
         engine->rootContext()->setContextProperty(QStringLiteral("testLanguage"), language);
         engine->rootContext()->setContextProperty(QStringLiteral("testShell"), shell);
+        // Separate controller for Settings connection lifecycle tests, so the
+        // other views retain their never-connected controller.
+        auto* settingsClient = new ControlClient(options, engine);
+        auto* settingsShell = new ShellController(settingsClient, engine);
+        engine->rootContext()->setContextProperty(QStringLiteral("testSettingsClient"), settingsClient);
+        engine->rootContext()->setContextProperty(QStringLiteral("testSettingsShell"), settingsShell);
     }
 };
 
