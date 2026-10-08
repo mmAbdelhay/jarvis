@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/mmAbdelhay/jarvis/os/go/internal/helperapi"
+	"github.com/mmAbdelhay/jarvis/os/go/internal/i18n"
 	"github.com/mmAbdelhay/jarvis/os/go/internal/mcp"
 	"github.com/mmAbdelhay/jarvis/os/go/internal/parse"
 	"github.com/mmAbdelhay/jarvis/os/go/internal/validate"
@@ -262,13 +263,14 @@ func (d Deps) describeUpdates(ctx context.Context, raw json.RawMessage) (mcp.Des
 	if err != nil {
 		return mcp.Description{}, err
 	}
+	l := i18n.FromContext(ctx)
 	var titles, lines []string
 	for _, it := range items {
 		u, ok := d.Updates.get(it)
 		if !ok {
 			u = d.lookupUpdate(ctx, it)
 		}
-		title, line := updateText(u)
+		title, line := updateText(l, u)
 		titles = append(titles, title)
 		lines = append(lines, line)
 	}
@@ -278,7 +280,7 @@ func (d Deps) describeUpdates(ctx context.Context, raw json.RawMessage) (mcp.Des
 		for i, it := range items {
 			ids[i] = it.ID
 		}
-		title = fmt.Sprintf(cardText.UpgradeMany, len(items), strings.Join(ids, ", "))
+		title = i18n.Sprintf(l, cardText.Get(l).UpgradeMany, len(items), strings.Join(ids, ", "))
 	}
 	return mcp.Description{Title: title, Detail: strings.Join(lines, "\n"), Source: sourceOf(items[0])}, nil
 }
@@ -304,18 +306,16 @@ func (d Deps) lookupUpdate(ctx context.Context, it pkgRef) UpdateItem {
 }
 
 // updateText is the card title and detail line for one update.
-func updateText(u UpdateItem) (title, line string) {
-	src := cardText.SourceDebian
-	if u.Source == "flatpak" {
-		src = cardText.SourceFlathub
-	}
+func updateText(l i18n.Lang, u UpdateItem) (title, line string) {
+	t := cardText.Get(l)
+	src := sourceName(t, u.Source)
 	where, note := src, ""
 	if u.Security {
-		where, note = src+cardText.SecuritySuffix, cardText.SecurityNote
+		where, note = src+t.SecuritySuffix, t.SecurityNote
 	}
 	if u.From != "" && u.To != "" && u.From != u.To {
-		return fmt.Sprintf(cardText.UpgradeOne, u.ID, u.From, u.To, where),
-			fmt.Sprintf(cardText.UpgradeLine, u.ID, u.From, u.To, src, note)
+		return i18n.Sprintf(l, t.UpgradeOne, u.ID, u.From, u.To, where),
+			i18n.Sprintf(l, t.UpgradeLine, u.ID, u.From, u.To, src, note)
 	}
-	return fmt.Sprintf(cardText.UpgradeUnknown, u.ID, where), fmt.Sprintf(cardText.UpgradeLineUnknown, u.ID, src, note)
+	return i18n.Sprintf(l, t.UpgradeUnknown, u.ID, where), i18n.Sprintf(l, t.UpgradeLineUnknown, u.ID, src, note)
 }

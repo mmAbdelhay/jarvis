@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"sort"
 	"strings"
 	"unicode/utf8"
 
+	"github.com/mmAbdelhay/jarvis/os/go/internal/i18n"
 	"github.com/mmAbdelhay/jarvis/os/go/internal/mcp"
 	"github.com/mmAbdelhay/jarvis/os/go/internal/registry"
 )
@@ -264,14 +264,14 @@ func (d Deps) registryList(ctx context.Context, raw json.RawMessage) (any, error
 	return map[string]any{"installed": installed, "available": available}, nil
 }
 
-func tierSentence(t registry.Tier) string {
-	switch t {
+func tierSentence(t registryCard, tier registry.Tier) string {
+	switch tier {
 	case registry.TierOfficial:
-		return registryText.TierOfficial
+		return t.TierOfficial
 	case registry.TierReviewed:
-		return registryText.TierReviewed
+		return t.TierReviewed
 	default:
-		return registryText.TierCommunity
+		return t.TierCommunity
 	}
 }
 
@@ -289,29 +289,31 @@ func (d Deps) describeRegistryInstall(ctx context.Context, raw json.RawMessage) 
 	if !ok {
 		return mcp.Description{}, mcp.Errorf(mcp.CodeNotFound, "%s %s is not in the tool registry", in.ID, in.Version)
 	}
+	l := i18n.FromContext(ctx)
+	t := registryText.Get(l)
 	var tools []string
-	for _, t := range e.Tools {
-		tools = append(tools, t.Name)
+	for _, tl := range e.Tools {
+		tools = append(tools, tl.Name)
 	}
-	parts := []string{tierSentence(e.Tier), fmt.Sprintf(registryText.ToolsLine, strings.Join(tools, ", "))}
+	parts := []string{tierSentence(t, e.Tier), i18n.Sprintf(l, t.ToolsLine, strings.Join(tools, ", "))}
 	if e.Permissions.Network {
-		parts = append(parts, registryText.NetworkYes)
+		parts = append(parts, t.NetworkYes)
 	} else {
-		parts = append(parts, registryText.NetworkNo)
+		parts = append(parts, t.NetworkNo)
 	}
 	if len(e.Permissions.Paths) == 0 {
-		parts = append(parts, registryText.FilesReadOnly)
+		parts = append(parts, t.FilesReadOnly)
 	} else {
-		parts = append(parts, fmt.Sprintf(registryText.FilesWritable, strings.Join(e.Permissions.Paths, ", ")))
+		parts = append(parts, i18n.Sprintf(l, t.FilesWritable, strings.Join(e.Permissions.Paths, ", ")))
 	}
 	return mcp.Description{
-		Title:  fmt.Sprintf(registryText.InstallTitle, e.Name, e.Version),
-		Detail: strings.Join(parts, registryText.Separator),
+		Title:  i18n.Sprintf(l, t.InstallTitle, e.Name, e.Version),
+		Detail: strings.Join(parts, t.Separator),
 		Source: mcp.SourceNetwork,
 	}, nil
 }
 
-func (d Deps) describeRegistryRemove(_ context.Context, raw json.RawMessage) (mcp.Description, error) {
+func (d Deps) describeRegistryRemove(ctx context.Context, raw json.RawMessage) (mcp.Description, error) {
 	in, err := decodeRef(raw, false)
 	if err != nil {
 		return mcp.Description{}, err
@@ -324,9 +326,11 @@ func (d Deps) describeRegistryRemove(_ context.Context, raw json.RawMessage) (mc
 	if err != nil {
 		return mcp.Description{}, registryError(err)
 	}
+	l := i18n.FromContext(ctx)
+	t := registryText.Get(l)
 	return mcp.Description{
-		Title:  fmt.Sprintf(registryText.RemoveTitle, reg.ID),
-		Detail: fmt.Sprintf(registryText.RemoveDetail, reg.Version),
+		Title:  i18n.Sprintf(l, t.RemoveTitle, reg.ID),
+		Detail: i18n.Sprintf(l, t.RemoveDetail, reg.Version),
 		Source: mcp.SourceSystem,
 	}, nil
 }

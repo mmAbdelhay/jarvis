@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/mmAbdelhay/jarvis/os/go/internal/helperapi"
+	"github.com/mmAbdelhay/jarvis/os/go/internal/i18n"
 	"github.com/mmAbdelhay/jarvis/os/go/internal/mcp"
 	"github.com/mmAbdelhay/jarvis/os/go/internal/parse"
 )
@@ -183,16 +184,19 @@ func (d Deps) installedVersion(ctx context.Context, it pkgRef) string {
 	return fi.Version
 }
 
-// describe builds the card text. It only reads (apt-cache, dpkg-query,
-// flatpak remote-info): jarvis.describe must have no side effects.
+// describe builds the card text in the language jarvis.describe asked
+// for. It only reads (apt-cache, dpkg-query, flatpak remote-info):
+// jarvis.describe must have no side effects.
 func (d Deps) describe(ctx context.Context, raw json.RawMessage, install bool) (mcp.Description, error) {
 	items, err := decodeItems(raw)
 	if err != nil {
 		return mcp.Description{}, err
 	}
-	one, many := cardText.RemoveOne, cardText.RemoveMany
+	l := i18n.FromContext(ctx)
+	t := cardText.Get(l)
+	one, many := t.RemoveOne, t.RemoveMany
 	if install {
-		one, many = cardText.InstallOne, cardText.InstallMany
+		one, many = t.InstallOne, t.InstallMany
 	}
 	var names, lines []string
 	for _, it := range items {
@@ -202,32 +206,37 @@ func (d Deps) describe(ctx context.Context, raw json.RawMessage, install bool) (
 			name = info.Name
 		}
 		names = append(names, name)
-		lines = append(lines, itemLine(it, info, lerr, install))
+		lines = append(lines, itemLine(l, it, info, lerr, install))
 	}
 	// jarvisd describes one element at a time (contracts §6.1); the
 	// many-item form remains for a client that does not split batches.
-	title := fmt.Sprintf(one, names[0])
+	title := i18n.Sprintf(l, one, names[0])
 	if len(items) > 1 {
-		title = fmt.Sprintf(many, len(items), strings.Join(names, ", "))
+		title = i18n.Sprintf(l, many, len(items), strings.Join(names, ", "))
 	}
 	return mcp.Description{Title: title, Detail: strings.Join(lines, "\n"), Source: sourceOf(items[0])}, nil
 }
 
-func itemLine(it pkgRef, info Info, err error, install bool) string {
-	from := cardText.SourceDebian
-	if it.Source == "flatpak" {
-		from = cardText.SourceFlathub
+func sourceName(t pkgCard, source string) string {
+	if source == "flatpak" {
+		return t.SourceFlathub
 	}
+	return t.SourceDebian
+}
+
+func itemLine(l i18n.Lang, it pkgRef, info Info, err error, install bool) string {
+	t := cardText.Get(l)
+	from := sourceName(t, it.Source)
 	if err != nil {
 		if install {
-			return fmt.Sprintf(cardText.LookupFailed, it.ID, from, mcp.AsToolError(err).Message)
+			return i18n.Sprintf(l, t.LookupFailed, it.ID, from, mcp.AsToolError(err).Message)
 		}
-		return fmt.Sprintf(cardText.RemoveUnknown, it.ID, from)
+		return i18n.Sprintf(l, t.RemoveUnknown, it.ID, from)
 	}
 	if install {
-		return fmt.Sprintf(cardText.InstallLine, it.ID, info.Version, from, HumanBytes(info.DownloadBytes))
+		return i18n.Sprintf(l, t.InstallLine, it.ID, info.Version, from, humanBytes(l, info.DownloadBytes))
 	}
-	return fmt.Sprintf(cardText.RemoveLine, it.ID, info.Version, from, HumanBytes(info.InstalledBytes))
+	return i18n.Sprintf(l, t.RemoveLine, it.ID, info.Version, from, humanBytes(l, info.InstalledBytes))
 }
 
 func sourceOf(it pkgRef) mcp.Source {
@@ -237,9 +246,12 @@ func sourceOf(it pkgRef) mcp.Source {
 	return mcp.SourceDebian
 }
 
-// HumanBytes formats a size the way a card shows it: "45 MB", "3.2 GB".
-func HumanBytes(n int64) string {
-	units := []string{"bytes", "kB", "MB", "GB", "TB"}
+// HumanBytes formats a size the way an English card shows it: "45 MB", "3.2 GB".
+func HumanBytes(n int64) string { return humanBytes(i18n.EN, n) }
+
+func humanBytes(l i18n.Lang, n int64) string {
+	t := cardText.Get(l)
+	units := []string{"", t.UnitKB, t.UnitMB, t.UnitGB, t.UnitTB}
 	f := float64(n)
 	i := 0
 	for f >= 1000 && i < len(units)-1 {
@@ -247,7 +259,7 @@ func HumanBytes(n int64) string {
 		i++
 	}
 	if i == 0 {
-		return fmt.Sprintf("%d bytes", n)
+		return fmt.Sprintf(t.UnitBytes, n)
 	}
 	if f < 10 {
 		return fmt.Sprintf("%.1f %s", f, units[i])
