@@ -7,11 +7,14 @@ import {
   createRegistryServers,
   expandDeclaredPath,
   parseRegistration,
-  SANDBOX_PROBE,
+  sandboxProbe,
+  resolveRuntimeDir,
   sandboxArgv,
 } from "./registry-servers.js";
 
 const HOME = "/home/ali";
+const RUN = "/run/user/1000";
+const SANDBOX_PROBE = sandboxProbe(HOME, RUN);
 const dir = (id: string, version: string) => `${HOME}/.local/share/jarvis/mcp/${id}/${version}`;
 const files = {
   id: "jarvis-files",
@@ -168,7 +171,7 @@ describe("sandboxArgv (contracts §7 #1)", () => {
       { home: HOME, fileId: "notes" },
     );
     if (!parsed.ok) throw new Error(parsed.error);
-    expect(sandboxArgv(parsed.value, HOME)).toEqual([
+    expect(sandboxArgv(parsed.value, HOME, RUN)).toEqual([
       "systemd-run",
       "--user",
       "--pipe",
@@ -183,17 +186,17 @@ describe("sandboxArgv (contracts §7 #1)", () => {
       "-p",
       `ReadWritePaths=${HOME}/Documents/Notes`,
       "-p",
-      "InaccessiblePaths=-%t/bus",
+      "InaccessiblePaths=-/run/user/1000/bus",
       "-p",
       "InaccessiblePaths=-/run/dbus/system_bus_socket",
       "-p",
-      "InaccessiblePaths=-%h/.ssh",
+      `InaccessiblePaths=-${HOME}/.ssh`,
       "-p",
-      "InaccessiblePaths=-%h/.gnupg",
+      `InaccessiblePaths=-${HOME}/.gnupg`,
       "-p",
-      "InaccessiblePaths=-%h/.local/share/keyrings",
+      `InaccessiblePaths=-${HOME}/.local/share/keyrings`,
       "-p",
-      "InaccessiblePaths=-%h/.config/jarvis",
+      `InaccessiblePaths=-${HOME}/.config/jarvis`,
       "--",
       "/usr/bin/env",
       "-i",
@@ -204,10 +207,37 @@ describe("sandboxArgv (contracts §7 #1)", () => {
     ]);
     const offline = parseRegistration(files, { home: HOME, fileId: "jarvis-files" });
     if (!offline.ok) throw new Error(offline.error);
-    const argv = sandboxArgv(offline.value, HOME);
+    const argv = sandboxArgv(offline.value, HOME, RUN);
     expect(argv).toContain("PrivateNetwork=yes");
     expect(argv).not.toContain("--scope");
     expect(argv.some((a) => a.startsWith("ReadWritePaths="))).toBe(false);
+  });
+
+  it("passes systemd no specifiers: every path is absolute", () => {
+    const parsed = parseRegistration(
+      {
+        id: "notes",
+        version: "2.0",
+        tier: "community",
+        command: [`${dir("notes", "2.0")}/server`],
+        permissions: { network: false, paths: [] },
+      },
+      { home: HOME, fileId: "notes" },
+    );
+    if (!parsed.ok) throw new Error(parsed.error);
+    for (const argv of [sandboxArgv(parsed.value, HOME, RUN), SANDBOX_PROBE]) {
+      expect(argv.some((a) => a.includes("%"))).toBe(false);
+      for (const a of argv.filter((x) => x.startsWith("InaccessiblePaths=-"))) {
+        expect(a.slice("InaccessiblePaths=-".length).startsWith("/")).toBe(true);
+      }
+    }
+  });
+
+  it("resolves the runtime dir from the env, else the uid, and needs an absolute path", () => {
+    expect(resolveRuntimeDir({ XDG_RUNTIME_DIR: "/run/user/7" }, 1000)).toBe("/run/user/7");
+    expect(resolveRuntimeDir({ XDG_RUNTIME_DIR: "relative" }, 1000)).toBe("/run/user/1000");
+    expect(resolveRuntimeDir({}, 42)).toBe("/run/user/42");
+    expect(resolveRuntimeDir({}, undefined)).toBeUndefined();
   });
 
   it("probes through the same properties", () => {
@@ -278,6 +308,7 @@ describe("createRegistryServers", () => {
     const hashed: string[] = [];
     const registry = createRegistryServers({
       home: HOME,
+      runtimeDir: RUN,
       dir: `${HOME}/.config/jarvis/mcp.d`,
       indexPath: INDEX_PATH,
       now: () => NOW,

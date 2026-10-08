@@ -59,6 +59,7 @@ import {
 import { buildProvider } from "./provider-factory.js";
 import {
   createRegistryServers,
+  resolveRuntimeDir,
   nodeHashFile,
   nodeRunProbe,
   nodeWatchDirectory,
@@ -142,8 +143,11 @@ async function main(argv: readonly string[]): Promise<void> {
     },
     clearInterval: (handle: unknown) => clearInterval(handle as NodeJS.Timeout),
   };
+  const runtimeDir =
+    resolveRuntimeDir(env, process.getuid?.()) ?? `/run/user/${process.getuid?.() ?? 0}`;
   const registryServers = createRegistryServers({
     home,
+    runtimeDir,
     dir: mcpConfigDir(home),
     indexPath: registryIndexPath(home),
     now: Date.now,

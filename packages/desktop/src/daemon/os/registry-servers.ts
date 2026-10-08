@@ -5,7 +5,7 @@
 // SERVICE:
 //   systemd-run --user --pipe --quiet --collect -p NoNewPrivileges=yes
 //     -p PrivateNetwork=<!network> -p ProtectHome=read-only
-//     [-p ReadWritePaths=<paths>] -p InaccessiblePaths=… -- env -i … <command>
+//     [-p ReadWritePaths=<paths>] -p InaccessiblePaths=-<absolute> -- env -i … <command>
 //
 // Trust (§7 #2): the `tier` in mcp.d is never believed. Tier, permissions and
 // tool risks come from the verified index cache that only jarvis-pkg writes
@@ -71,19 +71,39 @@ const PATH_SEGMENT = /^[A-Za-z0-9_@+-][A-Za-z0-9._@+-]{0,127}$/;
 
 const BASE_ARGV = ["systemd-run", "--user", "--pipe", "--quiet", "--collect"];
 
-/** Secrets and control sockets an add-on never sees (§7 #1). The leading "-"
- *  makes a path that does not exist (no ~/.gnupg yet) harmless instead of a
- *  failed unit start. */
-const INACCESSIBLE = [
-  "%t/bus",
-  "/run/dbus/system_bus_socket",
-  "%h/.ssh",
-  "%h/.gnupg",
-  "%h/.local/share/keyrings",
-  "%h/.config/jarvis",
-];
+/** Secrets and control sockets an add-on never sees (§7 #1). systemd does not
+ *  expand specifiers (%h, %t) in transient-unit properties and requires
+ *  absolute paths, so jarvisd builds them from $HOME and the runtime dir. The
+ *  leading "-" makes a path that does not exist (no ~/.gnupg yet) harmless
+ *  instead of a failed unit start. */
+function inaccessiblePaths(home: string, runtimeDir: string): string[] {
+  return [
+    posix.join(runtimeDir, "bus"),
+    "/run/dbus/system_bus_socket",
+    posix.join(home, ".ssh"),
+    posix.join(home, ".gnupg"),
+    posix.join(home, ".local", "share", "keyrings"),
+    posix.join(home, ".config", "jarvis"),
+  ];
+}
 
-function properties(network: boolean, writablePaths: readonly string[]): string[] {
+/** $XDG_RUNTIME_DIR, else /run/user/<uid>; must be absolute. */
+export function resolveRuntimeDir(
+  env: Readonly<Record<string, string | undefined>>,
+  uid: number | undefined,
+): string | undefined {
+  const fromEnv = env["XDG_RUNTIME_DIR"];
+  if (fromEnv !== undefined && posix.isAbsolute(fromEnv)) return posix.normalize(fromEnv);
+  if (uid !== undefined && uid >= 0) return `/run/user/${uid}`;
+  return undefined;
+}
+
+function properties(
+  network: boolean,
+  writablePaths: readonly string[],
+  home: string,
+  runtimeDir: string,
+): string[] {
   const argv = [
     "-p",
     "NoNewPrivileges=yes",
@@ -93,20 +113,24 @@ function properties(network: boolean, writablePaths: readonly string[]): string[
     "ProtectHome=read-only",
   ];
   if (writablePaths.length > 0) argv.push("-p", `ReadWritePaths=${writablePaths.join(" ")}`);
-  for (const path of INACCESSIBLE) argv.push("-p", `InaccessiblePaths=-${path}`);
+  for (const path of inaccessiblePaths(home, runtimeDir)) {
+    argv.push("-p", `InaccessiblePaths=-${path}`);
+  }
   return argv;
 }
 
 /** Run once before any add-on server: inside the sandbox only `lo` may exist
  *  and $HOME must not be writable. Exit 0 = the sandbox applied. */
-export const SANDBOX_PROBE: readonly string[] = [
-  ...BASE_ARGV,
-  ...properties(false, []),
-  "--",
-  "/bin/sh",
-  "-c",
-  'test "$(grep -c : /proc/net/dev)" -le 1 && test ! -w "$HOME"',
-];
+export function sandboxProbe(home: string, runtimeDir: string): string[] {
+  return [
+    ...BASE_ARGV,
+    ...properties(false, [], home, runtimeDir),
+    "--",
+    "/bin/sh",
+    "-c",
+    'test "$(grep -c : /proc/net/dev)" -le 1 && test ! -w "$HOME"',
+  ];
+}
 
 export function installDir(home: string, id: string, version: string): string {
   return posix.join(home, ".local", "share", "jarvis", "mcp", id, version);
@@ -230,11 +254,15 @@ export function bindToIndex(
   };
 }
 
-export function sandboxArgv(registration: Registration, home: string): string[] {
+export function sandboxArgv(
+  registration: Registration,
+  home: string,
+  runtimeDir: string,
+): string[] {
   // A clean environment: no session variables, tokens or proxies from jarvisd.
   return [
     ...BASE_ARGV,
-    ...properties(registration.permissions.network, registration.writablePaths),
+    ...properties(registration.permissions.network, registration.writablePaths, home, runtimeDir),
     "--",
     ENV,
     "-i",
@@ -289,6 +317,8 @@ export const EMPTY_REGISTRY: LoadedRegistry = {
 
 export function createRegistryServers(deps: {
   home: string;
+  /** Absolute $XDG_RUNTIME_DIR or /run/user/<uid> (no specifiers reach systemd). */
+  runtimeDir: string;
   dir: string;
   /** ~/.cache/jarvis/registry/index.verified.json (written by jarvis-pkg only). */
   indexPath: string;
@@ -401,7 +431,7 @@ export function createRegistryServers(deps: {
       if (launchable.length === 0) return { ...EMPTY_REGISTRY, installed: bound };
       if (!sandboxOk) {
         try {
-          sandboxOk = (await deps.runProbe(SANDBOX_PROBE)) === 0;
+          sandboxOk = (await deps.runProbe(sandboxProbe(deps.home, deps.runtimeDir))) === 0;
         } catch {
           sandboxOk = false;
         }
@@ -417,7 +447,7 @@ export function createRegistryServers(deps: {
       }
       const settled = await Promise.allSettled(
         launchable.map((registration) =>
-          deps.connect(registration.id, sandboxArgv(registration, deps.home)),
+          deps.connect(registration.id, sandboxArgv(registration, deps.home, deps.runtimeDir)),
         ),
       );
       const sessions: McpSession[] = [];
