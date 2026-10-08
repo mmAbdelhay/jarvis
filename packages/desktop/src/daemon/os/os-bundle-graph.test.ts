@@ -75,4 +75,12 @@ describe("the Jarvis OS daemon bundle graph", () => {
       ),
     ).toBe(false);
   });
+
+  it("cannot reach the installer backend: no file in jarvisd's graph names os.jarvis.Installer1", () => {
+    const { files } = walk(resolve(HERE, "os-daemon-main.ts"));
+    const platformModel = walk(PLATFORM_MODEL).files;
+    for (const file of [...files, ...platformModel]) {
+      expect(readFileSync(file, "utf8")).not.toMatch(/Installer1/);
+    }
+  });
 });
