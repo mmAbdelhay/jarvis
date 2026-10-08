@@ -32,7 +32,9 @@ void LockSurface::ext_session_lock_surface_v1_configure(uint32_t serial, uint32_
     if (!m_configured) {
         m_configured = true;
         window()->resizeFromApplyConfigure(m_pending);
-        window()->handleExpose(QRect(QPoint(), m_pending));
+        // Qt 6.8 (trixie) has no QWaylandWindow::handleExpose; isExposed() now
+        // returns true, so a recursive expose delivers the first frame.
+        window()->sendRecursiveExposeEvent();
     } else {
         window()->applyConfigureWhenPossible();
     }
