@@ -24,6 +24,7 @@ ShellController::ShellController(ControlClient* client, QObject* parent)
     , m_system(new SystemModel(this))
     , m_memory(new MemoryModel(this))
     , m_registry(new RegistryModel(this))
+    , m_voice(new VoiceModel(this))
     , m_launcher([](const QString& program) { return QProcess::startDetached(program, {}); })
 {
     connect(client, &ControlClient::opened, this, &ShellController::onOpened);
@@ -142,6 +143,27 @@ ShellController::ShellController(ControlClient* client, QObject* parent)
                 m_memory->applyError(r.text);
         });
     });
+    connect(m_voice, &VoiceModel::utteranceReady, this, &ShellController::onUtterance);
+    connect(m_voice, &VoiceModel::stopSpeakingRequested, this, &ShellController::stopSpeaking);
+    connect(m_voice, &VoiceModel::speakRepliesChanged, this, [this](bool on) {
+        // M3 contracts §5 #10: jarvisd owns the setting; voice:setSpeak [{on}].
+        request(u"voice:setSpeak"_s, QJsonArray{QJsonObject{{"on", on}}});
+        if (!on && m_voice->state() == u"speaking")
+            stopSpeaking();
+    });
+    connect(this, &ShellController::voiceStatePushed, this, [this](const QJsonObject& state) {
+        m_voice->applyServerState(state);
+        // Cut spoken replies short when the user turned them off.
+        if (m_voice->state() == u"speaking" && !m_voice->speakReplies())
+            stopSpeaking();
+    });
+    connect(m_system, &SystemModel::changed, this, [this] {
+        m_voice->setAvailability(m_system->voiceAvailable(), m_system->voiceStt(), m_system->voiceTts());
+        updateVoiceBlock();
+    });
+    connect(this, &ShellController::lockedChanged, this, &ShellController::updateVoiceBlock);
+    connect(this, &ShellController::connectionChanged, this, &ShellController::updateVoiceBlock);
+    updateVoiceBlock();
 }
 
 void ShellController::request(const QString& channel, const QJsonArray& args,
@@ -264,6 +286,8 @@ void ShellController::onPush(const QString& channel, const QJsonValue& payload)
     if (channel == u"sys:snapshot") {
         const QJsonObject snap = payload.toObject();
         m_system->applySnapshot(snap);
+        if (const QJsonValue speak = snap.value("voice").toObject().value("speak"); speak.isBool())
+            m_voice->applySnapshotSpeak(speak.toBool());
         // jarvisd's undo stack is authoritative when it reports one (M3 contracts §5 #10);
         // otherwise keep the local inference from approved cards.
         if (const QJsonValue undo = snap.value("undo"); undo.isObject()) {
@@ -351,6 +375,10 @@ void ShellController::stop()
 
 void ShellController::escape()
 {
+    if (m_voice->recording())
+        return m_voice->cancel();
+    if (m_voice->state() == u"speaking")
+        return stopSpeaking();
     if (m_conversation->busy())
         return stop();
     if (m_view == u"audit" || m_view == u"settings" || m_view == u"doctor")
@@ -515,4 +543,78 @@ void ShellController::askJarvis(const QString& text)
         return;
     }
     sendPrompt(text);
+}
+
+void ShellController::updateVoiceBlock()
+{
+    if (m_locked)
+        m_voice->setBlocked(true, u"Voice is off while the screen is locked."_s);
+    else if (m_connection != u"open")
+        m_voice->setBlocked(true, u"Voice needs the connection to Jarvis."_s);
+    else
+        m_voice->setBlocked(false);
+}
+
+CardModel* ShellController::voiceCard() const
+{
+    // Design §3.2 ruling: voice answers only a card the user can see right
+    // now, on an unlocked screen, that needs no password or typed secret.
+    if (m_locked || !m_surfaceShown)
+        return nullptr;
+    CardModel* card = m_view == u"chat" ? m_chatCard : m_view == u"doctor" ? m_doctorCard : nullptr;
+    return card && card->voiceAnswerable() ? card : nullptr;
+}
+
+void ShellController::pushToTalk()
+{
+    if (m_view != u"chat" && m_view != u"doctor")
+        setView(u"chat"_s);
+    m_voice->toggle();
+}
+
+void ShellController::onUtterance(const QByteArray& wav)
+{
+    if (m_locked) { // never upload audio recorded across a lock
+        m_voice->resultArrived();
+        return;
+    }
+    QJsonObject header{{"lang", "auto"}};
+    QString sentCardId;
+    if (const CardModel* card = voiceCard()) {
+        sentCardId = card->cardId();
+        header.insert("cardId", sentCardId);
+    }
+    sendUtterance(wav, header, [this, sentCardId](const ControlResult& r) {
+        m_voice->resultArrived();
+        if (!r.ok) {
+            m_conversation->addNotice(u"Voice didn't work: %1"_s.arg(r.text));
+            return;
+        }
+        applyVoiceResult(r.value.toObject(), sentCardId);
+    });
+}
+
+void ShellController::applyVoiceResult(const QJsonObject& result, const QString& sentCardId)
+{
+    const QString action = result.value("action").toString();
+    const QString heard = result.value("text").toString().simplified().left(200);
+    if (action == u"approve" || action == u"deny") {
+        CardModel* card = voiceCard();
+        // The very card we sent must still be open, visible and answerable.
+        if (sentCardId.isEmpty() || !card || card->cardId() != sentCardId) {
+            m_conversation->addNotice(u"Jarvis heard \u201c%1\u201d, but that card is gone. Nothing was changed."_s.arg(heard));
+            return;
+        }
+        const bool approve = action == u"approve";
+        m_conversation->addNotice(approve ? u"You said yes."_s : u"You said no."_s);
+        decide(card, approve);
+        return;
+    }
+    if (action == u"ignored") {
+        m_conversation->addNotice(heard.isEmpty() ? u"Jarvis didn't hear anything. Try again."_s
+                                                  : u"Jarvis didn't catch that. Try again."_s);
+        return;
+    }
+    // "prompt" (ruling R1): jarvisd already started the turn; its turn-start
+    // event puts the words in the chat. Sending agent:prompt would run it twice.
 }

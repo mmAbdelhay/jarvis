@@ -15,6 +15,7 @@
 #include "models/ProviderListModel.h"
 #include "models/ProviderModel.h"
 #include "models/SystemModel.h"
+#include "models/voice/VoiceModel.h"
 #include "models/MemoryModel.h"
 #include "models/RegistryModel.h"
 
@@ -40,6 +41,7 @@ class ShellController : public QObject {
     Q_PROPERTY(AuditModel* audit READ audit CONSTANT)
     Q_PROPERTY(SystemModel* system READ system CONSTANT)
     Q_PROPERTY(MemoryModel* memory READ memory CONSTANT)
+    Q_PROPERTY(VoiceModel* voice READ voice CONSTANT)
     Q_PROPERTY(RegistryModel* registry READ registry CONSTANT)
     Q_PROPERTY(bool offerDoctor READ offerDoctor NOTIFY providerStatusChanged)
     Q_PROPERTY(QString view READ view NOTIFY viewChanged)
@@ -68,6 +70,10 @@ public:
     SystemModel* system() const { return m_system; }
     MemoryModel* memory() const { return m_memory; }
     RegistryModel* registry() const { return m_registry; }
+    VoiceModel* voice() const { return m_voice; }
+    Q_INVOKABLE void pushToTalk();
+    Q_INVOKABLE void setSurfaceShown(bool shown) { m_surfaceShown = shown; }
+    bool surfaceShown() const { return m_surfaceShown; }
     // Contracts §6.8: only when the provider is unreachable AND the machine is offline.
     bool offerDoctor() const;
     QString view() const { return m_view; }
@@ -121,6 +127,10 @@ private:
     void maybeLeaveDoctor();
     void setView(QString view);
     void setConnection(const QString& connection);
+    void onUtterance(const QByteArray& wav);
+    void applyVoiceResult(const QJsonObject& result, const QString& sentCardId);
+    CardModel* voiceCard() const;
+    void updateVoiceBlock();
 
     ControlClient* m_client;
     Conversation* m_conversation;
@@ -137,6 +147,8 @@ private:
     SystemModel* m_system;
     MemoryModel* m_memory;
     RegistryModel* m_registry;
+    VoiceModel* m_voice;
+    bool m_surfaceShown = true;
     QString m_view = QStringLiteral("loading");
     QString m_connection = QStringLiteral("connecting");
     bool m_providerReachable = true;

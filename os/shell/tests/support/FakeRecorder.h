@@ -11,11 +11,12 @@ public:
     bool started = false;
     bool stopped = false;
     bool cancelled = false;
+    bool* cancelledFlag = nullptr; // outlives the recorder (VoiceModel deleteLater()s it)
     QString startError = QStringLiteral("No microphone");
 
     bool start() override { started = startOk; return startOk; }
     void stop() override { stopped = true; }
-    void cancel() override { cancelled = true; }
+    void cancel() override { cancelled = true; if (cancelledFlag) *cancelledFlag = true; }
     QString error() const override { return startError; }
     void finish(const QByteArray& pcm) { emit finished(pcm); }
     void fail(const QString& message) { emit failed(message); }

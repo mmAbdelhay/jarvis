@@ -60,13 +60,19 @@ int main(int argc, char* argv[])
     ShellSurface surface(window, layerShell);
     QObject::connect(&instance, &SingleInstance::messageReceived, &surface, [&surface, shell](const QByteArray&) {
         surface.summon();
+        shell->setSurfaceShown(true);
         shell->requestComposerFocus();
     });
-    QObject::connect(shell, &ShellController::dismissRequested, &surface, &ShellSurface::dismiss);
+    // Voice may answer a card only while the shell is on screen (design §3.2).
+    QObject::connect(shell, &ShellController::dismissRequested, &surface, [&surface, shell] {
+        surface.dismiss();
+        shell->setSurfaceShown(false);
+    });
 
     surface.show();
     if (parser.isSet(focusOption)) {
         surface.summon();
+        shell->setSurfaceShown(true);
         shell->requestComposerFocus();
     }
     client->start();
