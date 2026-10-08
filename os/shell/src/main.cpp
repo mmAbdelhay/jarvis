@@ -1,5 +1,6 @@
 #include <QCommandLineParser>
 #include <QGuiApplication>
+#include <QProcess>
 #include <QQmlApplicationEngine>
 #include <QQuickStyle>
 #include <QQuickWindow>
@@ -7,6 +8,7 @@
 
 #include "Language.h"
 #include "app/AppFont.h"
+#include "app/ClassicRedirect.h"
 #include "app/ShellController.h"
 #include "app/ShellSurface.h"
 #include "app/SingleInstance.h"
@@ -42,6 +44,13 @@ int main(int argc, char* argv[])
 
     if (parser.isSet(settingsOption))
         return runSettingsWindow(app, parser.isSet(quitAfterOption) ? parser.value(quitAfterOption).toInt() : -1);
+
+    // Classic fallback (contracts §6.14): Super and --ptt open the classic chat panel.
+    if (jarvis::shell::redirectToClassic(jarvis::shell::classicMarkerPath(),
+                                         [](const QString& program, const QStringList& args) {
+                                             return QProcess::startDetached(program, args);
+                                         }))
+        return 0;
 
     // A shell is already running (Super keybind, or a second launch): hand over and exit.
     SingleInstance instance(SingleInstance::defaultName());

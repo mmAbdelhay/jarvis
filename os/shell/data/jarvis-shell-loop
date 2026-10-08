@@ -1,25 +1,58 @@
 #!/bin/sh
-# Keeps jarvis-shell running inside a labwc session (spec §10: labwc's
-# autostart runs once, so this loop is what relaunches a crashed shell).
-#  - Backoff between launches: 1 s, doubling up to 30 s, so a shell that
-#    cannot start does not spin; reset to 1 s after a run that lasted 60 s.
-#  - Exits when the compositor's Wayland socket
-#    ($XDG_RUNTIME_DIR/$WAYLAND_DISPLAY) is gone, so the loop ends with labwc.
-# Test hooks (tests/data/test_relaunch_loop.sh): JARVIS_SHELL_BIN, and
-# JARVIS_LOOP_SLEEP / JARVIS_LOOP_NOW replace `sleep` and `date +%s`.
+# Keeps the Rafiq desktop running inside a labwc session (labwc's autostart
+# runs once, so this loop is what relaunches a crashed shell).
+#  - Backoff between launches: 1 s, doubling up to 30 s, reset to 1 s after a
+#    run that lasted 60 s.
+#  - Rafiq M4 contracts §6.14: when jarvis-shell exits 3 times within 60 s, write
+#    $XDG_RUNTIME_DIR/jarvis/classic-fallback and run jarvis-classic (the
+#    fallback desktop) from then on. A loop started while that marker exists
+#    runs jarvis-classic directly. The marker lives on tmpfs: logging out
+#    clears it.
+#  - Exits when the compositor's Wayland socket ($XDG_RUNTIME_DIR/$WAYLAND_DISPLAY)
+#    is gone, so the loop ends with labwc.
+# Test hooks (tests/data/test_relaunch_loop.sh): JARVIS_SHELL_BIN,
+# JARVIS_CLASSIC_BIN, and JARVIS_LOOP_SLEEP / JARVIS_LOOP_NOW replace `sleep`
+# and `date +%s`.
 set -u
 
 shell_bin="${JARVIS_SHELL_BIN:-jarvis-shell}"
+classic_bin="${JARVIS_CLASSIC_BIN:-jarvis-classic}"
 sleep_cmd="${JARVIS_LOOP_SLEEP:-sleep}"
 now_cmd="${JARVIS_LOOP_NOW:-date +%s}"
-socket="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/${WAYLAND_DISPLAY:-wayland-0}"
+runtime="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+socket="$runtime/${WAYLAND_DISPLAY:-wayland-0}"
+marker="$runtime/jarvis/classic-fallback"
 
+bin=$shell_bin
+if [ -e "$marker" ]; then
+    bin=$classic_bin
+fi
 delay=1
+recent=""                              # end times of shell exits in the last 60 s
 while [ -e "$socket" ]; do
     started=$($now_cmd)
-    "$shell_bin"
+    "$bin"
     ended=$($now_cmd)
     [ -e "$socket" ] || break          # labwc is gone: do not relaunch
+    if [ "$bin" = "$shell_bin" ]; then
+        kept=""
+        for t in $recent $ended; do
+            if [ $((ended - t)) -lt 60 ]; then
+                kept="$kept $t"
+            fi
+        done
+        recent=$kept
+        set -- $recent
+        if [ $# -ge 3 ]; then
+            mkdir -p "$runtime/jarvis"
+            : > "$marker"
+            chmod 0644 "$marker"
+            echo "jarvis-shell-loop: jarvis-shell failed 3 times in 60 s; starting classic mode" >&2
+            bin=$classic_bin
+            delay=1
+            continue
+        fi
+    fi
     if [ $((ended - started)) -ge 60 ]; then
         delay=1                        # it ran a while: start the backoff over
     fi

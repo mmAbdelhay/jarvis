@@ -1,44 +1,73 @@
 #!/bin/sh
-# ctest relaunch_loop: drives data/jarvis-shell-loop with a fake shell, a fake
-# clock and a fake sleep. Usage: test_relaunch_loop.sh <path to jarvis-shell-loop>
+# ctest relaunch_loop: drives data/jarvis-shell-loop with fake jarvis-shell and
+# jarvis-classic programs, a fake clock and a fake sleep.
+# Usage: test_relaunch_loop.sh <path to jarvis-shell-loop>
 set -eu
 loop="$1"
 T=$(mktemp -d /tmp/jsh-loop-XXXXXX)
 trap 'rm -rf "$T"' EXIT
 export XDG_RUNTIME_DIR="$T" WAYLAND_DISPLAY=wayland-test
 SOCKET="$T/wayland-test"
+MARKER="$T/jarvis/classic-fallback"
 
-cat > "$T/fake-shell" <<'EOF'
+cat > "$T/fake-prog" <<'EOF'
 #!/bin/sh
-# Counts runs, advances the fake clock by this run's duration, and removes the
-# Wayland socket (labwc exiting) on run $STOP_AFTER.
+# $1 = name. Logs the name, counts runs, advances the fake clock by this run's
+# duration and removes the Wayland socket (labwc exiting) on run $STOP_AFTER.
 n=$(( $(cat "$T/runs") + 1 )); echo "$n" > "$T/runs"
+printf '%s ' "$1" >> "$T/log"
 d=$(echo "$DURATIONS" | cut -d' ' -f"$n"); [ -n "$d" ] || d=0
 echo $(( $(cat "$T/time") + d )) > "$T/time"
 if [ "$n" -ge "$STOP_AFTER" ]; then rm -f "$SOCKET"; fi
 exit 1
 EOF
+printf '#!/bin/sh\nexec "$T/fake-prog" shell\n' > "$T/fake-shell"
+printf '#!/bin/sh\nexec "$T/fake-prog" classic\n' > "$T/fake-classic"
 cat > "$T/fake-sleep" <<'EOF'
 #!/bin/sh
 printf '%s ' "$1" >> "$T/sleeps"
 echo $(( $(cat "$T/time") + $1 )) > "$T/time"
 EOF
-chmod +x "$T/fake-shell" "$T/fake-sleep"
-export T SOCKET JARVIS_SHELL_BIN="$T/fake-shell" JARVIS_LOOP_SLEEP="$T/fake-sleep" JARVIS_LOOP_NOW="cat $T/time"
+chmod +x "$T/fake-prog" "$T/fake-shell" "$T/fake-classic" "$T/fake-sleep"
+export T SOCKET JARVIS_SHELL_BIN="$T/fake-shell" JARVIS_CLASSIC_BIN="$T/fake-classic" \
+       JARVIS_LOOP_SLEEP="$T/fake-sleep" JARVIS_LOOP_NOW="cat $T/time"
 
-reset_state() { echo 0 > "$T/runs"; echo 1000 > "$T/time"; : > "$T/sleeps"; }
+reset_state() { echo 0 > "$T/runs"; echo 1000 > "$T/time"; : > "$T/sleeps"; : > "$T/log"; rm -rf "$T/jarvis"; }
+expect() { [ "$2" = "$3" ] || { echo "FAIL $1: expected '$3', got '$2'"; exit 1; }; }
 
-# 1. Backoff doubles to 30 s, resets after a 100 s run, and the loop exits
-#    (without sleeping) once the socket is gone after run 9.
+# 1. Exits more than 60 s apart: the shell keeps being relaunched with backoff
+#    (1 s doubling to 30 s, reset after a 100 s run); no fallback.
 reset_state; touch "$SOCKET"
-DURATIONS="0 0 0 0 0 0 0 100 0" STOP_AFTER=9 sh "$loop"
-runs=$(cat "$T/runs"); sleeps=$(cat "$T/sleeps")
-[ "$runs" = 9 ] || { echo "FAIL backoff: expected 9 runs, got $runs"; exit 1; }
-[ "$sleeps" = "1 2 4 8 16 30 30 1 " ] || { echo "FAIL backoff: sleeps were '$sleeps'"; exit 1; }
+DURATIONS="31 31 31 31 31 31 100 31" STOP_AFTER=8 sh "$loop"
+expect backoff-runs "$(cat "$T/log")" "shell shell shell shell shell shell shell shell "
+expect backoff-sleeps "$(cat "$T/sleeps")" "1 2 4 8 16 30 1 "
+[ ! -e "$MARKER" ] || { echo "FAIL backoff: marker written without a crash loop"; exit 1; }
 
-# 2. No Wayland socket (labwc already gone): the shell is never started.
+# 2. No Wayland socket (labwc already gone): nothing is started.
 reset_state; rm -f "$SOCKET"
 DURATIONS="" STOP_AFTER=1 sh "$loop"
-[ "$(cat "$T/runs")" = 0 ] || { echo "FAIL socket: the shell started without a compositor"; exit 1; }
+expect no-socket "$(cat "$T/runs")" 0
 
-echo "relaunch loop: backoff and exit-with-labwc OK"
+# 3. Three exits within 60 s: the marker is written once and classic takes
+#    over, with its own fresh backoff.
+reset_state; touch "$SOCKET"
+(umask 077; DURATIONS="0 0 0 0 0 0" STOP_AFTER=6 sh "$loop") 2> "$T/stderr"
+expect fallback-runs "$(cat "$T/log")" "shell shell shell classic classic classic "
+expect fallback-sleeps "$(cat "$T/sleeps")" "1 2 1 2 "
+[ -f "$MARKER" ] || { echo "FAIL fallback: no marker at $MARKER"; exit 1; }
+
+expect marker-mode "$(python3 -c 'import os,stat,sys; print(oct(stat.S_IMODE(os.stat(sys.argv[1]).st_mode)))' "$MARKER")" 0o644
+[ ! -s "$MARKER" ] || { echo "FAIL marker: not empty"; exit 1; }
+expect fallback-log-lines "$(wc -l < "$T/stderr" | tr -d ' ')" 1
+
+# 4. A long first run still counts when the next two exits come fast.
+reset_state; touch "$SOCKET"
+DURATIONS="31 0 0 0" STOP_AFTER=4 sh "$loop"
+expect window-runs "$(cat "$T/log")" "shell shell shell classic "
+
+# 5. A loop started in a session that already fell back runs classic only.
+reset_state; touch "$SOCKET"; mkdir -p "$T/jarvis"; : > "$MARKER"
+DURATIONS="0 0 0" STOP_AFTER=3 sh "$loop"
+expect marker-runs "$(cat "$T/log")" "classic classic classic "
+
+echo "relaunch loop: backoff, classic fallback and exit-with-labwc OK"
