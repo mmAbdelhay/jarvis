@@ -1,5 +1,6 @@
 export * from "./types.js";
 export * from "./contract.js";
+export * from "./i18n.js";
 export * from "./messages.js";
 export * from "./fence.js";
 export * from "./audit.js";
