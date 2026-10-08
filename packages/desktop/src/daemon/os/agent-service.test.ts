@@ -1306,6 +1306,41 @@ describe("memory and tool search in jarvisd (design §3.8, §3.9)", () => {
     await expect(h.agent.memoryList(10)).resolves.toEqual([]);
   });
 
+  it("never opens the store for delete/clear while memory is off, and lists unsupported without a keyring", async () => {
+    const memory = memoryOpener();
+    let opens = 0;
+    let resets = 0;
+    const counted = {
+      ...memory,
+      open: async () => {
+        opens++;
+        return memory.open();
+      },
+      reset: async () => {
+        resets++;
+      },
+    };
+    const h = harness({ memory: counted, makeProvider: () => recording([]) });
+    h.files.set(YAML, LOCAL_YAML);
+    await h.agent.start();
+    await h.agent.memorySetEnabled(false);
+    await expect(h.agent.memoryDelete("x")).resolves.toBeNull();
+    await expect(h.agent.memoryClear()).resolves.toBeNull();
+    expect(opens).toBe(0);
+    expect(resets).toBe(1);
+
+    const noKey = harness({
+      memory: { ...memory, open: async () => null },
+      makeProvider: () => recording([]),
+    });
+    noKey.files.set(YAML, LOCAL_YAML);
+    await noKey.agent.start();
+    await expect(noKey.agent.memoryList(10)).rejects.toMatchObject({
+      code: "unsupported",
+      message: "Memory is off",
+    });
+  });
+
   it("writes a summary at shutdown with a request that also ends with the rules", async () => {
     const requests: { system: string; tools: string[] }[] = [];
     const memory = memoryOpener();

@@ -191,8 +191,9 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
     return sizes.length === 0 ? DEFAULT_CONTEXT_TOKENS : Math.min(...sizes);
   }
   const embedder = deps.embedder ?? null;
+  const memoryOn = () => brain.memoryEnabled && deps.fakeScript === undefined;
   const memory = createMemoryService({
-    enabled: () => brain.memoryEnabled && deps.fakeScript === undefined,
+    enabled: memoryOn,
     backend: () => deps.memory?.open() ?? Promise.resolve(null),
     reset: () => deps.memory?.reset() ?? Promise.resolve(),
     // The user's own model writes the summary; the request ends with SAFETY_RULES.
@@ -692,18 +693,29 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
     },
 
     async memoryList(limit) {
-      if (!brain.memoryEnabled || deps.fakeScript !== undefined) {
+      if (!memoryOn() || deps.memory === undefined) {
+        throw new OsAgentError("unsupported", AGENT_TEXT.memoryOff);
+      }
+      // No keyring (or locked) → open() yields null → memory is off (§7 #9).
+      if ((await deps.memory?.open()) == null) {
         throw new OsAgentError("unsupported", AGENT_TEXT.memoryOff);
       }
       return memory.list(limit);
     },
 
     async memoryDelete(id) {
+      // Memory off: never open (and so never create) the store.
+      if (!memoryOn()) return null;
       await memory.delete(id);
       return null;
     },
 
     async memoryClear() {
+      if (!memoryOn()) {
+        // Off: only wipe what exists (file + key); never open a new store.
+        await deps.memory?.reset();
+        return null;
+      }
       await memory.clear();
       return null;
     },
