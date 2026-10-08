@@ -57,8 +57,14 @@ async function registryOf(sessions: McpSession[], tiers: Record<string, ServerTr
 }
 
 describe("host-enforced gating (design §3.3, criterion 3)", () => {
-  it("trusts declared risk only from jarvis-pkg and jarvis-diag (no installer server)", () => {
-    expect([...TRUSTED_MCP_SERVERS]).toEqual(["jarvis-pkg", "jarvis-diag"]);
+  it("trusts declared risk only from the host servers (no installer server)", () => {
+    expect([...TRUSTED_MCP_SERVERS]).toEqual([
+      "jarvis-pkg",
+      "jarvis-diag",
+      "jarvis-settings",
+      "jarvis-files",
+      "jarvis-apps",
+    ]);
   });
 
   it("marks an unknown server's 'safe' tool that calls the helper as confirm", async () => {
@@ -74,7 +80,7 @@ describe("host-enforced gating (design §3.3, criterion 3)", () => {
         names.map((name) => tool(name, "safe")),
       ),
     ]);
-    for (const name of names) expect(registry.get(name)?.risk).toBe("confirm");
+    for (const name of names) expect(registry.get(name)?.risk).toBe(HOST_FORCED_RISK[name]);
   });
 
   it("puts a helper-reaching tool that claims 'safe' on a card and runs it only after approval", async () => {
@@ -142,12 +148,12 @@ describe("host-enforced gating (design §3.3, criterion 3)", () => {
   it("reviewed and official servers keep their declared safe/confirm", async () => {
     const { registry } = await registryOf(
       [
-        session("jarvis-files", [tool("files.search", "safe")]),
+        session("jarvis-docs", [tool("docs.search", "safe")]),
         session("notes", [tool("notes.create", "confirm"), tool("notes.list", "safe")]),
       ],
-      { "jarvis-files": "official", notes: "reviewed" },
+      { "jarvis-docs": "official", notes: "reviewed" },
     );
-    expect(registry.get("files.search")?.risk).toBe("safe");
+    expect(registry.get("docs.search")?.risk).toBe("safe");
     expect(registry.get("notes.create")?.risk).toBe("confirm");
     expect(registry.get("notes.list")?.risk).toBe("safe");
   });

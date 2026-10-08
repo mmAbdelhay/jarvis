@@ -12,7 +12,14 @@ import {
   isRecord,
 } from "./types.js";
 
-export const TRUSTED_MCP_SERVERS = ["jarvis-pkg", "jarvis-diag"] as const;
+export const TRUSTED_MCP_SERVERS = [
+  "jarvis-pkg",
+  "jarvis-diag",
+  // Rafiq M3 §1, §5 #1: /usr/lib/jarvis/mcp/jarvis-{settings,files,apps}.
+  "jarvis-settings",
+  "jarvis-files",
+  "jarvis-apps",
+] as const;
 
 /** Who vouches for a server's declared risks (contracts M2.5 §3). */
 export type ServerTrust = "host" | "official" | "reviewed" | "community" | "unknown";
@@ -29,6 +36,34 @@ export const HOST_FORCED_RISK: Readonly<Record<string, ToolRisk>> = {
   "net.radio_on": "confirm",
   "registry.install": "confirm",
   "registry.remove": "confirm",
+  // Rafiq M3 contracts §1: every setter and file write is a card; users and
+  // formatting need the admin password (checked by the helper with PAM, §5 #5).
+  "settings.brightness": "confirm",
+  "settings.volume": "confirm",
+  "settings.night_light": "confirm",
+  "settings.wifi": "confirm",
+  "settings.bluetooth": "confirm",
+  "settings.bluetooth_pair": "confirm",
+  "settings.bluetooth_unpair": "confirm",
+  "settings.audio_output": "confirm",
+  "settings.power_profile": "confirm",
+  "settings.scale": "confirm",
+  "settings.keyboard": "confirm",
+  "files.move": "confirm",
+  "files.copy": "confirm",
+  "files.rename": "confirm",
+  "files.mkdir": "confirm",
+  "files.trash": "confirm",
+  "files.restore": "confirm",
+  "apps.close": "confirm",
+  "apps.set_default": "confirm",
+  // Contracts §5 #2: URLs open through their own confirm-tier tool.
+  "apps.open_url": "confirm",
+  "disks.mount": "confirm",
+  "disks.unmount": "confirm",
+  "users.add": "password",
+  "users.remove": "password",
+  "disks.format_removable": "password",
 };
 
 /** Name spaces only jarvisd's own servers (jarvis-pkg, jarvis-diag) may use. */
@@ -43,6 +78,11 @@ export const HOST_TOOL_PREFIXES: readonly string[] = [
   "hw.",
   "registry.",
   "jarvis.",
+  "settings.",
+  "files.",
+  "apps.",
+  "users.",
+  "disks.",
 ];
 
 /** Compare what the model sees (separator and case folded), not the raw name. */
@@ -71,6 +111,20 @@ export function effectiveRisk(tool: string, declared: unknown, trust: ServerTrus
       : "confirm";
   return raiseRisk(risk, HOST_FORCED_RISK[tool] ?? "safe");
 }
+const URL_SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*:/;
+
+/** The risk of one call (M3 §1): `apps.open_path` is safe for a file but a
+ *  card for anything with a URL scheme. Only ever raises a tool's risk. */
+export function callRisk(tool: RegisteredTool, input: Record<string, unknown>): ToolRisk {
+  if (tool.name === "apps.open_path" && tool.risk === "safe") {
+    const opensUrl = Object.values(input).some(
+      (value) => typeof value === "string" && URL_SCHEME.test(value),
+    );
+    if (opensUrl) return "confirm";
+  }
+  return tool.risk;
+}
+
 export const DESCRIBE_TOOL = "jarvis.describe";
 export const SAFE_TOOL_TIMEOUT_MS = 60_000;
 /** Installs and restarts may take minutes; they are never cut short. Kept

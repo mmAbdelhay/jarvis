@@ -1528,3 +1528,35 @@ describe("memory and tool search in jarvisd (design §3.8, §3.9)", () => {
     expect(requests[0]?.tools).toContain("extra_tool_7");
   });
 });
+
+describe("apps.open_path with a URL goes through a card (M3 §1)", () => {
+  const appsTools: McpTool[] = [
+    {
+      name: "apps.open_path",
+      description: "Open a file or URL",
+      inputSchema: { type: "object", properties: { path: { type: "string" } } },
+      meta: { jarvis: { risk: "safe" } },
+    },
+  ];
+  it("opens a home file at once but asks before opening a URL", async () => {
+    const calls: string[] = [];
+    const h = harness({
+      fakeScript: parseFakeScript([
+        {
+          replies: [
+            { toolCalls: [{ name: "apps.open_path", input: { path: "/home/jarvis/a.pdf" } }] },
+            { toolCalls: [{ name: "apps.open_path", input: { path: "https://example.com" } }] },
+            { text: "done" },
+          ],
+        },
+      ]),
+      connectMcp: async () => [session("jarvis-apps", appsTools, calls)],
+    });
+    await h.agent.start();
+    h.agent.prompt("open things");
+    await h.until(() => h.events().some((e) => e.type === "card"));
+    expect(calls).toEqual(["apps.open_path"]);
+    const card = h.events().find((e) => e.type === "card");
+    expect(card?.type === "card" ? card.card.items[0]?.tool : undefined).toBe("apps.open_path");
+  });
+});

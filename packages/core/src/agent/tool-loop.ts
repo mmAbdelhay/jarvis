@@ -11,7 +11,7 @@ import { AGENT_TEXT, SYSTEM_PROMPT, toolActivity } from "./messages.js";
 import { buildSystemPrompt } from "./safety.js";
 import type { AgentEvent } from "./contract.js";
 import type { GateCall, GateItemStatus, RiskGate } from "./risk-gate.js";
-import type { RegisteredTool, ToolRegistry } from "./tool-registry.js";
+import { callRisk, type RegisteredTool, type ToolRegistry } from "./tool-registry.js";
 import {
   type ModelMessage,
   type ModelProvider,
@@ -172,7 +172,7 @@ async function runCalls(
       continue;
     }
     const input = deps.registry.sanitizeInput(tool, call.input);
-    if (tool.risk !== "safe") {
+    if (callRisk(tool, input) !== "safe") {
       gated.push({ call, gateCall: { callId: call.id, tool, input } });
       continue;
     }

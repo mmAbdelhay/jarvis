@@ -66,6 +66,8 @@ export type Registration = {
 export const RESERVED_SERVER_IDS: ReadonlySet<string> = new Set([
   "jarvis-pkg",
   "jarvis-diag",
+  "jarvis-settings",
+  "jarvis-apps",
   "jarvis-helper",
   "jarvis-installer",
   "jarvis-installer-backend",
