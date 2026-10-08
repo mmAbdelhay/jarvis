@@ -56,10 +56,20 @@ export function createProviderMonitor(deps: {
     try {
       const result = await deps.check();
       status = result.ok
-        ? { reachable: true }
-        : { reachable: false, error: result.error ?? "unreachable" };
+        ? { reachable: true, activeId: null, fallbackReason: null }
+        : {
+            reachable: false,
+            error: result.error ?? "unreachable",
+            activeId: null,
+            fallbackReason: null,
+          };
     } catch (error) {
-      status = { reachable: false, error: error instanceof Error ? error.message : String(error) };
+      status = {
+        reachable: false,
+        error: error instanceof Error ? error.message : String(error),
+        activeId: null,
+        fallbackReason: null,
+      };
     }
     set(status);
     return status;
@@ -74,8 +84,9 @@ export function createProviderMonitor(deps: {
       clear();
     },
     recheck,
-    reportOk: () => set({ reachable: true }),
-    reportFailure: (error) => set({ reachable: false, error }),
+    reportOk: () => set({ reachable: true, activeId: null, fallbackReason: null }),
+    reportFailure: (error) =>
+      set({ reachable: false, error, activeId: null, fallbackReason: null }),
     current: () => current,
   };
 }
