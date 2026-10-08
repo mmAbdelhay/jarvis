@@ -27,3 +27,42 @@ container lacks; re-capture these on a Debian 13 VM (commands below, run with
 | rfkill.json | `rfkill --json --output TYPE,SOFT,HARD` | reconstructed |
 | lspci-k.txt | `lspci -k` (QEMU q35 + an Intel Wi-Fi card with no bound driver) | reconstructed |
 | lsusb.txt | `lsusb` | reconstructed |
+
+### M2 Plan F additions (2026-10-08)
+
+Disk fixtures supplied by the Task 1 plan were captured in a `golang:1.24-trixie` container run with
+`--privileged` on a 64 GiB sparse file attached with `losetup -P`, laid out
+like a Windows 11 disk: `sgdisk --new=1:0:+100M --typecode=1:ef00
+--change-name=1:'EFI system partition' --new=2:0:+16M --typecode=2:0c01
+--change-name=2:'Microsoft reserved partition' --new=3:0:-1G --typecode=3:0700
+--change-name=3:'Basic data partition' --new=4:0:0 --typecode=4:2700
+--attributes=4:set:0`, then `mkfs.vfat -F 32 -n SYSTEM p1`, `mkntfs -Q -L
+Windows p3`, `mkntfs -Q -L Recovery p4`. No udev runs in a container, so
+partition nodes were made with `mknod` from `/sys/block/loopN/loopNpM/dev`.
+
+| File | Command | Source |
+|---|---|---|
+| sgdisk-p-windows.txt | `sgdisk -p /dev/loop1` (Windows layout above) | captured |
+| sgdisk-p-empty.txt | `sgdisk -p /dev/loop1` on a blank 16 GiB file | captured |
+| lsblk-windows.json | `lsblk -J -l -b -o PATH,PKNAME,TYPE,SIZE,MODEL,RM,RO,LOG-SEC /dev/loop1` | captured |
+| blkid-esp.txt, blkid-msr.txt, blkid-ntfs.txt, blkid-recovery.txt | `blkid -p -o export /dev/loop1pN` | captured |
+| blkid-bitlocker.txt | same, after `printf -- -FVE-FS- \| dd of=p4 bs=1 seek=3 conv=notrunc` | captured |
+| blkid-luks.txt | same, after `cryptsetup luksFormat --type luks2 --pbkdf argon2id --batch-mode --key-file=-` | captured |
+| blkid-ext4.txt | `blkid -p -o export /dev/mapper/jtest` after `mkfs.ext4 -F -q -L jarvis-root` | captured |
+| ntfsresize-info-clean.txt | `ntfsresize --info --no-progress-bar p3` | captured |
+| ntfsresize-info-dirty.txt | same, after a real `ntfsresize --size` (which schedules chkdsk) | captured |
+| ntfsresize-info-bitlocker.txt | same, on the BitLocker-signed p4 | captured |
+| efibootmgr.txt | `efibootmgr` (efibootmgr 18, tab before the device path) | reconstructed |
+| proc-mounts-live.txt | `cat /proc/mounts` on the live ISO (trimmed) | reconstructed |
+| proc-swaps.txt | `cat /proc/swaps` | reconstructed |
+
+Hibernation is NOT visible to `ntfsresize --info` (libntfs-3g checks
+`hiberfil.sys` only on read-write mounts), so the probe mounts the volume
+read-only with the kernel `ntfs3` driver and reads the first 4 bytes of
+`hiberfil.sys` ("HIBR"/"hibr" = hibernated or Fast Startup). Verified in the
+same container: `mount -t ntfs3 -o ro` of an image with an `HIBR` hiberfil
+succeeds and `head -c 4` reads `HIBR`.
+
+Local capture/re-capture with loop devices, privileged mounts, or QEMU is
+CI-only, not run. Fixtures were copied from the supplied plan; the
+reconstructed distro label is Rafiq.

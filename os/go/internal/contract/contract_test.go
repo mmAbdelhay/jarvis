@@ -1,5 +1,6 @@
 // Package contract pins both MCP servers' tools/list output to
-// docs/superpowers/specs/2026-10-07-jarvis-os-m1-contracts.md §1 and §6.1. If
+// docs/superpowers/specs/2026-10-07-jarvis-os-m1-contracts.md §1 and §6.1
+// and 2026-10-08-jarvis-os-m2-contracts.md §2. If
 // a tool, risk, secret, batch or input property changes, this test fails until the
 // contract file is changed first (the contract says: change it there first).
 package contract
@@ -31,10 +32,12 @@ var pkgContract = map[string]want{
 	"disk.usage":         {"safe", nil, []string{"path"}, nil},
 	"pkg.install":        {"confirm", nil, []string{"items"}, []string{"items"}},
 	"pkg.remove":         {"confirm", nil, []string{"items"}, []string{"items"}},
+	"updates.list":       {"safe", nil, nil, nil},
+	"updates.apply":      {"confirm", nil, []string{"items"}, []string{"items"}},
 }
 
 // batchTools declare _meta.jarvis.batch (contracts §6.1); no other tool may.
-var batchTools = map[string]string{"pkg.install": "items", "pkg.remove": "items"}
+var batchTools = map[string]string{"pkg.install": "items", "pkg.remove": "items", "updates.apply": "items"}
 
 var diagContract = map[string]want{
 	"sys.health":        {"safe", nil, nil, nil},
@@ -146,4 +149,24 @@ func TestJarvisPkgMatchesContract(t *testing.T) {
 
 func TestJarvisDiagMatchesContract(t *testing.T) {
 	check(t, "jarvis-diag", list(t, &mcp.Server{Name: "jarvis-diag", Tools: diagtools.Tools(diagtools.Deps{})}), diagContract)
+}
+
+func TestUpdatesApplyContractBounds(t *testing.T) {
+	for _, tool := range list(t, &mcp.Server{Name: "jarvis-pkg", Tools: pkgtools.Tools(pkgtools.Deps{})}) {
+		if tool.Name != "updates.apply" {
+			continue
+		}
+		var items struct {
+			Min int `json:"minItems"`
+			Max int `json:"maxItems"`
+		}
+		if err := json.Unmarshal(tool.InputSchema.Properties["items"], &items); err != nil {
+			t.Fatal(err)
+		}
+		if items.Min != 1 || items.Max != 200 {
+			t.Fatalf("updates.apply items bounds = %d..%d, want 1..200", items.Min, items.Max)
+		}
+		return
+	}
+	t.Fatal("missing updates.apply")
 }

@@ -54,6 +54,12 @@ func (f *Fake) FlatpakInstall(_ context.Context, refs []string) (Outcome, error)
 func (f *Fake) FlatpakRemove(_ context.Context, refs []string) (Outcome, error) {
 	return f.call("FlatpakRemove", refs)
 }
+func (f *Fake) AptUpgrade(_ context.Context, names []string) (Outcome, error) {
+	return f.call("AptUpgrade", names)
+}
+func (f *Fake) FlatpakUpdate(_ context.Context, refs []string) (Outcome, error) {
+	return f.call("FlatpakUpdate", refs)
+}
 func (f *Fake) RestartUnit(_ context.Context, name string) (Outcome, error) {
 	return f.call("RestartUnit", []string{name})
 }

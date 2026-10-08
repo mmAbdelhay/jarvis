@@ -63,15 +63,24 @@ func FlatpakRef(s string) error {
 	return nil
 }
 
+// MaxUpgradeItems bounds one update batch (M2 contracts §2: items 1-200).
+const MaxUpgradeItems = 200
+
 // AptNames checks a batch: 1..MaxItems names, each valid, no duplicates.
-func AptNames(names []string) error { return batch(names, AptName) }
+func AptNames(names []string) error { return batch(names, MaxItems, AptName) }
 
 // FlatpakRefs checks a batch of app IDs the same way.
-func FlatpakRefs(refs []string) error { return batch(refs, FlatpakRef) }
+func FlatpakRefs(refs []string) error { return batch(refs, MaxItems, FlatpakRef) }
 
-func batch(items []string, one func(string) error) error {
-	if len(items) == 0 || len(items) > MaxItems {
-		return invalid("expected 1 to %d items, got %d", MaxItems, len(items))
+// AptUpgradeNames checks an update batch: 1..MaxUpgradeItems names.
+func AptUpgradeNames(names []string) error { return batch(names, MaxUpgradeItems, AptName) }
+
+// FlatpakUpdateRefs checks an update batch of app IDs: 1..MaxUpgradeItems.
+func FlatpakUpdateRefs(refs []string) error { return batch(refs, MaxUpgradeItems, FlatpakRef) }
+
+func batch(items []string, max int, one func(string) error) error {
+	if len(items) == 0 || len(items) > max {
+		return invalid("expected 1 to %d items, got %d", max, len(items))
 	}
 	seen := map[string]bool{}
 	for _, it := range items {

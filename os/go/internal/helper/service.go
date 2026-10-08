@@ -49,7 +49,7 @@ func isProtected(pkg string) bool {
 	return pkg == "jarvisd" || strings.HasPrefix(pkg, "jarvis-")
 }
 
-// Service implements the five helper methods.
+// Service implements the helper methods (M1 contracts §2, M2 contracts §2).
 type Service struct {
 	Run  execx.Runner
 	Auth Authorizer
