@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# stub-debs.sh OUT — ten stand-in Jarvis packages, so the ISO can be built
+# stub-debs.sh OUT — eleven stand-in Jarvis packages, so the ISO can be built
 # and booted before the real E, F and G packages have landed. jarvisd keeps the real
 # maintainer scripts and a unit that runs /bin/true; jarvis-shell opens a
 # terminal (relaunch-loop snippet at the real package's path), which shows the
@@ -72,3 +72,9 @@ mkdir -p "$tmp/jarvis-model-fetch/usr/lib/systemd/system"
 printf '[Unit]\nConditionPathExists=/var/lib/jarvis/model-pending\n[Service]\nType=oneshot\nExecStart=/bin/true\n[Install]\nWantedBy=multi-user.target\n' \
   > "$tmp/jarvis-model-fetch/usr/lib/systemd/system/jarvis-model-fetch.service"
 stub jarvis-model-fetch "$packaging/jarvis-model-fetch"
+
+# jarvis-cli from its real definition (launcher, Depends on jarvisd) with a
+# one-line bundle, at the stub version so it pairs with the stub jarvisd.
+mkdir -p "$tmp/cli-dist"
+echo 'console.log("jarvis (stub)");' > "$tmp/cli-dist/jarvis.mjs"
+OS_VERSION=$version CLI_DIST=$tmp/cli-dist "$packaging/build.sh" --out "$out" jarvis-cli >/dev/null
