@@ -1,3 +1,28 @@
+find_package(Qt6 6.8 REQUIRED COMPONENTS LinguistTools)
+set(JARVIS_TEST_I18N_DIR ${CMAKE_CURRENT_BINARY_DIR}/i18n)
+set(_demo_qms "")
+foreach(lang en ar)
+  add_custom_command(OUTPUT ${JARVIS_TEST_I18N_DIR}/demo_${lang}.qm
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${JARVIS_TEST_I18N_DIR}
+    COMMAND $<TARGET_FILE:Qt6::lrelease> -silent ${CMAKE_CURRENT_SOURCE_DIR}/data/i18n/demo_${lang}.ts
+            -qm ${JARVIS_TEST_I18N_DIR}/demo_${lang}.qm
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/data/i18n/demo_${lang}.ts VERBATIM)
+  list(APPEND _demo_qms ${JARVIS_TEST_I18N_DIR}/demo_${lang}.qm)
+endforeach()
+# Stand-in for the real catalog until Task 4 (removed there).
+add_custom_command(OUTPUT ${JARVIS_TEST_I18N_DIR}/jarvis-ui_ar.qm
+  COMMAND ${CMAKE_COMMAND} -E copy ${JARVIS_TEST_I18N_DIR}/demo_ar.qm ${JARVIS_TEST_I18N_DIR}/jarvis-ui_ar.qm
+  DEPENDS ${JARVIS_TEST_I18N_DIR}/demo_ar.qm VERBATIM)
+list(APPEND _demo_qms ${JARVIS_TEST_I18N_DIR}/jarvis-ui_ar.qm)
+add_custom_target(jarvis_ui_test_qms DEPENDS ${_demo_qms})
+
+qt_add_executable(tst_language unit/tst_language.cpp)
+target_link_libraries(tst_language PRIVATE jarvis_ui_native Qt6::Gui Qt6::Test)
+target_compile_definitions(tst_language PRIVATE JARVIS_TEST_I18N_DIR="${JARVIS_TEST_I18N_DIR}")
+add_dependencies(tst_language jarvis_ui_test_qms)
+add_test(NAME tst_language COMMAND tst_language)
+set_tests_properties(tst_language PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" LABELS unit)
+
 set(JARVIS_QML_DIR "${QT_QML_OUTPUT_DIRECTORY}")
 
 qt_add_executable(tst_osrelease unit/tst_osrelease.cpp)
@@ -6,12 +31,13 @@ add_test(NAME tst_osrelease COMMAND tst_osrelease)
 set_tests_properties(tst_osrelease PROPERTIES LABELS unit)
 
 qt_add_executable(tst_ui tst_ui.cpp)
-target_link_libraries(tst_ui PRIVATE Qt6::Quick Qt6::QuickControls2 Qt6::QuickTest)
+target_link_libraries(tst_ui PRIVATE jarvis_ui_native Qt6::Quick Qt6::QuickControls2 Qt6::QuickTest)
 target_compile_definitions(tst_ui PRIVATE
   QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml"
   JARVIS_QML_DIR="${JARVIS_QML_DIR}"
-  JARVIS_TEST_OS_RELEASE="${CMAKE_CURRENT_SOURCE_DIR}/data/os-release")
-add_dependencies(tst_ui jarvis_ui)
+  JARVIS_TEST_OS_RELEASE="${CMAKE_CURRENT_SOURCE_DIR}/data/os-release"
+  JARVIS_TEST_I18N_DIR="${JARVIS_TEST_I18N_DIR}")
+add_dependencies(tst_ui jarvis_ui jarvis_ui_test_qms)
 add_test(NAME tst_ui COMMAND tst_ui)
 set_tests_properties(tst_ui PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" LABELS qml TIMEOUT 120)
 
