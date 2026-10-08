@@ -1,0 +1,8 @@
+#!/bin/sh
+# Jarvis Workspace launcher (M4 contracts §6.16): a private config directory so
+# the app never shares jarvisd's config or run directory. No setuid sandbox;
+# Chromium uses unprivileged user namespaces.
+JARVIS_CONFIG_DIR=${JARVIS_WORKSPACE_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/jarvis-workspace}
+export JARVIS_CONFIG_DIR
+mkdir -p "$JARVIS_CONFIG_DIR"
+exec /opt/jarvis-workspace/jarvis "$@"

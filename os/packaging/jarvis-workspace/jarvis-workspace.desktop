@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Jarvis Workspace
+Name[ar]=مساحة عمل جارفيس
+GenericName=Coding workspace
+GenericName[ar]=مساحة عمل برمجية
+Comment=Coding agents, editor, terminal, databases and APIs in one window
+Comment[ar]=وكلاء البرمجة والمحرّر والطرفية وقواعد البيانات وواجهات البرمجة في نافذة واحدة
+Exec=/usr/bin/jarvis-workspace --ozone-platform-hint=auto %U
+Icon=jarvis-workspace
+Terminal=false
+Categories=Development;IDE;
+StartupWMClass=jarvis

@@ -1,0 +1,16 @@
+Package: jarvis-workspace
+Version: @VERSION@
+Architecture: amd64
+Maintainer: Muhammad AbdElHay <mmAbdelhay@users.noreply.github.com>
+Installed-Size: @INSTALLED_SIZE@
+Depends: xdg-utils
+Recommends: git
+Section: devel
+Priority: optional
+Homepage: @HOME_URL@
+Description: Jarvis Workspace: coding agents, editor and terminals in one window
+ The Jarvis desktop app on @DISTRO_NAME@: coding agents in real terminals,
+ an editor, and database, API and cluster tabs. It runs its own core with its
+ own configuration directory, separate from the Jarvis assistant of the
+ desktop, and reads the assistant's provider settings only if you allow it.
+ Optional; not installed by default.
