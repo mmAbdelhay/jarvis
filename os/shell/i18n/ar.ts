@@ -141,6 +141,10 @@
             <source>Settings</source>
             <translation>الإعدادات</translation>
         </message>
+        <message>
+            <source>Switch to classic</source>
+            <translation>الانتقال إلى الوضع الكلاسيكي</translation>
+        </message>
     </context>
     <context>
         <name>CardModel</name>
@@ -1139,6 +1143,10 @@
         <message>
             <source>Remove the installed tool server %1.</source>
             <translation>أزِل خادم الأدوات المثبّت %1.</translation>
+        </message>
+        <message>
+            <source>Jarvis isn't responding. Keep waiting, or switch to classic mode.</source>
+            <translation>جارفيس لا يستجيب. انتظر قليلًا، أو انتقل إلى الوضع الكلاسيكي.</translation>
         </message>
     </context>
     <context>

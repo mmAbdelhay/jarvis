@@ -231,6 +231,39 @@ private slots:
         QCOMPARE(f.shell->bannerText(), u"Connecting to Jarvis…"_s);
     }
 
+    // M4 contracts §6.14: jarvisd down while the shell runs -> a banner with
+    // "Switch to classic". Only after a grace period, so a quick reconnect
+    // does not flash it.
+    void daemonDownOffersClassicMode()
+    {
+        Fixture f;
+        int switches = 0;
+        f.shell->setClassicSwitcher([&switches] { ++switches; return true; });
+        QSignalSpy banner(f.shell.get(), &ShellController::bannerChanged);
+        f.shell->setClassicOfferDelay(50);
+        QVERIFY(!f.shell->offerClassic());
+        QTRY_VERIFY(f.shell->offerClassic()); // never connected: jarvisd is not running
+        QVERIFY(banner.count() >= 1);
+        QCOMPARE(f.shell->bannerText(), u"Jarvis isn't responding. Keep waiting, or switch to classic mode."_s);
+        f.shell->switchToClassic();
+        QCOMPARE(switches, 1);
+
+        QVERIFY(f.open());
+        QVERIFY(!f.shell->offerClassic()); // connected: no offer
+        f.daemon.dropClients();
+        QTRY_COMPARE(f.shell->connection(), u"reconnecting"_s);
+        QVERIFY(!f.shell->offerClassic()); // not yet: it may come right back
+        QTRY_COMPARE_WITH_TIMEOUT(f.shell->connection(), u"open"_s, 3000);
+        QVERIFY(!f.shell->offerClassic());
+    }
+
+    void switchingWithoutASwitcherDoesNothing()
+    {
+        Fixture f;
+        f.shell->setClassicSwitcher({});
+        f.shell->switchToClassic(); // must not crash
+    }
+
     void firstBootShowsSetup()
     {
         Fixture f;

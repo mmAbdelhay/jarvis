@@ -13,6 +13,7 @@ TestCase {
 
     Component { id: rootComponent; ShellRoot {} }
     Component { id: spyComponent; SignalSpy {} }
+    Component { id: bannerComponent; Banner {} }
 
     function makeRoot() {
         const root = createTemporaryObject(rootComponent, testCase, { shell: testShell, width: 1440, height: 900 })
@@ -27,6 +28,19 @@ TestCase {
         compare(findChild(root, "loadingText").text, "Connecting to Jarvis…")
         compare(findChild(root, "bannerText").text, "Connecting to Jarvis…")
         verify(!findChild(root, "bannerDoctor").visible)
+        verify(!findChild(root, "bannerClassic").visible) // no classic switcher in tests
+    }
+
+    // M4 contracts §6.14: the jarvisd-down banner's way out.
+    function test_bannerOffersClassic() {
+        const banner = createTemporaryObject(bannerComponent, testCase, { width: 1000, text: "x", showClassic: true })
+        waitForRendering(banner)
+        const button = findChild(banner, "bannerClassic")
+        verify(button.visible)
+        compare(button.text, "Switch to classic")
+        const spy = createTemporaryObject(spyComponent, testCase, { target: banner, signalName: "classicRequested" })
+        mouseClick(button)
+        compare(spy.count, 1)
     }
 
     function test_navigationAndEscape() {

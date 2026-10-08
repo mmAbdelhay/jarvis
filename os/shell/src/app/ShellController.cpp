@@ -30,7 +30,13 @@ ShellController::ShellController(ControlClient* client, QObject* parent)
     , m_pairing(new PairingModel(this))
     , m_phone(new PhoneModel(this))
     , m_launcher([](const QString& program) { return QProcess::startDetached(program, {}); })
+    , m_daemonDownTimer(new QTimer(this))
 {
+    // Contracts §6.14: jarvisd unreachable this long -> offer classic mode.
+    m_daemonDownTimer->setSingleShot(true);
+    m_daemonDownTimer->setInterval(15000);
+    connect(m_daemonDownTimer, &QTimer::timeout, this, [this] { setDaemonDown(true); });
+    m_daemonDownTimer->start(); // not connected yet
     connect(client, &ControlClient::opened, this, &ShellController::onOpened);
     connect(client, &ControlClient::closed, this, &ShellController::onClosed);
     connect(client, &ControlClient::push, this, &ShellController::onPush);
@@ -236,8 +242,37 @@ bool ShellController::offerDoctor() const
     return m_connection == u"open" && !m_providerReachable && m_system->known() && !m_system->online();
 }
 
+void ShellController::setClassicSwitcher(ClassicSwitcher switcher)
+{
+    m_classicSwitcher = std::move(switcher);
+    emit bannerChanged();
+}
+
+void ShellController::setClassicOfferDelay(int ms)
+{
+    m_daemonDownTimer->setInterval(ms);
+    if (m_daemonDownTimer->isActive())
+        m_daemonDownTimer->start();
+}
+
+void ShellController::setDaemonDown(bool down)
+{
+    if (down == m_daemonDown)
+        return;
+    m_daemonDown = down;
+    emit bannerChanged();
+}
+
+void ShellController::switchToClassic()
+{
+    if (m_classicSwitcher)
+        m_classicSwitcher();
+}
+
 QString ShellController::bannerText() const
 {
+    if (offerClassic())
+        return tr("Jarvis isn't responding. Keep waiting, or switch to classic mode.");
     if (m_connection == u"connecting")
         return tr("Connecting to Jarvis…");
     if (m_connection == u"reconnecting")
@@ -267,6 +302,12 @@ void ShellController::setConnection(const QString& connection)
     if (connection == m_connection)
         return;
     m_connection = connection;
+    if (connection == u"open") {
+        m_daemonDownTimer->stop();
+        setDaemonDown(false);
+    } else if (!m_daemonDownTimer->isActive() && !m_daemonDown) {
+        m_daemonDownTimer->start();
+    }
     emit connectionChanged();
     emit bannerChanged();
     emit providerStatusChanged(); // offerDoctor depends on the connection

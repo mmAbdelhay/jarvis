@@ -5,6 +5,7 @@
 #include <QJsonObject>
 #include <QObject>
 #include <QSet>
+#include <QTimer>
 #include <QtQml/qqmlregistration.h>
 #include <functional>
 
@@ -53,6 +54,7 @@ class ShellController : public QObject {
     Q_PROPERTY(bool providerReachable READ providerReachable NOTIFY providerStatusChanged)
     Q_PROPERTY(QString providerError READ providerError NOTIFY providerStatusChanged)
     Q_PROPERTY(QString bannerText READ bannerText NOTIFY bannerChanged)
+    Q_PROPERTY(bool offerClassic READ offerClassic NOTIFY bannerChanged)
     Q_PROPERTY(bool updatesChecking READ updatesChecking NOTIFY updatesChanged)
     Q_PROPERTY(QString updatesNote READ updatesNote NOTIFY updatesChanged)
     Q_PROPERTY(QString language READ language NOTIFY languageChanged)
@@ -105,6 +107,16 @@ public:
     QString updatesNote() const { return m_updatesNote; }
 
     void setLauncher(Launcher launcher) { m_launcher = std::move(launcher); }
+
+    // Contracts §6.14: jarvisd unreachable for the grace period while the
+    // shell runs -> the banner offers "Switch to classic".
+    bool offerClassic() const { return m_daemonDown && m_classicSwitcher; }
+    using ClassicSwitcher = std::function<bool()>;
+    // main(): write the classic-fallback marker and quit; the session guard
+    // then starts jarvis-classic. Unset: the offer is never shown.
+    void setClassicSwitcher(ClassicSwitcher switcher);
+    void setClassicOfferDelay(int ms);
+    Q_INVOKABLE void switchToClassic();
 
     Q_INVOKABLE bool sendPrompt(const QString& text);
     Q_INVOKABLE void stop();
@@ -185,6 +197,10 @@ private:
     QString m_providerError;
     QSet<QString> m_chatCardIds; // chat cards not yet closed, for the single card-closed notice
     Launcher m_launcher;
+    ClassicSwitcher m_classicSwitcher;
+    QTimer* m_daemonDownTimer;
+    bool m_daemonDown = false;
+    void setDaemonDown(bool down);
     bool m_updatesChecking = false;
     QString m_updatesNote;
 };

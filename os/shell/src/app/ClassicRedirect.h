@@ -16,4 +16,9 @@ QString classicMarkerPath();
 bool redirectToClassic(const QString& markerPath,
                        const std::function<bool(const QString& program, const QStringList& args)>& start);
 
+// "Switch to classic" from the jarvisd-down banner (contracts §6.14): writes
+// the marker jarvis-shell-guard reads ("reason=<reason>\nsince=<epoch>\n"),
+// its directory private (0700) like the guard's. False when it cannot.
+bool writeClassicMarker(const QString& markerPath, const QString& reason, qint64 since);
+
 } // namespace jarvis::shell

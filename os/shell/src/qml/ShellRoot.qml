@@ -50,7 +50,9 @@ Rectangle {
             showDoctor: root.shell.offerDoctor
             showSettings: root.shell.connection === "open" && !root.shell.providerReachable
             onDoctorRequested: root.shell.openDoctor()
+            showClassic: root.shell.offerClassic
             onSettingsRequested: root.shell.showView("settings")
+            onClassicRequested: root.shell.switchToClassic()
         }
 
         RowLayout {

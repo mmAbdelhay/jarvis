@@ -1,9 +1,11 @@
 #include <QCommandLineParser>
+#include <QDateTime>
 #include <QGuiApplication>
 #include <QProcess>
 #include <QQmlApplicationEngine>
 #include <QQuickStyle>
 #include <QQuickWindow>
+#include <QStandardPaths>
 #include <QtQml/qqmlextensionplugin.h>
 
 #include "Language.h"
@@ -85,6 +87,19 @@ int main(int argc, char* argv[])
         return 1;
 
     const bool layerShell = !parser.isSet(windowedOption) && QGuiApplication::platformName().startsWith(u"wayland"_s);
+    // Contracts §6.14: jarvisd down while the shell runs -> "Switch to classic".
+    // Only in the Rafiq session (the layer-shell desktop with jarvis-classic
+    // installed): write the marker jarvis-shell-guard reads and quit cleanly;
+    // the session loop relaunches the guard, which starts jarvis-classic.
+    if (layerShell && !QStandardPaths::findExecutable(u"jarvis-classic"_s).isEmpty()) {
+        shell->setClassicSwitcher([] {
+            if (!jarvis::shell::writeClassicMarker(jarvis::shell::classicMarkerPath(), u"user"_s,
+                                                   QDateTime::currentSecsSinceEpoch()))
+                return false;
+            QCoreApplication::exit(0);
+            return true;
+        });
+    }
     ShellSurface surface(window, layerShell);
     QObject::connect(&instance, &SingleInstance::messageReceived, &surface, [&surface, shell](const QByteArray& message) {
         surface.summon();

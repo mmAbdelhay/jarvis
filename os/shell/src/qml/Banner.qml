@@ -12,8 +12,10 @@ Rectangle {
     property string text
     property bool showDoctor: false   // ShellController.offerDoctor (contracts §6.8)
     property bool showSettings: false
+    property bool showClassic: false  // ShellController.offerClassic (M4 contracts §6.14)
     signal doctorRequested()
     signal settingsRequested()
+    signal classicRequested()
 
     implicitHeight: row.implicitHeight + 20
     color: Theme.warnBannerBg
@@ -49,6 +51,14 @@ Rectangle {
             implicitHeight: 36
             text: qsTr("Settings")
             onClicked: root.settingsRequested()
+        }
+        ActionButton {
+            objectName: "bannerClassic"
+            visible: root.showClassic
+            variant: "ghost"
+            implicitHeight: 36
+            text: qsTr("Switch to classic")
+            onClicked: root.classicRequested()
         }
     }
 }

@@ -141,6 +141,10 @@
             <source>Settings</source>
             <translation>Settings</translation>
         </message>
+        <message>
+            <source>Switch to classic</source>
+            <translation>Switch to classic</translation>
+        </message>
     </context>
     <context>
         <name>CardModel</name>
@@ -1135,6 +1139,10 @@
         <message>
             <source>Remove the installed tool server %1.</source>
             <translation>Remove the installed tool server %1.</translation>
+        </message>
+        <message>
+            <source>Jarvis isn't responding. Keep waiting, or switch to classic mode.</source>
+            <translation>Jarvis isn't responding. Keep waiting, or switch to classic mode.</translation>
         </message>
     </context>
     <context>
