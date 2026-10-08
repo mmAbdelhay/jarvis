@@ -1,6 +1,7 @@
 # jarvis-idle line for labwc's autostart (Plan P owns /etc/xdg/labwc/autostart).
 # Live boots autologin a user whose password nobody typed, so they never lock
 # on idle. Nothing listens for lock-session there, so rc.xml binds Super+L
-# directly to jarvis-lock (deliberate deviation from contracts 5.15).
+# directly to jarvis-lock (deliberate deviation from contracts 5.15). The cost:
+# a Super+L locker that crashes is not relaunched (threat model R6).
 # Installed systems always run the idle loop.
 if [ ! -d "${JARVIS_LIVE_MEDIUM:-/run/live/medium}" ]; then /usr/libexec/jarvis/jarvis-idle-loop & fi

@@ -4,7 +4,8 @@
   /etc/xdg/labwc/rc.xml. Super alone (on release) focuses the chat; Super+Space
   starts, or sends, a voice message (M3 contracts section 5.15); Super+L runs
   jarvis-lock directly, like the session's rc.xml, so it also works on live
-  boots without jarvis-idle (plan P's deliberate deviation from section 5.15);
+  boots without jarvis-idle (plan P's deliberate deviation from section 5.15;
+  a crashed Super+L locker is not relaunched, docs/os/threat-model.md R6);
   Ctrl+Alt+T opens foot even when an app window has focus.
 -->
 <labwc_config>

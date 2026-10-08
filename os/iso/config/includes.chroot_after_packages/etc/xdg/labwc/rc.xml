@@ -2,8 +2,11 @@
 <!-- labwc for Rafiq. <default/> keeps the stock key binds.
      Super alone on release focuses Jarvis; Super+key chords cancel it.
      Super+Space toggles push-to-talk; Super+L runs jarvis-lock directly,
-     including live boots without jarvis-idle (Task 7's deliberate deviation
-     from contracts §5.15). Ctrl+Alt+T opens foot. -->
+     including live boots without jarvis-idle (deliberate deviation from
+     contracts §5.15). Trade-off: jarvis-idle relaunches only lockers it
+     started, so a Super+L locker that crashes or loses its lock leaves the
+     session locked with no lock surface until a VT switch (fails closed;
+     docs/os/threat-model.md R6). Ctrl+Alt+T opens foot. -->
 <labwc_config>
   <core>
     <decoration>server</decoration>
