@@ -134,10 +134,10 @@ ShellController::ShellController(ControlClient* client, QObject* parent)
     });
     // Contracts §2: install/remove happen through tools and cards, never a channel.
     connect(m_registry, &RegistryModel::installRequested, this, [this](const QString& id, const QString& version) {
-        askJarvis(u"Install the tool server %1 version %2 from the Jarvis tool registry."_s.arg(id, version)); // i18n: ignore
+        askJarvis(tr("Install the tool server %1 version %2 from the Jarvis tool registry.").arg(id, version));
     });
     connect(m_registry, &RegistryModel::removeRequested, this, [this](const QString& id) {
-        askJarvis(u"Remove the installed tool server %1."_s.arg(id)); // i18n: ignore
+        askJarvis(tr("Remove the installed tool server %1.").arg(id));
     });
     // Settings → Phone (M3 contracts §5.9).
     const auto phoneStatus = [this](const ControlResult& r) {
@@ -579,8 +579,7 @@ void ShellController::askForUpdates()
 {
     // Spec §8: "update my computer" -> jarvisd runs updates.list and shows one batch card.
     showView(u"chat"_s);
-    // Model-only prompts stay English (contracts §6.11).
-    sendPrompt(u"Update my computer"_s); // i18n: ignore
+    sendPrompt(tr("Update my computer"));
 }
 
 void ShellController::checkForUpdates()

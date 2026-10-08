@@ -33,6 +33,87 @@ private slots:
     }
     void cleanupTestCase() { m_language->setLanguage(u"en"_s); }
 
+    void generatedPromptCatalogIsArabic()
+    {
+        QCOMPARE(ShellController::tr("Update my computer"), u"حدّث حاسوبي"_s);
+        QCOMPARE(ShellController::tr("Install the tool server %1 version %2 from the Jarvis tool registry.").arg(u"jarvis-clock"_s, u"1.0"_s),
+                 u"ثبّت خادم الأدوات jarvis-clock بالإصدار 1.0 من سجل أدوات جارفيس."_s);
+        QCOMPARE(ShellController::tr("Remove the installed tool server %1.").arg(u"jarvis-clock"_s), u"أزِل خادم الأدوات المثبّت jarvis-clock."_s);
+    }
+
+    void generatedPromptsUseArabic_data()
+    {
+        QTest::addColumn<QString>("action");
+        QTest::addColumn<QString>("expected");
+        QTest::newRow("updates") << u"updates"_s << u"حدّث حاسوبي"_s;
+        QTest::newRow("install") << u"install"_s << u"ثبّت خادم الأدوات jarvis-clock بالإصدار 1.0 من سجل أدوات جارفيس."_s;
+        QTest::newRow("remove") << u"remove"_s << u"أزِل خادم الأدوات المثبّت jarvis-clock."_s;
+    }
+
+    void generatedPromptsUseArabic()
+    {
+        QFETCH(QString, action);
+        QFETCH(QString, expected);
+        ShellFixture f;
+        QVERIFY(f.open());
+        if (action == u"updates")
+            f.shell->askForUpdates();
+        else if (action == u"install")
+            emit f.shell->registry()->installRequested(u"jarvis-clock"_s, u"1.0"_s);
+        else
+            emit f.shell->registry()->removeRequested(u"jarvis-clock"_s);
+        QTRY_COMPARE(f.requests(u"agent:prompt"_s).size(), 1);
+        QCOMPARE(f.requests(u"agent:prompt"_s).first().value("a").toArray().first().toObject().value("text").toString(), expected);
+    }
+
+    void languagePushRetranslatesOpenCardAndModels()
+    {
+        QVERIFY(m_language->setLanguage(u"en"_s));
+        ShellFixture f;
+        f.shell->setLanguageApplier([this](const QString& code) { return m_language->setLanguage(code); }, u"en"_s);
+        QVERIFY(f.shell->chatCard()->load(fixture::card(u"c1"_s, items(3))));
+        auto* card = f.shell->chatCard();
+        card->setTicked(0, false);
+        QCOMPARE(card->headline(), u"Jarvis wants to do 3 things"_s);
+        QCOMPARE(card->approveLabel(), u"Approve 2 of 3"_s);
+        f.shell->memory()->applyItems(QJsonArray{QJsonObject{{"id", "m1"}, {"kind", "fact"}, {"text", "unchanged"}, {"createdAt", 1}}});
+        f.shell->audit()->applyEntries(QJsonArray{QJsonObject{{"ts", 1}, {"title", "unchanged"}, {"decision", "approved"}, {"result", "ok"}}}, false);
+        f.shell->registry()->applyList(QJsonObject{{"available", QJsonArray{QJsonObject{
+            {"id", "jarvis-clock"}, {"version", "1.0"}, {"tier", "official"},
+            {"name", "Clock"}, {"description", "unchanged"}, {"permissions", QJsonObject{}}, {"tools", QJsonArray{}}}}}});
+        auto snapshot = fixture::snapshot(false);
+        snapshot.insert("model", QJsonObject{{"model", "test"}, {"local", true}, {"supportsTools", true}});
+        f.shell->system()->applySnapshot(snapshot);
+        f.shell->system()->applyUpdateCounts(2, 2);
+        QSignalSpy registryChanged(f.shell->registry(), &QAbstractItemModel::dataChanged);
+        QSignalSpy cardChanged(card, &CardModel::changed);
+        QSignalSpy systemChanged(f.shell->system(), &SystemModel::changed);
+        QSignalSpy bannerChanged(f.shell.get(), &ShellController::bannerChanged);
+        QSignalSpy auditChanged(f.shell->audit(), &QAbstractItemModel::dataChanged);
+        QSignalSpy memoryChanged(f.shell->memory(), &QAbstractItemModel::dataChanged);
+        // Deliver the control push through the real controller connection;
+        // no local socket is needed for this model notification regression.
+        emit f.client->push(u"ui:language"_s, QJsonObject{{"lang", "ar"}});
+        QTRY_COMPARE(f.shell->language(), u"ar"_s);
+        QVERIFY(!cardChanged.isEmpty());
+        QVERIFY(!systemChanged.isEmpty());
+        QVERIFY(!bannerChanged.isEmpty());
+        QVERIFY(!auditChanged.isEmpty());
+        QVERIFY(!memoryChanged.isEmpty());
+        QVERIFY(!registryChanged.isEmpty());
+        QCOMPARE(card->headline(), u"يريد جارفيس تنفيذ 3 إجراءات"_s);
+        QCOMPARE(card->approveLabel(), u"الموافقة على 2 من 3"_s);
+        QCOMPARE(f.shell->system()->memoryText(), u"0.0 / 0.0 غيغابايت"_s);
+        QCOMPARE(f.shell->system()->modelDetail(), u"على أجهزتك · يستطيع التحكم في النظام"_s);
+        QCOMPARE(f.shell->system()->updatesText(), u"تحديثان · تحديثان أمنيان"_s);
+        QCOMPARE(f.shell->registry()->data(f.shell->registry()->index(0), RegistryModel::TierLabelRole).toString(), u"رسمي"_s);
+        QCOMPARE(card->cardId(), u"c1"_s);
+        QCOMPARE(card->tickedCount(), 2);
+        QCOMPARE(f.shell->system()->networkDetail(), u"الاتصال: متصل"_s);
+        QCOMPARE(f.shell->audit()->data(f.shell->audit()->index(0), AuditModel::DecisionLabelRole).toString(), u"تمت الموافقة"_s);
+        QCOMPARE(f.shell->memory()->data(f.shell->memory()->index(0), MemoryModel::KindLabelRole).toString(), u"معلومة"_s);
+    }
+
     void cardHeadlineUsesArabicPlurals()
     {
         CardModel two, three, eleven, hundred;

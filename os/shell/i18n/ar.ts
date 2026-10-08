@@ -491,6 +491,18 @@
             <source>Arabic isn't installed on this computer, so Jarvis stays in English.</source>
             <translation>العربية غير مثبّتة على هذا الحاسوب، لذا يبقى جارفيس بالإنجليزية.</translation>
         </message>
+        <message>
+            <source>Update my computer</source>
+            <translation>حدّث حاسوبي</translation>
+        </message>
+        <message>
+            <source>Install the tool server %1 version %2 from the Jarvis tool registry.</source>
+            <translation>ثبّت خادم الأدوات %1 بالإصدار %2 من سجل أدوات جارفيس.</translation>
+        </message>
+        <message>
+            <source>Remove the installed tool server %1.</source>
+            <translation>أزِل خادم الأدوات المثبّت %1.</translation>
+        </message>
     </context>
     <context>
         <name>SystemModel</name>

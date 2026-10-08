@@ -487,6 +487,18 @@
             <source>Arabic isn't installed on this computer, so Jarvis stays in English.</source>
             <translation>Arabic isn't installed on this computer, so Jarvis stays in English.</translation>
         </message>
+        <message>
+            <source>Update my computer</source>
+            <translation>Update my computer</translation>
+        </message>
+        <message>
+            <source>Install the tool server %1 version %2 from the Jarvis tool registry.</source>
+            <translation>Install the tool server %1 version %2 from the Jarvis tool registry.</translation>
+        </message>
+        <message>
+            <source>Remove the installed tool server %1.</source>
+            <translation>Remove the installed tool server %1.</translation>
+        </message>
     </context>
     <context>
         <name>SystemModel</name>
