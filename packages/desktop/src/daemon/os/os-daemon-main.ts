@@ -28,8 +28,15 @@ import {
   connectMcpServer,
   nodeMcpSpawn,
   nodeSecretToolExec,
+  MEMORY_KEY_LABEL,
   PROVIDER_KEY_ATTRIBUTE,
 } from "@jarvis/platform/model";
+import {
+  createOllamaEmbedder,
+  openVectorCache,
+  removeMemoryFile,
+  type VectorCache,
+} from "@jarvis/platform/store";
 import { DAEMON_EXIT, DAEMON_USAGE, parseDaemonArgs } from "../args.js";
 import { nodeControlDeps } from "../control/deps.js";
 import { runDirectoryFor } from "../control/endpoint.js";
@@ -44,6 +51,7 @@ import {
   scrubSecrets,
 } from "../log-file.js";
 import { createOsAgent } from "./agent-service.js";
+import { createMemoryBackendOpener } from "./memory-backend.js";
 import { connectOsMcpServers } from "./mcp-servers.js";
 import { createModelStateReader } from "./model-state-reader.js";
 import { createOsBinding } from "./os-binding.js";
@@ -52,9 +60,11 @@ import {
   MODEL_STATE_PATH,
   mcpConfigDir,
   mcpDirFrom,
+  memoryDbPath,
   osConfigPath,
   readOsBuildId,
   registryIndexPath,
+  toolIndexPath,
 } from "./os-paths.js";
 import { buildProvider } from "./provider-factory.js";
 import {
@@ -174,6 +184,28 @@ async function main(argv: readonly string[]): Promise<void> {
       }),
     log: info,
   });
+  let vectorCache: VectorCache | undefined;
+  try {
+    vectorCache = openVectorCache({ path: toolIndexPath(home), now: Date.now });
+  } catch (thrown) {
+    error(`the tool index cache is unavailable: ${describe(thrown)}`);
+  }
+  const embedder = createOllamaEmbedder({
+    fetch: (url, init) => fetch(url, init),
+    now: Date.now,
+    log: info,
+    ...(vectorCache === undefined ? {} : { cache: vectorCache }),
+  });
+  const memory = createMemoryBackendOpener({
+    path: memoryDbPath(home),
+    secrets: createSecretToolStore(nodeSecretToolExec(env), { label: MEMORY_KEY_LABEL }),
+    fileExists: existsSync,
+    removeFile: removeMemoryFile,
+    randomKey: () => randomBytes(32),
+    newId: () => randomBytes(8).toString("hex"),
+    now: Date.now,
+    log: info,
+  });
   let push: (channel: string, payload: unknown) => void = () => {};
   const agent = createOsAgent({
     push: (channel, payload) => push(channel, payload),
@@ -196,6 +228,8 @@ async function main(argv: readonly string[]): Promise<void> {
         log: info,
       }),
     registryServers,
+    embedder,
+    memory,
     watchRegistry: (onChange) => nodeWatchDirectory(mcpConfigDir(home), onChange, info),
     readModelState: createModelStateReader({
       path: MODEL_STATE_PATH,
@@ -231,7 +265,10 @@ async function main(argv: readonly string[]): Promise<void> {
   server.onConnect(() => agent.resync());
 
   const shutdown = createShutdown({
-    stopCore: () => agent.shutdown(),
+    stopCore: async () => {
+      await agent.shutdown();
+      vectorCache?.close();
+    },
     closeControl: () => server.close(),
     exit: (code) => {
       restoreConsole();

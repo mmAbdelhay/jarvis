@@ -5,16 +5,20 @@ import {
   type DoctorState,
   type McpSession,
   type McpTool,
+  type MemoryBackend,
+  type MemoryRecord,
   type ModelEvent,
   type ModelProvider,
   parseFakeScript,
   ProviderError,
+  SAFETY_RULES,
   type SysSnapshot,
 } from "@jarvis/core";
 import { createMemorySecretStore, providerAccount } from "@jarvis/platform/model";
 import { describe, expect, it } from "vitest";
 import { createOsAgent, OsAgentError, type OsAgentDeps } from "./agent-service.js";
 import type { ConfigIo } from "./provider-config.js";
+import type { MemoryOpener } from "./memory-backend.js";
 import { EMPTY_REGISTRY, type LoadedRegistry } from "./registry-servers.js";
 
 const pkgTools: McpTool[] = [
@@ -1198,5 +1202,159 @@ describe("registry servers in jarvisd (contracts §3, §7)", () => {
       permissions: { network: true, paths: ["~/Old"] },
       tools: [],
     });
+  });
+});
+
+function memoryOpener(): MemoryOpener & { rows: MemoryRecord[] } {
+  const rows: MemoryRecord[] = [];
+  let next = 0;
+  const backend: MemoryBackend = {
+    add: async (memory) => {
+      const id = `mem${++next}`;
+      rows.push({ id, ...memory });
+      return id;
+    },
+    list: async (limit) => [...rows].reverse().slice(0, limit),
+    all: async () => [...rows],
+    delete: async (id) => {
+      const index = rows.findIndex((r) => r.id === id);
+      if (index >= 0) rows.splice(index, 1);
+      return index >= 0;
+    },
+    clear: async () => {
+      rows.length = 0;
+    },
+  };
+  return { rows, open: async () => backend, reset: async () => {}, close: () => {} };
+}
+
+describe("memory and tool search in jarvisd (design §3.8, §3.9)", () => {
+  function recording(requests: { system: string; tools: string[] }[]): ModelProvider {
+    return {
+      async *chat(request) {
+        requests.push({ system: request.system, tools: request.tools.map((t) => t.name) });
+        yield { type: "text", delta: '{"summary": "talked", "facts": []}' };
+        yield { type: "done", usage: { inputTokens: 0, outputTokens: 0 } };
+      },
+      probe: async () => ({ ok: true, supportsTools: true, models: [] }),
+      listModels: async () => [],
+      reachable: async () => ({ ok: true }),
+    };
+  }
+  const LOCAL_YAML =
+    "os:\n  providers:\n    - { id: local, kind: ollama, baseUrl: http://127.0.0.1:11434, model: m }\n";
+
+  it("recalls a remembered action into the next request, before the rules", async () => {
+    const requests: { system: string; tools: string[] }[] = [];
+    const memory = memoryOpener();
+    memory.rows.push({
+      id: "f1",
+      kind: "fact",
+      text: "Install Firefox (pkg.install), approved on 2026-10-06.",
+      createdAt: Date.now() - 86_400_000,
+      embedding: null,
+      embeddingModel: null,
+    });
+    const h = harness({ makeProvider: () => recording(requests), memory, now: Date.now });
+    h.files.set(YAML, LOCAL_YAML);
+    await h.agent.start();
+    h.agent.prompt("what did I install last week?");
+    await h.until(() => h.events().some((e) => e.type === "turn-end"));
+    const system = requests[0]?.system ?? "";
+    expect(system).toContain("Install Firefox");
+    expect(system.indexOf("<memory-notes>")).toBeLessThan(system.indexOf(SAFETY_RULES));
+    expect(system.endsWith(SAFETY_RULES)).toBe(true);
+  });
+
+  it("lists, deletes and forgets memories through the agent", async () => {
+    const memory = memoryOpener();
+    const h = harness({ memory, makeProvider: () => recording([]) });
+    h.files.set(YAML, LOCAL_YAML);
+    await h.agent.start();
+    memory.rows.push(
+      { id: "a", kind: "fact", text: "one", createdAt: 1, embedding: null, embeddingModel: null },
+      {
+        id: "b",
+        kind: "summary",
+        text: "two",
+        createdAt: 2,
+        embedding: null,
+        embeddingModel: null,
+      },
+    );
+    await expect(h.agent.memoryList(10)).resolves.toEqual([
+      { id: "b", kind: "summary", text: "two", createdAt: 2 },
+      { id: "a", kind: "fact", text: "one", createdAt: 1 },
+    ]);
+    await expect(h.agent.memoryDelete("a")).resolves.toBeNull();
+    await expect(h.agent.memoryClear()).resolves.toBeNull();
+    expect(memory.rows).toEqual([]);
+  });
+
+  it("turns memory off and on (contracts §7 #9): off persists, lists as unsupported", async () => {
+    const memory = memoryOpener();
+    const h = harness({ memory, makeProvider: () => recording([]) });
+    h.files.set(YAML, LOCAL_YAML);
+    await h.agent.start();
+    await expect(h.agent.memorySetEnabled(false)).resolves.toBeNull();
+    expect(h.files.get(YAML)).toContain("enabled: false");
+    await expect(h.agent.memoryList(10)).rejects.toMatchObject({
+      code: "unsupported",
+      message: "Memory is off",
+    });
+    await expect(h.agent.memorySetEnabled(true)).resolves.toBeNull();
+    await expect(h.agent.memoryList(10)).resolves.toEqual([]);
+  });
+
+  it("writes a summary at shutdown with a request that also ends with the rules", async () => {
+    const requests: { system: string; tools: string[] }[] = [];
+    const memory = memoryOpener();
+    const h = harness({ makeProvider: () => recording(requests), memory });
+    h.files.set(YAML, LOCAL_YAML);
+    await h.agent.start();
+    h.agent.prompt("hello");
+    await h.until(() => h.events().some((e) => e.type === "turn-end"));
+    await h.agent.shutdown();
+    expect(requests).toHaveLength(2);
+    expect(requests[1]?.system.endsWith(SAFETY_RULES)).toBe(true);
+    expect(memory.rows.map((r) => r.text)).toEqual(["talked"]);
+  });
+
+  it("keeps memory off under the fake provider", async () => {
+    const memory = memoryOpener();
+    const fake = harness({ fakeScript: installScript, memory });
+    await fake.agent.start();
+    fake.agent.prompt("please install hello");
+    await fake.until(() => fake.events().some((e) => e.type === "card"));
+    await fake.agent.shutdown();
+    expect(memory.rows).toEqual([]);
+  });
+
+  it("offers at most 24 tools a turn once more than 40 are registered", async () => {
+    const requests: { system: string; tools: string[] }[] = [];
+    const many: McpTool[] = Array.from({ length: 45 }, (_, i) => ({
+      name: `extra.tool_${i}`,
+      description: `extra thing ${i}`,
+      inputSchema: { type: "object", properties: {} },
+      meta: { jarvis: { risk: "safe" } },
+    }));
+    const h = harness({
+      makeProvider: () => recording(requests),
+      registryServers: {
+        load: async () => ({
+          sessions: [session("extras", many, [])],
+          tiers: new Map([["extras", "reviewed"]]),
+          installed: [],
+          sandbox: "ok",
+        }),
+      },
+    });
+    h.files.set(YAML, LOCAL_YAML);
+    await h.agent.start();
+    h.agent.prompt("extra thing 7");
+    await h.until(() => h.events().some((e) => e.type === "turn-end"));
+    expect(requests[0]?.tools.length).toBeLessThanOrEqual(24);
+    expect(requests[0]?.tools).toContain("net_status");
+    expect(requests[0]?.tools).toContain("extra_tool_7");
   });
 });

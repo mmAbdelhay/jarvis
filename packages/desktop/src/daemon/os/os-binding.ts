@@ -1,4 +1,4 @@
-// The contract §3.1 channels (+ M2 §2 updates:check) as ControlHandlers for the existing control
+// The contract §3.1 channels (+ M2 §2 updates:check, M2.5 §2 memory:* and registry:list) as ControlHandlers for the existing control
 // server (frames, handshake, lock and run dir unchanged). Every argument is
 // parsed by @jarvis/wire's field-by-field parsers before the agent sees it;
 // a parse failure or an OsAgentError is a typed refusal, never "internal".
@@ -13,6 +13,9 @@ import {
   parseAgentStop,
   parseAuditList,
   parseDoctorSkip,
+  parseMemoryDelete,
+  parseMemoryList,
+  parseMemorySetEnabled,
   parseNoArgs,
   parseProviderDraft,
   parseProviderSave,
@@ -58,6 +61,15 @@ export function createOsBinding(
       case OS_CONTROL_REQUESTS.registryList:
         value(parseNoArgs(args));
         return agent.registryList();
+      case OS_CONTROL_REQUESTS.memoryList:
+        return agent.memoryList(value(parseMemoryList(args)).limit);
+      case OS_CONTROL_REQUESTS.memoryDelete:
+        return agent.memoryDelete(value(parseMemoryDelete(args)).id);
+      case OS_CONTROL_REQUESTS.memoryClear:
+        value(parseNoArgs(args));
+        return agent.memoryClear();
+      case OS_CONTROL_REQUESTS.memorySetEnabled:
+        return agent.memorySetEnabled(value(parseMemorySetEnabled(args)).enabled);
       default:
         throw new ControlRequestError("unknown-channel", `No handler for ${channel}`);
     }

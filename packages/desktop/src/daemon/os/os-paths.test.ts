@@ -4,16 +4,23 @@ import {
   DEFAULT_MCP_DIR,
   mcpConfigDir,
   mcpDirFrom,
+  memoryDbPath,
   MODEL_STATE_PATH,
   osConfigPath,
   readOsBuildId,
   registryIndexPath,
+  toolIndexPath,
 } from "./os-paths.js";
 
 describe("os paths", () => {
   it("puts add-on registrations and the verified index under the home", () => {
     expect(mcpConfigDir("/home/u")).toBe("/home/u/.config/jarvis/mcp.d");
     expect(registryIndexPath("/home/u")).toBe("/home/u/.cache/jarvis/registry/index.verified.json");
+  });
+
+  it("puts the memory store and the tool index cache under the home", () => {
+    expect(memoryDbPath("/home/u")).toBe("/home/u/.local/share/jarvis/memory.sqlite");
+    expect(toolIndexPath("/home/u")).toBe("/home/u/.cache/jarvis/tool-index.sqlite");
   });
 
   it("uses /usr/lib/jarvis/mcp unless JARVIS_MCP_DIR overrides it", () => {

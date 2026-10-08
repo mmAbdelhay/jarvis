@@ -7,6 +7,14 @@
 // No electron here (core/no-electron.test.ts).
 import {
   AGENT_TEXT,
+  CORE_TOOLS,
+  createMemoryService,
+  type MemoryItem,
+  redactSecrets,
+  selectTools,
+  SESSION_IDLE_MS,
+  type TextEmbedder,
+  toModelName,
   CONTEXT_TOKENS,
   DEFAULT_CONTEXT_TOKENS,
   createFailoverProvider,
@@ -51,6 +59,7 @@ import {
 } from "@jarvis/core";
 import type { SecretStore } from "@jarvis/platform/model";
 import { OS_CONTROL_PUSHES } from "@jarvis/wire";
+import type { MemoryOpener } from "./memory-backend.js";
 import type { ConfigIo, ProviderSection } from "./provider-config.js";
 import { EMPTY_REGISTRY, type LoadedRegistry, type Registration } from "./registry-servers.js";
 import { createLazyKeyProvider, unavailableProvider } from "./provider-factory.js";
@@ -60,6 +69,7 @@ import {
   type OsBrainConfig,
   type ProviderEntry,
   readOsBrainConfig,
+  writeOsMemoryEnabled,
   writeOsProviders,
 } from "./provider-list-config.js";
 import { createProviderMonitor } from "./provider-monitor.js";
@@ -99,6 +109,10 @@ export type OsAgentDeps = {
     append(entry: AuditEntry): Promise<void>;
     list(query: AuditQuery): Promise<AuditEntry[]>;
   };
+  /** Local embeddings (loopback Ollama) for tool search and memory; absent → keywords. */
+  embedder?: TextEmbedder | null;
+  /** The encrypted memory store (memory-backend.ts); absent → memory off. */
+  memory?: MemoryOpener;
   now(): number;
   newId(): string;
   timers: {
@@ -123,6 +137,11 @@ export interface OsAgent {
   auditList(query: AuditQuery): Promise<AuditEntry[]>;
   /** registry:list (M2.5 contracts §2). */
   registryList(): Promise<RegistryListResult>;
+  memoryList(limit: number): Promise<MemoryItem[]>;
+  memoryDelete(id: string): Promise<null>;
+  memoryClear(): Promise<null>;
+  /** memory:setEnabled (M2.5 contracts §7 #9); persisted in jarvis.yaml. */
+  memorySetEnabled(enabled: boolean): Promise<null>;
   /** updates:check (M2 contracts §2). */
   checkUpdates(): Promise<UpdatesCheckResult>;
   /** A shell (re)connected: re-push what a broadcast it missed would have said. */
@@ -171,6 +190,45 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
     );
     return sizes.length === 0 ? DEFAULT_CONTEXT_TOKENS : Math.min(...sizes);
   }
+  const embedder = deps.embedder ?? null;
+  const memory = createMemoryService({
+    enabled: () => brain.memoryEnabled && deps.fakeScript === undefined,
+    backend: () => deps.memory?.open() ?? Promise.resolve(null),
+    reset: () => deps.memory?.reset() ?? Promise.resolve(),
+    // The user's own model writes the summary; the request ends with SAFETY_RULES.
+    summarize: async (system, transcript, signal) => {
+      let text = "";
+      for await (const event of provider.chat({
+        system,
+        messages: [{ role: "user", text: transcript }],
+        tools: [],
+        signal,
+      })) {
+        if (event.type === "text") text += event.delta;
+        else if (event.type === "done") break;
+      }
+      return text;
+    },
+    embedder,
+    redact: redactSecrets,
+    now: deps.now,
+    log: deps.log,
+  });
+  let idleTimer: unknown;
+  const touchSession = () => {
+    if (idleTimer !== undefined) deps.timers.clearTimeout(idleTimer);
+    idleTimer = deps.timers.setTimeout(() => {
+      idleTimer = undefined;
+      void memory.endSession();
+    }, SESSION_IDLE_MS);
+  };
+  const coreToolNames = new Set(CORE_TOOLS.map(toModelName));
+  let lastSearchNote = "";
+  const logSearchOnce = (line: string) => {
+    if (line === lastSearchNote) return;
+    lastSearchNote = line;
+    deps.log(line);
+  };
   let hostSessions: McpSession[] = [];
   let addOns: LoadedRegistry = EMPTY_REGISTRY;
   let addOnsDirty = true;
@@ -229,7 +287,10 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
   const gate = createRiskGate({
     emit,
     describe: async (tool, input) => (await ensureRegistry()).describe(tool, input),
-    audit: (entry) => deps.audit.append(entry),
+    audit: async (entry) => {
+      await deps.audit.append(entry);
+      memory.recordAudit(entry);
+    },
     now: deps.now,
     newId: deps.newId,
     timers: deps.timers,
@@ -405,6 +466,8 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
       void (async () => {
         try {
           const tools = await ensureRegistry({ reloadAddOns: true });
+          const notes = await memory.recall(text).catch(() => []);
+          const before = history.length;
           failover?.beginTurn();
           const result = await runTurn(
             {
@@ -415,6 +478,12 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
               toolsEnabled: deps.fakeScript !== undefined || activeEntry()?.supportsTools !== false,
               emit,
               newId: deps.newId,
+              selectTools: (query, all) =>
+                selectTools(all, query, {
+                  coreModelNames: coreToolNames,
+                  embedder,
+                  log: logSearchOnce,
+                }),
             },
             {
               turnId,
@@ -422,8 +491,11 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
               text,
               signal: controller.signal,
               ...(context === undefined ? {} : { context }),
+              ...(notes.length === 0 ? {} : { notes }),
             },
           );
+          memory.afterTurn(result.messages.slice(before));
+          touchSession();
           history = trimHistory(result.messages);
           if (result.reason !== "error") monitor.reportOk();
           else if (result.errorKind === "network" || result.errorKind === "auth") {
@@ -619,6 +691,33 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
       return { installed, available };
     },
 
+    async memoryList(limit) {
+      if (!brain.memoryEnabled || deps.fakeScript !== undefined) {
+        throw new OsAgentError("unsupported", AGENT_TEXT.memoryOff);
+      }
+      return memory.list(limit);
+    },
+
+    async memoryDelete(id) {
+      await memory.delete(id);
+      return null;
+    },
+
+    async memoryClear() {
+      await memory.clear();
+      return null;
+    },
+
+    async memorySetEnabled(enabled) {
+      try {
+        await writeOsMemoryEnabled(deps.configPath, enabled, deps.configIo);
+      } catch (error) {
+        throw new OsAgentError("internal", describeError(error));
+      }
+      brain = { ...brain, memoryEnabled: enabled };
+      return null;
+    },
+
     async checkUpdates() {
       try {
         const summary = await updates.check();
@@ -647,6 +746,10 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
       turn?.controller.abort();
       doctor.cancel();
       gate.closeAll();
+      if (idleTimer !== undefined) deps.timers.clearTimeout(idleTimer);
+      // Session end (design §3.9), bounded so a dead provider cannot hold the stop.
+      await Promise.race([memory.endSession(), sleep(20_000)]);
+      deps.memory?.close();
       monitor.stop();
       sys.stop();
       updates.stop();

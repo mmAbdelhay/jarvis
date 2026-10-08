@@ -283,20 +283,28 @@ the socket runs with the desktop's own origin.
 
 **Jarvis OS runs a second jarvisd entry.** `daemon/os/os-daemon-main.ts` is
 `jarvisd` without the desktop core: the same control server, handshake, lock,
-run directory and lifecycle, serving only the Jarvis OS channels
-(`agent:*`, `provider:*`, `doctor:*`, `audit:list`, `updates:check`, defined in
-`@jarvis/wire`'s `os-control.ts`) through `daemon/os/os-binding.ts`. Behind
-them, `daemon/os/agent-service.ts` composes the provider-neutral agent from
-`@jarvis/core`'s `agent/` module (tool loop, risk gate, network doctor) with
+run directory and lifecycle, serving only the Jarvis OS channels (`agent:*`,
+`provider:*`, `doctor:*`, `audit:list`, `updates:check`, `memory:*`,
+`registry:list`, defined in `@jarvis/wire`'s `os-control.ts`) through
+`daemon/os/os-binding.ts`. Behind them, `daemon/os/agent-service.ts` composes
+`@jarvis/core`'s `agent/` module (tool loop with the safety rules on every
+request, history fitted per request, safe calls four at a time, per-turn tool
+search; risk gate; network doctor; provider failover; memory service) with
 `@jarvis/platform/model` (Anthropic, OpenAI-compatible, Ollama and Gemini
-adapters, MCP stdio client, keyring, audit log). Its `sys:snapshot` push
-also carries pending updates (`updates-monitor.ts`: `updates.list` 2 min
-after start, then daily) and the local model's download state
-(`model-state-reader.ts`, `/var/lib/jarvis/model-state.json`). It runs on
-Linux only, is built by `pnpm --filter @jarvis/desktop build:daemon` into one
-esbuild bundle in `packages/desktop/dist-daemon/`, and never loads Electron,
-node-pty, sqlite or the Agent SDK (`daemon/os/os-bundle-graph.test.ts`). The
-desktop app's `daemon-main.ts` and its orchestrator are untouched by it.
+adapters, MCP stdio client, keyring, audit log) and `@jarvis/platform/store`
+(`node:sqlite` embedding cache, AES-GCM sealed memory store, loopback-only
+Ollama embedder). Providers are an ordered list in `jarvis.yaml`'s `os:`
+section, keys by id in the keyring. Add-on MCP servers registered in
+`~/.config/jarvis/mcp.d/` start through `systemd-run --user --scope` only when
+a sandbox probe proves the sandbox applies (`registry-servers.ts`); their
+tools' risk follows their tier. Its `sys:snapshot` push also carries pending
+updates (`updates-monitor.ts`: `updates.list` 2 min after start, then daily)
+and the local model's download state (`model-state-reader.ts`,
+`/var/lib/jarvis/model-state.json`). It runs on Linux only, is built by
+`pnpm --filter @jarvis/desktop build:daemon` into one esbuild bundle in
+`packages/desktop/dist-daemon/`, and never loads Electron, node-pty, a native
+module or the Agent SDK (`daemon/os/os-bundle-graph.test.ts`). The desktop
+app's `daemon-main.ts` and its orchestrator are untouched by it.
 
 See [Background daemon](../guide/background-daemon.md) for the user side.
 

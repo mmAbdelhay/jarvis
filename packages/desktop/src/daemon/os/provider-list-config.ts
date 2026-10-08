@@ -149,3 +149,24 @@ export async function writeOsProviders(
   }
   await io.writeFile(path, document.toString());
 }
+
+/** Persist os.memory.enabled (contracts §7 #9), keeping the rest of the file. */
+export async function writeOsMemoryEnabled(
+  path: string,
+  enabled: boolean,
+  io: ConfigIo,
+): Promise<void> {
+  let text = "";
+  try {
+    text = await io.readFile(path);
+  } catch (error) {
+    if (!isMissing(error)) throw error;
+  }
+  const document = parseDocument(text);
+  if (document.errors.length > 0) {
+    throw new Error(`jarvis.yaml does not parse: ${document.errors[0]?.message ?? "unknown"}`);
+  }
+  if (!isMap(document.get("os", true))) document.set("os", document.createNode({}));
+  document.setIn(["os", "memory", "enabled"], enabled);
+  await io.writeFile(path, document.toString());
+}

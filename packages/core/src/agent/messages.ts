@@ -42,6 +42,7 @@ export const AGENT_TEXT = {
     `Too many items in one call: at most ${limit}. Nothing was shown or changed; split the request.`,
   updatesListFailed: "updates.list failed",
   updatesListUnreadable: "updates.list sent an answer jarvisd cannot read",
+  memoryOff: "Memory is off",
   updatesUnavailable: "Checking for updates is not available on this system.",
   updatesCheckFailed: (message: string) => `Could not check for updates: ${message}`,
   doctorNote: (summary: string) => `[Before this message the network doctor ran: ${summary}]`,

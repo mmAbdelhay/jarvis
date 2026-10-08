@@ -60,3 +60,13 @@ export function mcpConfigDir(home: string): string {
 export function registryIndexPath(home: string): string {
   return posix.join(home, ".cache", "jarvis", "registry", "index.verified.json");
 }
+
+/** Design §3.9: the encrypted memory store. */
+export function memoryDbPath(home: string): string {
+  return posix.join(home, ".local", "share", "jarvis", "memory.sqlite");
+}
+
+/** Design §3.8: the embedding cache for tool search. */
+export function toolIndexPath(home: string): string {
+  return posix.join(home, ".cache", "jarvis", "tool-index.sqlite");
+}
