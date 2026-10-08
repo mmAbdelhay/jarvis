@@ -1,8 +1,5 @@
 #include "models/voice/VoiceModel.h"
 
-#include <QSettings>
-#include <QStandardPaths>
-
 #include "models/voice/WavEncoder.h"
 
 using namespace Qt::StringLiterals;
@@ -13,19 +10,12 @@ VoiceModel::VoiceModel(QObject* parent)
     : QObject(parent)
     , m_factory([](QObject* owner) -> Recorder* { return new ProcessRecorder(ProcessRecorder::defaultCommand(), jarvis::voice::kMaxPcmBytes, owner); })
 {
-    QSettings settings(settingsPath(), QSettings::IniFormat);
-    m_speakReplies = settings.value(u"voice/speakReplies"_s, true).toBool();
     m_countdown.setInterval(1000);
     connect(&m_countdown, &QTimer::timeout, this, [this] {
         if (--m_secondsLeft <= 0)
             return finish();
         emit changed();
     });
-}
-
-QString VoiceModel::settingsPath()
-{
-    return QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + u"/jarvis/shell.ini"_s;
 }
 
 QString VoiceModel::state() const
@@ -54,10 +44,16 @@ void VoiceModel::setSpeakReplies(bool on)
     if (on == m_speakReplies)
         return;
     m_speakReplies = on;
-    QSettings settings(settingsPath(), QSettings::IniFormat);
-    settings.setValue(u"voice/speakReplies"_s, on);
     emit changed();
-    emit speakRepliesChanged(on);
+    emit speakRepliesChanged(on); // ShellController relays this as voice:setSpeak
+}
+
+void VoiceModel::applySnapshotSpeak(bool on)
+{
+    if (on == m_speakReplies)
+        return;
+    m_speakReplies = on;
+    emit changed(); // jarvisd owns the value: no speakRepliesChanged, so nothing is echoed back
 }
 
 void VoiceModel::setAvailability(bool available, const QString& stt, const QString& tts)

@@ -39,7 +39,6 @@ public:
 
     void setRecorderFactory(RecorderFactory factory) { m_factory = std::move(factory); }
     void setCountdownIntervalForTest(int ms) { m_countdown.setInterval(ms); }
-    static QString settingsPath();
 
     bool available() const { return m_available; }
     QString state() const;
@@ -50,7 +49,8 @@ public:
     QString hint() const { return m_hint; }
     QString statusText() const;
     bool speakReplies() const { return m_speakReplies; }
-    void setSpeakReplies(bool on);
+    void setSpeakReplies(bool on);      // user choice: emits speakRepliesChanged
+    void applySnapshotSpeak(bool on);   // from sys:snapshot.voice.speak: no signal back (jarvisd owns it)
     QString sttName() const { return m_stt; }
     QString ttsName() const { return m_tts; }
 

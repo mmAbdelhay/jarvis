@@ -34,7 +34,6 @@ private slots:
     void initTestCase()
     {
         QStandardPaths::setTestModeEnabled(true);
-        QFile::remove(VoiceModel::settingsPath());
     }
 
     void unavailableRefusesToStart()
@@ -185,18 +184,19 @@ private slots:
         QVERIFY(rig.voice.hint().contains(u"too long"_s));
     }
 
-    void speakRepliesPersists()
+    void speakRepliesFollowsDaemon()
     {
-        {
-            VoiceModel voice;
-            QVERIFY(voice.speakReplies());
-            QSignalSpy spy(&voice, &VoiceModel::speakRepliesChanged);
-            voice.setSpeakReplies(false);
-            QCOMPARE(spy.size(), 1);
-        }
-        VoiceModel again;
-        QVERIFY(!again.speakReplies());
-        again.setSpeakReplies(true);
+        VoiceModel voice;
+        QVERIFY(voice.speakReplies());
+        QSignalSpy spy(&voice, &VoiceModel::speakRepliesChanged);
+        voice.setSpeakReplies(false); // user choice: relayed to jarvisd
+        QCOMPARE(spy.size(), 1);
+        QVERIFY(spy.takeFirst().at(0).toBool() == false);
+        voice.applySnapshotSpeak(true); // daemon value: applied, not echoed
+        QVERIFY(voice.speakReplies());
+        QCOMPARE(spy.size(), 0);
+        voice.setSpeakReplies(true); // no change, no signal
+        QCOMPARE(spy.size(), 0);
     }
 };
 
