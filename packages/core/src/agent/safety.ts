@@ -28,3 +28,10 @@ export function estimateTokens(text: string): number {
 export function buildSystemPrompt(base: string, notes: readonly string[] = []): string {
   return [base, ...notes.filter((note) => note.trim() !== ""), SAFETY_RULES].join("\n\n");
 }
+
+/** Puts `note` just before the safety rules, which must stay last (design 3.1). */
+export function insertBeforeSafetyRules(system: string, note: string): string {
+  const at = system.lastIndexOf(SAFETY_RULES);
+  if (at === -1) return `${system}\n\n${note}\n\n${SAFETY_RULES}`;
+  return `${system.slice(0, at)}${note}\n\n${system.slice(at)}`;
+}

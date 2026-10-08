@@ -4,6 +4,7 @@
 // result — data, error, denial, timeout, stop — goes back to the model as a
 // tool result, fenced when it carries tool output. A running tool is never
 // interrupted: Stop takes effect between calls. Never throws.
+import type { ToolProfile } from "./backup.js";
 import { fenceToolOutput } from "./fence.js";
 import { DEFAULT_CONTEXT_TOKENS, fitHistory, historyBudget } from "./context-fit.js";
 import { mapLimit } from "./map-limit.js";
@@ -27,6 +28,9 @@ import {
 export const MAX_STEPS = 20;
 export const MAX_HISTORY_MESSAGES = 60;
 
+/** The usual model's profile: every tool, MAX_STEPS steps. */
+export const FULL_PROFILE: ToolProfile = { name: "full", maxSteps: MAX_STEPS, allows: () => true };
+
 /** Design §3.4: a step's safe calls run at most this many at once. */
 export const SAFE_CALL_CONCURRENCY = 4;
 const CALL_ID = /^[A-Za-z0-9_-]{1,64}$/;
@@ -42,6 +46,9 @@ export type ToolLoopDeps = {
   contextTokens?: number;
   /** Design §3.8: picks this turn's tools from all of them (tool-search.ts). */
   selectTools?(text: string, tools: ModelToolSpec[]): Promise<ModelToolSpec[]>;
+  /** M4 §1: the profile of the provider answering now (the failover's status).
+   *  Read at the first event of each reply and after it. Default FULL_PROFILE. */
+  profile?(): ToolProfile;
 };
 
 export type TurnRequest = {
@@ -118,10 +125,16 @@ async function streamReply(
     signal: AbortSignal;
   },
   turnId: string,
+  onFirstEvent: () => void = () => {},
 ): Promise<{ text: string; calls: ModelToolCall[] }> {
   let text = "";
   const calls: ModelToolCall[] = [];
+  let first = true;
   for await (const event of deps.provider.chat(request)) {
+    if (first) {
+      first = false;
+      onFirstEvent();
+    }
     if (event.type === "text") {
       if (event.delta === "") continue;
       text += event.delta;
@@ -143,6 +156,7 @@ async function runCalls(
     signal: AbortSignal;
     ran: string[];
     lang: Lang;
+    allows(tool: string): boolean;
   },
 ): Promise<ModelToolResult[]> {
   const { turnId, signal } = context;
@@ -175,7 +189,9 @@ async function runCalls(
   };
 
   for (const call of context.calls) {
-    const tool = deps.toolsEnabled ? deps.registry.resolve(call.name) : undefined;
+    const resolved = deps.toolsEnabled ? deps.registry.resolve(call.name) : undefined;
+    // M4 §1: on the backup model, a tool outside the simple profile does not exist.
+    const tool = resolved !== undefined && context.allows(resolved.name) ? resolved : undefined;
     if (tool === undefined) {
       results.set(call.id, note(call, AGENT_TEXT.unknownTool(call.name), true));
       continue;
@@ -250,9 +266,10 @@ async function reportStepLimit(
     ran: string[];
     budget: number;
     lang: Lang;
+    steps: number;
   },
 ): Promise<void> {
-  context.messages.push({ role: "user", text: AGENT_TEXT.stepLimitNote(MAX_STEPS) });
+  context.messages.push({ role: "user", text: AGENT_TEXT.stepLimitNote(context.steps) });
   let text = "";
   try {
     const reply = await streamReply(
@@ -270,7 +287,7 @@ async function reportStepLimit(
     if (context.signal.aborted) throw error;
   }
   if (text.trim() === "") {
-    text = USER_TEXT[context.lang].stepLimitFallback(MAX_STEPS, context.ran);
+    text = USER_TEXT[context.lang].stepLimitFallback(context.steps, context.ran);
     deps.emit({ type: "text", turnId: context.turnId, delta: text });
   }
   context.messages.push({ role: "assistant", text, toolCalls: [] });
@@ -309,6 +326,22 @@ export async function runTurn(deps: ToolLoopDeps, request: TurnRequest): Promise
     };
   };
 
+  let profile: ToolProfile = FULL_PROFILE;
+  let profileSteps = 0;
+  let noticed = false;
+  // The failover switches inside chat(); the profile is read at the reply's
+  // first event (for the notice) and after it (for the cap and the tools).
+  const readProfile = () => {
+    const now = deps.profile?.() ?? FULL_PROFILE;
+    if (now.name === profile.name) return;
+    profile = now;
+    profileSteps = 0;
+    if (now.name === "simple" && !noticed) {
+      noticed = true;
+      deps.emit({ type: "text", turnId, delta: `${USER_TEXT[lang].backupNotice}\n\n` });
+    }
+  };
+
   deps.emit({ type: "turn-start", turnId, text: request.text });
   try {
     if (deps.selectTools !== undefined && allTools.length > 0) {
@@ -322,21 +355,46 @@ export async function runTurn(deps: ToolLoopDeps, request: TurnRequest): Promise
     }
     for (let step = 0; ; step++) {
       if (signal.aborted) return finish("stopped");
-      if (step === MAX_STEPS) {
-        await reportStepLimit(deps, { system, messages, signal, turnId, ran, budget, lang });
+      const cap =
+        step === MAX_STEPS
+          ? MAX_STEPS
+          : profileSteps >= profile.maxSteps
+            ? profile.maxSteps
+            : undefined;
+      if (cap !== undefined) {
+        await reportStepLimit(deps, {
+          system,
+          messages,
+          signal,
+          turnId,
+          ran,
+          budget,
+          lang,
+          steps: cap,
+        });
         return finish("step-limit");
       }
       const reply = await streamReply(
         deps,
         { system, messages: fitHistory(messages, budget), tools, signal },
         turnId,
+        readProfile,
       );
+      readProfile();
+      profileSteps++;
       const calls = withUsableIds(reply.calls, deps.newId);
       messages.push({ role: "assistant", text: reply.text, toolCalls: calls });
       if (calls.length === 0) return finish("done");
       messages.push({
         role: "tool",
-        results: await runCalls(deps, { turnId, calls, signal, ran, lang }),
+        results: await runCalls(deps, {
+          turnId,
+          calls,
+          signal,
+          ran,
+          lang,
+          allows: (name) => profile.allows(name),
+        }),
       });
     }
   } catch (error) {
