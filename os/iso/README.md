@@ -89,18 +89,19 @@ Results: `summary.md`, `results.json`, `serial.log`, `diagnostics.txt`,
 
 `os/iso/smoke/run_install.py` boots the ISO through OVMF with Secure Boot and
 Microsoft keys, drives the installer backend over D-Bus (`installctl.mjs`) and
-types the disk passphrase and greeter password with QMP send-key. Three
+types the disk passphrase and greeter password with QMP send-key. Four
 scenarios:
 
 | Scenario | What it proves |
 |---|---|
-| `erase` | Erase + encrypt install: Secure Boot stays enabled, root is on the unlocked LUKS device, os-release is the brand, live-only packages are gone, the greeter (not autologin) runs, ollama listens on 127.0.0.1:11434 only, the APT source and archive keyring are installed, secrets never reach the installer log, and a wrong passphrase does not give a shell. With `--update-repo` it also checks updates from a local signed test repo. |
+| `erase` | Erase + encrypt install: Secure Boot stays enabled, root is on the unlocked LUKS device, os-release is the brand, live-only packages are gone, the greeter (not autologin) runs, ollama listens on 127.0.0.1:11434 only, the APT source and archive keyring are installed, secrets never reach the installer log, and a wrong passphrase does not give a shell. It chooses the German (`de`) keyboard and types the passphrase and password on that layout, so Plymouth, the greeter's cage and the user's labwc must all follow `/etc/default/keyboard` (contracts §11.5). With `--update-repo` it also checks updates from a local signed test repo. |
 | `alongside` | Install next to a Windows (NTFS) disk: Windows partitions only shrink (their start never moves), both systems stay bootable, GRUB shows its 3 s menu because another OS is found. |
-| `refusals` | Criterion 4: the backend refuses an alongside install (exit status 3) on a hibernated Windows disk (`ntfs-hibernated`) and on a BitLocker disk (`ntfs-bitlocker`). Criterion 5: an erase Plan on the same disk is only a plan. Neither disk image changes (digests compared). |
+| `refusals` | Criterion 4: the backend refuses an alongside install (exit status 3) on a hibernated Windows disk (`ntfs-hibernated`), a BitLocker disk (`ntfs-bitlocker`) and a disk scheduled for chkdsk (`ntfs-dirty`, made by `tools/ntfs-set-dirty.py`). Criterion 5: an erase Plan on the same disk is only a plan. No disk image changes (digests compared). |
+| `local-model` | Criterion 7: an offline install (the live VM has no NIC, 8 GiB RAM) of the smallest catalog model; on first boot, online, `jarvis-model-fetch` downloads it (model-state `ready`, marker gone), `ollama list` shows it after login, and the user's `jarvis.yaml` points at it. Not covered: the shell's progress display. |
 
 ```bash
 sudo apt-get install qemu-system-x86 ovmf xorriso gdisk ntfs-3g dosfstools mtools
-for s in refusals erase alongside; do
+for s in refusals erase alongside local-model; do
   python3 os/iso/smoke/run_install.py --iso dist/rafiq-*.iso --out /tmp/inst-$s --scenario $s --work /mnt || echo "FAILED $s"
 done
 ```
@@ -138,8 +139,9 @@ node --test os/iso/smoke/assets/
 `.github/workflows/os.yml` (Linux only, path-filtered) jobs: `checks`
 (shellcheck, lints), `build-go`, `build-daemon`, `build-qt`, `build-distro`
 (the H packages), `build-iso` (privileged `debian:trixie`, uploads `os-iso`),
-`smoke-test` (QEMU, KVM when available), `install-test` (matrix over the three
-scenarios, KVM required), `repo` (publishes the APT repository) and `release`
+`smoke-test` (QEMU, KVM when available), `loop-tests` (the Go `TestLoop*`
+installer tests on real loop devices, as root), `install-test` (matrix over the
+four scenarios, KVM required), `repo` (publishes the APT repository) and `release`
 on `os-v*` tags (draft release; the tag `X.Y` must equal `DISTRO_VERSION`).
 
 Without the secrets `JARVIS_APT_SIGNING_KEY` / `JARVIS_APT_DEPLOY_KEY` the

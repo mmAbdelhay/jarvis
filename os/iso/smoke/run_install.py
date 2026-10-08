@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Install tests: the ISO booted through OVMF with Secure Boot and Microsoft
-keys (M2 design §13; criteria 1-6, 10, 12). The release image is unchanged:
+keys (M2 design §13; criteria 1-7, 10, 12; contracts §11.5 keyboard chain). The release image is unchanged:
 the root shell on ttyS0 comes from a systemd credential that QEMU passes over
 SMBIOS. The backend is driven over D-Bus (installctl.mjs); the disk
 passphrase and the greeter password are typed with QMP send-key."""
@@ -28,6 +28,14 @@ from run_smoke import Run, build_assets  # noqa: E402
 
 BRAND_ENV = HERE.parent.parent / "branding" / "brand.env"
 GIB = 1 << 30
+# The erase install chooses a non-US keyboard and types the disk passphrase
+# and the greeter password with it: Plymouth, the greeter's cage and the
+# user's labwc must all use /etc/default/keyboard (contracts §11.5).
+ERASE_KEYBOARD = "de"
+# make-windows-disk.sh state -> the Plan refusal key (criterion 4).
+REFUSALS = {"hibernated": "ntfs-hibernated", "bitlocker": "ntfs-bitlocker", "dirty": "ntfs-dirty"}
+# The local model needs minRamGB 8 (ModelFits) and a target over 30 GiB + model.
+LOCAL_MODEL_RAM_MB = 8192
 
 
 def brand(path: Path) -> dict[str, str]:
@@ -53,6 +61,40 @@ def target_checks(b: dict[str, str]) -> list[tuple[str, str]]:
         ("APT source and archive keyring installed (criterion 10)",
          "test -f /etc/apt/sources.list.d/jarvis.sources && test -s /usr/share/keyrings/jarvis-archive-keyring.gpg"),
         ("secrets never in the installer log", f"test -f /var/log/jarvis-installer.log && ! grep -qF {secrets} /var/log/jarvis-installer.log"),
+    ]
+
+
+def keyboard_checks(layout: str) -> list[tuple[str, str]]:
+    """contracts §11.5, in order: the file (before login), the greeter's cage
+    (before login) and a child of the user's labwc (after login: labwc
+    applies its environment file over what the wrapper exported, so only
+    what it launched shows the effective layout)."""
+    env = "tr '\\0' '\\n' < /proc/$pid/environ | grep -qx XKB_DEFAULT_LAYOUT=" + layout
+    return [
+        ("§11.5: /etc/default/keyboard has the chosen layout", f"grep -qx 'XKBLAYOUT=\"{layout}\"' /etc/default/keyboard"),
+        ("§11.5: the greeter's cage types with the chosen layout",
+         f"for i in $(seq 90); do pid=$(pgrep -u _greetd -x cage | head -n1); [ -n \"$pid\" ] && break; sleep 1; done; "
+         f"[ -n \"$pid\" ] && {env}"),
+        ("§11.5: the user's labwc session types with the chosen layout",
+         f"pid=$(pgrep -u {flow.USER} -x jarvis-shell | head -n1) && [ -n \"$pid\" ] && {env}"),
+    ]
+
+
+def model_checks(user: str) -> list[tuple[str, str]]:
+    """Criterion 7 after an offline install: first boot fetches the model."""
+    state = "/var/lib/jarvis/model-state.json"
+    yaml = f"/home/{user}/.config/jarvis/jarvis.yaml"
+    return [
+        ("criterion 7: offline install left the model for first boot",
+         "grep -q 'model: offline' /var/log/jarvis-installer.log"),
+        ("criterion 7: jarvis-model-fetch finishes on first boot (model-state ready, marker gone)",
+         f"for i in $(seq 360); do grep -q '\"state\":\"ready\"' {state} && ! test -e /var/lib/jarvis/model-pending && exit 0; "
+         f"sleep 5; done; cat {state}; systemctl status --no-pager jarvis-model-fetch; exit 1"),
+        ("criterion 7: ollama lists the local model",
+         f"ollama list | awk 'NR>1 {{print $1}}' | grep -qx '{flow.LOCAL_MODEL_TAG}'"),
+        ("contracts §6: the user's jarvis.yaml points at the local ollama model",
+         f"[ \"$(stat -c %U:%a {yaml})\" = {user}:600 ] && grep -qx '  kind: ollama' {yaml} "
+         f"&& grep -qx '  baseUrl: \"http://127.0.0.1:11434\"' {yaml} && grep -qx '  model: \"{flow.LOCAL_MODEL_TAG}\"' {yaml}"),
     ]
 
 
@@ -111,10 +153,11 @@ class Machine:
             f.close()
 
 
-def live_vm(args, work: Path, disks_: tuple[Path, ...], vars_path: Path, ovmf: firmware.Ovmf, assets: Path, tag: str) -> qemu.InstallVm:
+def live_vm(args, work: Path, disks_: tuple[Path, ...], vars_path: Path, ovmf: firmware.Ovmf, assets: Path, tag: str,
+            **extra) -> qemu.InstallVm:
     return qemu.InstallVm(disks=disks_, assets=assets, serial_socket=work / f"s-{tag}.sock",
                           qmp_socket=work / f"q-{tag}.sock", ovmf=ovmf, vars_path=vars_path,
-                          accel=args.accel, iso=args.iso.resolve())
+                          accel=args.accel, iso=args.iso.resolve(), **extra)
 
 
 def live_session(run: Run, m: Machine) -> bool:
@@ -147,17 +190,17 @@ def install(run: Run, choices: dict, target: Path, before: str) -> bool:
     return run.check("install finishes (Execute → Finished ok)", lambda: sh(flow.execute(2400), 2500))
 
 
-def unlock(run: Run, m: Machine, *, wrong_first: bool) -> bool:
+def unlock(run: Run, m: Machine, *, wrong_first: bool, layout: str = "us") -> bool:
     def wrong_three_times():
         box = m.wait_prompt(300 * run.factor)
-        m.qmp.type_text(flow.WRONG_PASSPHRASE)
+        m.qmp.type_text(flow.WRONG_PASSPHRASE, layout=layout)
         img = m.screen("typed")
         assert screen.bullet_pixels(img, box) > 0, "typed keys did not reach the prompt"
-        m.qmp.type_text("\n")
+        m.qmp.type_text("\n", layout=layout)
         for _attempt in (2, 3):
             time.sleep(1)
             m.wait_prompt(120, empty=True)
-            m.qmp.type_text(flow.WRONG_PASSPHRASE + "\n")
+            m.qmp.type_text(flow.WRONG_PASSPHRASE + "\n", layout=layout)
         time.sleep(1)
         m.wait_prompt(120, empty=True)
         time.sleep(10)
@@ -174,19 +217,19 @@ def unlock(run: Run, m: Machine, *, wrong_first: bool) -> bool:
     def right():
         if not wrong_first:
             m.wait_prompt(300 * run.factor)
-        m.qmp.type_text(flow.PASSPHRASE + "\n")
+        m.qmp.type_text(flow.PASSPHRASE + "\n", layout=layout)
         m.serial.wait_for_shell(300 * run.factor)
 
-    return run.check("criterion 2: Plymouth prompt unlocks the disk", right)
+    return run.check(f"criterion 2: Plymouth prompt unlocks the disk (typed on the {layout} layout)", right)
 
 
-def greeter_login(run: Run, m: Machine) -> None:
+def greeter_login(run: Run, m: Machine, layout: str = "us") -> None:
     sh = run.sh
 
     def wrong_password():
         time.sleep(5)
         m.screen("greeter")
-        m.qmp.type_text("not-the-password\n")
+        m.qmp.type_text(flow.WRONG_PASSWORD + "\n", layout=layout)
         time.sleep(8)
         status, _ = m.serial.run(f"loginctl list-users --no-legend | grep -qw {flow.USER}")
         assert status != 0, "a wrong password opened a session"
@@ -195,7 +238,7 @@ def greeter_login(run: Run, m: Machine) -> None:
 
     def login():
         start = time.monotonic()
-        m.qmp.type_text(flow.PASSWORD + "\n")
+        m.qmp.type_text(flow.PASSWORD + "\n", layout=layout)
         sh(f"for i in $(seq 120); do pgrep -u {flow.USER} -x labwc >/dev/null && exit 0; sleep 1; done; exit 1", 130)
         uid = int(sh(f"id -u {flow.USER}").strip())
         sh(scenarios.mount_assets())
@@ -219,7 +262,7 @@ def scenario_erase(args, run: Run, work: Path, out: Path, ovmf: firmware.Ovmf) -
         run.shell = m.serial
         if not live_session(run, m):
             return
-        ok = install(run, flow.choices("/dev/vda", "erase"), target, before)
+        ok = install(run, flow.choices("/dev/vda", "erase", keyboard=ERASE_KEYBOARD), target, before)
         run.check("criterion 2: root is LUKS2", lambda: run.sh(flow.luks2_on("/dev/vda")))
         run.check("secrets never in the live journal", lambda: run.sh(
             f"! journalctl -b --no-pager | grep -qF -e '{flow.PASSPHRASE}' -e '{flow.PASSWORD}'"))
@@ -230,12 +273,17 @@ def scenario_erase(args, run: Run, work: Path, out: Path, ovmf: firmware.Ovmf) -
                         qmp_socket=work / "q-t.sock", ovmf=ovmf, vars_path=vars_path, accel=args.accel)
     with Machine("target", vm, out) as m:
         run.shell = m.serial
-        if not unlock(run, m, wrong_first=True):
+        if not unlock(run, m, wrong_first=True, layout=ERASE_KEYBOARD):
             return
         for name, command in target_checks(b):
             run.check(name, lambda c=command: run.sh(c, 200))
         run.check("GRUB menu hidden with no other OS (design §7)", lambda: run.sh("! grep -q 'set timeout=3' /boot/grub/grub.cfg"))
-        greeter_login(run, m)
+        kb = keyboard_checks(ERASE_KEYBOARD)
+        for name, command in kb[:2]:
+            run.check(name, lambda c=command: run.sh(c, 120))
+        greeter_login(run, m, ERASE_KEYBOARD)
+        for name, command in kb[2:]:
+            run.check(name, lambda c=command: run.sh(c, 60))
         if args.update_repo:
             import updates  # Task 17; imported lazily so Task 16 stands alone
 
@@ -279,9 +327,8 @@ def scenario_alongside(args, run: Run, work: Path, out: Path, ovmf: firmware.Ovm
 
 
 def scenario_refusals(args, run: Run, work: Path, out: Path, ovmf: firmware.Ovmf) -> None:
-    hib = disks.make_windows_disk(work / "hib.img", 48, "hibernated")
-    bl = disks.make_windows_disk(work / "bl.img", 48, "bitlocker")
-    digests = {p: disks.sparse_digest(p) for p in (hib, bl)}
+    images = [disks.make_windows_disk(work / f"{state}.img", 48, state) for state in REFUSALS]
+    digests = {p: disks.sparse_digest(p) for p in images}
     vars_path = firmware.make_vars(ovmf, work / "vars.fd")
     assets = build_assets(work)
 
@@ -291,12 +338,12 @@ def scenario_refusals(args, run: Run, work: Path, out: Path, ovmf: firmware.Ovmf
             assert status == 3 and f'"refused":"{reason}"' in text, f"exit {status}: {text[-800:]}"
         return check
 
-    with Machine("live", live_vm(args, work, (hib, bl), vars_path, ovmf, assets, "live"), out) as m:
+    with Machine("live", live_vm(args, work, tuple(images), vars_path, ovmf, assets, "live"), out) as m:
         run.shell = m.serial
         if not live_session(run, m):
             return
-        run.check("criterion 4: hibernated Windows refused (ntfs-hibernated)", refused("/dev/vda", "ntfs-hibernated"))
-        run.check("criterion 4: BitLocker refused (ntfs-bitlocker)", refused("/dev/vdb", "ntfs-bitlocker"))
+        for i, (state, reason) in enumerate(REFUSALS.items()):
+            run.check(f"criterion 4: {state} Windows refused ({reason})", refused(f"/dev/vd{chr(ord('a') + i)}", reason))
         run.check("criterion 5: an erase Plan on the same disk is only a plan", lambda: run.sh(flow.plan(flow.choices("/dev/vda", "erase")), 120))
         m.poweroff()
 
@@ -307,7 +354,41 @@ def scenario_refusals(args, run: Run, work: Path, out: Path, ovmf: firmware.Ovmf
     run.check("criteria 4-5: no disk changed", unchanged)
 
 
-SCENARIOS = {"erase": scenario_erase, "alongside": scenario_alongside, "refusals": scenario_refusals}
+def scenario_local_model(args, run: Run, work: Path, out: Path, ovmf: firmware.Ovmf) -> None:
+    """Criterion 7: an offline install (no NIC) of a local model; first boot,
+    online, fetches it (jarvis-model-fetch) before and after login."""
+    target = disks.make_blank(work / "target.img", 48)
+    vars_path = firmware.make_vars(ovmf, work / "vars.fd")
+    assets = build_assets(work)
+    before = disks.sparse_digest(target)
+    live = live_vm(args, work, (target,), vars_path, ovmf, assets, "live", memory_mb=LOCAL_MODEL_RAM_MB, network=False)
+    with Machine("live", live, out) as m:
+        run.shell = m.serial
+        if not live_session(run, m):
+            return
+        run.check("criterion 7: Probe is offline and the local model fits", lambda: run.sh(
+            flow.probe() + " | grep -q '\"online\":false'"))
+        ok = install(run, flow.choices("/dev/vda", "erase", brain=flow.local_brain()), target, before)
+        m.poweroff()
+    if not ok:
+        return
+    vm = qemu.InstallVm(disks=(target,), assets=assets, serial_socket=work / "s-t.sock", qmp_socket=work / "q-t.sock",
+                        ovmf=ovmf, vars_path=vars_path, accel=args.accel, memory_mb=LOCAL_MODEL_RAM_MB)
+    with Machine("target", vm, out) as m:
+        run.shell = m.serial
+        if not unlock(run, m, wrong_first=False):
+            return
+        checks = model_checks(flow.USER)
+        for name, command in checks[:2]:
+            run.check(name, lambda c=command: run.sh(c, 1900))
+        greeter_login(run, m)
+        for name, command in checks[2:]:
+            run.check(name, lambda c=command: run.sh(c, 120))
+        m.poweroff()
+
+
+SCENARIOS = {"erase": scenario_erase, "alongside": scenario_alongside, "refusals": scenario_refusals,
+             "local-model": scenario_local_model}
 
 
 def main(argv: list[str] | None = None) -> int:

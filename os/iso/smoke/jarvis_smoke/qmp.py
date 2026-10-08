@@ -20,7 +20,17 @@ class QmpError(RuntimeError):
     pass
 
 
-def text_to_keys(text: str) -> list[list[str]]:
+# XKB "de" (QWERTZ), by US key position: only what the test secrets need.
+GERMAN = {"y": "z", "z": "y", "-": "slash", " ": "spc", "\n": "ret", "\t": "tab"}
+
+
+def text_to_keys(text: str, layout: str = "us") -> list[list[str]]:
+    """QEMU qcodes name keys by their US position; LAYOUT is the XKB layout
+    the guest uses, so the guest receives TEXT (contracts §11.5)."""
+    if layout == "de":
+        return [_german_key(ch) for ch in text]
+    if layout != "us":
+        raise ValueError(f"no key map for layout {layout!r}")
     keys = []
     for ch in text:
         if "a" <= ch <= "z" or "0" <= ch <= "9":
@@ -34,6 +44,17 @@ def text_to_keys(text: str) -> list[list[str]]:
         else:
             raise ValueError(f"no US-layout key for {ch!r}")
     return keys
+
+
+def _german_key(ch: str) -> list[str]:
+    lower = ch.lower()
+    if lower in GERMAN:
+        return ["shift", GERMAN[lower]] if ch != lower else [GERMAN[ch]]
+    if "a" <= lower <= "z":
+        return ["shift", lower] if ch != lower else [ch]
+    if "0" <= ch <= "9":
+        return [ch]
+    raise ValueError(f"no German-layout key for {ch!r}")
 
 
 class Qmp:
@@ -82,8 +103,8 @@ class Qmp:
     def send_keys(self, keys: list[str], hold_ms: int = 60) -> None:
         self.command("send-key", keys=[{"type": "qcode", "data": k} for k in keys], **{"hold-time": hold_ms})
 
-    def type_text(self, text: str, delay: float = 0.08) -> None:
-        for keys in text_to_keys(text):
+    def type_text(self, text: str, delay: float = 0.08, layout: str = "us") -> None:
+        for keys in text_to_keys(text, layout):
             self.send_keys(keys)
             time.sleep(delay)
 

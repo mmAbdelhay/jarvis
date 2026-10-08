@@ -15,6 +15,16 @@ class KeysTest(unittest.TestCase):
     def test_passphrase_symbols(self):
         self.assertEqual(qmp.text_to_keys("-!\n "), [["minus"], ["shift", "1"], ["ret"], ["spc"]])
 
+    def test_german_layout_moves_the_keys_that_differ(self):
+        # Under XKB "de" the keys QEMU names by US position type other
+        # characters: y/z swap, "-" sits on the US "/" key (contracts §11.5).
+        self.assertEqual(qmp.text_to_keys("zy-42\n", layout="de"), [["y"], ["z"], ["slash"], ["4"], ["2"], ["ret"]])
+        self.assertEqual(qmp.text_to_keys("Tester", layout="de"), [["shift", "t"], ["e"], ["s"], ["t"], ["e"], ["r"]])
+        with self.assertRaises(ValueError):
+            qmp.text_to_keys("@", layout="de")
+        with self.assertRaises(ValueError):
+            qmp.text_to_keys("a", layout="fr")
+
     def test_refuses_non_us_characters(self):
         with self.assertRaises(ValueError):
             qmp.text_to_keys("é")

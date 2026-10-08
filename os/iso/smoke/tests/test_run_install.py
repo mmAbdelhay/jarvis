@@ -19,6 +19,21 @@ class RunInstallTest(unittest.TestCase):
         cmds = dict(run_install.target_checks(run_install.brand(run_install.BRAND_ENV)))
         self.assertTrue(all("\n" not in c for c in cmds.values()), "serial shell takes one line per command")
 
+    def test_scenarios_cover_keyboard_dirty_and_local_model(self):
+        self.assertEqual(set(run_install.SCENARIOS), {"erase", "alongside", "refusals", "local-model"})
+        names = " ".join(n for n, _ in run_install.keyboard_checks("de"))
+        for needle in ("/etc/default/keyboard", "greeter", "labwc"):
+            self.assertIn(needle, names)
+        cmds = dict(run_install.keyboard_checks("de"))
+        self.assertTrue(all("\n" not in c and "de" in c for c in cmds.values()))
+        self.assertEqual(run_install.ERASE_KEYBOARD, "de", "the erase install types its secrets on a non-US layout")
+        names = " ".join(n for n, _ in run_install.model_checks(run_install.flow.USER))
+        for needle in ("criterion 7", "model-state", "ollama", "jarvis.yaml"):
+            self.assertIn(needle, names)
+
+    def test_refusals_cover_every_windows_state(self):
+        self.assertEqual(run_install.REFUSALS, {"hibernated": "ntfs-hibernated", "bitlocker": "ntfs-bitlocker", "dirty": "ntfs-dirty"})
+
     def test_shrink_rules(self):
         gib = 1 << 30
         before = disks.Part(3, 640000, (60 * gib) // 512, "ntfs", "Basic data partition")

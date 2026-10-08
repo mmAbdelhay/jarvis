@@ -52,7 +52,7 @@ jobs:
       - run: |
           apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
             git ca-certificates dpkg-dev shellcheck xorriso python3 python3-yaml gpg gpg-agent gpgv reprepro apt \
-            librsvg2-bin grub-common fonts-inter cmake gcc libc6-dev zstd file sbsigntool curl
+            librsvg2-bin grub-common fonts-inter cmake gcc libc6-dev zstd file sbsigntool curl ntfs-3g
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
@@ -98,6 +98,29 @@ jobs:
           name: go-dist
           path: os/go/dist/
           if-no-files-found: error
+
+  # Plan F Task 14: probe, plan, partition, encrypt and format real loop
+  # devices (Windows-like and blank disks). Root and loop devices: CI only
+  # (contracts §11.16).
+  loop-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: os/go/go.mod
+          cache-dependency-path: os/go/go.sum
+      - run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends gdisk ntfs-3g cryptsetup-bin dosfstools e2fsprogs fdisk
+      - name: go test -run TestLoop (root)
+        working-directory: os/go
+        run: |
+          go test -c -o "$RUNNER_TEMP/install.test" ./internal/install
+          cd internal/install # go test runs a package's tests in its directory
+          sudo env JARVIS_LOOP_TESTS=1 "$RUNNER_TEMP/install.test" -test.count=1 -test.v -test.run TestLoop | tee "$RUNNER_TEMP/loop.log"
+          ! grep -q -- '--- SKIP' "$RUNNER_TEMP/loop.log"
 
   build-daemon:
     runs-on: ubuntu-24.04
@@ -311,7 +334,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        scenario: [erase, alongside, refusals]
+        scenario: [erase, alongside, refusals, local-model]
     name: install-test (${{ matrix.scenario }})
     steps:
       - uses: actions/checkout@v4
@@ -370,7 +393,7 @@ jobs:
 
   repo:
     if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/os-v'))
-    needs: [smoke-test, install-test, build-distro]
+    needs: [smoke-test, install-test, loop-tests, build-distro]
     runs-on: ubuntu-24.04
     container: debian:trixie
     steps:
@@ -427,7 +450,7 @@ jobs:
 
   release:
     if: startsWith(github.ref, 'refs/tags/os-v')
-    needs: [smoke-test, install-test, repo]
+    needs: [smoke-test, install-test, loop-tests, repo]
     runs-on: ubuntu-24.04
     permissions:
       contents: write

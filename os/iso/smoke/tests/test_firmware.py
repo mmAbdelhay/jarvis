@@ -36,3 +36,7 @@ class FirmwareTest(unittest.TestCase):
         self.assertNotIn("-kernel", argv, "firmware boot, not direct kernel boot")
         no_iso = qemu.install_qemu_argv(qemu.InstallVm(**{**vm.__dict__, "iso": None}))
         self.assertNotIn("media=cdrom", " ".join(no_iso))
+        self.assertIn("virtio-net-pci", joined)
+        offline = qemu.install_qemu_argv(qemu.InstallVm(**{**vm.__dict__, "network": False}))
+        self.assertNotIn("virtio-net-pci", " ".join(offline))
+        self.assertIn("-nic none", " ".join(offline), "an offline install VM has no NIC (criterion 7)")

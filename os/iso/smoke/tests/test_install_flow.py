@@ -15,6 +15,18 @@ class FlowTest(unittest.TestCase):
         self.assertEqual(c["brain"], {"kind": "cloud"})
         self.assertEqual(c["keyboard"], "us", "QMP types with the US layout")
 
+    def test_keyboard_and_local_brain_are_choices(self):
+        c = flow.choices("/dev/vda", "erase", keyboard="de", brain=flow.local_brain())
+        self.assertEqual(c["keyboard"], "de")
+        self.assertEqual(c["brain"], {"kind": "local", "modelId": flow.LOCAL_MODEL_ID})
+        self.assertEqual(flow.LOCAL_MODEL_TAG, "llama3.2:3b", "the smallest catalog model")
+
+    def test_secrets_type_on_both_test_layouts(self):
+        from jarvis_smoke import qmp
+        for layout in ("us", "de"):
+            for secret in (flow.PASSWORD, flow.PASSPHRASE, flow.WRONG_PASSPHRASE, flow.WRONG_PASSWORD):
+                qmp.text_to_keys(secret, layout=layout)
+
     def test_alongside_needs_a_size(self):
         self.assertEqual(flow.choices("/dev/vda", "alongside", alongside_bytes=24 << 30)["disk"]["alongsideSizeBytes"], 24 << 30)
         with self.assertRaises(ValueError):

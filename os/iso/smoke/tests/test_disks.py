@@ -43,3 +43,34 @@ class DisksTest(unittest.TestCase):
             with open(bl, "rb") as f:
                 f.seek(parts[2].start * 512 + 3)
                 self.assertEqual(f.read(8), b"-FVE-FS-")
+
+
+class NtfsDirtyTest(unittest.TestCase):
+    """Criterion 4's ntfs-dirty refusal: the tool must make ntfsresize see a
+    volume scheduled for check, with $MFT and $MFTMirr still consistent."""
+
+    @unittest.skipUnless(shutil.which("mkntfs") and shutil.which("ntfsresize") and shutil.which("ntfsfix"),
+                         "needs ntfs-3g (CI os checks job)")
+    def test_set_dirty_makes_ntfsresize_refuse(self):
+        tool = disks.TOOLS / "ntfs-set-dirty.py"
+        with tempfile.TemporaryDirectory() as d:
+            img = Path(d) / "n.img"
+            img.write_bytes(b"")
+            os.truncate(img, 256 << 20)
+            subprocess.run(["mkntfs", "-F", "-Q", "-q", str(img)], check=True, capture_output=True)
+            clean = subprocess.run(["ntfsresize", "--info", "--no-progress-bar", str(img)], capture_output=True, text=True)
+            self.assertNotIn("scheduled for check", clean.stdout + clean.stderr)
+            subprocess.run(["python3", str(tool), str(img)], check=True)
+            dirty = subprocess.run(["ntfsresize", "--info", "--no-progress-bar", str(img)], capture_output=True, text=True)
+            self.assertIn("scheduled for check", dirty.stdout + dirty.stderr)
+            fix = subprocess.run(["ntfsfix", "--no-action", str(img)], capture_output=True, text=True)
+            self.assertIn("$MFT and $MFTMirr completed successfully", fix.stdout)
+
+    def test_set_dirty_refuses_a_non_ntfs_image(self):
+        tool = disks.TOOLS / "ntfs-set-dirty.py"
+        with tempfile.TemporaryDirectory() as d:
+            img = Path(d) / "z.img"
+            img.write_bytes(bytes(4096))
+            r = subprocess.run(["python3", str(tool), str(img)], capture_output=True, text=True)
+            self.assertNotEqual(r.returncode, 0)
+            self.assertIn("no NTFS boot sector", r.stderr)

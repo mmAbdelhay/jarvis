@@ -13,21 +13,30 @@ USER = "tester"
 PASSWORD = "tester-pass-42"
 PASSPHRASE = "correct-horse-42"
 WRONG_PASSPHRASE = "wrong-horse-00"
+WRONG_PASSWORD = "not-the-password"
+# The smallest catalog model (os/models/catalog.json; minRamGB 8).
+LOCAL_MODEL_ID = "llama3.2-3b"
+LOCAL_MODEL_TAG = "llama3.2:3b"
 HOSTNAME = "testbox"
 LIVE_USER = "jarvis"
 
 
-def choices(disk: str, mode: str, *, alongside_bytes: int | None = None, encrypt: bool = True) -> dict:
+def local_brain() -> dict:
+    return {"kind": "local", "modelId": LOCAL_MODEL_ID}
+
+
+def choices(disk: str, mode: str, *, alongside_bytes: int | None = None, encrypt: bool = True,
+            keyboard: str = "us", brain: dict | None = None) -> dict:
     d: dict = {"path": disk, "mode": mode}
     if mode == "alongside":
         if alongside_bytes is None:
             raise ValueError("alongside needs alongside_bytes")
         d["alongsideSizeBytes"] = alongside_bytes
     return {
-        "locale": "en_US.UTF-8", "keyboard": "us", "timezone": "Etc/UTC",
+        "locale": "en_US.UTF-8", "keyboard": keyboard, "timezone": "Etc/UTC",
         "disk": d, "encrypt": encrypt,
         "user": {"fullName": "Test User", "username": USER, "hostname": HOSTNAME, "autologin": False},
-        "brain": {"kind": "cloud"},
+        "brain": brain or {"kind": "cloud"},
     }
 
 

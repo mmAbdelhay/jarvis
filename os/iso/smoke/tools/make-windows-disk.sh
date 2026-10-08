@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# make-windows-disk.sh IMAGE SIZE_GIB clean|hibernated|bitlocker — a raw disk
+# make-windows-disk.sh IMAGE SIZE_GIB clean|hibernated|bitlocker|dirty — a raw disk
 # that looks like a Windows install to os-prober and ntfsresize (design §13).
 # Root: losetup, sgdisk, mkfs.vfat, mkntfs, ntfs-3g.
 set -euo pipefail
 img=$1 size=$2 state=$3
-case $state in clean|hibernated|bitlocker) ;; *) echo "make-windows-disk: unknown state $state" >&2; exit 2 ;; esac
+case $state in clean|hibernated|bitlocker|dirty) ;; *) echo "make-windows-disk: unknown state $state" >&2; exit 2 ;; esac
 [ "$(id -u)" = 0 ] || { echo "make-windows-disk: run as root" >&2; exit 1; }
 rm -f "$img"
 truncate -s "${size}G" "$img"
@@ -29,6 +29,10 @@ if [ "$state" = hibernated ]; then
   { printf 'HIBR'; head -c 1048572 /dev/zero; } > "$mnt/hiberfil.sys"
 fi
 umount "$mnt"
+if [ "$state" = dirty ]; then
+  # Windows shut down uncleanly / chkdsk scheduled (criterion 4: ntfs-dirty).
+  python3 "$(dirname "$0")/ntfs-set-dirty.py" "${loop}p3"
+fi
 if [ "$state" = bitlocker ]; then
   printf -- '-FVE-FS-' | dd of="${loop}p3" bs=1 seek=3 conv=notrunc status=none
 fi

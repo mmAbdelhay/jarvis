@@ -136,6 +136,7 @@ class InstallVm:
     iso: Path | None = None
     memory_mb: int = 4096
     cpus: int = 4
+    network: bool = True  # False: no NIC at all (an offline install)
 
 
 def install_qemu_argv(vm: InstallVm) -> list[str]:
@@ -156,8 +157,8 @@ def install_qemu_argv(vm: InstallVm) -> list[str]:
     argv += ["-drive", f"file={vm.assets},format=raw,if=virtio,readonly=on"]
     if vm.iso is not None:
         argv += ["-drive", f"file={vm.iso},media=cdrom,readonly=on"]
+    argv += ["-netdev", "user,id=net0", "-device", "virtio-net-pci,netdev=net0"] if vm.network else ["-nic", "none"]
     argv += [
-        "-netdev", "user,id=net0", "-device", "virtio-net-pci,netdev=net0",
         "-vga", "none", "-device", "virtio-vga", "-display", "none",
         "-serial", f"unix:{vm.serial_socket},server=on,wait=off",
         "-qmp", f"unix:{vm.qmp_socket},server=on,wait=off",
