@@ -47,11 +47,18 @@ REGISTRY_VERSION  ?= $(patsubst os-v%,%,$(VERSION))
 REGISTRY_BASE_URL ?= https://mmabdelhay.github.io/jarvis-apt/registry/artifacts
 REGISTRY_OUT      := dist-registry
 
+# Published versions are immutable (contracts section 7 #7): the binaries embed
+# the version from os/registry/servers/<id>.json, never the git describe, so
+# every commit yields the same bytes for the same published id/version.
+REG_BUILD := CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) $(GO) build -trimpath -buildvcs=false
+regver = $$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' ../registry/servers/$(1).json)
+
 registry:
 	rm -rf $(REGISTRY_OUT)
-	$(BUILD) -buildvcs=false -o $(REGISTRY_OUT)/jarvis-clock/server ./cmd/jarvis-clock
-	$(BUILD) -buildvcs=false -o $(REGISTRY_OUT)/jarvis-files/server ./cmd/jarvis-files
-	$(BUILD) -buildvcs=false -o $(REGISTRY_OUT)/jarvis-web/server ./cmd/jarvis-web
+	for id in jarvis-clock jarvis-files jarvis-web; do \
+		v=$(call regver,$$id) || exit 1; \
+		$(REG_BUILD) -ldflags "-s -w -X main.version=$$v" -o $(REGISTRY_OUT)/$$id/server ./cmd/$$id || exit 1; \
+	done
 	$(GO) run ./tools/regpack -bin $(REGISTRY_OUT) -out $(REGISTRY_OUT) \
 		-version $(REGISTRY_VERSION) -base-url $(REGISTRY_BASE_URL) -license ../../LICENSE
 
