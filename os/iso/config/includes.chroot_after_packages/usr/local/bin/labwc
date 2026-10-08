@@ -8,4 +8,6 @@ if [ -r "$keyboard" ]; then
   export XKB_DEFAULT_LAYOUT="${XKBLAYOUT:-us}"
   export XKB_DEFAULT_VARIANT="${XKBVARIANT:-}"
 fi
-exec "${LABWC_BIN:-/usr/bin/labwc}" "$@"
+# Merge user keyboard/environment and rc.xml settings over the system config
+# so the Wayland settings, renderer switch and session key binds survive.
+exec "${LABWC_BIN:-/usr/bin/labwc}" --merge-config "$@"
