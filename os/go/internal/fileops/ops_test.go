@@ -262,3 +262,48 @@ func TestJournalKeepsTheNewest(t *testing.T) {
 		t.Fatal("state dir")
 	}
 }
+
+func TestUndoMkdirNeverRemovesAFile(t *testing.T) {
+	o, home, _ := newOps(t)
+	mk := o.Run(Mkdir, []Item{{From: "~/Work"}})
+	if len(mk.Failed) != 0 || !exists(home, "Work") {
+		t.Fatalf("mkdir: %+v", mk)
+	}
+	must(t, os.Remove(filepath.Join(home, "Work")))
+	write(t, home, "Work", "my file")
+	u, err := o.Undo(mk.JournalID)
+	must(t, err)
+	if len(u.Failed) != 1 || read(t, home, "Work") != "my file" {
+		t.Fatalf("a file that replaced the folder must stay: %+v", u)
+	}
+}
+
+func TestRestoreRefusesPrivateTrash(t *testing.T) {
+	o, home, outside := newOps(t)
+	write(t, home, ".ssh/id_rsa", "KEY")
+	write(t, home, "Documents/.hidden/a.txt", "h")
+	// as if the file manager trashed them
+	for _, rel := range []string{".ssh/id_rsa", "Documents/.hidden/a.txt"} {
+		_, err := o.Trash.Put(filepath.Join(home, rel))
+		must(t, err)
+	}
+	for _, from := range []string{"trash:id_rsa", "trash:a.txt", "~/.ssh/id_rsa"} {
+		r := o.Run(Restore, []Item{{From: from, To: "~/Desktop/notes.txt"}})
+		if len(r.Done) != 0 || len(r.Failed) != 1 {
+			t.Fatalf("%s: %+v", from, r)
+		}
+		if from != "~/.ssh/id_rsa" && r.Failed[0].Code != mcp.CodeDenied {
+			t.Fatalf("%s: want denied, %+v", from, r)
+		}
+	}
+	if exists(home, "Desktop/notes.txt") {
+		t.Fatal("private item must not land in the open")
+	}
+	// trashed from outside home
+	if _, err := o.Trash.Put(filepath.Join(outside, "secret.txt")); err == nil {
+		r := o.Run(Restore, []Item{{From: "trash:secret.txt", To: "~/Desktop/s.txt"}})
+		if len(r.Done) != 0 || len(r.Failed) != 1 || r.Failed[0].Code != mcp.CodeDenied {
+			t.Fatalf("outside home: %+v", r)
+		}
+	}
+}

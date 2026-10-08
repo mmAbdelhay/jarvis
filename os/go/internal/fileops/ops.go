@@ -352,6 +352,9 @@ func (o *Ops) restore(it Item) ([]Step, Done, error) {
 	if err != nil {
 		return nil, Done{}, failedf(mcp.CodeNotFound, "%s is not in the trash", it.From)
 	}
+	if err := o.checkTrashedPublic(item); err != nil {
+		return nil, Done{}, err
+	}
 	target := it.To
 	if target == "" {
 		target = o.Paths.Display(item.OriginalPath)
@@ -373,6 +376,28 @@ func (o *Ops) restore(it Item) ([]Step, Done, error) {
 	step := Step{Kind: Restore, From: TrashPrefix + item.Name, To: dst.Abs}
 	fingerprint(&step, dst.Abs)
 	return append(steps, step), Done{Kind: Restore, From: TrashPrefix + item.Name, To: dst.Display}, nil
+}
+
+// checkTrashedPublic refuses to restore an item that was private (hidden or
+// key-like) or that came from outside $HOME, wherever it would land.
+func (o *Ops) checkTrashedPublic(item trash.Item) error {
+	deny := func() error {
+		return failedf(mcp.CodeDenied, "%s is private or was not in your home folder, so it stays in the trash", TrashPrefix+item.Name)
+	}
+	if homepath.Private(item.Name) {
+		return deny()
+	}
+	shown := o.Paths.Display(item.OriginalPath)
+	rest, ok := strings.CutPrefix(shown, "~/")
+	if !ok || rest == ".." || strings.HasPrefix(rest, "../") {
+		return deny()
+	}
+	for _, part := range strings.Split(rest, "/") {
+		if homepath.Private(part) {
+			return deny()
+		}
+	}
+	return nil
 }
 
 // copyTree copies src (file, folder or link, not followed below the top)
@@ -548,6 +573,9 @@ func (o *Ops) undoStep(s Step) (Done, error) {
 		}
 		return Done{Kind: Trash, From: show(s.To), To: TrashPrefix + item.Name}, nil
 	case Mkdir:
+		if fi, err := os.Lstat(s.From); err != nil || !fi.IsDir() {
+			return Done{}, changed(s.From)
+		}
 		if err := os.Remove(s.From); err != nil {
 			return Done{}, failedf(mcp.CodeInvalid, "%s is not empty any more, so it was kept", show(s.From))
 		}
