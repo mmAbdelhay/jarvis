@@ -131,7 +131,14 @@ export type AuthorizeKey = (channel: string, key: string, device: AuthenticatedD
 export type RequestOutcome =
   | { kind: "value"; value: unknown }
   | { kind: "unknown-channel" }
-  | { kind: "forbidden" };
+  | { kind: "forbidden" }
+  /** A typed refusal with its own code (and optional English text): the OS
+   *  daemon's `locked`, `bad-request`... reach the phone as themselves. */
+  | {
+      kind: "refused";
+      code: "bad-request" | "forbidden" | "locked" | "unsupported" | "rate-limited";
+      text?: string;
+    };
 
 /**
  * `blob` is `undefined` for every `req` (M8 rule 8) — only a completed
@@ -404,8 +411,12 @@ export function createConnection(socket: SocketLike, deps: ConnectionDeps): Conn
   }
 
   /** `{kind:"value"}` -> "ok"; the outcome's own kind otherwise. */
-  function auditOutcomeOf(outcome: RequestOutcome): "ok" | "forbidden" | "unknown-channel" {
-    return outcome.kind === "value" ? "ok" : outcome.kind;
+  function auditOutcomeOf(
+    outcome: RequestOutcome,
+  ): "ok" | "error" | "forbidden" | "unknown-channel" {
+    if (outcome.kind === "value") return "ok";
+    if (outcome.kind === "refused") return "error";
+    return outcome.kind;
   }
 
   function clearHandshakeTimer(): void {
@@ -754,6 +765,14 @@ export function createConnection(socket: SocketLike, deps: ConnectionDeps): Conn
   }
 
   function deliverOutcome(id: number, outcome: RequestOutcome): void {
+    if (outcome.kind === "refused") {
+      if (outcome.text === undefined) {
+        sendErr(id, outcome.code);
+      } else {
+        reply({ t: "err", id, code: outcome.code, text: outcome.text, language: "en" });
+      }
+      return;
+    }
     if (outcome.kind !== "value") {
       sendErr(id, outcome.kind);
       return;
