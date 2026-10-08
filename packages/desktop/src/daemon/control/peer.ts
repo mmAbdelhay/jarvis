@@ -9,7 +9,7 @@
 //
 // No electron here (core/no-electron.test.ts).
 import { execFile } from "node:child_process";
-import { readlink } from "node:fs/promises";
+import { readdir, readlink } from "node:fs/promises";
 import type { Socket } from "node:net";
 
 export const SS_PATH = "/usr/bin/ss";
@@ -41,6 +41,7 @@ export function inodeOfLink(link: string): string | undefined {
 export type PeerDeps = {
   fdOf(socket: Socket): number | undefined;
   readlink(path: string): Promise<string>;
+  readdir(path: string): Promise<string[]>;
   listUnixSockets(): Promise<string>;
 };
 
@@ -51,13 +52,30 @@ export async function peerExecutable(socket: Socket, deps: PeerDeps): Promise<st
     const mine = inodeOfLink(await deps.readlink(`/proc/self/fd/${fd}`));
     if (mine === undefined) return undefined;
     const rows = parseSsUnix(await deps.listUnixSockets());
-    const own = rows.find((row) => row.localInode === mine);
-    if (own === undefined || own.peerInode === "0") return undefined;
-    const pids = [
-      ...new Set(rows.filter((row) => row.localInode === own.peerInode).flatMap((row) => row.pids)),
-    ];
+    // A client chooses its own socket address, which ss prints unescaped, so
+    // text can carry forged rows: an inode seen in more than one row is refused.
+    const ownRows = rows.filter((row) => row.localInode === mine);
+    if (ownRows.length !== 1) return undefined;
+    const own = ownRows[0] as SsUnixRow;
+    if (own.peerInode === "0") return undefined;
+    const peerRows = rows.filter((row) => row.localInode === own.peerInode);
+    if (peerRows.length !== 1) return undefined;
+    const pids = (peerRows[0] as SsUnixRow).pids;
     if (pids.length !== 1) return undefined;
-    const exe = await deps.readlink(`/proc/${pids[0]}/exe`);
+    const pid = pids[0] as number;
+    // The pid in the text is a claim; the kernel must confirm the process holds the peer inode.
+    const want = `socket:[${own.peerInode}]`;
+    let holds = false;
+    for (const name of await deps.readdir(`/proc/${pid}/fd`)) {
+      if (!/^\d+$/.test(name)) continue;
+      const link = await deps.readlink(`/proc/${pid}/fd/${name}`).catch(() => undefined);
+      if (link === want) {
+        holds = true;
+        break;
+      }
+    }
+    if (!holds) return undefined;
+    const exe = await deps.readlink(`/proc/${pid}/exe`);
     return exe.endsWith(" (deleted)") ? undefined : exe;
   } catch {
     return undefined;
@@ -72,6 +90,7 @@ export function nodePeerDeps(): PeerDeps {
       return typeof fd === "number" && Number.isInteger(fd) && fd >= 0 ? fd : undefined;
     },
     readlink: (path) => readlink(path),
+    readdir: (path) => readdir(path),
     listUnixSockets: () =>
       new Promise((resolve, reject) => {
         execFile(
