@@ -80,4 +80,27 @@ describe("nodeTerminal", () => {
     io.input.end();
     await expect(second).resolves.toBeNull();
   });
+
+  it("keeps lines that arrive in one chunk for later reads", async () => {
+    const io = fakeStdio(false);
+    const term = nodeTerminal({ input: io.input, output: io.output, signals: false });
+    const first = term.readLine("› ");
+    io.input.write("one\ntwo\nthree\n");
+    await expect(first).resolves.toBe("one");
+    await expect(term.readLine("› ")).resolves.toBe("two");
+    await expect(term.readLine("› ")).resolves.toBe("three");
+    const last = term.readLine("› ");
+    io.input.end();
+    await expect(last).resolves.toBeNull();
+    await expect(term.readLine("› ")).resolves.toBeNull();
+  });
+
+  it("returns null when a line read is aborted", async () => {
+    const io = fakeStdio(false);
+    const term = nodeTerminal({ input: io.input, output: io.output, signals: false });
+    const abort = new AbortController();
+    const pending = term.readLine("› ", abort.signal);
+    abort.abort();
+    await expect(pending).resolves.toBeNull();
+  });
 });

@@ -2,7 +2,7 @@
 // Everything above it is tested with FakeTerminal. A secret is read only from
 // a real terminal (stdin and stdout both TTYs). Piped input never fills a
 // password field, and never answers a card (card.ts checks `interactive`).
-import { createInterface } from "node:readline";
+import { createInterface, type Interface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
 
 export interface Terminal {
@@ -39,6 +39,54 @@ export function nodeTerminal(options: NodeTerminalOptions = {}): Terminal {
     });
   }
 
+  // One long-lived readline per terminal: a chunk with several lines must not
+  // lose the later ones, so 'line' events are queued and readLine takes from it.
+  const queue: string[] = [];
+  const readers = new Set<{ resolve: (value: string | null) => void }>();
+  let rl: Interface | null = null;
+  let ended = false;
+  const stopReader = () => {
+    const current = rl;
+    rl = null;
+    current?.close();
+  };
+  const ensureReader = (): Interface => {
+    if (rl !== null) return rl;
+    const created = createInterface({ input, output, terminal: interactive });
+    created.on("line", (line) => {
+      const next = readers.values().next();
+      if (next.done === true) {
+        queue.push(line);
+        return;
+      }
+      readers.delete(next.value);
+      next.value.resolve(line);
+    });
+    created.on("SIGINT", () => {
+      if (readers.size === 0) {
+        if (interrupts.size === 0) process.exit(130);
+        for (const listener of [...interrupts]) listener();
+        return;
+      }
+      output.write("\n");
+      for (const reader of [...readers]) {
+        readers.delete(reader);
+        reader.resolve(null);
+      }
+    });
+    created.on("close", () => {
+      if (rl !== created) return; // closed on purpose (secret prompt)
+      rl = null;
+      ended = true;
+      for (const reader of [...readers]) {
+        readers.delete(reader);
+        reader.resolve(null);
+      }
+    });
+    rl = created;
+    return created;
+  };
+
   return {
     interactive,
     write(text) {
@@ -46,32 +94,32 @@ export function nodeTerminal(options: NodeTerminalOptions = {}): Terminal {
     },
     readLine(prompt, signal) {
       if (signal?.aborted) return Promise.resolve(null);
+      // Lines buffered by an earlier chunk are served first, with no prompt.
+      if (queue.length > 0) return Promise.resolve(queue.shift() as string);
+      if (ended) return Promise.resolve(null);
       return new Promise((resolve) => {
-        const rl = createInterface({ input, output, terminal: interactive });
-        let done = false;
-        const finish = (value: string | null) => {
-          if (done) return;
-          done = true;
-          signal?.removeEventListener("abort", onAbort);
-          rl.close();
-          resolve(value);
+        const reader = {
+          resolve: (value: string | null) => {
+            signal?.removeEventListener("abort", onAbort);
+            resolve(value);
+          },
         };
         const onAbort = () => {
+          readers.delete(reader);
           output.write("\n");
-          finish(null);
+          reader.resolve(null);
         };
         signal?.addEventListener("abort", onAbort, { once: true });
-        rl.on("SIGINT", () => {
-          output.write("\n");
-          finish(null);
-        });
-        rl.on("close", () => finish(null));
-        rl.question(prompt, (answer) => finish(answer));
+        readers.add(reader);
+        const active = ensureReader();
+        active.setPrompt(prompt);
+        active.prompt();
       });
     },
     readSecret(prompt, signal) {
       const setRaw = input.setRawMode;
       if (!interactive || setRaw === undefined || signal?.aborted) return Promise.resolve(null);
+      stopReader(); // raw keystrokes below must not also reach readline
       output.write(prompt);
       return new Promise((resolve) => {
         let value = "";
