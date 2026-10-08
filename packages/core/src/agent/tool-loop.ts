@@ -39,6 +39,8 @@ export type ToolLoopDeps = {
   newId(): string;
   /** The provider's context size in tokens (context-fit.ts CONTEXT_TOKENS). */
   contextTokens?: number;
+  /** Design §3.8: picks this turn's tools from all of them (tool-search.ts). */
+  selectTools?(text: string, tools: ModelToolSpec[]): Promise<ModelToolSpec[]>;
 };
 
 export type TurnRequest = {
@@ -268,12 +270,13 @@ export async function runTurn(deps: ToolLoopDeps, request: TurnRequest): Promise
   const prompt =
     request.context === undefined ? request.text : `${request.context}\n\n${request.text}`;
   const messages: ModelMessage[] = [...request.history, { role: "user", text: prompt }];
-  const tools = deps.toolsEnabled ? deps.registry.modelTools() : [];
+  const allTools = deps.toolsEnabled ? deps.registry.modelTools() : [];
+  let tools = allTools;
   const base = deps.toolsEnabled ? SYSTEM_PROMPT : `${SYSTEM_PROMPT}\n\n${AGENT_TEXT.noToolsNote}`;
   // Design 3.1: the safety rules close EVERY request's system text; only the
   // history is cut to fit the context, never the rules.
   const system = buildSystemPrompt(base, request.notes ?? []);
-  const budget = historyBudget(deps.contextTokens ?? DEFAULT_CONTEXT_TOKENS, system, tools);
+  let budget = historyBudget(deps.contextTokens ?? DEFAULT_CONTEXT_TOKENS, system, tools);
   const ran: string[] = [];
 
   const finish = (reason: TurnEndReason, failure?: unknown): TurnResult => {
@@ -294,6 +297,15 @@ export async function runTurn(deps: ToolLoopDeps, request: TurnRequest): Promise
 
   deps.emit({ type: "turn-start", turnId, text: request.text });
   try {
+    if (deps.selectTools !== undefined && allTools.length > 0) {
+      try {
+        const picked = await deps.selectTools(request.text, allTools);
+        if (picked.length > 0) tools = picked;
+      } catch {
+        tools = allTools;
+      }
+      budget = historyBudget(deps.contextTokens ?? DEFAULT_CONTEXT_TOKENS, system, tools);
+    }
     for (let step = 0; ; step++) {
       if (signal.aborted) return finish("stopped");
       if (step === MAX_STEPS) {

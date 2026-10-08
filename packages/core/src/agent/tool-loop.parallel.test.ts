@@ -212,3 +212,52 @@ describe("parallel safe calls (design §3.4, criterion 4)", () => {
     expect(results[5]?.content).toBe(AGENT_TEXT.stopped);
   });
 });
+
+describe("per-turn tool selection hook (design §3.8)", () => {
+  it("offers only the selected tools, and a call to an unoffered tool still runs gated", async () => {
+    const held = holdingSession(["net.status", "logs.query"]);
+    const registry = await loadToolRegistry([held.session], {
+      trusted: new Set(["jarvis-diag"]),
+      log: () => {},
+    });
+    const offered: string[][] = [];
+    const replies: ModelEvent[][] = [
+      [{ type: "tool_call", id: "c1", name: "logs_query", input: { id: "L" } }, DONE],
+      [{ type: "text", delta: "ok" }, DONE],
+    ];
+    const provider: ModelProvider = {
+      async *chat(request) {
+        offered.push(request.tools.map((t) => t.name));
+        yield* replies.shift() ?? [DONE];
+      },
+      probe: async () => ({ ok: true, supportsTools: true, models: [] }),
+      listModels: async () => [],
+      reachable: async () => ({ ok: true }),
+    };
+    const gate = createRiskGate({
+      emit: () => {},
+      describe: async (tool) => ({ title: tool.name, detail: "", source: "system" }),
+      audit: async () => {},
+      now: () => 0,
+      newId: () => "card",
+      timers: { setTimeout: () => 0, clearTimeout: () => {} },
+      log: () => {},
+    });
+    const done = runTurn(
+      {
+        provider,
+        registry,
+        gate,
+        toolsEnabled: true,
+        emit: () => {},
+        newId: () => "n",
+        selectTools: async (_text, tools) => tools.filter((t) => t.name === "net_status"),
+      },
+      { turnId: "t", history: [], text: "network?", signal: new AbortController().signal },
+    );
+    await until(() => held.started.includes("L"));
+    held.release("L");
+    await done;
+    expect(offered[0]).toEqual(["net_status"]);
+  });
+});

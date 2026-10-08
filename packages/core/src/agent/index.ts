@@ -17,3 +17,4 @@ export * from "./failover.js";
 export * from "./redact.js";
 export * from "./text-index.js";
 export * from "./map-limit.js";
+export * from "./tool-search.js";
