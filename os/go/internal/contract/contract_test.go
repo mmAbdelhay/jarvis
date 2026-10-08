@@ -39,7 +39,11 @@ var pkgContract = map[string]want{
 	"registry.search":  {"safe", nil, []string{"query"}, []string{"query"}},
 	"registry.install": {"confirm", nil, []string{"id", "version"}, []string{"id", "version"}},
 	"registry.remove":  {"confirm", nil, []string{"id"}, []string{"id"}},
+	"registry.list":    {"safe", nil, nil, nil}, // hidden, contracts §7.8
 }
+
+// hiddenTools are the contract tools that must declare _meta.jarvis.hidden.
+var hiddenTools = map[string]bool{"registry.list": true}
 
 // batchTools declare _meta.jarvis.batch (contracts §6.1); no other tool may.
 var batchTools = map[string]string{"pkg.install": "items", "pkg.remove": "items", "updates.apply": "items"}
@@ -133,7 +137,7 @@ func check(t *testing.T, server string, tools []listedTool, contract map[string]
 		for p := range tl.InputSchema.Properties {
 			props = append(props, p)
 		}
-		if m.Risk != w.risk || *m.Hidden || !eq(m.Secrets, w.secrets) || !eq(props, w.props) || !eq(tl.InputSchema.Required, w.required) {
+		if m.Risk != w.risk || *m.Hidden != hiddenTools[tl.Name] || !eq(m.Secrets, w.secrets) || !eq(props, w.props) || !eq(tl.InputSchema.Required, w.required) {
 			t.Errorf("%s %s: risk=%s secrets=%v props=%v required=%v; contract says risk=%s secrets=%v props=%v required=%v",
 				server, tl.Name, m.Risk, m.Secrets, props, tl.InputSchema.Required, w.risk, w.secrets, w.props, w.required)
 		}

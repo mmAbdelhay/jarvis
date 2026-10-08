@@ -300,3 +300,53 @@ func TestRegistryTextHasNoEmptyStrings(t *testing.T) {
 		}
 	}
 }
+
+func TestRegistryListSplitsInstalledAndAvailable(t *testing.T) {
+	fr := newFakeRegistry(t)
+	s := registrytest.NewSigner(t)
+	threeServers(t, fr, s)
+	d, _ := registryDeps(t, fr, s)
+
+	var hidden bool
+	for _, tool := range Tools(d) {
+		if tool.Name == "registry.list" {
+			hidden = tool.Hidden && tool.Risk == mcp.RiskSafe
+		}
+	}
+	if !hidden {
+		t.Fatal("registry.list must be a hidden safe tool")
+	}
+	count := func(m map[string]any, k string) []string {
+		var ids []string
+		for _, e := range m[k].([]any) {
+			ids = append(ids, e.(map[string]any)["id"].(string))
+		}
+		return ids
+	}
+	got, err := call(t, d, "registry.list", `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := asJSON(t, got)
+	if len(count(m, "installed")) != 0 || len(count(m, "available")) == 0 {
+		t.Fatalf("before install: %v", m)
+	}
+	total := len(count(m, "available"))
+	if _, err := call(t, d, "registry.install", `{"id":"notes","version":"2.0.0"}`); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = call(t, d, "registry.list", `{}`)
+	m = asJSON(t, got)
+	inst := count(m, "installed")
+	if len(inst) != 1 || inst[0] != "notes" || len(count(m, "available")) != total-1 {
+		t.Fatalf("after install: %v", m)
+	}
+	for _, id := range count(m, "available") {
+		if id == "notes" {
+			t.Fatal("installed id still listed as available")
+		}
+	}
+	if _, err := call(t, d, "registry.list", `{"x":1}`); code(err) != mcp.CodeInvalid {
+		t.Fatalf("extra arg: %v", err)
+	}
+}
