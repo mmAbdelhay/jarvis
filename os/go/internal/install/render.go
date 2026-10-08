@@ -111,8 +111,16 @@ func renderGrub(dualBoot bool) string {
 // renderJarvisYAML is the provider section jarvisd reads (M2 contracts §6,
 // packages/desktop/src/daemon/os/provider-config.ts). Strings are JSON
 // quoted, which is valid YAML and safe for "qwen3:8b".
-func renderJarvisYAML(kind, baseURL, model string) string {
+// renderJarvisYAML: kind "" (a cloud brain, set up after the first login)
+// leaves the provider out; lang "" leaves os.language to jarvisd's LANG default.
+func renderJarvisYAML(kind, baseURL, model, lang string) string {
 	q := func(s string) string { b, _ := json.Marshal(s); return string(b) }
-	return "# Written by the Rafiq installer. Change it in Settings.\nprovider:\n" +
-		"  kind: " + kind + "\n  baseUrl: " + q(baseURL) + "\n  model: " + q(model) + "\n"
+	out := "# Written by the Rafiq installer. Change it in Settings.\n"
+	if kind != "" {
+		out += "provider:\n  kind: " + kind + "\n  baseUrl: " + q(baseURL) + "\n  model: " + q(model) + "\n"
+	}
+	if lang != "" {
+		out += "os:\n  language: " + lang + "\n"
+	}
+	return out
 }

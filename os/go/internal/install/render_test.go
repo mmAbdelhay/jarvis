@@ -40,7 +40,7 @@ func TestRenderers(t *testing.T) {
 	if got := renderGrub(true); !strings.Contains(got, "GRUB_TIMEOUT=3\nGRUB_TIMEOUT_STYLE=menu\n") || !strings.Contains(got, "GRUB_DISABLE_OS_PROBER=false") {
 		t.Fatalf("grub = %q", got)
 	}
-	if got := renderJarvisYAML("openai-compatible", "http://10.0.0.5:8000/v1", "qwen: \"x\""); !strings.Contains(got, "  model: \"qwen: \\\"x\\\"\"\n") {
+	if got := renderJarvisYAML("openai-compatible", "http://10.0.0.5:8000/v1", "qwen: \"x\"", ""); !strings.Contains(got, "  model: \"qwen: \\\"x\\\"\"\n") {
 		t.Fatalf("yaml quoting = %q", got)
 	}
 }

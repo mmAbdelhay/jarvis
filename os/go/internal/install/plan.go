@@ -5,6 +5,7 @@ import (
 	"sort"
 
 	"github.com/mmAbdelhay/jarvis/os/go/internal/catalog"
+	"github.com/mmAbdelhay/jarvis/os/go/internal/i18n"
 	"github.com/mmAbdelhay/jarvis/os/go/internal/pkgtools"
 )
 
@@ -82,8 +83,9 @@ type Planned struct {
 // refuses (Refusal) what is unsafe or impossible and rejects (InvalidError)
 // what is malformed. Nothing here touches a disk.
 func MakePlan(c Choices, p ProbeResult, planID string) (Planned, error) {
+	x := trFor(c)
 	if !p.UEFI {
-		return Planned{}, &Refusal{RefuseNoUEFI, text.NoUEFI}
+		return Planned{}, &Refusal{RefuseNoUEFI, x.t.NoUEFI}
 	}
 	if err := checkChoices(c); err != nil {
 		return Planned{}, err
@@ -98,7 +100,7 @@ func MakePlan(c Choices, p ProbeResult, planID string) (Planned, error) {
 		return Planned{}, invalidf("%s is not a disk Rafiq can be installed on", c.Disk.Path)
 	}
 	if p.LiveDevice != nil && *p.LiveDevice == disk.Path {
-		return Planned{}, &Refusal{RefuseLiveMedium, text.LiveMedium}
+		return Planned{}, &Refusal{RefuseLiveMedium, x.t.LiveMedium}
 	}
 	if disk.SectorBytes <= 0 || disk.LastUsable <= 0 {
 		return Planned{}, invalidf("%s has no readable geometry", disk.Path)
@@ -112,11 +114,11 @@ func MakePlan(c Choices, p ProbeResult, planID string) (Planned, error) {
 	)
 	switch c.Disk.Mode {
 	case "erase":
-		lay, err = planErase(*disk)
+		lay, err = planErase(x, *disk)
 	case "alongside":
-		lay, err = planAlongside(*disk, *c.Disk.AlongsideSizeBytes)
+		lay, err = planAlongside(x, *disk, *c.Disk.AlongsideSizeBytes)
 	case "manual":
-		lay, err = planManual(*disk, c.Disk.Manual, c.Encrypt)
+		lay, err = planManual(x, *disk, c.Disk.Manual, c.Encrypt)
 	default:
 		return Planned{}, invalidf("disk.mode must be erase, alongside or manual")
 	}
@@ -125,7 +127,7 @@ func MakePlan(c Choices, p ProbeResult, planID string) (Planned, error) {
 	}
 	lay.Encrypt = c.Encrypt
 	if lay.Root.Bytes < MinRootBytes {
-		return Planned{}, &Refusal{RefuseDiskTooSmall, fmt.Sprintf(text.DiskTooSmall, lay.Root.Path, human(MinRootBytes))}
+		return Planned{}, &Refusal{RefuseDiskTooSmall, x.f(x.t.DiskTooSmall, lay.Root.Path, human(MinRootBytes))}
 	}
 	var model *catalog.Model
 	if c.Brain.Kind == "local" {
@@ -133,7 +135,7 @@ func MakePlan(c Choices, p ProbeResult, planID string) (Planned, error) {
 		if !ok {
 			return Planned{}, invalidf("model %q is not in the catalog", c.Brain.ModelID)
 		}
-		if err := modelFits(m, lay.Root.Bytes, p); err != nil {
+		if err := modelFits(x, m, lay.Root.Bytes, p); err != nil {
 			return Planned{}, err
 		}
 		model = &m
@@ -141,10 +143,10 @@ func MakePlan(c Choices, p ProbeResult, planID string) (Planned, error) {
 	pl := Planned{Choices: c, Disk: *disk, Layout: lay, Model: model, Online: p.Online, SecureBoot: p.SecureBoot}
 	pl.Public = InstallPlan{
 		PlanID:    planID,
-		Summary:   summary(c, *disk, lay, model, p.Online),
-		Steps:     steps(lay, model),
-		DiskAfter: diskAfter(*disk, lay),
-		Warnings:  warnings(*disk, lay),
+		Summary:   summary(x, c, *disk, lay, model, p.Online),
+		Steps:     steps(x, lay, model),
+		DiskAfter: diskAfter(x, *disk, lay),
+		Warnings:  warnings(x, *disk, lay),
 	}
 	return pl, nil
 }
@@ -154,20 +156,20 @@ func MakePlan(c Choices, p ProbeResult, planID string) (Planned, error) {
 // the same; disk: MinRootBytes plus the model). The UI must hide models
 // that fail it; Plan refuses them.
 func ModelFits(m catalog.Model, rootBytes int64, p ProbeResult) bool {
-	return modelFits(m, rootBytes, p) == nil
+	return modelFits(tr{l: i18n.EN, t: textEN}, m, rootBytes, p) == nil
 }
 
-func modelFits(m catalog.Model, rootBytes int64, p ProbeResult) error {
+func modelFits(x tr, m catalog.Model, rootBytes int64, p ProbeResult) error {
 	if float64(p.RAMBytes) < m.MinRamGB*0.9e9 {
-		return &Refusal{RefuseModelDoesNotFit, fmt.Sprintf(text.ModelTooBigRAM, m.DisplayName, int(m.MinRamGB), human(p.RAMBytes))}
+		return &Refusal{RefuseModelDoesNotFit, x.f(x.t.ModelTooBigRAM, m.DisplayName, int(m.MinRamGB), human(p.RAMBytes))}
 	}
 	if m.MinVramGB != nil {
 		if p.GPU == nil || p.GPU.VRAMBytes == nil || float64(*p.GPU.VRAMBytes) < *m.MinVramGB*0.9e9 {
-			return &Refusal{RefuseModelDoesNotFit, fmt.Sprintf(text.ModelNeedsGPU, m.DisplayName, int(*m.MinVramGB))}
+			return &Refusal{RefuseModelDoesNotFit, x.f(x.t.ModelNeedsGPU, m.DisplayName, int(*m.MinVramGB))}
 		}
 	}
 	if rootBytes < MinRootBytes+m.SizeBytes {
-		return &Refusal{RefuseModelDoesNotFit, fmt.Sprintf(text.ModelTooBigDisk, m.DisplayName, human(MinRootBytes+m.SizeBytes), human(rootBytes))}
+		return &Refusal{RefuseModelDoesNotFit, x.f(x.t.ModelTooBigDisk, m.DisplayName, human(MinRootBytes+m.SizeBytes), human(rootBytes))}
 	}
 	return nil
 }
@@ -195,19 +197,19 @@ func PartPath(disk string, n int) string {
 	return fmt.Sprintf("%s%d", disk, n)
 }
 
-func planErase(d Disk) (Layout, error) {
+func planErase(x tr, d Disk) (Layout, error) {
 	a := alignSectors(d)
 	espSec := ESPSizeBytes / d.SectorBytes
 	esp := Part{Number: 1, Create: true, Format: true, Start: a, End: a + espSec - 1}
 	root := Part{Number: 2, Create: true, Format: true, Start: a + espSec, End: d.LastUsable}
 	if root.End <= root.Start {
-		return Layout{}, &Refusal{RefuseDiskTooSmall, fmt.Sprintf(text.DiskTooSmall, d.Path, human(MinRootBytes+ESPSizeBytes))}
+		return Layout{}, &Refusal{RefuseDiskTooSmall, x.f(x.t.DiskTooSmall, d.Path, human(MinRootBytes+ESPSizeBytes))}
 	}
 	esp.Path, root.Path = PartPath(d.Path, 1), PartPath(d.Path, 2)
 	esp.Bytes = espSec * d.SectorBytes
 	root.Bytes = (root.End - root.Start + 1) * d.SectorBytes
 	if root.Bytes < MinRootBytes {
-		return Layout{}, &Refusal{RefuseDiskTooSmall, fmt.Sprintf(text.DiskTooSmall, d.Path, human(MinRootBytes+ESPSizeBytes))}
+		return Layout{}, &Refusal{RefuseDiskTooSmall, x.f(x.t.DiskTooSmall, d.Path, human(MinRootBytes+ESPSizeBytes))}
 	}
 	return Layout{Mode: "erase", Disk: d.Path, SectorBytes: d.SectorBytes, Wipe: true, ESP: esp, Root: root, FallbackBoot: true}, nil
 }
@@ -256,28 +258,28 @@ func freeNumbers(d Disk, n int) []int {
 
 // planAlongside shrinks Windows' partition from its end only (its start
 // sector never moves) and puts Rafiq in the space that frees.
-func planAlongside(d Disk, jarvisBytes int64) (Layout, error) {
+func planAlongside(x tr, d Disk, jarvisBytes int64) (Layout, error) {
 	win := windowsPartition(d)
 	if !d.GPT || win == nil {
-		return Layout{}, &Refusal{RefuseAlongsideNoWin, text.NoWindows}
+		return Layout{}, &Refusal{RefuseAlongsideNoWin, x.t.NoWindows}
 	}
 	if win.NTFS == nil {
-		return Layout{}, &Refusal{RefuseNTFSDirty, text.Dirty}
+		return Layout{}, &Refusal{RefuseNTFSDirty, x.t.Dirty}
 	}
 	switch {
 	case win.NTFS.Bitlocker || win.FS == "BitLocker":
-		return Layout{}, &Refusal{RefuseNTFSBitlocker, text.Bitlocker}
+		return Layout{}, &Refusal{RefuseNTFSBitlocker, x.t.Bitlocker}
 	case win.NTFS.Hibernated:
-		return Layout{}, &Refusal{RefuseNTFSHibernated, text.Hibernated}
+		return Layout{}, &Refusal{RefuseNTFSHibernated, x.t.Hibernated}
 	case win.NTFS.Dirty:
-		return Layout{}, &Refusal{RefuseNTFSDirty, text.Dirty}
+		return Layout{}, &Refusal{RefuseNTFSDirty, x.t.Dirty}
 	}
 	esp := reusableESP(d)
 	need := int64(MinRootBytes)
 	if esp == nil {
 		need += ESPSizeBytes
 	}
-	tooSmall := &Refusal{RefuseAlongsideSmall, fmt.Sprintf(text.AlongsideTooSmall, human(need), human(win.NTFS.MinSizeBytes))}
+	tooSmall := &Refusal{RefuseAlongsideSmall, x.f(x.t.AlongsideTooSmall, human(need), human(win.NTFS.MinSizeBytes))}
 	newBytes := win.SizeBytes - jarvisBytes
 	if jarvisBytes < need || newBytes < win.NTFS.MinSizeBytes || newBytes <= 0 {
 		return Layout{}, tooSmall
@@ -321,7 +323,7 @@ func planAlongside(d Disk, jarvisBytes int64) (Layout, error) {
 
 // planManual uses existing partitions as the user assigned them; the
 // partition table itself is never changed in manual mode.
-func planManual(d Disk, entries []ManualEntry, encrypt bool) (Layout, error) {
+func planManual(x tr, d Disk, entries []ManualEntry, encrypt bool) (Layout, error) {
 	byPath := map[string]Partition{}
 	for _, p := range d.Partitions {
 		byPath[p.Path] = p
@@ -362,13 +364,13 @@ func planManual(d Disk, entries []ManualEntry, encrypt bool) (Layout, error) {
 		}
 	}
 	if !haveRoot {
-		return Layout{}, &Refusal{RefuseManualNoRoot, text.ManualNoRoot}
+		return Layout{}, &Refusal{RefuseManualNoRoot, x.t.ManualNoRoot}
 	}
 	if !haveESP {
-		return Layout{}, &Refusal{RefuseManualNoESP, text.ManualNoESP}
+		return Layout{}, &Refusal{RefuseManualNoESP, x.t.ManualNoESP}
 	}
 	if espPart.TypeGUID != espTypeGUID || espPart.SizeBytes < ESPReuseMinBytes || (!lay.ESP.Format && espPart.FS != "vfat") {
-		return Layout{}, &Refusal{RefuseManualNoESP, fmt.Sprintf(text.ManualSmallESP, espPart.Path, human(ESPReuseMinBytes))}
+		return Layout{}, &Refusal{RefuseManualNoESP, x.f(x.t.ManualSmallESP, espPart.Path, human(ESPReuseMinBytes))}
 	}
 	for _, p := range d.Partitions {
 		if !seenPart[p.Path] && p.TypeGUID == basicDataTypeGUID && (p.FS == "ntfs" || p.FS == "BitLocker") {
@@ -378,10 +380,10 @@ func planManual(d Disk, entries []ManualEntry, encrypt bool) (Layout, error) {
 	return lay, nil
 }
 
-func summary(c Choices, d Disk, lay Layout, model *catalog.Model, online bool) []string {
+func summary(x tr, c Choices, d Disk, lay Layout, model *catalog.Model, online bool) []string {
 	enc := ""
 	if lay.Encrypt {
-		enc = text.Encrypted
+		enc = x.t.Encrypted
 	}
 	var out []string
 	switch lay.Mode {
@@ -390,58 +392,58 @@ func summary(c Choices, d Disk, lay Layout, model *catalog.Model, online bool) [
 		if name == "" {
 			name = d.Path
 		}
-		out = append(out, fmt.Sprintf(text.EraseDisk, name, human(d.SizeBytes), d.Path),
-			fmt.Sprintf(text.EraseCreate, human(lay.ESP.Bytes), human(lay.Root.Bytes), enc))
+		out = append(out, x.f(x.t.EraseDisk, name, human(d.SizeBytes), d.Path),
+			x.f(x.t.EraseCreate, human(lay.ESP.Bytes), human(lay.Root.Bytes), enc))
 	case "alongside":
-		out = append(out, fmt.Sprintf(text.AlongsideShrink, human(lay.Shrink.Part.SizeBytes), human(lay.Shrink.NewBytes), human(lay.Root.Bytes+espIfNew(lay)), enc))
+		out = append(out, x.f(x.t.AlongsideShrink, human(lay.Shrink.Part.SizeBytes), human(lay.Shrink.NewBytes), human(lay.Root.Bytes+espIfNew(lay)), enc))
 		if lay.ESP.Create {
-			out = append(out, fmt.Sprintf(text.ESPCreate, human(lay.ESP.Bytes)))
+			out = append(out, x.f(x.t.ESPCreate, human(lay.ESP.Bytes)))
 		} else {
-			out = append(out, fmt.Sprintf(text.ESPReuse, lay.ESP.Path))
+			out = append(out, x.f(x.t.ESPReuse, lay.ESP.Path))
 		}
 	case "manual":
-		out = append(out, fmt.Sprintf(text.ManualRoot, lay.Root.Path, human(lay.Root.Bytes), enc))
+		out = append(out, x.f(x.t.ManualRoot, lay.Root.Path, human(lay.Root.Bytes), enc))
 		if lay.ESP.Format {
-			out = append(out, fmt.Sprintf(text.ManualESPFormat, lay.ESP.Path))
+			out = append(out, x.f(x.t.ManualESPFormat, lay.ESP.Path))
 		} else {
-			out = append(out, fmt.Sprintf(text.ManualESPKeep, lay.ESP.Path))
+			out = append(out, x.f(x.t.ManualESPKeep, lay.ESP.Path))
 		}
 		if lay.Swap != nil {
 			if lay.Swap.Format {
-				out = append(out, fmt.Sprintf(text.ManualSwapFormat, lay.Swap.Path))
+				out = append(out, x.f(x.t.ManualSwapFormat, lay.Swap.Path))
 			} else {
-				out = append(out, fmt.Sprintf(text.ManualSwapKeep, lay.Swap.Path))
+				out = append(out, x.f(x.t.ManualSwapKeep, lay.Swap.Path))
 			}
 		}
 	}
 	if lay.Encrypt {
-		out = append(out, text.EncryptOn)
+		out = append(out, x.t.EncryptOn)
 	} else {
-		out = append(out, text.EncryptOff)
+		out = append(out, x.t.EncryptOff)
 	}
-	out = append(out, fmt.Sprintf(text.Regional, c.Locale, c.Keyboard, c.Timezone),
-		fmt.Sprintf(text.Account, c.User.FullName, c.User.Username, c.User.Hostname))
+	out = append(out, x.f(x.t.Regional, c.Locale, c.Keyboard, c.Timezone),
+		x.f(x.t.Account, c.User.FullName, c.User.Username, c.User.Hostname))
 	if c.User.Autologin {
-		out = append(out, text.LoginAuto)
+		out = append(out, x.t.LoginAuto)
 	} else {
-		out = append(out, text.LoginPassword)
+		out = append(out, x.t.LoginPassword)
 	}
 	free := lay.Root.Bytes - InstalledBytes
 	switch c.Brain.Kind {
 	case "local":
 		if online {
-			out = append(out, fmt.Sprintf(text.BrainLocal, model.DisplayName, human(model.SizeBytes)))
+			out = append(out, x.f(x.t.BrainLocal, model.DisplayName, human(model.SizeBytes)))
 		} else {
-			out = append(out, fmt.Sprintf(text.BrainLocalLater, model.DisplayName, human(model.SizeBytes)))
+			out = append(out, x.f(x.t.BrainLocalLater, model.DisplayName, human(model.SizeBytes)))
 		}
 		free -= model.SizeBytes
 	case "cloud":
-		out = append(out, text.BrainCloud)
+		out = append(out, x.t.BrainCloud)
 	case "lan":
 		base, _ := normalizeBaseURL(c.Brain.BaseURL)
-		out = append(out, fmt.Sprintf(text.BrainLAN, c.Brain.Model, base))
+		out = append(out, x.f(x.t.BrainLAN, c.Brain.Model, base))
 	}
-	return append(out, fmt.Sprintf(text.FreeAfter, human(free)))
+	return append(out, x.f(x.t.FreeAfter, human(free)))
 }
 
 func espIfNew(lay Layout) int64 {
@@ -451,41 +453,41 @@ func espIfNew(lay Layout) int64 {
 	return 0
 }
 
-func steps(lay Layout, model *catalog.Model) []Step {
+func steps(x tr, lay Layout, model *catalog.Model) []Step {
 	var out []Step
 	switch lay.Mode {
 	case "erase":
-		out = append(out, Step{"partition", text.StepPartition})
+		out = append(out, Step{"partition", x.t.StepPartition})
 	case "alongside":
-		out = append(out, Step{"partition", text.StepShrink})
+		out = append(out, Step{"partition", x.t.StepShrink})
 	}
 	if lay.Encrypt {
-		out = append(out, Step{"encrypt", text.StepEncrypt})
+		out = append(out, Step{"encrypt", x.t.StepEncrypt})
 	}
-	out = append(out, Step{"format", text.StepFormat}, Step{"copy", text.StepCopy},
-		Step{"configure", text.StepConfigure}, Step{"bootloader", text.StepBootloader})
+	out = append(out, Step{"format", x.t.StepFormat}, Step{"copy", x.t.StepCopy},
+		Step{"configure", x.t.StepConfigure}, Step{"bootloader", x.t.StepBootloader})
 	if model != nil {
-		out = append(out, Step{"model", text.StepModel})
+		out = append(out, Step{"model", x.t.StepModel})
 	}
 	return out
 }
 
-func warnings(d Disk, lay Layout) []string {
-	out := []string{text.NoUndo}
+func warnings(x tr, d Disk, lay Layout) []string {
+	out := []string{x.t.NoUndo}
 	switch lay.Mode {
 	case "erase":
-		out = append(out, fmt.Sprintf(text.EraseAll, d.Path))
+		out = append(out, x.f(x.t.EraseAll, d.Path))
 	case "alongside":
-		out = append(out, text.AlongsideBackup, text.Chkdsk)
+		out = append(out, x.t.AlongsideBackup, x.t.Chkdsk)
 	}
 	if d.Removable {
-		out = append(out, fmt.Sprintf(text.Removable, d.Path))
+		out = append(out, x.f(x.t.Removable, d.Path))
 	}
 	return out
 }
 
 // diskAfter lists the partitions in disk order as they will be after install.
-func diskAfter(d Disk, lay Layout) []DiskAfter {
+func diskAfter(x tr, d Disk, lay Layout) []DiskAfter {
 	type row struct {
 		start int64
 		DiskAfter
@@ -494,35 +496,35 @@ func diskAfter(d Disk, lay Layout) []DiskAfter {
 	label := func(p Partition) string {
 		switch {
 		case p.TypeGUID == espTypeGUID:
-			return text.LabelESP
+			return x.t.LabelESP
 		case p.Label != "":
 			return p.Label
 		case p.Name != "":
 			return p.Name
 		}
-		return fmt.Sprintf(text.LabelPartition, p.Number)
+		return x.f(x.t.LabelPartition, p.Number)
 	}
 	if lay.Mode != "erase" {
 		for _, p := range d.Partitions {
 			r := row{p.Start, DiskAfter{Label: label(p), SizeBytes: p.SizeBytes}}
 			switch {
 			case lay.Shrink != nil && p.Path == lay.Shrink.Part.Path:
-				r.Label, r.SizeBytes = text.LabelWindows, lay.Shrink.NewBytes
+				r.Label, r.SizeBytes = x.t.LabelWindows, lay.Shrink.NewBytes
 			case p.Path == lay.Root.Path:
-				r.Label, r.Encrypted = text.LabelJarvis, lay.Encrypt
+				r.Label, r.Encrypted = x.t.LabelJarvis, lay.Encrypt
 			case p.Path == lay.ESP.Path:
-				r.Label = text.LabelESP
+				r.Label = x.t.LabelESP
 			case lay.Swap != nil && p.Path == lay.Swap.Path:
-				r.Label = text.LabelSwap
+				r.Label = x.t.LabelSwap
 			}
 			rows = append(rows, r)
 		}
 	}
 	if lay.ESP.Create {
-		rows = append(rows, row{lay.ESP.Start, DiskAfter{text.LabelESP, lay.ESP.Bytes, false}})
+		rows = append(rows, row{lay.ESP.Start, DiskAfter{x.t.LabelESP, lay.ESP.Bytes, false}})
 	}
 	if lay.Root.Create {
-		rows = append(rows, row{lay.Root.Start, DiskAfter{text.LabelJarvis, lay.Root.Bytes, lay.Encrypt}})
+		rows = append(rows, row{lay.Root.Start, DiskAfter{x.t.LabelJarvis, lay.Root.Bytes, lay.Encrypt}})
 	}
 	sort.SliceStable(rows, func(i, j int) bool { return rows[i].start < rows[j].start })
 	out := make([]DiskAfter, len(rows))

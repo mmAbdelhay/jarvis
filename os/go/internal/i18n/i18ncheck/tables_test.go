@@ -12,6 +12,7 @@ import (
 	_ "github.com/mmAbdelhay/jarvis/os/go/internal/diagtools"
 	_ "github.com/mmAbdelhay/jarvis/os/go/internal/filestools"
 	"github.com/mmAbdelhay/jarvis/os/go/internal/i18n"
+	_ "github.com/mmAbdelhay/jarvis/os/go/internal/install"
 	_ "github.com/mmAbdelhay/jarvis/os/go/internal/pkgtools"
 	_ "github.com/mmAbdelhay/jarvis/os/go/internal/settingstools"
 )
@@ -23,6 +24,7 @@ var wantTables = []string{
 	"jarvis-apps/card",
 	"jarvis-diag/card",
 	"jarvis-files/card",
+	"jarvis-installer/text",
 	"jarvis-pkg/card",
 	"jarvis-pkg/registry",
 	"jarvis-settings/admin",

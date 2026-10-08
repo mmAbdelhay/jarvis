@@ -598,7 +598,8 @@ func TestExecuteDoneNotes(t *testing.T) {
 	h.run.on(execx.Exit(2, "EFI variables are not supported on this system."), "efibootmgr").
 		ok("chroot", "/target", "grub-install", "--target=x86_64-efi", "--efi-directory=/boot/efi", "--bootloader-id=debian", "--uefi-secure-boot", "--no-nvram", "--force-extra-removable").
 		ok("chroot", "/target", "update-grub")
-	j := &job{d: h.deps, pl: erasePlan(t)}
+	pl = erasePlan(t)
+	j := &job{d: h.deps, pl: pl, x: trFor(pl.Choices)}
 	if err := j.bootloader(context.Background()); err != nil || len(j.notes) != 1 || j.notes[0] != text.NoteNoNVRAM {
 		t.Fatalf("err %v notes %q", err, j.notes)
 	}

@@ -1,27 +1,36 @@
 package install
 
-// text is every user-facing string the backend produces: Review summary
-// lines, warnings, step titles, refusal reasons and progress details. English
-// only in M2; the M4 Arabic pass translates this table and nothing else.
-var text = struct {
-	ChoicesDecode        string
-	DiskDecode           string
-	UserDecode           string
-	SecretsDecode        string
-	InvalidLocale        string
-	InvalidKeyboard      string
-	InvalidTimezone      string
-	InvalidUsername      string
-	InvalidHostname      string
-	InvalidFullName      string
-	MissingModelID       string
-	InvalidModel         string
-	InvalidBrainKind     string
-	InvalidBaseURL       string
-	InvalidPassword      string
-	MissingPassphrase    string
-	UnexpectedPassphrase string
-	InvalidPassphrase    string
+import (
+	"strings"
+
+	"github.com/mmAbdelhay/jarvis/os/go/internal/i18n"
+)
+
+// installText is every user-facing string the backend produces: Review
+// summary lines, warnings, step titles, refusal reasons and progress
+// details, in English and Arabic (M4 contracts §6.6: the backend speaks the
+// language of Choices.locale). Fields tagged keep are D-Bus argument errors
+// the installer UI prevents before it calls; like every error meant for a
+// program, they stay English.
+type installText struct {
+	ChoicesDecode        string `i18n:"keep"`
+	DiskDecode           string `i18n:"keep"`
+	UserDecode           string `i18n:"keep"`
+	SecretsDecode        string `i18n:"keep"`
+	InvalidLocale        string `i18n:"keep"`
+	InvalidKeyboard      string `i18n:"keep"`
+	InvalidTimezone      string `i18n:"keep"`
+	InvalidUsername      string `i18n:"keep"`
+	InvalidHostname      string `i18n:"keep"`
+	InvalidFullName      string `i18n:"keep"`
+	MissingModelID       string `i18n:"keep"`
+	InvalidModel         string `i18n:"keep"`
+	InvalidBrainKind     string `i18n:"keep"`
+	InvalidBaseURL       string `i18n:"keep"`
+	InvalidPassword      string `i18n:"keep"`
+	MissingPassphrase    string `i18n:"keep"`
+	UnexpectedPassphrase string `i18n:"keep"`
+	InvalidPassphrase    string `i18n:"keep"`
 
 	// Summary lines.
 	EraseDisk, EraseCreate                      string
@@ -54,8 +63,9 @@ var text = struct {
 	ModelWaiting, ModelDownloading, ModelDone       string
 	ModelLater, Done                                string
 	NoteSecureBootOff, NoteNoNVRAM                  string
-}{
-	ChoicesDecode:        "choices: %v",
+}
+
+var textEN = installText{ChoicesDecode: "choices: %v",
 	DiskDecode:           "choices.disk: %v",
 	UserDecode:           "choices.user: %v",
 	SecretsDecode:        "secrets: malformed",
@@ -144,3 +154,130 @@ var text = struct {
 	NoteSecureBootOff: "Secure Boot is off on this computer. Rafiq starts anyway; you can turn Secure Boot on later in the firmware settings.",
 	NoteNoNVRAM:       "The firmware did not accept a boot entry, so the computer starts Rafiq through its standard fallback loader. If it does not start, choose the disk in the firmware boot menu.",
 }
+
+var textAR = installText{
+	ChoicesDecode:        "choices: %v",
+	DiskDecode:           "choices.disk: %v",
+	UserDecode:           "choices.user: %v",
+	SecretsDecode:        "secrets: malformed",
+	InvalidLocale:        "locale %q is not like en_US.UTF-8",
+	InvalidKeyboard:      "keyboard %q is not an XKB layout like us or us(intl)",
+	InvalidTimezone:      "time zone %q is not like Africa/Cairo",
+	InvalidUsername:      "username %q is not allowed: use lower-case letters, digits, - and _",
+	InvalidHostname:      "computer name %q is not allowed: use lower-case letters, digits and -",
+	InvalidFullName:      "full name must be 1-100 characters without : , = or \\",
+	MissingModelID:       "brain.modelId is required",
+	InvalidModel:         "brain.model must be 1-200 characters",
+	InvalidBrainKind:     "brain.kind must be local, cloud or lan",
+	InvalidBaseURL:       "brain.baseUrl must be an http(s) URL without credentials, query or fragment",
+	InvalidPassword:      "the password must be 1-1024 characters without control characters",
+	MissingPassphrase:    "an encryption passphrase is required",
+	UnexpectedPassphrase: "an encryption passphrase was given but encryption is off",
+	InvalidPassphrase:    "the encryption passphrase must be 8-512 characters without control characters",
+	EraseDisk:            "مسح القرص %s بالكامل (%s، %s). سيُحذف كل ما عليه.",
+	EraseCreate:          "إنشاء قسم إقلاع " + efi + " بحجم %s، وقسم بحجم %s %sلرفيق.",
+	AlongsideShrink:      "تصغير ويندوز من %s إلى %s، وإنشاء قسم بحجم %s %sلرفيق.",
+	ESPReuse:             "استخدام قسم الإقلاع الموجود %s، المشترك مع ويندوز.",
+	ESPCreate:            "إنشاء قسم إقلاع " + efi + " جديد بحجم %s.",
+	ManualRoot:           "تهيئة %s (%s) %sلرفيق. سيُحذف كل ما عليه.",
+	ManualESPKeep:        "استخدام %s قسمًا للإقلاع " + efi + " دون تهيئته.",
+	ManualESPFormat:      "تهيئة %s قسمًا للإقلاع " + efi + ". سيُحذف كل ما عليه.",
+	ManualSwapKeep:       "استخدام %s مساحةً للتبديل.",
+	ManualSwapFormat:     "تهيئة %s مساحةً للتبديل. سيُحذف كل ما عليه.",
+	EncryptOn:            "التشفير مفعّل: ستكتب عبارة المرور في كل مرة يُشغَّل فيها الحاسوب.",
+	EncryptOff:           "التشفير غير مفعّل: يستطيع أي شخص يحصل على القرص قراءة ملفاتك.",
+	Regional:             "اللغة %s، ولوحة المفاتيح %s، والمنطقة الزمنية %s.",
+	Account:              "حسابك: %s (%s) على الحاسوب %q.",
+	LoginAuto:            "يُسجَّل الدخول تلقائيًا.",
+	LoginPassword:        "تُطلب كلمة المرور في شاشة تسجيل الدخول.",
+	BrainLocal:           "يفكّر جارفيس على هذا الحاسوب باستخدام %s (تنزيل بحجم %s).",
+	BrainLocalLater:      "يفكّر جارفيس على هذا الحاسوب باستخدام %s (تنزيل بحجم %s يكتمل بعد إعادة التشغيل الأولى، لعدم توفر اتصال بالإنترنت الآن).",
+	BrainCloud:           "يفكّر جارفيس عبر خدمة سحابية؛ وتضيف مفتاحها بعد أول تسجيل دخول.",
+	BrainLAN:             "يفكّر جارفيس باستخدام %s على الخادم %s.",
+	FreeAfter:            "تبقى نحو %s متاحة لملفاتك.",
+	Encrypted:            "مشفّرًا ",
+
+	NoUndo:          "لن يتغيّر شيء حتى تضغط «تثبيت». بعد ذلك لا يمكن التراجع عن تغييرات القرص.",
+	EraseAll:        "سيُحذف كل ما على %s، بما في ذلك أي نظام تشغيل آخر.",
+	AlongsideBackup: "انسخ ملفاتك احتياطيًا أولًا. تصغير ويندوز آمن، لكن انقطاع الكهرباء في أثنائه قد يُتلف ويندوز.",
+	Chkdsk:          "سيفحص ويندوز قرصه مرة واحدة عند تشغيله التالي. اتركه حتى ينتهي.",
+	Removable:       "%s قرص قابل للإزالة. لن يعمل رفيق إلا وهو موصول بالحاسوب.",
+
+	StepPartition:  "تجهيز القرص",
+	StepShrink:     "تصغير ويندوز وتجهيز القرص",
+	StepEncrypt:    "التشفير",
+	StepFormat:     "إنشاء أنظمة الملفات",
+	StepCopy:       "نسخ رفيق",
+	StepConfigure:  "إعداد حسابك وإعداداتك",
+	StepBootloader: "تثبيت محمّل الإقلاع",
+	StepModel:      "تنزيل عقل جارفيس",
+
+	LabelESP:       "إقلاع " + iso("EFI"),
+	LabelJarvis:    "رفيق",
+	LabelWindows:   "ويندوز",
+	LabelSwap:      "مساحة التبديل",
+	LabelPartition: "القسم %d",
+
+	LiveMedium:        "هذا هو قرص " + iso("USB") + " الذي يعمل منه رفيق. اختر قرصًا آخر.",
+	NoUEFI:            "بدأ هذا الحاسوب في وضع " + iso("BIOS") + " القديم. يحتاج رفيق إلى " + iso("UEFI") + ": فعّل " + iso("UEFI") + " في إعدادات البرنامج الثابت، ثم شغّل الحاسوب من قرص " + iso("USB") + " مجددًا.",
+	DiskTooSmall:      "%s صغير جدًا: يحتاج رفيق إلى %s على الأقل.",
+	Bitlocker:         "ويندوز على هذا القرص مشفّر باستخدام " + iso("BitLocker") + ". أوقف " + iso("BitLocker") + " في ويندوز (أو علّقه مؤقتًا)، ثم حاول مجددًا.",
+	Hibernated:        "لم يُغلَق ويندوز إغلاقًا كاملًا. شغّل ويندوز، ثم اضغط مطولًا على مفتاح " + iso("Shift") + " وأنت تنقر «إيقاف التشغيل»، ثم حاول مجددًا.",
+	Dirty:             "يحتاج ويندوز إلى فحص قرصه. شغّل ويندوز واتركه حتى ينتهي، ثم أوقف تشغيله مع الضغط مطولًا على مفتاح " + iso("Shift") + "، ثم حاول مجددًا.",
+	AlongsideTooSmall: "لا توجد مساحة كافية: يحتاج رفيق إلى %s على الأقل، ويجب أن يبقى لويندوز %s على الأقل.",
+	NoWindows:         "لا يوجد ويندوز مثبّت على هذا القرص لتثبيت رفيق بجانبه.",
+	ManualNoRoot:      "اختر قسمًا لرفيق (/).",
+	ManualNoESP:       "اختر قسم إقلاع " + efi + " للمسار " + iso("/boot/efi") + ".",
+	ManualSmallESP:    "يجب أن يكون قسم الإقلاع %s قسم نظام " + iso("EFI") + " بحجم %s على الأقل.",
+	ModelTooBigDisk:   "يحتاج %s إلى مساحة %s، ولن يتوفر لرفيق سوى %s.",
+	ModelTooBigRAM:    "يحتاج %s إلى %d غيغابايت من الذاكرة، وفي هذا الحاسوب %s.",
+	ModelNeedsGPU:     "يحتاج %s إلى بطاقة رسوميات بذاكرة %d غيغابايت.",
+
+	Preflight:         "فحص القرص",
+	Cancelled:         "أُلغي التثبيت قبل إجراء أي تغيير.",
+	DiskChanged:       "تغيّر القرص منذ إعداد الخطة. لم يتغيّر شيء؛ ارجع وراجع الخطة مجددًا.",
+	ModelOffline:      "لا يوجد اتصال بالإنترنت: سيُنزَّل النموذج بعد إعادة التشغيل الأولى.",
+	ModelWaiting:      "بدء التنزيل",
+	ModelDownloading:  "جارٍ تنزيل %s",
+	ModelDone:         "%s جاهز",
+	ModelLater:        "سيستمر التنزيل بعد إعادة التشغيل الأولى.",
+	Done:              "اكتمل تثبيت رفيق.",
+	NoteSecureBootOff: "الإقلاع الآمن (" + iso("Secure Boot") + ") غير مفعّل على هذا الحاسوب. سيعمل رفيق رغم ذلك، ويمكنك تفعيل الإقلاع الآمن لاحقًا من إعدادات البرنامج الثابت.",
+	NoteNoNVRAM:       "لم يقبل البرنامج الثابت إضافة مدخل إقلاع، لذا يشغّل الحاسوب رفيق عبر محمّل الإقلاع الاحتياطي القياسي. إذا لم يعمل، فاختر القرص من قائمة الإقلاع في البرنامج الثابت.",
+}
+
+// texts is the backend's table pair, checked by the i18n CI gate.
+var texts = i18n.NewTable("jarvis-installer/text", textEN, textAR)
+
+// text is the English table: argument errors (validate.go, types.go), which
+// stay English, and tests.
+var text = textEN
+
+// efi is the "(EFI)" of the Arabic boot-partition lines, isolated.
+var efi = "(" + iso("EFI") + ")"
+
+func iso(s string) string { return i18n.FSI + s + i18n.PDI }
+
+// langOf is the install's language: Arabic for an ar_* locale, else English.
+func langOf(c Choices) i18n.Lang {
+	lang, _, _ := strings.Cut(strings.NewReplacer(".", "_", "@", "_").Replace(c.Locale), "_")
+	if lang == "ar" {
+		return i18n.AR
+	}
+	return i18n.EN
+}
+
+// tr is one install's text and formatter.
+type tr struct {
+	l i18n.Lang
+	t installText
+}
+
+func trFor(c Choices) tr {
+	l := langOf(c)
+	return tr{l: l, t: texts.Get(l)}
+}
+
+// f formats a line: fmt.Sprintf in English; in Arabic RLM first and every
+// inserted string isolated (i18n.Sprintf).
+func (x tr) f(format string, a ...any) string { return i18n.Sprintf(x.l, format, a...) }

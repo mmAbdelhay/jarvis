@@ -32,7 +32,7 @@ func (j *job) startModel(ctx context.Context) error {
 	if m == nil {
 		return nil
 	}
-	st := modelstate.State{ModelID: m.ID, OllamaTag: m.OllamaTag, State: modelstate.Pending, Message: text.ModelLater}
+	st := modelstate.State{ModelID: m.ID, OllamaTag: m.OllamaTag, State: modelstate.Pending, Message: j.tx().t.ModelLater}
 	if err := modelstate.MarkPending(j.d.Files, Target); err != nil {
 		return err
 	}
@@ -41,7 +41,7 @@ func (j *job) startModel(ctx context.Context) error {
 	}
 	if !j.pl.Online {
 		j.d.Log.Printf("model: offline, %s downloads on first boot", m.OllamaTag)
-		j.d.Events.ModelProgress(0, text.ModelOffline)
+		j.d.Events.ModelProgress(0, j.tx().t.ModelOffline)
 		return nil
 	}
 	mctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
@@ -82,14 +82,14 @@ func (j *job) pullModel(ctx context.Context, st modelstate.State) error {
 	cancelUp()
 	if err == nil {
 		j.d.Log.Printf("model: pulling %s", st.OllamaTag)
-		j.d.Events.ModelProgress(0, text.ModelWaiting)
+		j.d.Events.ModelProgress(0, j.tx().t.ModelWaiting)
 		last := -1
 		err = client.Pull(ctx, st.OllamaTag, func(p ollama.Progress) {
 			if p.Percent == last {
 				return
 			}
 			last = p.Percent
-			j.d.Events.ModelProgress(p.Percent, fmt.Sprintf(text.ModelDownloading, j.pl.Model.DisplayName))
+			j.d.Events.ModelProgress(p.Percent, j.tx().f(j.tx().t.ModelDownloading, j.pl.Model.DisplayName))
 			st.State, st.Percent, st.Message = modelstate.Downloading, p.Percent, p.Status
 			_ = modelstate.Write(j.d.Files, Target, st, j.now())
 		})
@@ -102,9 +102,9 @@ func (j *job) pullModel(ctx context.Context, st modelstate.State) error {
 	}
 	if err != nil {
 		j.d.Log.Printf("model: %v; first boot will continue", err)
-		st.State, st.Message = modelstate.Pending, text.ModelLater
+		st.State, st.Message = modelstate.Pending, j.tx().t.ModelLater
 		_ = modelstate.Write(j.d.Files, Target, st, j.now())
-		j.d.Events.ModelProgress(st.Percent, text.ModelLater)
+		j.d.Events.ModelProgress(st.Percent, j.tx().t.ModelLater)
 		return err
 	}
 	st.State, st.Percent, st.Message = modelstate.Ready, 100, ""
@@ -115,7 +115,7 @@ func (j *job) pullModel(ctx context.Context, st modelstate.State) error {
 		return err
 	}
 	j.d.Log.Printf("model: %s ready", st.OllamaTag)
-	j.d.Events.ModelProgress(100, fmt.Sprintf(text.ModelDone, j.pl.Model.DisplayName))
+	j.d.Events.ModelProgress(100, j.tx().f(j.tx().t.ModelDone, j.pl.Model.DisplayName))
 	return nil
 }
 

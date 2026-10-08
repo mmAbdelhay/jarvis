@@ -14,6 +14,7 @@ import (
 
 	"github.com/mmAbdelhay/jarvis/os/go/internal/execx"
 	"github.com/mmAbdelhay/jarvis/os/go/internal/files"
+	"github.com/mmAbdelhay/jarvis/os/go/internal/i18n"
 	"github.com/mmAbdelhay/jarvis/os/go/internal/parse"
 )
 
@@ -143,6 +144,7 @@ type job struct {
 	user     parse.PasswdEntry
 
 	notes []string // Done-screen notes: the Finished message on success
+	x     tr       // the install's language (Choices.locale, M4 contracts §6.6)
 
 	modelCancel context.CancelFunc
 	modelDone   chan error
@@ -151,7 +153,7 @@ type job struct {
 // Execute runs pl to the end and reports through d.Events; it always ends
 // with exactly one Finished. Secrets reach child processes on stdin only.
 func Execute(ctx context.Context, d Deps, pl Planned, sec Secrets, gate *Gate) {
-	j := &job{d: d, pl: pl, sec: sec, rootDev: pl.Layout.Root.Path}
+	j := &job{d: d, pl: pl, sec: sec, rootDev: pl.Layout.Root.Path, x: trFor(pl.Choices)}
 	for _, s := range []string{sec.UserPassword, deref(sec.LUKSPassphrase)} {
 		if s != "" {
 			d.Log.AddSecret(s)
@@ -162,15 +164,24 @@ func Execute(ctx context.Context, d Deps, pl Planned, sec Secrets, gate *Gate) {
 	switch {
 	case errors.Is(err, errCancelled):
 		d.Log.Printf("cancelled before any change")
-		d.Events.Finished(false, "", text.Cancelled)
+		d.Events.Finished(false, "", j.tx().t.Cancelled)
 	case err != nil:
 		d.Log.Printf("FAILED in %s: %v", j.step, err)
 		j.cleanup()
 		d.Events.Finished(false, j.step, strings.Join(d.Log.Tail(20), "\n"))
 	default:
-		d.Log.Printf("%s", text.Done)
+		d.Log.Printf("%s", textEN.Done) // the log stays English
 		d.Events.Finished(true, "", strings.Join(j.notes, "\n"))
 	}
+}
+
+// tx is the install's language; a job built without one (tests, dry run)
+// takes it from its plan's Choices.
+func (j *job) tx() tr {
+	if j.x.t.Done == "" {
+		return trFor(j.pl.Choices)
+	}
+	return j.x
 }
 
 func deref(s *string) string {
@@ -249,7 +260,7 @@ func (j *job) run(ctx context.Context, gate *Gate) error {
 		first = "encrypt"
 	}
 	j.step = first
-	j.d.Events.Progress(first, 0, text.Preflight)
+	j.d.Events.Progress(first, 0, j.tx().t.Preflight)
 	if err := j.preflight(ctx); err != nil {
 		return err
 	}
@@ -258,7 +269,7 @@ func (j *job) run(ctx context.Context, gate *Gate) error {
 	}
 	j.d.Log.Printf("plan %s: %s", j.pl.Public.PlanID, strings.Join(j.pl.Public.Summary, " | "))
 	if !j.pl.SecureBoot {
-		j.notes = append(j.notes, text.NoteSecureBootOff)
+		j.notes = append(j.notes, j.tx().t.NoteSecureBootOff)
 	}
 	if lay.Mode != "manual" {
 		if err := j.partition(ctx); err != nil {
@@ -308,7 +319,7 @@ func (j *job) preflight(ctx context.Context) error {
 	}
 	g, err := parse.SgdiskPrint(string(res.Stdout))
 	if err != nil || !sameTable(disk, g) {
-		return errors.New(text.DiskChanged)
+		return errors.New(j.tx().t.DiskChanged)
 	}
 	return nil
 }
@@ -765,13 +776,20 @@ func (j *job) greetd(username string, autologin bool) error {
 	return j.write(conf, out, 0o644)
 }
 
-// brainConfig writes ~/.config/jarvis/jarvis.yaml (M2 contracts §6).
+// brainConfig writes ~/.config/jarvis/jarvis.yaml (M2 contracts §6): the
+// provider, and os.language: ar for an Arabic install (M4 contracts §6.6).
+// A cloud brain with an English install writes nothing.
 func (j *job) brainConfig(ctx context.Context) error {
 	b := j.pl.Choices.Brain
-	var kind, base, model string
+	var kind, base, model, lang string
+	if j.tx().l == i18n.AR {
+		lang = string(i18n.AR)
+	}
 	switch b.Kind {
 	case "cloud":
-		return nil
+		if lang == "" {
+			return nil
+		}
 	case "local":
 		kind, base, model = "ollama", "http://127.0.0.1:11434", j.pl.Model.OllamaTag
 	case "lan":
@@ -786,7 +804,7 @@ func (j *job) brainConfig(ctx context.Context) error {
 		}
 	}
 	file := home + "/.config/jarvis/jarvis.yaml"
-	if err := j.d.Files.WriteFile(file, []byte(renderJarvisYAML(kind, base, model)), 0o600); err != nil {
+	if err := j.d.Files.WriteFile(file, []byte(renderJarvisYAML(kind, base, model, lang)), 0o600); err != nil {
 		return err
 	}
 	for _, p := range append(dirs, file) {
@@ -880,7 +898,7 @@ func (j *job) bootloader(ctx context.Context) error {
 			return err
 		}
 		j.d.Log.Printf("warning: no firmware boot entry (%v); the fallback loader \\EFI\\BOOT\\BOOTX64.EFI starts Rafiq", err)
-		j.notes = append(j.notes, text.NoteNoNVRAM)
+		j.notes = append(j.notes, j.tx().t.NoteNoNVRAM)
 	}
 	if err := j.chroot(ctx, slow, "update-grub"); err != nil {
 		return err
