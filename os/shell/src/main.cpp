@@ -29,7 +29,9 @@ int main(int argc, char* argv[])
     parser.addVersionOption();
     const QCommandLineOption focusOption(u"focus"_s, u"Bring the shell to the front and focus the chat."_s);
     const QCommandLineOption windowedOption(u"windowed"_s, u"Run as an ordinary window, not a layer-shell surface."_s);
-    const QCommandLineOption pttOption(u"ptt"_s, u"Push-to-talk: start, or send, a voice message (Super+Space)."_s);
+    // M3 contracts §5.15: Super+Space runs `jarvis-shell --voice`; --ptt is the older spelling.
+    const QCommandLineOption pttOption(QStringList{u"voice"_s, u"ptt"_s},
+                                       u"Push-to-talk: start, or send, a voice message (Super+Space)."_s);
     parser.addOptions({focusOption, windowedOption, pttOption});
     parser.process(app);
 

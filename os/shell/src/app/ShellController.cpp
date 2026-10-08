@@ -687,7 +687,7 @@ bool ShellController::handleInstanceMessage(const QByteArray& message)
         requestComposerFocus();
         return true;
     }
-    if (message == "ptt") { // Super+Space (labwc) -> jarvis-shell --ptt
+    if (message == "ptt") { // Super+Space (labwc) -> jarvis-shell --voice
         setSurfaceShown(true);
         pushToTalk();
         return true;

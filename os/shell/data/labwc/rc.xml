@@ -2,8 +2,9 @@
 <!--
   jarvis-shell keybinds for labwc. Plan P merges this <keyboard> block into
   /etc/xdg/labwc/rc.xml. Super alone (on release) focuses the chat; Super+Space
-  starts, or sends, a voice message; Super+L asks logind to lock the session
-  (jarvis-idle runs jarvis-lock on logind's Lock signal, M3 contracts section 3);
+  starts, or sends, a voice message (M3 contracts section 5.15); Super+L runs
+  jarvis-lock directly, like the session's rc.xml, so it also works on live
+  boots without jarvis-idle (plan P's deliberate deviation from section 5.15);
   Ctrl+Alt+T opens foot even when an app window has focus.
 -->
 <labwc_config>
@@ -13,10 +14,10 @@
       <action name="Execute" command="jarvis-shell --focus" />
     </keybind>
     <keybind key="W-space">
-      <action name="Execute" command="jarvis-shell --ptt" />
+      <action name="Execute" command="jarvis-shell --voice" />
     </keybind>
     <keybind key="W-l">
-      <action name="Execute" command="loginctl lock-session" />
+      <action name="Execute" command="jarvis-lock" />
     </keybind>
     <keybind key="C-A-t">
       <action name="Execute" command="foot" />

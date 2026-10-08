@@ -59,3 +59,8 @@ if(UNIX)
                ${CMAKE_CURRENT_SOURCE_DIR}/../data/jarvis-shell-loop)
   set_tests_properties(relaunch_loop PROPERTIES LABELS unit TIMEOUT 30)
 endif()
+
+# M3 contracts §5.15: Super+Space runs `jarvis-shell --voice` (the session's rc.xml).
+add_test(NAME cli_has_voice_option COMMAND jarvis-shell --help)
+set_tests_properties(cli_has_voice_option PROPERTIES
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen" LABELS unit PASS_REGULAR_EXPRESSION "--voice")
