@@ -16,3 +16,4 @@ export * from "./context-fit.js";
 export * from "./failover.js";
 export * from "./redact.js";
 export * from "./text-index.js";
+export * from "./map-limit.js";

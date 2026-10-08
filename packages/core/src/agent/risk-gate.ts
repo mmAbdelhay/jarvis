@@ -5,6 +5,7 @@
 // whatever it returns — and never into events, model messages or the audit
 // log. One audit line per item, approved or not.
 import { auditInput } from "./audit.js";
+import { mapLimit } from "./map-limit.js";
 import { AGENT_TEXT } from "./messages.js";
 import {
   type AgentEvent,
@@ -133,23 +134,6 @@ function batchLimit(tool: RegisteredTool): number {
   return typeof max === "number" && Number.isInteger(max) && max >= 1
     ? Math.min(max, MAX_BATCH_ITEMS)
     : MAX_BATCH_ITEMS;
-}
-
-async function mapLimit<T, R>(
-  items: readonly T[],
-  limit: number,
-  fn: (item: T) => Promise<R>,
-): Promise<R[]> {
-  const out: R[] = new Array(items.length);
-  let next = 0;
-  const worker = async () => {
-    while (next < items.length) {
-      const index = next++;
-      out[index] = await fn(items[index] as T);
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
-  return out;
 }
 
 export function createRiskGate(deps: RiskGateDeps): RiskGate {

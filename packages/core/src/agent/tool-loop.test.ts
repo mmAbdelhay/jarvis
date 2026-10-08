@@ -212,8 +212,8 @@ describe("runTurn", () => {
     const toolEvents = h.events.filter((e) => e.type === "tool");
     expect(toolEvents.map((e) => (e.type === "tool" ? `${e.name}:${e.status}` : ""))).toEqual([
       "net.status:running",
-      "net.status:ok",
       "logs.query:running",
+      "net.status:ok",
       "logs.query:ok",
     ]);
     expectPaired(result.messages);
