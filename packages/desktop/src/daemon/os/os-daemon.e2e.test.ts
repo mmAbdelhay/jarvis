@@ -13,9 +13,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import { connectControl } from "../control/client.js";
 import { nodeControlDeps } from "../control/deps.js";
 import { createControlServer } from "../control/server.js";
+import { makeWav } from "./__fixtures__/wav.js";
+import { createOsVoice } from "./voice-service.js";
 import { createOsAgent } from "./agent-service.js";
 import { connectOsMcpServers } from "./mcp-servers.js";
-import { createOsBinding } from "./os-binding.js";
+import { createOsBinding, createOsRouter } from "./os-binding.js";
 
 const WINDOWS = process.platform === "win32";
 const FIXTURE = fileURLToPath(
@@ -90,7 +92,7 @@ describe.skipIf(WINDOWS)("jarvisd OS mode over the real control socket", () => {
       log: () => {},
     });
     cleanups.push(() => agent.shutdown());
-    const handlers = createOsBinding(agent, {
+    const handlers = createOsBinding(createOsRouter({ agent }), {
       requestStop: () => {},
       defer: (cb) => setImmediate(cb),
     });
@@ -198,5 +200,133 @@ describe.skipIf(WINDOWS)("jarvisd OS mode over the real control socket", () => {
     );
     // The check's refresh and the resync race; wait for the snapshot that carries it.
     await until(() => snapshotsSeen.some((s) => s.updates.count === 2 && s.updates.security === 1));
+  });
+  it("spoken approval waits for shell confirmation, undo reverts it, and setLocked is refused", async () => {
+    const dir = await mkdtemp(join("/tmp", "jm3-"));
+    cleanups.push(() => rm(dir, { recursive: true, force: true }));
+    const runDirectory = join(dir, "run");
+    let push: (channel: string, payload: unknown) => void = () => {};
+    const agent = createOsAgent({
+      push: (channel, payload) => push(channel, payload),
+      configPath: join(dir, "jarvis.yaml"),
+      configIo: {
+        readFile: async () => {
+          throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+        },
+        writeFile: async () => {},
+      },
+      secrets: createMemorySecretStore(),
+      providerKeys: createMemorySecretStore(),
+      readModelState: async () => null,
+      makeProvider: () => {
+        throw new Error("the fake provider is active");
+      },
+      fakeScript: parseFakeScript([
+        {
+          expectPromptContains: "brighter",
+          replies: [
+            { toolCalls: [{ name: "settings.brightness", input: { percent: 80 } }] },
+            { text: "Brightness is 80%." },
+          ],
+        },
+      ]),
+      connectMcp: () =>
+        connectOsMcpServers({
+          servers: ["jarvis-settings"],
+          commandFor: (name) => ({ command: process.execPath, args: [FIXTURE, name] }),
+          spawn: nodeMcpSpawn(process.env, () => {}),
+          timers,
+          clientVersion: "test",
+          log: () => {},
+        }),
+      audit: createAuditLog({ path: join(dir, "audit.jsonl"), fs: nodeAuditFs }),
+      now: Date.now,
+      newId: () => randomBytes(8).toString("hex"),
+      timers,
+      log: () => {},
+    });
+    cleanups.push(() => agent.shutdown());
+    const voice = createOsVoice({
+      io: {
+        availability: () => ({ available: true, stt: "ggml-base", tts: null, speak: false }),
+        transcribe: async () => ({ text: "Yes.", language: "en" }),
+        speak: async () => false,
+        stopSpeaking: () => {},
+      },
+      agent,
+      push: (channel, payload) => push(channel, payload),
+      log: () => {},
+    });
+    const router = createOsRouter({
+      agent,
+      voice,
+      isLockClient: async (c) => (await c.peerExecutable?.()) === "/usr/bin/jarvis-lock",
+    });
+    const started = await createControlServer({
+      platform: process.platform,
+      runDirectory,
+      build: "e2e-build",
+      handlers: createOsBinding(router, { requestStop: () => {}, defer: (cb) => setImmediate(cb) }),
+      deps: nodeControlDeps(),
+    });
+    if (started.kind !== "started") throw new Error("control server busy");
+    const server = started.server;
+    cleanups.push(() => server.close());
+    push = (channel, payload) => server.push(channel, payload);
+    await agent.start();
+
+    const client = await connectControl({
+      platform: process.platform,
+      runDirectory,
+      build: "e2e-build",
+      deps: nodeControlDeps(),
+    });
+    cleanups.push(() => client.close());
+    const events: AgentEvent[] = [];
+    const voiceStates: unknown[] = [];
+    client.onPush((channel, payload) => {
+      if (channel === "agent:events") events.push(payload as AgentEvent);
+      if (channel === "voice:state") voiceStates.push(payload);
+    });
+
+    await client.invoke("agent:prompt", [{ text: "make the screen brighter" }]);
+    await until(() => events.some((e) => e.type === "card"));
+    const card = events.find((e) => e.type === "card");
+    const cardId = card?.type === "card" ? card.card.cardId : "";
+    expect(card?.type === "card" ? card.card.items[0]?.detail : undefined).toBe("40 → 80");
+    await expect(
+      client.upload("voice:utterance", [{ lang: "auto", cardId }], makeWav(16_000)),
+    ).resolves.toEqual({ text: "Yes.", lang: "en", action: "approve" });
+    expect(agent.card(cardId)).toBeDefined();
+    expect(events.some((e) => e.type === "card-closed")).toBe(false);
+    await expect(client.invoke("agent:undo", [])).rejects.toMatchObject({ code: "bad-request" });
+    await client.invoke("agent:confirm", [
+      {
+        cardId,
+        approve: true,
+        ticked: card?.type === "card" ? card.card.items.map((item) => item.itemId) : [],
+        secrets: {},
+      },
+    ]);
+    await until(
+      () => events.some((e) => e.type === "turn-end") && agent.currentTurnId() === undefined,
+    );
+    expect(voiceStates).toEqual([{ state: "transcribing" }, { state: "idle" }]);
+
+    await expect(client.invoke("agent:undo", [])).resolves.toEqual({
+      undone: "settings.brightness on jarvis-settings",
+    });
+    await expect(client.invoke("agent:undo", [])).resolves.toEqual({ undone: null });
+    const audit = (await client.invoke("audit:list", [{ limit: 10 }])) as AuditEntry[];
+    expect(audit.map((a) => a.title)).toEqual([
+      "Undo: settings.brightness on jarvis-settings",
+      "settings.brightness on jarvis-settings",
+    ]);
+
+    // This test process is not /usr/bin/jarvis-lock.
+    await expect(client.invoke("sys:setLocked", [{ locked: true }])).rejects.toMatchObject({
+      code: "forbidden",
+    });
+    expect(agent.isLocked()).toBe(false);
   });
 });

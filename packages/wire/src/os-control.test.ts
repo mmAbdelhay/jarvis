@@ -36,10 +36,29 @@ describe("OS control channel names (contracts §3, M2 §2)", () => {
         "provider:save",
         "registry:list",
         "updates:check",
+        "voice:setSpeak",
+        "voice:stop",
+        "agent:undo",
+        "pairing:answer",
+        "sys:setLocked",
+        "remote:status",
+        "remote:configure",
+        "remote:setOwnerPassword",
+        "remote:revoke",
+        "pairing:open",
+        "pairing:cancel",
       ].sort(),
     );
     expect(Object.values(OS_CONTROL_PUSHES).sort()).toEqual(
-      ["agent:events", "doctor:state", "provider:status", "sys:snapshot"].sort(),
+      [
+        "agent:events",
+        "doctor:state",
+        "provider:status",
+        "sys:snapshot",
+        "voice:state",
+        "pairing:pending",
+        "remote:status",
+      ].sort(),
     );
     expect(CARD_TIMEOUT_MS).toBe(300_000);
   });

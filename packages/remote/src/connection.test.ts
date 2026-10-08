@@ -1729,3 +1729,24 @@ describe("createConnection: owner login (Phase 0)", () => {
     expect(harness.clock.pending()).toBe(0);
   });
 });
+
+describe("createConnection: typed refusals (Rafiq M3 phone bridge)", () => {
+  it("a refused outcome answers err with its own code and text", async () => {
+    const outcomes: RequestOutcome[] = [
+      { kind: "refused", code: "locked", text: "The screen is locked." },
+      { kind: "refused", code: "bad-request" },
+    ];
+    let call = 0;
+    const handle: RequestHandler = vi.fn(async () => outcomes[call++] as RequestOutcome);
+    const harness = makeHarness({ handle });
+    openConnection(harness);
+    harness.connection.onText(reqFrame(1, "agent:confirm"));
+    await flush();
+    harness.connection.onText(reqFrame(2, "agent:confirm"));
+    await flush();
+    expect(harness.socket.sent).toEqual([
+      { t: "err", id: 1, code: "locked", text: "The screen is locked.", language: "en" },
+      { t: "err", id: 2, code: "bad-request", text: "err:bad-request", language: "en" },
+    ]);
+  });
+});

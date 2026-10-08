@@ -171,3 +171,25 @@ Never include passwords, keys, tokens or other secrets. Use an empty list when t
   auditFact: (title: string, tool: string, date: string) =>
     `${title} (${tool}), approved on ${date}.`,
 } as const;
+
+/** Rafiq M3: lock, undo, voice, phone and pairing texts jarvisd produces. */
+export const CONTROL_TEXT = {
+  locked: "The screen is locked. Unlock it to answer cards.",
+  lockClientOnly: "Only the lock screen can change the lock state.",
+  localOnly: "This can only be changed on the computer.",
+  passwordNotFromPhone: "Changes that need your password can only be approved on the computer.",
+  nothingToUndo: "There is nothing to undo.",
+  undone: (title: string) => `Undone: ${title}.`,
+  undoTitle: (title: string) => `Undo: ${title}`,
+  undoFailed: (title: string, detail: string) => `Could not undo "${title}": ${detail}`,
+  undoMoved: (title: string) => `Could not undo "${title}": its tool is no longer available.`,
+  lastChange: "the last change",
+  moreItems: (title: string, more: number) => `${title} (+${more} more)`,
+  voiceUnavailable: "Voice is not installed on this computer.",
+  badAudio: "The recording must be a 16 kHz mono 16-bit WAV file of at most 4 MiB.",
+  transcriptionFailed: "Jarvis could not understand the recording.",
+  noPairingRequest: "No phone is waiting to pair.",
+  pairingChanged: "Another phone is asking to pair now. Check its name again.",
+  pairingUnavailable: "Turn on phone access and set an owner password first.",
+  remoteOff: "Phone access is not running.",
+} as const;

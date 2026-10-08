@@ -6,6 +6,12 @@ import { describe, expectTypeOf, it } from "vitest";
 
 describe("core's agent types are exactly the contract's (@jarvis/wire)", () => {
   it("matches every §3.3 type", () => {
+    expectTypeOf<Core.AuditVia>().toEqualTypeOf<Wire.AuditVia>();
+    expectTypeOf<Core.VoiceAvailability>().toEqualTypeOf<Wire.VoiceAvailability>();
+    expectTypeOf<Core.VoiceLang>().toEqualTypeOf<Wire.VoiceLang>();
+    expectTypeOf<Core.VoiceAction>().toEqualTypeOf<Wire.VoiceAction>();
+    expectTypeOf<Core.UndoResult>().toEqualTypeOf<Wire.UndoResult>();
+
     expectTypeOf<Core.AgentEvent>().toEqualTypeOf<Wire.AgentEvent>();
     expectTypeOf<Core.Card>().toEqualTypeOf<Wire.Card>();
     expectTypeOf<Core.CardItem>().toEqualTypeOf<Wire.CardItem>();

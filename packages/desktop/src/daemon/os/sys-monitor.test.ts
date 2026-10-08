@@ -11,6 +11,9 @@ const snapshot = (online: boolean): SysSnapshot => ({
   failedUnits: [],
   model: null,
   updates: { count: 0, security: 0, checkedAt: null },
+  locked: false,
+  voice: { available: false, stt: null, tts: null, speak: false },
+  undo: { available: false, title: null },
 });
 
 describe("createSysMonitor", () => {

@@ -205,3 +205,39 @@ describe("connectMcpServer against a real process", () => {
     expect(session.alive).toBe(false);
   });
 });
+
+it("settings fixture describes the exact transition and returns a reversible setter", async () => {
+  const session = await connectMcpServer({
+    ...base,
+    name: "jarvis-settings",
+    command: process.execPath,
+    args: [FIXTURE, "jarvis-settings"],
+    spawn: nodeMcpSpawn(process.env, () => {}),
+  });
+  try {
+    expect((await session.listTools()).map((tool) => tool.name)).toEqual([
+      "settings.brightness",
+      "jarvis.describe",
+    ]);
+    expect(
+      (
+        await session.callTool("jarvis.describe", {
+          tool: "settings.brightness",
+          input: { percent: 80 },
+        })
+      ).structuredContent,
+    ).toMatchObject({ detail: "40 → 80" });
+    expect(
+      (await session.callTool("settings.brightness", { percent: 80 })).structuredContent,
+    ).toEqual({
+      previous: 40,
+      current: 80,
+      undo: { tool: "settings.brightness", input: { percent: 40 } },
+    });
+    expect(
+      (await session.callTool("settings.brightness", { percent: 40 })).structuredContent,
+    ).toMatchObject({ previous: 80, current: 40 });
+  } finally {
+    session.close();
+  }
+});

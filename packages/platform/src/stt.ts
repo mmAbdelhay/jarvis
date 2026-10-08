@@ -20,12 +20,13 @@ export async function transcribe(
   wavPath: string,
   config: WhisperConfig,
   run: CommandRunner,
+  language: "auto" | "en" | "ar" = "auto",
 ): Promise<Transcript> {
   const { code, stdout, stderr } = await run(config.binaryPath, [
     "-m",
     config.modelPath,
     "-l",
-    "auto",
+    language,
     "-nt",
     "-f",
     wavPath,

@@ -2,7 +2,13 @@
 // its "offer the Network doctor?" decision read. Built from jarvis-diag's
 // sys.health + net.status (+ svc.list_failed for unit names), and from the
 // configured model. Pure.
-import type { ModelDownload, ProviderKind, SysSnapshot, UpdatesSummary } from "./contract.js";
+import type {
+  ModelDownload,
+  ProviderKind,
+  SysSnapshot,
+  UpdatesSummary,
+  VoiceAvailability,
+} from "./contract.js";
 import type { NetStatus } from "./doctor.js";
 import { isRecord } from "./types.js";
 
@@ -58,6 +64,8 @@ export function isLocalBaseUrl(baseUrl: string): boolean {
   return PRIVATE_V4.some((pattern) => pattern.test(host));
 }
 
+export const NO_VOICE: VoiceAvailability = { available: false, stt: null, tts: null, speak: false };
+
 export const NO_UPDATES_YET: UpdatesSummary = { count: 0, security: 0, checkedAt: null };
 
 export function buildSysSnapshot(parts: {
@@ -72,6 +80,9 @@ export function buildSysSnapshot(parts: {
     download?: ModelDownload | null;
   } | null;
   updates?: UpdatesSummary;
+  locked?: boolean;
+  voice?: VoiceAvailability;
+  undo?: SysSnapshot["undo"];
 }): SysSnapshot {
   const root = parts.health?.disks.find((disk) => disk.mount === "/");
   const wifi = parts.net?.devices.find(
@@ -98,5 +109,8 @@ export function buildSysSnapshot(parts: {
             download: parts.model.download ?? null,
           },
     updates: { ...(parts.updates ?? NO_UPDATES_YET) },
+    locked: parts.locked ?? false,
+    voice: { ...(parts.voice ?? NO_VOICE) },
+    undo: { ...(parts.undo ?? { available: false, title: null }) },
   };
 }

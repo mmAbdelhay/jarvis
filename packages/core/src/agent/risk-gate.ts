@@ -6,10 +6,11 @@
 // log. One audit line per item, approved or not.
 import { auditInput } from "./audit.js";
 import { mapLimit } from "./map-limit.js";
-import { AGENT_TEXT } from "./messages.js";
+import { AGENT_TEXT, CONTROL_TEXT } from "./messages.js";
 import {
   type AgentEvent,
   type AuditEntry,
+  type AuditVia,
   CARD_TIMEOUT_MS,
   type Card,
   type CardItem,
@@ -39,10 +40,31 @@ export type GateBatchRequest = {
 };
 
 export class GateError extends Error {
-  constructor(message: string) {
+  constructor(
+    message: string,
+    readonly code: "bad-request" | "forbidden" = "bad-request",
+  ) {
     super(message);
     this.name = "GateError";
   }
+}
+
+/** Who answered a card (Rafiq M3 §2): the computer, or a paired phone that
+ *  may never approve a password-tier item (design §3.3 ruling). */
+export type ConfirmFrom = { via: AuditVia; allowPassword: boolean };
+export const LOCAL_CONFIRM: ConfirmFrom = { via: "desktop", allowPassword: true };
+
+/** A ticked call that ran and returned ok (agent-service keeps undo steps from it). */
+export type GateRan = {
+  tool: RegisteredTool;
+  titles: string[];
+  input: Record<string, unknown>;
+  outcome: ToolOutcome;
+  via: AuditVia;
+};
+
+function auditVia(requested: GateBatchRequest["via"], from: ConfirmFrom | undefined): AuditVia {
+  return from?.via.startsWith("phone:") ? from.via : requested;
 }
 
 export type RiskGateDeps = {
@@ -56,13 +78,15 @@ export type RiskGateDeps = {
     clearTimeout(handle: unknown): void;
   };
   log(line: string): void;
+  /** Called after a ticked call ran and returned ok. Must not throw. */
+  onRan?(ran: GateRan): void;
 };
 
 export interface RiskGate {
   runBatch(request: GateBatchRequest): Promise<GateItemResult[]>;
   /** Throws GateError for a closed or unknown card, an unknown item, or a
    *  secret for a field the item does not have. */
-  confirm(answer: ConfirmAnswer): void;
+  confirm(answer: ConfirmAnswer, from?: ConfirmFrom): void;
   openCards(): Card[];
   /** Closes every open card as denied (shutdown). */
   closeAll(): void;
@@ -72,6 +96,7 @@ type Decision = {
   decision: "approved" | "denied" | "timeout";
   ticked: ReadonlySet<string>;
   secrets: Record<string, Record<string, string>>;
+  from?: ConfirmFrom;
 };
 
 const refused = (decision: "denied" | "timeout"): Decision => ({
@@ -264,6 +289,7 @@ export function createRiskGate(deps: RiskGateDeps): RiskGate {
       const secretValues = Object.values(provided);
       let status: GateItemStatus;
       let outcome: ToolOutcome | undefined;
+      let ranInput: Record<string, unknown> | undefined;
       if (ticked.length === 0) {
         status = decision.decision === "approved" ? "unticked" : decision.decision;
       } else if (request.signal?.aborted === true) {
@@ -276,6 +302,7 @@ export function createRiskGate(deps: RiskGateDeps): RiskGate {
           elements === undefined
             ? call.input
             : { ...call.input, items: ticked.map((unit) => elements[unit.elementIndex as number]) };
+        ranInput = input;
         let raw: ToolOutcome;
         try {
           raw = await request.execute(call, { ...input, ...provided });
@@ -293,6 +320,22 @@ export function createRiskGate(deps: RiskGateDeps): RiskGate {
           text: scrubText(raw.text, secretValues),
           ...(raw.code === undefined ? {} : { code: raw.code }),
         };
+      }
+      const via = auditVia(request.via, decision.from);
+      if (status === "ran" && outcome?.ok === true && ranInput !== undefined) {
+        try {
+          deps.onRan?.({
+            tool: call.tool,
+            titles: ticked.map((unit) => unit.item.title),
+            input: ranInput,
+            outcome,
+            via,
+          });
+        } catch (error) {
+          deps.log(
+            `[gate] onRan failed: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
       }
       results.push({
         callId: call.callId,
@@ -317,7 +360,7 @@ export function createRiskGate(deps: RiskGateDeps): RiskGate {
             : decision.decision === "approved"
               ? "denied"
               : decision.decision,
-          via: request.via,
+          via,
           result: !wasTicked || outcome === undefined ? "skipped" : outcome.ok ? "ok" : "failed",
           ...(wasTicked && outcome !== undefined && !outcome.ok
             ? { message: outcome.text.slice(0, 500) }
@@ -330,7 +373,7 @@ export function createRiskGate(deps: RiskGateDeps): RiskGate {
 
   return {
     runBatch,
-    confirm(answer) {
+    confirm(answer, from = LOCAL_CONFIRM) {
       const entry = open.get(answer.cardId);
       if (entry === undefined) throw new GateError("That card is no longer open");
       const items = new Map(entry.card.items.map((item) => [item.itemId, item]));
@@ -352,10 +395,18 @@ export function createRiskGate(deps: RiskGateDeps): RiskGate {
       const ticked = new Set(answer.ticked);
       if (ticked.size > entry.maxTicked)
         throw new GateError(`Tick at most ${entry.maxTicked} item(s) on this card`);
+      // Design §3.3 ruling: password-tier items are approved on the computer only.
+      if (
+        answer.approve &&
+        !from.allowPassword &&
+        [...ticked].some((id) => items.get(id)?.risk === "password")
+      ) {
+        throw new GateError(CONTROL_TEXT.passwordNotFromPhone, "forbidden");
+      }
       entry.settle(
         answer.approve && ticked.size > 0
-          ? { decision: "approved", ticked, secrets }
-          : refused("denied"),
+          ? { decision: "approved", ticked, secrets, from }
+          : { ...refused("denied"), from },
       );
     },
     openCards() {

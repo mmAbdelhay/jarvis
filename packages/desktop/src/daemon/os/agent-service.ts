@@ -7,6 +7,19 @@
 // No electron here (core/no-electron.test.ts).
 import {
   AGENT_TEXT,
+  type Card,
+  CONTROL_TEXT,
+  type ConfirmFrom,
+  createUndoStack,
+  LOCAL_CONFIRM,
+  NO_VOICE,
+  parseUndo,
+  stepTitle,
+  undoFamily,
+  type UndoRequest,
+  undoRequestOf,
+  type UndoResult,
+  type VoiceAvailability,
   CORE_TOOLS,
   createMemoryService,
   type MemoryItem,
@@ -59,6 +72,7 @@ import {
 } from "@jarvis/core";
 import type { SecretStore } from "@jarvis/platform/model";
 import { OS_CONTROL_PUSHES } from "@jarvis/wire";
+import type { LockStore } from "./lock-store.js";
 import type { MemoryOpener } from "./memory-backend.js";
 import type { ConfigIo, ProviderSection } from "./provider-config.js";
 import { EMPTY_REGISTRY, type LoadedRegistry, type Registration } from "./registry-servers.js";
@@ -78,7 +92,7 @@ import { createUpdatesMonitor, UpdatesCheckError } from "./updates-monitor.js";
 
 export class OsAgentError extends Error {
   constructor(
-    readonly code: "bad-request" | "unsupported" | "internal",
+    readonly code: "bad-request" | "unsupported" | "internal" | "locked" | "forbidden",
     message: string,
   ) {
     super(message);
@@ -121,6 +135,10 @@ export type OsAgentDeps = {
   toolProfile?: "full" | "readonly";
   /** The encrypted memory store (memory-backend.ts); absent → memory off. */
   memory?: MemoryOpener;
+  /** Rafiq M3 §2/§3: the lock state's copy in $XDG_RUNTIME_DIR. Absent: memory only. */
+  lockStore?: LockStore;
+  /** sys:snapshot.voice. Absent: voice unavailable. */
+  voiceAvailability?(): VoiceAvailability;
   now(): number;
   newId(): string;
   timers: {
@@ -134,9 +152,19 @@ export type OsAgentDeps = {
 
 export interface OsAgent {
   start(): Promise<void>;
-  prompt(text: string): { turnId: string };
+  prompt(text: string, from?: ConfirmFrom): { turnId: string };
   stop(turnId: string): null;
-  confirm(answer: ConfirmAnswer): null;
+  confirm(answer: ConfirmAnswer, from?: ConfirmFrom): null;
+  /** agent:undo (M3 §2): runs the newest stored undo call. */
+  undo(from?: ConfirmFrom): Promise<UndoResult>;
+  /** sys:setLocked (M3 §3) — the router checks the caller is jarvis-lock. */
+  setLocked(locked: boolean): Promise<null>;
+  isLocked(): boolean;
+  /** An open card, for voice answers. */
+  card(cardId: string): Card | undefined;
+  currentTurnId(): string | undefined;
+  /** Every agent:events payload, as it is pushed. */
+  onEvent(listener: (event: AgentEvent) => void): () => void;
   providerList(): Promise<ProviderListResult>;
   probe(draft: ProviderDraft & { id?: string }): Promise<ProbeResult>;
   save(request: ProviderSaveRequest): Promise<ProviderSaveResult>;
@@ -160,8 +188,18 @@ export interface OsAgent {
 const describeError = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 export function createOsAgent(deps: OsAgentDeps): OsAgent {
+  const listeners = new Set<(event: AgentEvent) => void>();
+  const undoStack = createUndoStack();
+  let locked = false;
   const emit = (event: AgentEvent) => {
     deps.push(OS_CONTROL_PUSHES.agentEvents, event);
+    for (const listener of listeners) {
+      try {
+        listener(event);
+      } catch (error) {
+        deps.log(`[agent] event listener failed: ${describeError(error)}`);
+      }
+    }
     // A finished install or removal changes mcp.d: reload add-ons before the next turn.
     if (
       event.type === "tool" &&
@@ -282,8 +320,17 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
         }
       }
       // Host servers first: on a name collision the host tool wins.
-      registry = await loadToolRegistry([...hostSessions, ...addOns.sessions], {
-        trusted: new Set(TRUSTED_MCP_SERVERS),
+      // An add-on never takes a host server's name: trust is by name, so a
+      // registry "jarvis-files" would otherwise be trusted as host and shadow
+      // the built-in one (contracts §5.1: jarvisd ignores it).
+      const hostNames = new Set<string>(TRUSTED_MCP_SERVERS);
+      const addOnSessions = addOns.sessions.filter((s) => {
+        if (!hostNames.has(s.name)) return true;
+        deps.log(`[registry] ${s.name}: reuses a host server name; ignored`);
+        return false;
+      });
+      registry = await loadToolRegistry([...hostSessions, ...addOnSessions], {
+        trusted: hostNames,
         trustOf: (name) => addOns.tiers.get(name) ?? "unknown",
         safeOnly,
         log: deps.log,
@@ -306,6 +353,26 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
     newId: deps.newId,
     timers: deps.timers,
     log: deps.log,
+    onRan: (ran) => {
+      const tools = registry;
+      if (tools === undefined) return;
+      const undo = parseUndo(
+        ran.outcome.data,
+        ran.tool,
+        (name) => tools.get(name),
+        new Set<string>(TRUSTED_MCP_SERVERS),
+      );
+      if (undo === undefined) return;
+      undoStack.push({
+        title: stepTitle(ran.titles),
+        tool: undo.tool.name,
+        input: undo.input,
+        server: undo.tool.server,
+        family: undoFamily(undo.tool.name) ?? "",
+        at: deps.now(),
+      });
+      void sys.refresh();
+    },
   });
 
   const monitor = createProviderMonitor({
@@ -364,6 +431,12 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
             };
       })(),
       updates: updates.current(),
+      locked,
+      voice: deps.voiceAvailability?.() ?? NO_VOICE,
+      undo: (() => {
+        const last = undoStack.peek();
+        return { available: last !== undefined, title: last?.title ?? null };
+      })(),
     });
   }
 
@@ -453,8 +526,70 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
       : keyedProvider(target, saved);
   }
 
+  async function runUndo(request: UndoRequest, from: ConfirmFrom): Promise<UndoResult> {
+    if (locked) throw new OsAgentError("locked", CONTROL_TEXT.locked);
+    const step = undoStack.pop(request.kind === "files" ? (s) => s.family === "files." : undefined);
+    if (step === undefined) return { undone: null };
+    const tools = await ensureRegistry();
+    // The registry may have been reloaded since: the same name must still be
+    // served by the same host server, or nothing runs.
+    if (tools.get(step.tool)?.server !== step.server) {
+      throw new OsAgentError("internal", CONTROL_TEXT.undoMoved(step.title));
+    }
+    const outcome = await tools.call(step.tool, step.input);
+    try {
+      await deps.audit.append({
+        ts: deps.now(),
+        tool: step.tool,
+        title: CONTROL_TEXT.undoTitle(step.title),
+        input: step.input,
+        decision: "approved",
+        via: from.via,
+        result: outcome.ok ? "ok" : "failed",
+        ...(outcome.ok ? {} : { message: outcome.text.slice(0, 500) }),
+      });
+    } catch (error) {
+      deps.log(`[undo] audit write failed: ${describeError(error)}`);
+    }
+    if (!outcome.ok) {
+      throw new OsAgentError(
+        "internal",
+        CONTROL_TEXT.undoFailed(step.title, outcome.text.slice(0, 200)),
+      );
+    }
+    void sys.refresh();
+    return { undone: step.title };
+  }
+
+  /** A typed or spoken "undo" is answered here, never by the model. */
+  function promptUndo(text: string, request: UndoRequest, from: ConfirmFrom): { turnId: string } {
+    const turnId = deps.newId();
+    turn = { turnId, controller: new AbortController() };
+    emit({ type: "turn-start", turnId, text });
+    void (async () => {
+      let reply: string;
+      try {
+        const result = await runUndo(request, from);
+        reply =
+          result.undone === null ? CONTROL_TEXT.nothingToUndo : CONTROL_TEXT.undone(result.undone);
+      } catch (error) {
+        reply = describeError(error);
+      }
+      emit({ type: "text", turnId, delta: reply });
+      emit({ type: "turn-end", turnId, reason: "done" });
+      if (turn?.turnId === turnId) turn = undefined;
+    })();
+    return { turnId };
+  }
+
   return {
     async start() {
+      try {
+        locked = (await deps.lockStore?.read()) ?? false;
+      } catch (error) {
+        locked = true;
+        deps.log(`[lock] could not read the lock state, staying locked: ${describeError(error)}`);
+      }
       await loadProvider();
       monitor.start();
       void ensureRegistry();
@@ -466,9 +601,11 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
       updates.start();
     },
 
-    prompt(text) {
+    prompt(text, from = LOCAL_CONFIRM) {
       if (turn !== undefined) throw new OsAgentError("bad-request", AGENT_TEXT.turnRunning);
       if (doctor.running) throw new OsAgentError("bad-request", AGENT_TEXT.doctorRunning);
+      const undoRequest = undoRequestOf(text);
+      if (undoRequest !== undefined) return promptUndo(text, undoRequest, from);
       const turnId = deps.newId();
       const controller = new AbortController();
       turn = { turnId, controller };
@@ -531,14 +668,48 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
       return null;
     },
 
-    confirm(answer) {
+    confirm(answer, from = LOCAL_CONFIRM) {
+      // Rafiq M3 §2: no card is answered while the screen is locked, by anyone.
+      if (locked) throw new OsAgentError("locked", CONTROL_TEXT.locked);
       try {
-        gate.confirm(answer);
+        gate.confirm(answer, from);
       } catch (error) {
-        if (error instanceof GateError) throw new OsAgentError("bad-request", error.message);
+        if (error instanceof GateError) throw new OsAgentError(error.code, error.message);
         throw error;
       }
       return null;
+    },
+
+    async undo(from = LOCAL_CONFIRM) {
+      if (locked) throw new OsAgentError("locked", CONTROL_TEXT.locked);
+      if (turn !== undefined) throw new OsAgentError("bad-request", AGENT_TEXT.turnRunning);
+      return runUndo({ kind: "any" }, from);
+    },
+
+    async setLocked(next) {
+      if (locked !== next) {
+        locked = next;
+        deps.log(`[lock] ${next ? "locked" : "unlocked"}`);
+        const current = sys.current();
+        if (current !== undefined) deps.push(OS_CONTROL_PUSHES.sysSnapshot, { ...current, locked });
+        void sys.refresh();
+      }
+      try {
+        await deps.lockStore?.write(next);
+      } catch (error) {
+        deps.log(`[lock] could not save the lock state: ${describeError(error)}`);
+      }
+      return null;
+    },
+
+    isLocked: () => locked,
+    card: (cardId) => gate.openCards().find((card) => card.cardId === cardId),
+    currentTurnId: () => turn?.turnId,
+    onEvent(listener) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
     },
 
     async providerList() {

@@ -1,3 +1,6 @@
+import { isIpLiteral as isAddressLiteral } from "./address.js";
+import { DEVICE_ID_PATTERN } from "./protocol.js";
+
 // Jarvis OS control-socket channels (contracts §3): what jarvis-shell says to
 // jarvisd after the existing handshake. Pure — no node:*, no other package
 // (no-node-imports.test.ts). The C++ shell's CI test reads
@@ -30,6 +33,23 @@ export const OS_CONTROL_REQUESTS = {
   memorySetEnabled: "memory:setEnabled",
   /** M2.5 §2: a: [], v: {installed, available}. */
   registryList: "registry:list",
+  /** Contracts §5 #10. a: [{on}], v: null. */
+  voiceSetSpeak: "voice:setSpeak",
+  /** Rafiq M3 contracts §2. a: [], v: null — stops speech. */
+  voiceStop: "voice:stop",
+  /** Rafiq M3 contracts §2. a: [], v: UndoResult. */
+  agentUndo: "agent:undo",
+  /** Rafiq M3 contracts §2. a: [PairingAnswer], v: null. */
+  pairingAnswer: "pairing:answer",
+  /** Rafiq M3 contracts §3: from /usr/bin/jarvis-lock only (peer-checked). a: [{locked}], v: null. */
+  sysSetLocked: "sys:setLocked",
+  /** Additive (plan N gap): the shell's phone settings; local connections only. */
+  remoteStatus: "remote:status",
+  remoteConfigure: "remote:configure",
+  remoteSetOwnerPassword: "remote:setOwnerPassword",
+  remoteRevoke: "remote:revoke",
+  pairingOpen: "pairing:open",
+  pairingCancel: "pairing:cancel",
 } as const;
 
 export const OS_CONTROL_PUSHES = {
@@ -38,6 +58,11 @@ export const OS_CONTROL_PUSHES = {
   doctorState: "doctor:state",
   /** Contracts §6 #8: every 10 s and on change, and on every new connection. */
   sysSnapshot: "sys:snapshot",
+  /** Rafiq M3 contracts §2. */
+  voiceState: "voice:state",
+  pairingPending: "pairing:pending",
+  /** Additive (plan N gap): OsRemoteStatus on every change and on connect. */
+  remoteStatus: "remote:status",
 } as const;
 
 export const PROVIDER_KINDS = ["anthropic", "openai-compatible", "ollama", "gemini"] as const;
@@ -118,6 +143,9 @@ export type SysSnapshot = {
     download: ModelDownload | null;
   } | null;
   updates: UpdatesSummary;
+  locked: boolean;
+  voice: VoiceAvailability;
+  undo: { available: boolean; title: string | null };
 };
 
 export type CardSource = "debian" | "flathub" | "system" | "network";
@@ -173,7 +201,7 @@ export type AuditEntry = {
   title: string;
   input: unknown;
   decision: "approved" | "denied" | "timeout";
-  via: "desktop" | "doctor";
+  via: AuditVia;
   result: "ok" | "failed" | "skipped";
   message?: string;
 };
@@ -416,3 +444,152 @@ export function parseAuditList(args: readonly unknown[]): Parsed<AuditQuery> {
   }
   return ok({ limit, beforeTs });
 }
+
+/** Blob requests (the control socket's existing blob lane). */
+export const OS_CONTROL_BLOBS = {
+  /** Rafiq M3 contracts §2: 16 kHz mono WAV ≤ 4 MiB. */
+  voiceUtterance: "voice:utterance",
+} as const;
+
+// ── Rafiq M3 (contracts §2) ─────────────────────────────────────────────
+
+export type VoiceLang = "en" | "ar";
+export type VoiceAction = "prompt" | "approve" | "deny" | "ignored";
+export type VoiceStateName = "idle" | "listening" | "transcribing" | "speaking";
+export type VoiceStatePush = { state: VoiceStateName; lang?: VoiceLang };
+/** stt: the whisper model in use ("ggml-base"/"ggml-small"), tts: Piper voices installed. */
+export type VoiceAvailability = {
+  available: boolean;
+  stt: string | null;
+  tts: string | null;
+  speak: boolean;
+};
+/** `ticked` is additive (plan N gap): the shell's current ticks; absent = every item. */
+export type VoiceUtteranceMeta = { lang: "auto" | "en" | "ar"; cardId?: string; ticked?: string[] };
+export type VoiceUtteranceResult = { text: string; lang: VoiceLang; action: VoiceAction };
+export type UndoResult = { undone: string | null };
+/** Contracts §5 #9: answers are tied to the pending request. */
+export type PairingPending = {
+  requestId: string;
+  deviceName: string;
+  address: string;
+  expiresAt: number;
+};
+export type PairingAnswer = { requestId: string; approve: boolean };
+export type PairingOpenResult = { uri: string; expiresAt: number };
+export type OsRemoteStatus = {
+  enabled: boolean;
+  listening: { host: string; port: number; fingerprint: string } | null;
+  pairing: "closed" | "open" | "confirming";
+  devices: { id: string; name: string; connected: boolean; lastSeenAt: number | null }[];
+  hasOwnerPassword: boolean;
+  problem: string | null;
+};
+export type RemoteConfigureRequest = { enabled: boolean; bindAddress?: string; port?: number };
+export type OwnerPasswordRequest = { current?: string; next: string };
+export type OwnerPasswordResult = { ok: true } | { ok: false; code: string };
+
+const VOICE_LANGS = ["auto", "en", "ar"] as const;
+const MAX_PASSWORD_CHARS = 1_024;
+
+function isTickList(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.length <= MAX_TICKED &&
+    value.every(isId) &&
+    new Set(value).size === value.length
+  );
+}
+
+export function isIpLiteral(value: unknown): value is string {
+  return typeof value === "string" && isAddressLiteral(value);
+}
+
+export function parseVoiceUtteranceMeta(args: readonly unknown[]): Parsed<VoiceUtteranceMeta> {
+  if (args.length === 0) return ok({ lang: "auto" });
+  const a = single(args);
+  if (a === undefined) return fail("expected [{lang?, cardId?, ticked?}]");
+  const { lang, cardId, ticked } = a;
+  const meta: VoiceUtteranceMeta = { lang: "auto" };
+  if (lang !== undefined) {
+    if (typeof lang !== "string" || !(VOICE_LANGS as readonly string[]).includes(lang)) {
+      return fail("lang must be auto, en or ar");
+    }
+    meta.lang = lang as VoiceUtteranceMeta["lang"];
+  }
+  if (cardId !== undefined) {
+    if (!isId(cardId)) return fail("cardId must be an id");
+    meta.cardId = cardId;
+  }
+  if (ticked !== undefined) {
+    if (!isTickList(ticked)) return fail("ticked must be a list of item ids");
+    meta.ticked = [...ticked];
+  }
+  return ok(meta);
+}
+
+export function parsePairingAnswer(args: readonly unknown[]): Parsed<PairingAnswer> {
+  const a = single(args);
+  if (a === undefined || typeof a["approve"] !== "boolean" || !isId(a["requestId"])) {
+    return fail("expected [{requestId, approve}]");
+  }
+  return ok({ requestId: a["requestId"], approve: a["approve"] });
+}
+
+export function parseSetLocked(args: readonly unknown[]): Parsed<{ locked: boolean }> {
+  const a = single(args);
+  if (a === undefined || typeof a["locked"] !== "boolean") return fail("expected [{locked}]");
+  return ok({ locked: a["locked"] });
+}
+
+export function parseRemoteConfigure(args: readonly unknown[]): Parsed<RemoteConfigureRequest> {
+  const a = single(args);
+  if (a === undefined || typeof a["enabled"] !== "boolean") {
+    return fail("expected [{enabled, bindAddress?, port?}]");
+  }
+  const request: RemoteConfigureRequest = { enabled: a["enabled"] };
+  const { bindAddress, port } = a;
+  if (bindAddress !== undefined) {
+    if (!isIpLiteral(bindAddress)) return fail("bindAddress must be an IP address");
+    request.bindAddress = bindAddress;
+  }
+  if (port !== undefined) {
+    if (typeof port !== "number" || !Number.isInteger(port) || port < 1 || port > 65_535) {
+      return fail("port must be a whole number from 1 to 65535");
+    }
+    request.port = port;
+  }
+  return ok(request);
+}
+
+const isPassword = (value: unknown): value is string =>
+  typeof value === "string" && value.length > 0 && value.length <= MAX_PASSWORD_CHARS;
+
+export function parseOwnerPassword(args: readonly unknown[]): Parsed<OwnerPasswordRequest> {
+  const a = single(args);
+  if (a === undefined) return fail("expected [{current?, next}]");
+  const { current, next } = a;
+  // Never put the value in the error: it is a password.
+  if (!isPassword(next)) return fail("next must be 1-1024 characters");
+  if (current === undefined) return ok({ next });
+  if (!isPassword(current)) return fail("current must be 1-1024 characters");
+  return ok({ current, next });
+}
+
+export function parseRemoteRevoke(args: readonly unknown[]): Parsed<{ deviceId: string }> {
+  const a = single(args);
+  const deviceId = a?.["deviceId"];
+  if (typeof deviceId !== "string" || !DEVICE_ID_PATTERN.test(deviceId)) {
+    return fail("deviceId must be a device id");
+  }
+  return ok({ deviceId });
+}
+
+/** Contracts §5 #10: computer speech preference. */
+export function parseSetSpeak(args: readonly unknown[]): Parsed<{ on: boolean }> {
+  const a = single(args);
+  if (a === undefined || typeof a["on"] !== "boolean") return fail("expected [{on}]");
+  return ok({ on: a["on"] });
+}
+
+export type AuditVia = "desktop" | "doctor" | `phone:${string}`;

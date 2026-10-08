@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { parseNetStatus } from "./doctor.js";
 import {
   buildSysSnapshot,
+  NO_VOICE,
   isLocalBaseUrl,
   parseFailedUnitNames,
   parseSysHealth,
@@ -63,6 +64,9 @@ describe("buildSysSnapshot", () => {
         download: null,
       },
       updates: { count: 0, security: 0, checkedAt: null },
+      locked: false,
+      voice: { available: false, stt: null, tts: null, speak: false },
+      undo: { available: false, title: null },
     });
   });
 
@@ -76,6 +80,9 @@ describe("buildSysSnapshot", () => {
       failedUnits: [],
       model: null,
       updates: { count: 0, security: 0, checkedAt: null },
+      locked: false,
+      voice: { available: false, stt: null, tts: null, speak: false },
+      undo: { available: false, title: null },
     });
   });
 
@@ -141,5 +148,29 @@ describe("isLocalBaseUrl", () => {
     ]) {
       expect(isLocalBaseUrl(url), url).toBe(false);
     }
+  });
+});
+
+describe("sys:snapshot M3 parts", () => {
+  it("defaults to unlocked with no voice", () => {
+    const snapshot = buildSysSnapshot({ failedUnits: [], model: null });
+    expect(snapshot.locked).toBe(false);
+    expect(snapshot.undo).toEqual({ available: false, title: null });
+    expect(snapshot.voice).toEqual(NO_VOICE);
+    expect(NO_VOICE).toEqual({ available: false, stt: null, tts: null, speak: false });
+  });
+  it("carries the lock state and voice availability it is given", () => {
+    const voice = { available: true, stt: "ggml-base", tts: "en_US-amy-medium", speak: true };
+    const snapshot = buildSysSnapshot({
+      failedUnits: [],
+      model: null,
+      locked: true,
+      voice,
+      undo: { available: true, title: "Brightness" },
+    });
+    expect(snapshot.locked).toBe(true);
+    expect(snapshot.undo).toEqual({ available: true, title: "Brightness" });
+    expect(snapshot.voice).toEqual(voice);
+    expect(snapshot.voice).not.toBe(voice);
   });
 });

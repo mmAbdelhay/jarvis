@@ -36,3 +36,24 @@ describe("parseAuditEntry", () => {
     expect(parseAuditEntry({ ...entry, ts: "1" })).toBeUndefined();
   });
 });
+
+describe("phone audit lines (Rafiq M3 §2)", () => {
+  const line = {
+    ts: 1,
+    tool: "settings.brightness",
+    title: "Set brightness to 80%",
+    input: { percent: 80 },
+    decision: "approved",
+    result: "ok",
+  };
+  it("accepts via phone:<deviceName>", () => {
+    expect(parseAuditEntry({ ...line, via: "phone:Pixel 8" })?.via).toBe("phone:Pixel 8");
+  });
+  it("refuses an empty, overlong or control-character phone name", () => {
+    expect(parseAuditEntry({ ...line, via: "phone:" })).toBeUndefined();
+    expect(parseAuditEntry({ ...line, via: `phone:${"a".repeat(65)}` })).toBeUndefined();
+    expect(parseAuditEntry({ ...line, via: "phone:a\nb" })).toBeUndefined();
+    expect(parseAuditEntry({ ...line, via: "phone:a\n" })).toBeUndefined();
+    expect(parseAuditEntry({ ...line, via: "laptop" })).toBeUndefined();
+  });
+});

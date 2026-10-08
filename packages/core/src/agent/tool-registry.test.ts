@@ -129,9 +129,9 @@ describe("loadToolRegistry", () => {
   });
 
   it("makes an unknown server's tools confirm even when they claim safe", async () => {
-    const other = fakeSession("someone-else", [tool("files.delete_all", meta("safe"))]);
+    const other = fakeSession("someone-else", [tool("docs.delete_all", meta("safe"))]);
     const registry = await loadToolRegistry([other.session], { trusted, log: () => {} });
-    expect(registry.get("files.delete_all")?.risk).toBe("confirm");
+    expect(registry.get("docs.delete_all")?.risk).toBe("confirm");
   });
 
   it("registers only effectively-safe tools in the read-only profile (contracts §7 #14)", async () => {

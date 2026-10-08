@@ -1,7 +1,16 @@
 {
   "protocolVersion": 1,
-  "frame": { "headerBytes": 5, "kinds": { "json": 0, "binary": 1 } },
-  "handshake": { "serverLabel": "jarvisd-server", "clientLabel": "jarvisd-client" },
+  "frame": {
+    "headerBytes": 5,
+    "kinds": {
+      "json": 0,
+      "binary": 1
+    }
+  },
+  "handshake": {
+    "serverLabel": "jarvisd-server",
+    "clientLabel": "jarvisd-client"
+  },
   "requests": [
     "agent:prompt",
     "agent:stop",
@@ -17,7 +26,28 @@
     "memory:delete",
     "memory:clear",
     "memory:setEnabled",
-    "registry:list"
+    "registry:list",
+    "voice:setSpeak",
+    "voice:stop",
+    "agent:undo",
+    "pairing:answer",
+    "sys:setLocked",
+    "remote:status",
+    "remote:configure",
+    "remote:setOwnerPassword",
+    "remote:revoke",
+    "pairing:open",
+    "pairing:cancel"
   ],
-  "pushes": ["agent:events", "provider:status", "doctor:state", "sys:snapshot"]
+  "pushes": [
+    "agent:events",
+    "provider:status",
+    "doctor:state",
+    "sys:snapshot",
+    "voice:state",
+    "pairing:pending",
+    "remote:status"
+  ],
+  "blobs": ["voice:utterance"],
+  "otherClients": ["sys:setLocked"]
 }
