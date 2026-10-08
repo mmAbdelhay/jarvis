@@ -15,6 +15,7 @@ on:
       - "packages/desktop/src/daemon/**"
       - "packages/desktop/package.json"
       - "packages/desktop/scripts/**"
+      - "packages/desktop/electron-builder.yml"
       - "pnpm-lock.yaml"
       - ".github/workflows/os.yml"
   push:
@@ -29,6 +30,7 @@ on:
       - "packages/desktop/src/daemon/**"
       - "packages/desktop/package.json"
       - "packages/desktop/scripts/**"
+      - "packages/desktop/electron-builder.yml"
       - "pnpm-lock.yaml"
       - ".github/workflows/os.yml"
   workflow_dispatch:
@@ -43,7 +45,7 @@ permissions:
 env:
   # One version for every .deb and the ISO of this run (packages depend on
   # each other with (= version)); a tag os-vX.Y.Z builds X.Y.Z.
-  OS_VERSION: ${{ startsWith(github.ref, 'refs/tags/os-v') && github.ref_name || format('0.3.0~ci{0}', github.run_number) }}
+  OS_VERSION: ${{ startsWith(github.ref, 'refs/tags/os-v') && github.ref_name || format('0.4.0~ci{0}', github.run_number) }}
 
 jobs:
   checks:
@@ -54,7 +56,8 @@ jobs:
       - run: |
           apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
             git ca-certificates dpkg-dev shellcheck xorriso python3 python3-yaml gpg gpg-agent gpgv reprepro apt \
-            librsvg2-bin grub-common fonts-inter cmake gcc libc6-dev zstd file sbsigntool curl ntfs-3g busybox-static
+            librsvg2-bin grub-common fonts-inter cmake gcc libc6-dev zstd file sbsigntool curl ntfs-3g busybox-static \
+            qt6-l10n-tools fontconfig fonts-ibm-plex fonts-noto-core desktop-file-utils
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
@@ -63,6 +66,9 @@ jobs:
       - run: python3 os/branding/tools/name-lint.py
       - run: os/branding/tests/run.sh
       - run: os/packaging/tests/run.sh
+        env:
+          # Throwaway job container: the backup-model and font tests may dpkg -i.
+          JARVIS_DPKG_INSTALL_TESTS: "1"
       - run: os/repo/tests/run.sh
       - run: os/registry/tests/run.sh
       - run: python3 -m unittest discover -s os/registry/tests -v
@@ -71,13 +77,18 @@ jobs:
       - run: python3 -m unittest discover -s os/models/tests -v
       - run: python3 -m unittest discover -s os/models/tools/tests -v
       - run: python3 -m unittest discover -s os/packaging/lib/tests -v
+      - run: python3 -m unittest discover -s os/recipes/tests -v
+      - run: python3 os/recipes/tools/recipes.py validate
+      # Every recipe package exists in Debian trixie / on Flathub (apt lists are fresh from the first step).
+      - run: python3 os/recipes/tools/check_sources.py
+      - run: python3 os/models/tools/backup_model.py check
       - run: python3 -m unittest discover -s os/iso/smoke/tests -t os/iso/smoke -v
       - run: node --test os/iso/smoke/assets/
       - name: shellcheck
         run: |
           {
             # tests/fixtures hold name-lint input data, not scripts.
-            git ls-files os/packaging os/iso os/branding os/repo os/registry os/models | grep -v '/tests/fixtures/' | while read -r f; do
+            git ls-files os/packaging os/iso os/branding os/repo os/registry os/models os/recipes | grep -v '/tests/fixtures/' | while read -r f; do
               head -n1 "$f" | grep -qE '^#!.*(/|env )(ba)?sh' && echo "$f"
             done
           } | xargs shellcheck -x -S warning
@@ -184,9 +195,10 @@ jobs:
       - name: Install build dependencies
         run: |
           cat os/ui/deps/debian-build.txt os/shell/deps/debian-build.txt os/installer/deps/debian-build.txt \
-            os/greeter/deps/debian-build.txt os/lock/deps/debian-build.txt os/idle/deps/debian-build.txt | grep -v '^[[:space:]]*#' | awk 'NF' | sort -u > /tmp/build-deps
+            os/greeter/deps/debian-build.txt os/lock/deps/debian-build.txt os/idle/deps/debian-build.txt \
+            os/classic/deps/debian-build.txt | grep -v '^[[:space:]]*#' | awk 'NF' | sort -u > /tmp/build-deps
           DEBIAN_FRONTEND=noninteractive xargs -a /tmp/build-deps \
-            apt-get install -y -qq --no-install-recommends dpkg-dev xz-utils file python3 make
+            apt-get install -y -qq --no-install-recommends dpkg-dev xz-utils file python3 make qt6-l10n-tools
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -208,7 +220,8 @@ jobs:
       - run: os/greeter/ci/test.sh
       - run: os/lock/ci/test.sh
       - run: os/idle/ci/test.sh
-      - run: os/packaging/build.sh --out out/debs jarvis-ui jarvis-shell jarvis-installer jarvis-greeter jarvis-lock jarvis-idle
+      - run: os/classic/ci/test.sh
+      - run: os/packaging/build.sh --out out/debs jarvis-ui jarvis-shell jarvis-installer jarvis-greeter jarvis-lock jarvis-idle jarvis-classic jarvis-i18n
       - uses: actions/upload-artifact@v4
         with:
           name: debs-qt
@@ -241,7 +254,7 @@ jobs:
             echo "keyring=throwaway" >> "$GITHUB_OUTPUT"
             echo "Archive keyring: throwaway CI key $fpr (NOT FOR RELEASE)" >> "$GITHUB_STEP_SUMMARY"
           fi
-      - run: os/packaging/build.sh --out out/debs jarvis-branding jarvis-models-catalog jarvis-archive-keyring jarvis-ollama jarvis-agent
+      - run: os/packaging/build.sh --out out/debs jarvis-branding jarvis-models-catalog jarvis-archive-keyring jarvis-ollama jarvis-agent jarvis-session jarvis-fonts jarvis-recipes
       - uses: actions/upload-artifact@v4
         with:
           name: debs-distro
@@ -255,6 +268,103 @@ jobs:
           name: ci-apt-key
           path: ci-apt-key.tgz
           retention-days: 1
+
+  i18n-gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      # M4 contracts §3: no en key without ar (or back), nothing unfinished.
+      - run: python3 os/packaging/lib/i18n_gate.py
+
+  build-backup-model:
+    runs-on: ubuntu-24.04
+    container: debian:trixie
+    timeout-minutes: 45
+    steps:
+      - run: |
+          apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+            git ca-certificates dpkg-dev python3 file xz-utils
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/jarvis-build/backup-model
+          key: backup-model-${{ hashFiles('os/models/backup-model.lock.json') }}
+      # M4 contracts §1: the pinned weights, verified byte for byte.
+      - run: os/packaging/build.sh --out out/debs jarvis-backup-model
+      - uses: actions/upload-artifact@v4
+        with:
+          name: debs-backup-model
+          path: out/debs/*.deb
+          if-no-files-found: error
+          compression-level: 0
+
+  backup-model-test:
+    needs: [build-distro, build-backup-model]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: debs-distro
+          path: ${{ runner.temp }}/debs
+      - uses: actions/download-artifact@v4
+        with:
+          name: debs-backup-model
+          path: ${{ runner.temp }}/debs
+      # Offline: the packaged model answers with a tool call, English and Arabic.
+      - run: os/packaging/backup/offline-chat.sh --debs "$RUNNER_TEMP/debs"
+
+  classic-session-test:
+    needs: build-distro
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: debs-distro
+          path: ${{ runner.temp }}/debs
+      # Headless labwc: automatic fallback, classic session, Super routing (contracts §2).
+      - run: os/iso/session/classic.sh --debs "$RUNNER_TEMP/debs" --out "$RUNNER_TEMP/classic"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: classic-session-test
+          path: ${{ runner.temp }}/classic/
+          if-no-files-found: warn
+
+  build-workspace:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      # Both bootstrap steps: node-pty compiled here and the Linux Electron build.
+      - run: pnpm bootstrap
+      - run: pnpm --filter @jarvis/desktop build
+      # M4 contracts §5: a directory build, not an AppImage (CLI override; electron-builder.yml is Plan Q's).
+      - run: pnpm --filter @jarvis/desktop exec electron-builder --linux dir --x64 --config electron-builder.yml
+      - name: Package and install-test in Debian trixie
+        run: |
+          docker run --rm -e OS_VERSION -v "$GITHUB_WORKSPACE:/src" -w /src debian:trixie bash -euo pipefail -c '
+            apt-get update -qq
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends dpkg-dev file python3 zstd git ca-certificates >/dev/null
+            git config --global --add safe.directory /src
+            os/packaging/build.sh --out out/workspace jarvis-workspace
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends ./out/workspace/jarvis-workspace_*_amd64.deb >/dev/null
+            if ldd /opt/jarvis-workspace/jarvis | grep "not found"; then exit 1; fi'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: workspace-deb
+          path: out/workspace/*.deb
+          if-no-files-found: error
+          compression-level: 0
 
   build-voice:
     runs-on: ubuntu-24.04
@@ -293,7 +403,7 @@ jobs:
       - run: os/packaging/voice/roundtrip.sh --debs "$RUNNER_TEMP/debs"
 
   session-test:
-    needs: build-qt
+    needs: [build-qt, build-distro]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -301,6 +411,10 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: debs-qt
+          path: ${{ runner.temp }}/debs
+      - uses: actions/download-artifact@v4
+        with:
+          name: debs-distro
           path: ${{ runner.temp }}/debs
       # Headless labwc: Super+L / Super+Space, PAM unlock, idle lock (contracts §3).
       - run: os/iso/session/run.sh --debs "$RUNNER_TEMP/debs" --out "$RUNNER_TEMP/session"
@@ -312,7 +426,7 @@ jobs:
           if-no-files-found: warn
 
   build-iso:
-    needs: [build-go, build-daemon, build-qt, build-distro, build-voice]
+    needs: [build-go, build-daemon, build-qt, build-distro, build-voice, build-backup-model, i18n-gate]
     runs-on: ubuntu-24.04
     timeout-minutes: 100
     steps:
@@ -547,7 +661,7 @@ jobs:
 
   repo:
     if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/os-v'))
-    needs: [smoke-test, install-test, loop-tests, build-distro, agent-install, docker-image, session-test, voice-roundtrip]
+    needs: [smoke-test, install-test, loop-tests, build-distro, agent-install, docker-image, session-test, voice-roundtrip, i18n-gate, backup-model-test, classic-session-test]
     runs-on: ubuntu-24.04
     container: debian:trixie
     steps:
@@ -575,6 +689,14 @@ jobs:
           pattern: debs-*
           merge-multiple: true
           path: ${{ runner.temp }}/debs
+      - if: steps.gate.outputs.go == 'true'
+        name: Keep only .debs GitHub Pages can host (100 MB per file)
+        run: |
+          mkdir -p "$RUNNER_TEMP/too-big"
+          find "$RUNNER_TEMP/debs" -name '*.deb' -size +95M -print -exec mv {} "$RUNNER_TEMP/too-big/" \; |
+            while read -r f; do
+              echo "::warning title=APT repo::$(basename "$f") is over 95 MB and is not published (GitHub Pages limit; M4 Plan T gap 3)"
+            done
       - if: steps.gate.outputs.go == 'true'
         uses: actions/download-artifact@v4
         with:
@@ -624,7 +746,7 @@ jobs:
 
   release:
     if: startsWith(github.ref, 'refs/tags/os-v')
-    needs: [smoke-test, install-test, loop-tests, repo, agent-install, docker-publish, session-test, voice-roundtrip]
+    needs: [smoke-test, install-test, loop-tests, repo, agent-install, docker-publish, session-test, voice-roundtrip, i18n-gate, backup-model-test, classic-session-test, build-workspace]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -639,6 +761,10 @@ jobs:
         with:
           name: os-iso
           path: iso
+      - uses: actions/download-artifact@v4
+        with:
+          name: workspace-deb
+          path: workspace
       - env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -646,4 +772,4 @@ jobs:
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft \
             --title "$DISTRO_NAME ${GITHUB_REF_NAME#os-v}" \
             --notes "Live/installer ISO built, smoke- and install-tested (Secure Boot) by run ${{ github.run_id }}. Agent image: ghcr.io/mmabdelhay/jarvis-agent:${GITHUB_REF_NAME#os-v}." \
-            iso/*.iso iso/*.iso.sha256
+            iso/*.iso iso/*.iso.sha256 workspace/*.deb

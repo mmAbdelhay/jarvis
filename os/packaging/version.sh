@@ -11,7 +11,7 @@ fi
 here=$(cd "$(dirname "$0")" && pwd)
 if stamp=$(git -C "$here" log -1 --format=%cd --date=format:%Y%m%d%H%M 2>/dev/null) &&
   sha=$(git -C "$here" rev-parse --short=10 HEAD 2>/dev/null); then
-  printf '0.3.0~m3.%s.g%s\n' "$stamp" "$sha"
+  printf '0.4.0~m4.%s.g%s\n' "$stamp" "$sha"
 else
-  printf '0.3.0~m3.dev\n'
+  printf '0.4.0~m4.dev\n'
 fi

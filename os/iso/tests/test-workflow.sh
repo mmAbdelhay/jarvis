@@ -68,7 +68,6 @@ assert "jarvis-agent" in d("build-distro")
 PY
 # --- Rafiq M3 Plan P ---
 for j in build-voice voice-roundtrip session-test; do check "job $j" grep -qw "$j" <<<"$jobs"; done
-check "M3 CI version" grep -qF "'0.3.0~ci{0}'" "$wf"
 check "M3 wiring" python3 - "$wf" <<'PY'
 import sys, yaml
 w = yaml.safe_load(open(sys.argv[1]))
@@ -91,5 +90,45 @@ for n in ("voice-roundtrip", "session-test"):
 for n in ("repo", "release"):
     assert {"session-test", "voice-roundtrip"} <= needs(n), n
 assert "discover -s os/packaging/lib/tests" in d("checks")
+PY
+# --- Rafiq M4 Plan T ---
+for j in i18n-gate build-backup-model backup-model-test classic-session-test build-workspace; do
+  check "job $j" grep -qw "$j" <<<"$jobs"
+done
+check "M4 CI version" grep -qF "'0.4.0~ci{0}'" "$wf"
+check "electron-builder.yml triggers the workflow" grep -qF '"packages/desktop/electron-builder.yml"' "$wf"
+check "M4 wiring" python3 - "$wf" <<'PY'
+import sys, yaml
+w = yaml.safe_load(open(sys.argv[1]))
+j = w["jobs"]
+d = lambda n: yaml.safe_dump(j[n], width=1000)
+needs = lambda n: {j[n]["needs"]} if isinstance(j[n]["needs"], str) else set(j[n]["needs"])
+c = d("checks")
+for s in ("discover -s os/recipes/tests", "recipes.py validate", "check_sources.py", "backup_model.py check",
+          "qt6-l10n-tools", "fonts-noto-core", "fonts-ibm-plex", "desktop-file-utils", "JARVIS_DPKG_INSTALL_TESTS"):
+    assert s in c, s
+assert "jarvis-session jarvis-fonts jarvis-recipes" in d("build-distro")
+qt = d("build-qt")
+for s in ("os/classic/deps/debian-build.txt", "os/classic/ci/test.sh", "jarvis-classic jarvis-i18n", "qt6-l10n-tools"):
+    assert s in qt, s
+assert "i18n_gate.py" in d("i18n-gate")
+bm = d("build-backup-model")
+for s in ("jarvis-backup-model", "debs-backup-model", "backup-model.lock.json", "compression-level: 0"):
+    assert s in bm, s
+assert needs("backup-model-test") == {"build-distro", "build-backup-model"}
+assert "os/packaging/backup/offline-chat.sh" in d("backup-model-test")
+assert needs("classic-session-test") == {"build-distro"} and "os/iso/session/classic.sh" in d("classic-session-test")
+assert {"build-qt", "build-distro"} <= needs("session-test") and "debs-distro" in d("session-test")
+ws = d("build-workspace")
+for s in ("electron-builder --linux dir --x64", "jarvis-workspace", "workspace-deb", "ldd /opt/jarvis-workspace/jarvis"):
+    assert s in ws, s
+assert "debs-" not in ws, "the workspace .deb must never reach the ISO (contracts §5)"
+assert {"build-backup-model", "i18n-gate"} <= needs("build-iso")
+for n in ("backup-model-test", "classic-session-test"):
+    assert "--privileged" not in d(n), n
+for n in ("repo", "release"):
+    assert {"backup-model-test", "classic-session-test", "i18n-gate"} <= needs(n), n
+assert "-size +95M" in d("repo")
+assert "build-workspace" in needs("release") and "workspace/*.deb" in d("release")
 PY
 finish
