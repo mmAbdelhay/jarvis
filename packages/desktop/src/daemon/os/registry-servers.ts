@@ -411,6 +411,13 @@ export function createRegistryServers(deps: {
           continue;
         }
         bound.push(result.value);
+        // Contract gap 10 (open, owner decision): entry.artifact.sha256 is the
+        // hash of the .tar.gz (contracts §3, §7 #7), but this re-hashes the
+        // unpacked entry point, and other files of node/python servers are not
+        // checked. Needs one of: a per-file manifest hash in the index, a
+        // verified file list written by jarvis-pkg, or jarvis-pkg keeping the
+        // verified tarball for jarvisd to re-hash. Until then a real install
+        // fails closed here (logged mismatch, server not started).
         let digest: string;
         try {
           digest = await deps.hashFile(file.command.at(-1) ?? "");
