@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": false,
+    "declaration": false,
+    "noEmit": true,
+    "types": ["node"],
+    "paths": { "@jarvis/wire": ["../wire/src/index.ts"] }
+  },
+  "include": ["src", "scripts/*.d.mts"]
+}
