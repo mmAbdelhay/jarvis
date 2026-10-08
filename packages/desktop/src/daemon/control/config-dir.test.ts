@@ -34,9 +34,9 @@ describe("jarvisConfigDir", () => {
 describe("daemonLogPath", () => {
   it("is <config dir>/logs/jarvisd.log, following JARVIS_CONFIG_DIR", async () => {
     const { daemonLogPath } = await import("../log-file.js");
-    expect(daemonLogPath("/home/u", {})).toBe("/home/u/.config/jarvis/logs/jarvisd.log");
+    expect(daemonLogPath("/home/u", {}, "linux")).toBe("/home/u/.config/jarvis/logs/jarvisd.log");
     expect(
-      daemonLogPath("/home/u", { JARVIS_CONFIG_DIR: "/home/u/.config/jarvis-workspace" }),
+      daemonLogPath("/home/u", { JARVIS_CONFIG_DIR: "/home/u/.config/jarvis-workspace" }, "linux"),
     ).toBe("/home/u/.config/jarvis-workspace/logs/jarvisd.log");
   });
 });

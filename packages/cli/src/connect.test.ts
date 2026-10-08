@@ -2,13 +2,19 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { connectJarvis, NotRunningError, readBuildStamp } from "./connect.js";
-import { MISSING_STAMP, TEST_BUILD, type TestDaemon, testDaemons } from "./testing/daemon.js";
+import {
+  MISSING_STAMP,
+  TEST_BUILD,
+  type TestDaemon,
+  testDaemons,
+  testTempRoot,
+} from "./testing/daemon.js";
 
 const daemons = testDaemons();
 
 describe("readBuildStamp", () => {
   it("reads {build} and answers empty for a missing or broken stamp", async () => {
-    const dir = await mkdtemp(join("/tmp", "jcli-stamp-"));
+    const dir = await mkdtemp(join(testTempRoot(), "jcli-stamp-"));
     try {
       await writeFile(join(dir, "good.json"), JSON.stringify({ build: "0.3.0+abc" }));
       await writeFile(join(dir, "bad.json"), "{not json");
@@ -41,7 +47,7 @@ describe("connectJarvis", () => {
 
   it("uses JARVIS_BUILD_STAMP when it matches the daemon", async () => {
     const d: TestDaemon = await daemons.start(() => "pong");
-    const dir = await mkdtemp(join("/tmp", "jcli-stamp-"));
+    const dir = await mkdtemp(join(testTempRoot(), "jcli-stamp-"));
     try {
       const stamp = join(dir, "build-stamp.json");
       await writeFile(stamp, JSON.stringify({ build: TEST_BUILD }));

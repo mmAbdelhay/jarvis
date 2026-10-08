@@ -1,8 +1,10 @@
 // The real jarvisd control server (packages/desktop/src/daemon/control/server.ts)
 // with scripted handlers, so the CLI is tested against the exact frames and
 // handshake it meets in production. Run dirs live under /tmp because macOS
-// caps Unix socket paths near 104 bytes.
+// caps Unix socket paths near 104 bytes; Windows has no /tmp (and uses named
+// pipes, so the length cap does not apply): there it is the OS temp dir.
 import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach } from "vitest";
 import type { ControlClient } from "../../../desktop/src/daemon/control/client.js";
@@ -16,6 +18,11 @@ import { connectJarvis } from "../connect.js";
 export const TEST_BUILD = "test-build-1";
 export const MISSING_STAMP = "/nonexistent/jarvis/build-stamp.json";
 
+/** A short, writable base for scratch dirs on every OS the tests run on. */
+export function testTempRoot(platform: NodeJS.Platform = process.platform): string {
+  return platform === "win32" ? tmpdir() : "/tmp";
+}
+
 export type Handler = (channel: string, args: unknown[]) => unknown;
 
 export interface TestDaemon {
@@ -27,7 +34,7 @@ export interface TestDaemon {
 }
 
 export async function startTestDaemon(handler: Handler = () => null): Promise<TestDaemon> {
-  const dir = await mkdtemp(join("/tmp", "jcli-"));
+  const dir = await mkdtemp(join(testTempRoot(), "jcli-"));
   const runDirectory = join(dir, "run");
   const requests: { channel: string; args: unknown[] }[] = [];
   const state = { handler, closed: false };
