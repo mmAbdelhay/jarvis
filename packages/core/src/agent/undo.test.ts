@@ -85,6 +85,37 @@ describe("parseUndo (M3 §1: every setter returns {undo: {tool, input}})", () =>
     expect(parseUndo(undo("settings.brightness"), addon, lookup, HOST)).toBeUndefined();
   });
 
+  it("accepts a hidden target only when it is the family's own .undo", () => {
+    const move = tools.get("files.move") as RegisteredTool;
+    const extra = new Map(tools);
+    extra.set("files.something", tool("files.something", "jarvis-files", { hidden: true }));
+    extra.set("settings.undo", tool("settings.undo", "jarvis-settings", { hidden: true }));
+    const look = (name: string) => extra.get(name);
+    const undo = (target: string) => ({ undo: { tool: target, input: {} } });
+    expect(parseUndo(undo("files.undo"), move, look, HOST)?.tool.name).toBe("files.undo");
+    expect(parseUndo(undo("settings.undo"), brightness, look, HOST)?.tool.name).toBe(
+      "settings.undo",
+    );
+    expect(parseUndo(undo("files.something"), move, look, HOST)).toBeUndefined();
+  });
+
+  it("returns undefined for undo: null", () => {
+    expect(parseUndo({ undo: null }, brightness, lookup, HOST)).toBeUndefined();
+  });
+
+  it("refuses hidden password-tier and hidden secret-taking undo targets", () => {
+    const move = tools.get("files.move") as RegisteredTool;
+    const extra = new Map(tools);
+    extra.set("files.undo", tool("files.undo", "jarvis-files", { hidden: true, risk: "password" }));
+    const undo = { undo: { tool: "files.undo", input: {} } };
+    expect(parseUndo(undo, move, (n) => extra.get(n), HOST)).toBeUndefined();
+    extra.set(
+      "files.undo",
+      tool("files.undo", "jarvis-files", { hidden: true, secrets: ["password"] }),
+    );
+    expect(parseUndo(undo, move, (n) => extra.get(n), HOST)).toBeUndefined();
+  });
+
   it("refuses malformed or oversized undo objects", () => {
     expect(parseUndo({}, brightness, lookup, HOST)).toBeUndefined();
     expect(parseUndo({ undo: "settings.brightness" }, brightness, lookup, HOST)).toBeUndefined();

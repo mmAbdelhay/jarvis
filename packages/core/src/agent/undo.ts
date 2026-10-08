@@ -3,7 +3,8 @@
 // "undo". An undo runs WITHOUT a card — the user is reversing something they
 // already approved — so what it may run is narrow: a tool of the same host
 // server, in the same family (settings./files./apps./disks.), never a
-// password-tier or secret-taking tool, never anything an add-on suggests.
+// password-tier or secret-taking tool, never anything an add-on suggests. A hidden tool
+// qualifies only as the family's own `.undo` (files.undo, settings.undo).
 // Pure.
 import { CONTROL_TEXT } from "./messages.js";
 import { normalizePhrase } from "./phrases.js";
@@ -59,6 +60,7 @@ export function parseUndo(
   if (family === undefined || undoFamily(tool) !== family) return undefined;
   const target = lookup(tool);
   if (target === undefined || target.server !== ran.server) return undefined;
+  if (target.hidden && tool !== `${family}undo`) return undefined;
   if (target.risk === "password" || HOST_FORCED_RISK[tool] === "password") return undefined;
   if (target.secrets.length > 0) return undefined;
   return { tool: target, input: copy };
