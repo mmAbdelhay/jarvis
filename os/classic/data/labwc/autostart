@@ -1,0 +1,5 @@
+# jarvis-classic line for labwc's autostart in the "Rafiq (classic)" session
+# (Rafiq M4 contracts §2). Plan T assembles that session's labwc config from
+# this file and rc.xml. The shell's relaunch loop restarts a crashed taskbar
+# with backoff and stops when labwc exits.
+JARVIS_SHELL_BIN=/usr/bin/jarvis-classic /usr/share/jarvis-shell/jarvis-shell-loop &

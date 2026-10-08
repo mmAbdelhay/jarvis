@@ -31,3 +31,10 @@ add_test(NAME classic_uses_shell_controller_only
   COMMAND ${CMAKE_COMMAND} -DSRC_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../src
           -P ${CMAKE_CURRENT_SOURCE_DIR}/check_no_direct_channels.cmake)
 set_tests_properties(classic_uses_shell_controller_only PROPERTIES LABELS unit)
+
+# The real binary starts without jarvisd or a compositor, builds its three windows and quits.
+add_test(NAME classic_smoke COMMAND $<TARGET_FILE:jarvis-classic> --windowed --quit-after 1500)
+set_tests_properties(classic_smoke PROPERTIES LABELS smoke TIMEOUT 30
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QML_IMPORT_PATH=${QT_QML_OUTPUT_DIRECTORY};XDG_RUNTIME_DIR=${CMAKE_CURRENT_BINARY_DIR}/smoke-run;JARVIS_I18N_DIR=${JARVIS_I18N_BUILD_DIR}"
+  FAIL_REGULAR_EXPRESSION "is not installed|is not a type|ReferenceError|TypeError|Cannot assign|Required property")
+file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/smoke-run)

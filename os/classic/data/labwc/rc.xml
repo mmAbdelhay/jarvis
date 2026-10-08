@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<!--
+  jarvis-classic keybinds for labwc in the "Rafiq (classic)" session. Plan T
+  merges this <keyboard> block into that session's rc.xml. Super opens the
+  docked Jarvis panel, Ctrl+Alt+T opens foot, Super+L locks (M3 contracts §5.15).
+-->
+<labwc_config>
+  <keyboard>
+    <default />
+    <keybind key="Super_L" onRelease="yes">
+      <action name="Execute" command="jarvis-classic --chat" />
+    </keybind>
+    <keybind key="C-A-t">
+      <action name="Execute" command="foot" />
+    </keybind>
+    <keybind key="W-l">
+      <action name="Execute" command="loginctl lock-session" />
+    </keybind>
+  </keyboard>
+</labwc_config>
