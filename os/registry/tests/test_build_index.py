@@ -174,6 +174,18 @@ class BuildIndexTest(unittest.TestCase):
         self.build(s1, at=T2)
         self.assertTrue(any("generatedAt" in p for p in self.build(s2, previous=s1, at=T1)))
 
+    def test_refresh_rebuild_extends_valid_until(self):
+        # The scheduled re-sign job (Task 11) rebuilds unchanged inputs against the
+        # live site so validUntil never lapses between releases (contracts §7.6).
+        s1, s2 = self.tmp / "s1", self.tmp / "s2"
+        self.assertEqual(self.build(s1, at=T1), [])
+        self.assertEqual(self.build(s2, previous=s1, at=T3), [])
+        self.assertEqual(self.warnings, [])
+        old, new = self.index(s1), self.index(s2)
+        self.assertEqual(new["entries"], old["entries"])
+        self.assertEqual(new["generatedAt"], T3)
+        self.assertEqual(new["validUntil"], "2026-11-10T10:00:00Z")
+
     def test_other_channel_carried_over(self):
         s1, s2, s3 = self.tmp / "s1", self.tmp / "s2", self.tmp / "s3"
         self.build(s1, "testing")
