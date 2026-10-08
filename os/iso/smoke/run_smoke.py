@@ -65,6 +65,8 @@ class Run:
 def run_checks(run: Run, args: argparse.Namespace) -> dict | None:
     sh = run.sh
     sh("dmesg -n 1")
+    if args.disable_jarvis_apt:
+        sh(scenarios.DISABLE_JARVIS_APT)
     sh(scenarios.wait_for_user(150), 320)
     uid = int(sh("id -u jarvis").strip())
     ctl = lambda a: scenarios.jarvisctl(uid, a)  # noqa: E731
@@ -185,6 +187,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--ram-fail-mb", type=int, default=900)
     p.add_argument("--settle-seconds", type=int, default=60)
     p.add_argument("--port", type=int, default=8099)
+    p.add_argument("--disable-jarvis-apt", action="store_true")
     args = p.parse_args(argv)
 
     out = args.out

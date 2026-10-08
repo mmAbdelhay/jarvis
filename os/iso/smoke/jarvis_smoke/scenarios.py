@@ -105,3 +105,8 @@ def wait_connectivity_full(seconds: int) -> str:
         f"[ \"$(nmcli networking connectivity check 2>/dev/null)\" = full ] && exit 0; sleep 1; done; "
         f"nmcli networking connectivity check; exit 1"
     )
+
+
+# The live overlay only: nothing outlives the boot. Used when the ISO's
+# keyring cannot verify the public repo (throwaway key, or no Pages repo yet).
+DISABLE_JARVIS_APT = "mv /etc/apt/sources.list.d/jarvis.sources /run/jarvis.sources.disabled"

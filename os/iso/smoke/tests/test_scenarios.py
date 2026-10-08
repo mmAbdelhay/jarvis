@@ -95,5 +95,14 @@ class FakeProviderScriptsTest(unittest.TestCase):
         self.assertIn("runuser -u jarvis", sc.jarvisctl(1000, "wait"))
 
 
+class JarvisAptTest(unittest.TestCase):
+    def test_disable_moves_the_source_aside_in_the_overlay(self):
+        from jarvis_smoke import scenarios
+        self.assertEqual(
+            scenarios.DISABLE_JARVIS_APT,
+            "mv /etc/apt/sources.list.d/jarvis.sources /run/jarvis.sources.disabled",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
