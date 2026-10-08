@@ -52,7 +52,7 @@ func (c *Client) bus() (*dbus.Conn, error) {
 	return conn, nil
 }
 
-func (c *Client) call(ctx context.Context, timeout time.Duration, method string, arg any) (helperapi.Outcome, error) {
+func (c *Client) call(ctx context.Context, timeout time.Duration, method string, args ...any) (helperapi.Outcome, error) {
 	conn, err := c.bus()
 	if err != nil {
 		return helperapi.Outcome{}, &helperapi.Error{Message: "cannot reach the system bus: " + err.Error()}
@@ -62,7 +62,7 @@ func (c *Client) call(ctx context.Context, timeout time.Duration, method string,
 	// AllowInteractiveAuthorization lets polkit show its password dialog for
 	// a future auth_admin action instead of failing outright.
 	call := conn.Object(helperapi.BusName, helperapi.ObjectPath).
-		CallWithContext(ctx, helperapi.Interface+"."+method, dbus.FlagAllowInteractiveAuthorization, arg)
+		CallWithContext(ctx, helperapi.Interface+"."+method, dbus.FlagAllowInteractiveAuthorization, args...)
 	if call.Err != nil {
 		return helperapi.Outcome{}, fromDBus(call.Err)
 	}

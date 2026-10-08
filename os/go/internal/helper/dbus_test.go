@@ -25,11 +25,11 @@ func TestReplyMapping(t *testing.T) {
 }
 
 // godbus exports every exported method of Object: guard that it is exactly
-// the contract methods (M1 §2 plus M2 §2), so a helper method added for convenience can
+// the contract methods (M1 §2, M2 §2, Rafiq M3 §1), so a helper method added for convenience can
 // never become a root D-Bus entry point by accident.
 func TestObjectExportsExactlyTheContractMethods(t *testing.T) {
 	want := map[string]bool{"AptInstall": true, "AptRemove": true, "FlatpakInstall": true, "FlatpakRemove": true, "RestartUnit": true,
-		"AptUpgrade": true, "FlatpakUpdate": true}
+		"AptUpgrade": true, "FlatpakUpdate": true, "AddUser": true, "RemoveUser": true, "FormatRemovable": true}
 	typ := reflect.TypeOf(&Object{})
 	var got []string
 	for i := 0; i < typ.NumMethod(); i++ {

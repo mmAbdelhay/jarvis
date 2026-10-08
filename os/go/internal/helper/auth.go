@@ -51,12 +51,21 @@ type polkitResult struct {
 	Details      map[string]string
 }
 
-// Authorize implements Authorizer.
-func (a SystemAuthorizer) Authorize(ctx context.Context, sender, action string) error {
+// UnixUser asks the bus daemon for the caller's UID (implements CallerUIDs).
+func (a SystemAuthorizer) UnixUser(ctx context.Context, sender string) (uint32, error) {
 	body, err := a.Bus.Call(ctx, "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus.GetConnectionUnixUser", sender)
 	var uid uint32
 	if err != nil || dbus.Store(body, &uid) != nil {
-		return fmt.Errorf("%w: cannot identify caller %s", ErrDenied, sender)
+		return 0, fmt.Errorf("%w: cannot identify caller %s", ErrDenied, sender)
+	}
+	return uid, nil
+}
+
+// Authorize implements Authorizer.
+func (a SystemAuthorizer) Authorize(ctx context.Context, sender, action string) error {
+	uid, err := a.UnixUser(ctx, sender)
+	if err != nil {
+		return err
 	}
 
 	min := a.MinUID
@@ -72,7 +81,7 @@ func (a SystemAuthorizer) Authorize(ctx context.Context, sender, action string) 
 		flags = 1 // AllowUserInteraction: show the polkit password dialog
 	}
 	subject := polkitSubject{Kind: "system-bus-name", Details: map[string]dbus.Variant{"name": dbus.MakeVariant(sender)}}
-	body, err = a.Bus.Call(ctx, "org.freedesktop.PolicyKit1", "/org/freedesktop/PolicyKit1/Authority",
+	body, err := a.Bus.Call(ctx, "org.freedesktop.PolicyKit1", "/org/freedesktop/PolicyKit1/Authority",
 		"org.freedesktop.PolicyKit1.Authority.CheckAuthorization", subject, action, map[string]string{}, flags, "")
 	var res polkitResult
 	if err != nil || dbus.Store(body, &res) != nil {
