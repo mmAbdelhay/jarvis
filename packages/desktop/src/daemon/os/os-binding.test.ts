@@ -12,6 +12,7 @@ import {
   PHONE_REQUESTS,
   requireLocal,
 } from "./os-binding.js";
+import type { OsRemoteControls } from "./os-remote.js";
 import type { OsVoice } from "./voice-service.js";
 
 const connection: ControlConnection = { id: 1, onClose: () => {} };
@@ -504,5 +505,63 @@ describe("voice channels (Rafiq M3 §2)", () => {
     await expect(
       createOsRouter({ agent, voice }).invoke("voice:stop", [], { kind: "local", connection }),
     ).resolves.toBeNull();
+  });
+});
+describe("phone settings channels are local-only (plan N gap channels)", () => {
+  const remote: OsRemoteControls = {
+    status: () => ({
+      enabled: false,
+      listening: null,
+      pairing: "closed",
+      devices: [],
+      hasOwnerPassword: false,
+      problem: null,
+    }),
+    configure: async () => ({
+      enabled: true,
+      listening: null,
+      pairing: "closed",
+      devices: [],
+      hasOwnerPassword: true,
+      problem: null,
+    }),
+    setOwnerPassword: async () => ({ ok: true }),
+    openPairing: async () => ({ uri: "jarvis://pair", expiresAt: 1 }),
+    cancelPairing: () => null,
+    answerPairing: () => null,
+    revoke: async () => ({ revoked: true }),
+  };
+  const phone = { kind: "phone" as const, device: { id: "d".repeat(32), name: "Pixel 8" } };
+
+  it("serves the computer and refuses a phone", async () => {
+    const { agent } = fakeAgent();
+    const router = createOsRouter({ agent, remote });
+    const local = { kind: "local" as const, connection };
+    await expect(
+      router.invoke("pairing:answer", [{ requestId: "r".repeat(32), approve: true }], local),
+    ).resolves.toBeNull();
+    await expect(
+      router.invoke("remote:configure", [{ enabled: true }], local),
+    ).resolves.toMatchObject({ enabled: true });
+    await expect(router.invoke("pairing:open", [], local)).resolves.toMatchObject({
+      uri: "jarvis://pair",
+    });
+    for (const [channel, args] of [
+      ["pairing:answer", [{ requestId: "r".repeat(32), approve: true }]],
+      ["pairing:open", []],
+      ["remote:setOwnerPassword", [{ next: "x" }]],
+      ["remote:revoke", [{ deviceId: "a".repeat(32) }]],
+    ] as const) {
+      await expect(router.invoke(channel, [...args], phone)).rejects.toMatchObject({
+        code: "forbidden",
+      });
+    }
+  });
+
+  it("answers unsupported when phone access is not built in", async () => {
+    const { agent } = fakeAgent();
+    await expect(
+      createOsRouter({ agent }).invoke("remote:status", [], { kind: "local", connection }),
+    ).rejects.toMatchObject({ code: "unsupported" });
   });
 });

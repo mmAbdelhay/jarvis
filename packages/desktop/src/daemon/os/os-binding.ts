@@ -20,8 +20,12 @@ import {
   parseMemoryList,
   parseMemorySetEnabled,
   parseNoArgs,
+  parseOwnerPassword,
+  parsePairingAnswer,
   parseProviderDraft,
   parseProviderSave,
+  parseRemoteConfigure,
+  parseRemoteRevoke,
   parseSetLocked,
   parseSetSpeak,
   parseVoiceUtteranceMeta,
@@ -29,6 +33,7 @@ import {
 import { ControlRequestError } from "../control/messages.js";
 import type { ControlConnection, ControlHandlers } from "../control/server.js";
 import { type OsAgent, OsAgentError } from "./agent-service.js";
+import type { OsRemoteControls } from "./os-remote.js";
 import type { OsVoice } from "./voice-service.js";
 
 function value<T>(parsed: Parsed<T>): T {
@@ -46,6 +51,8 @@ export type OsServices = {
   /** Rafiq M3 §3: true only for /usr/bin/jarvis-lock (peer-checked). */
   isLockClient?(connection: ControlConnection): Promise<boolean>;
   voice?: OsVoice;
+  /** Rafiq M3 plan N: the phone bridge controls (local-only channels). */
+  remote?: OsRemoteControls;
 };
 
 export type OsRouter = {
@@ -94,6 +101,13 @@ export function requireLocal(origin: OsOrigin): void {
 
 export function createOsRouter(services: OsServices): OsRouter {
   const { agent } = services;
+
+  function remote(): OsRemoteControls {
+    if (services.remote === undefined) {
+      throw new ControlRequestError("unsupported", CONTROL_TEXT.remoteOff);
+    }
+    return services.remote;
+  }
 
   async function route(channel: string, args: unknown[], origin: OsOrigin): Promise<unknown> {
     switch (channel) {
@@ -155,6 +169,30 @@ export function createOsRouter(services: OsServices): OsRouter {
         }
         return services.voice.setSpeak(on);
       }
+      case OS_CONTROL_REQUESTS.remoteStatus:
+        requireLocal(origin);
+        value(parseNoArgs(args));
+        return remote().status();
+      case OS_CONTROL_REQUESTS.remoteConfigure:
+        requireLocal(origin);
+        return remote().configure(value(parseRemoteConfigure(args)));
+      case OS_CONTROL_REQUESTS.remoteSetOwnerPassword:
+        requireLocal(origin);
+        return remote().setOwnerPassword(value(parseOwnerPassword(args)));
+      case OS_CONTROL_REQUESTS.remoteRevoke:
+        requireLocal(origin);
+        return remote().revoke(value(parseRemoteRevoke(args)).deviceId);
+      case OS_CONTROL_REQUESTS.pairingOpen:
+        requireLocal(origin);
+        value(parseNoArgs(args));
+        return remote().openPairing();
+      case OS_CONTROL_REQUESTS.pairingCancel:
+        requireLocal(origin);
+        value(parseNoArgs(args));
+        return remote().cancelPairing();
+      case OS_CONTROL_REQUESTS.pairingAnswer:
+        requireLocal(origin);
+        return remote().answerPairing(value(parsePairingAnswer(args)));
       default:
         throw new ControlRequestError("unknown-channel", `No handler for ${channel}`);
     }
