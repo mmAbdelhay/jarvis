@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 
-def render_summary(results: list[dict], ram: dict | None, accel: str) -> str:
+def render_summary(results: list[dict], ram: dict | None, accel: str, title: str = "Smoke tests") -> str:
     lines = [
-        f"## Jarvis OS smoke tests ({accel})",
+        f"## {title} ({accel})",
         "",
         "| Check | Result | Time |",
         "|---|---|---|",

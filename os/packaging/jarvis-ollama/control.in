@@ -1,0 +1,13 @@
+Package: jarvis-ollama
+Version: @VERSION@
+Architecture: amd64
+Maintainer: Muhammad AbdElHay <mmAbdelhay@users.noreply.github.com>
+Installed-Size: @INSTALLED_SIZE@
+Depends: adduser, systemd
+Section: misc
+Priority: optional
+Homepage: https://github.com/ollama/ollama
+Description: Ollama local model server for @DISTRO_NAME@ (localhost only)
+ Upstream Ollama release, SHA-256 pinned (version in
+ /usr/share/doc/jarvis-ollama/UPSTREAM), CPU backends, run as the
+ "ollama" system user on 127.0.0.1:11434 with models in /var/lib/ollama.

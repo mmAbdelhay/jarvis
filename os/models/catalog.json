@@ -1,0 +1,89 @@
+{
+  "version": 1,
+  "models": [
+    {
+      "id": "llama3.2-3b",
+      "ollamaTag": "llama3.2:3b",
+      "displayName": "Llama 3.2 3B",
+      "sizeBytes": 2019393189,
+      "minRamGB": 8,
+      "minVramGB": null,
+      "tier": "small",
+      "toolCalling": "verified",
+      "languages": ["en", "de", "fr", "it", "pt", "hi", "es", "th"],
+      "recommendedFor": "Laptops with 8 GB of memory; quick everyday tasks"
+    },
+    {
+      "id": "qwen3-4b",
+      "ollamaTag": "qwen3:4b",
+      "displayName": "Qwen3 4B",
+      "sizeBytes": 2497293931,
+      "minRamGB": 8,
+      "minVramGB": null,
+      "tier": "small",
+      "toolCalling": "verified",
+      "languages": ["en", "ar", "zh", "fr", "de", "es"],
+      "recommendedFor": "8 GB machines; best small model for Arabic"
+    },
+    {
+      "id": "qwen3-8b",
+      "ollamaTag": "qwen3:8b",
+      "displayName": "Qwen3 8B",
+      "sizeBytes": 5225388164,
+      "minRamGB": 16,
+      "minVramGB": null,
+      "tier": "medium",
+      "toolCalling": "verified",
+      "languages": ["en", "ar", "zh", "fr", "de", "es"],
+      "recommendedFor": "16 GB machines; the recommended default"
+    },
+    {
+      "id": "llama3.1-8b",
+      "ollamaTag": "llama3.1:8b",
+      "displayName": "Llama 3.1 8B",
+      "sizeBytes": 4920753328,
+      "minRamGB": 16,
+      "minVramGB": null,
+      "tier": "medium",
+      "toolCalling": "verified",
+      "languages": ["en", "de", "fr", "it", "pt", "hi", "es", "th"],
+      "recommendedFor": "16 GB machines; strong English tool use"
+    },
+    {
+      "id": "qwen3-14b",
+      "ollamaTag": "qwen3:14b",
+      "displayName": "Qwen3 14B",
+      "sizeBytes": 9276198565,
+      "minRamGB": 32,
+      "minVramGB": null,
+      "tier": "large",
+      "toolCalling": "verified",
+      "languages": ["en", "ar", "zh", "fr", "de", "es"],
+      "recommendedFor": "32 GB machines; more careful multi-step tasks"
+    },
+    {
+      "id": "gpt-oss-20b",
+      "ollamaTag": "gpt-oss:20b",
+      "displayName": "gpt-oss 20B",
+      "sizeBytes": 13793441244,
+      "minRamGB": 32,
+      "minVramGB": null,
+      "tier": "large",
+      "toolCalling": "verified",
+      "languages": ["en"],
+      "recommendedFor": "32 GB machines; strongest local reasoning"
+    },
+    {
+      "id": "qwen3-30b-a3b",
+      "ollamaTag": "qwen3:30b",
+      "displayName": "Qwen3 30B (A3B)",
+      "sizeBytes": 18556699314,
+      "minRamGB": 32,
+      "minVramGB": 24,
+      "tier": "gpu",
+      "toolCalling": "verified",
+      "languages": ["en", "ar", "zh", "fr", "de", "es"],
+      "recommendedFor": "Machines with a 24 GB graphics card"
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+# What the INSTALLED system needs to boot, unlock and log in (design §5.2,
+# §6, §7). The installer copies this live root to the disk, so these live in
+# the image; the installer backend's tools come with jarvis-installer-backend.
+plymouth
+plymouth-label
+cryptsetup
+cryptsetup-initramfs
+grub-efi-amd64
+grub-efi-amd64-signed
+shim-signed
+efibootmgr
+mokutil
+os-prober
+ntfs-3g
+gdisk
+dosfstools
+e2fsprogs
+squashfs-tools
+cage
+libpam-gnome-keyring

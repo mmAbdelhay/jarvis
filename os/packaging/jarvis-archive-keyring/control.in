@@ -1,0 +1,11 @@
+Package: jarvis-archive-keyring
+Version: @VERSION@
+Architecture: all
+Maintainer: Muhammad AbdElHay <mmAbdelhay@users.noreply.github.com>
+Installed-Size: @INSTALLED_SIZE@
+Section: misc
+Priority: optional
+Homepage: @HOME_URL@
+Description: @DISTRO_NAME@ archive key and APT source
+ The OpenPGP key that signs the @DISTRO_NAME@ package repository, and the
+ APT source that uses it (signed-by), so updates are verified.

@@ -1,0 +1,11 @@
+#!/bin/sh
+# Load the installed keyboard before the compositor reads its environment.
+set -e
+keyboard=${LABWC_KEYBOARD_FILE:-/etc/default/keyboard}
+if [ -r "$keyboard" ]; then
+  # shellcheck disable=SC1090 # Installed keyboard settings, chosen at runtime.
+  . "$keyboard"
+  export XKB_DEFAULT_LAYOUT="${XKBLAYOUT:-us}"
+  export XKB_DEFAULT_VARIANT="${XKBVARIANT:-}"
+fi
+exec "${LABWC_BIN:-/usr/bin/labwc}" "$@"

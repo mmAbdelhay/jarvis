@@ -5,7 +5,7 @@ foot
 xwayland
 qt6-wayland
 layer-shell-qt
-fonts-ibm-plex
+fonts-inter
 libgl1-mesa-dri
 pipewire
 pipewire-pulse

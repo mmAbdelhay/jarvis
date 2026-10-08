@@ -43,7 +43,7 @@ shlibs_depends() {
   probe=$(mktemp -d)
   mkdir "$probe/debian"
   printf 'Source: shlibs-probe\n\nPackage: shlibs-probe\nArchitecture: any\n' > "$probe/debian/control"
-  (cd "$probe" && dpkg-shlibdeps -O --ignore-missing-info "${args[@]}" 2>/dev/null) |
+  (cd "$probe" && dpkg-shlibdeps -O --ignore-missing-info "${libdirs[@]}" "${args[@]}" 2>/dev/null) |
     sed -n 's/^shlibs:Depends=//p'
   rm -rf "$probe"
 }
@@ -54,6 +54,16 @@ if [ -f "$root/.extra-depends" ]; then
   extra=$({ grep -v '^[[:space:]]*#' "$root/.extra-depends" || true; } | awk 'NF {print $1}' | paste -sd, - | sed 's/,/, /g')
   rm -f "$root/.extra-depends"
 fi
+# Stage metadata lists package-private library search paths.
+libdirs=()
+if [ -f "$root/.shlibs-libdirs" ]; then
+  while IFS= read -r d || [ -n "$d" ]; do
+    case $d in '' ) continue ;; esac
+    [[ $d =~ ^[[:space:]]*# ]] && continue
+    libdirs+=("-l$root/${d#/}")
+  done < "$root/.shlibs-libdirs"
+  rm -f "$root/.shlibs-libdirs"
+fi
 chmod -R u+rwX,go+rX,go-w "$root"
 mkdir -p "$root/DEBIAN" "$out"
 
@@ -61,6 +71,11 @@ size_kb=$(du -sk --exclude=DEBIAN "$root" | cut -f1)
 text=$(cat "$control")
 text=${text//@VERSION@/$version}
 text=${text//@INSTALLED_SIZE@/$size_kb}
+# Brand placeholders from os/branding/brand.env.
+# shellcheck source=../../branding/lib/brand.sh
+. "$(dirname "$0")/../../branding/lib/brand.sh"
+brand_load
+text=$(printf '%s' "$text" | brand_render_text)
 if grep -q '@[A-Z_]*@' <<<"$text"; then
   echo "build-deb: unfilled placeholder in $control:" >&2
   grep '@[A-Z_]*@' <<<"$text" >&2

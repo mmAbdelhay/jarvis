@@ -5,12 +5,21 @@ inc=$ISO_DIR/config/includes.chroot_after_packages
 c_labwc=$REPO_ROOT/os/shell/data/labwc
 tmp=$(mktmp); trap 'rm -rf "$tmp"' EXIT
 
-check "greetd autologins jarvis into labwc" python3 - "$inc/etc/greetd/config.toml" <<'PY'
+inc_greetd=$inc/etc/greetd/config.toml
+check "image ships no greetd config of its own (jarvis-greeter's is the installed one)" test ! -e "$inc_greetd"
+live=$inc/usr/lib/live/config/2000-jarvis-live-session
+check "live-config script executable" test -x "$live"
+check "live-config script is POSIX sh" sh -n "$live"
+mkdir -p "$tmp/live/etc/greetd"
+check "live-config writes its test root" env LIVE_ROOT="$tmp/live" sh "$live"
+check "live boots autologin jarvis into labwc" python3 - "$tmp/live/etc/greetd/config.toml" <<'PY'
 import sys, tomllib
 c = tomllib.load(open(sys.argv[1], "rb"))
 assert c["initial_session"] == {"command": "labwc", "user": "jarvis"}, c
 assert c["default_session"]["user"] == "_greetd", c
 PY
+check "keyring empty-password unlock only on live boots" grep -q 'if \[ -d /run/live/medium \]' "$inc/etc/xdg/labwc/autostart"
+check "installer starts only where installed (live)" grep -Fxq 'if [ -x /usr/bin/jarvis-installer ]; then jarvis-installer & fi' "$inc/etc/xdg/labwc/autostart"
 
 # keybinds FILE -> "key<TAB>action<TAB>command" lines, sorted
 keybinds() {
@@ -26,8 +35,8 @@ print("\n".join(sorted(rows)))
 PY
 }
 ours=$(keybinds "$inc/etc/xdg/labwc/rc.xml")
-check "Super focuses the shell (§6 #14)" grep -qxP 'Super_L\tExecute\tjarvis-shell --focus' <<<"$ours"
-check "Ctrl+Alt+T opens foot" grep -qxP 'C-A-t\tExecute\tfoot' <<<"$ours"
+check "Super focuses the shell (§6 #14)" grep -Fxq $'Super_L\tExecute\tjarvis-shell --focus' <<<"$ours"
+check "Ctrl+Alt+T opens foot" grep -Fxq $'C-A-t\tExecute\tfoot' <<<"$ours"
 check "Super acts on release (so Super+key chords still work)" python3 - "$inc/etc/xdg/labwc/rc.xml" <<'PY'
 import sys, xml.etree.ElementTree as ET
 kb = ET.parse(sys.argv[1]).getroot().find("keyboard")
@@ -61,5 +70,30 @@ if [ -f "$c_labwc/autostart" ] && [ -f "$c_loop" ]; then
 else
   echo "SKIP: Plan C's os/shell/data/labwc/autostart or jarvis-shell-loop not landed yet" >&2
 fi
+
+
+# The compositor must inherit the installed keyboard before it starts.
+keyboard_session=$inc/usr/local/bin/labwc
+check "keyboard session executable" test -x "$keyboard_session"
+mkdir -p "$tmp/keyboard"
+printf 'XKBLAYOUT="ara"\nXKBVARIANT="azerty"\n' > "$tmp/keyboard/default"
+cat > "$tmp/keyboard/compositor" <<'EOF'
+#!/bin/sh
+printf '%s:%s:%s\n' "$XKB_DEFAULT_LAYOUT" "$XKB_DEFAULT_VARIANT" "$*"
+EOF
+chmod +x "$tmp/keyboard/compositor"
+check_keyboard() {
+  local result
+  result=$(LABWC_KEYBOARD_FILE="$tmp/keyboard/default" LABWC_BIN="$tmp/keyboard/compositor" sh "$keyboard_session" --debug) || return
+  test "$result" = 'ara:azerty:--debug'
+}
+check "labwc inherits layout and variant and forwards arguments" check_keyboard
+printf 'XKBLAYOUT="us"\nXKBVARIANT=""\n' > "$tmp/keyboard/default"
+check_keyboard_default() {
+  local result
+  result=$(LABWC_KEYBOARD_FILE="$tmp/keyboard/default" LABWC_BIN="$tmp/keyboard/compositor" XKB_DEFAULT_VARIANT=stale sh "$keyboard_session") || return
+  test "$result" = 'us::'
+}
+check "empty variant clears inherited variant" check_keyboard_default
 
 finish

@@ -16,6 +16,9 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from jarvis_smoke import credentials
+from jarvis_smoke.firmware import Ovmf
+
 # console=ttyS0 makes systemd's getty generator start serial-getty@ttyS0,
 # whose agetty hangs up ttyS0 and kills the debug shell mid-command; mask it.
 HARNESS_APPEND = (
@@ -119,3 +122,46 @@ def screendump(qmp_socket: Path, target: Path, timeout: float = 10.0) -> None:
                     raise RuntimeError(reply["error"])
                 if "return" in reply:
                     break
+
+
+@dataclass(frozen=True)
+class InstallVm:
+    disks: tuple[Path, ...]  # first one is /dev/vda, the install target
+    assets: Path
+    serial_socket: Path
+    qmp_socket: Path
+    ovmf: Ovmf
+    vars_path: Path
+    accel: str
+    iso: Path | None = None
+    memory_mb: int = 4096
+    cpus: int = 4
+
+
+def install_qemu_argv(vm: InstallVm) -> list[str]:
+    """Firmware boot through OVMF with Secure Boot (SMM, secure pflash)."""
+    if vm.accel == "kvm":
+        accel = ["-accel", "kvm", "-cpu", "host"]
+    else:
+        accel = ["-accel", "tcg,thread=multi", "-cpu", "max"]
+    argv = [
+        "qemu-system-x86_64", "-machine", "q35,smm=on", *accel,
+        "-m", str(vm.memory_mb), "-smp", str(vm.cpus),
+        "-global", "driver=cfi.pflash01,property=secure,value=on",
+        "-drive", f"if=pflash,format=raw,unit=0,readonly=on,file={vm.ovmf.code}",
+        "-drive", f"if=pflash,format=raw,unit=1,file={vm.vars_path}",
+    ]
+    for disk in vm.disks:
+        argv += ["-drive", f"file={disk},format=raw,if=virtio,cache=unsafe"]
+    argv += ["-drive", f"file={vm.assets},format=raw,if=virtio,readonly=on"]
+    if vm.iso is not None:
+        argv += ["-drive", f"file={vm.iso},media=cdrom,readonly=on"]
+    argv += [
+        "-netdev", "user,id=net0", "-device", "virtio-net-pci,netdev=net0",
+        "-vga", "none", "-device", "virtio-vga", "-display", "none",
+        "-serial", f"unix:{vm.serial_socket},server=on,wait=off",
+        "-qmp", f"unix:{vm.qmp_socket},server=on,wait=off",
+        "-monitor", "none", "-no-reboot",
+        *credentials.smbios_args(),
+    ]
+    return argv

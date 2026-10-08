@@ -33,7 +33,7 @@ class ReportTest(unittest.TestCase):
             {"used_mb": 512, "verdict": "ok", "warn_mb": 600, "fail_mb": 900},
             "kvm",
         )
-        self.assertIn("## Jarvis OS smoke tests (kvm)", text)
+        self.assertIn("## Smoke tests (kvm)", text)
         self.assertIn("| boot | PASS | 41.2 s |", text)
         self.assertIn("| §11.1 hello | FAIL | 3.0 s |", text)
         self.assertIn("Idle RAM: **512 MB** (target ≤ 600 MB, ceiling 900 MB): ok", text)

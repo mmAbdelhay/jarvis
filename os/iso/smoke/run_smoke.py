@@ -54,7 +54,7 @@ class Run:
         try:
             detail = fn() or ""
             ok = True
-        except (CommandFailed, SerialTimeout, AssertionError, ValueError) as error:
+        except (CommandFailed, SerialTimeout, AssertionError, ValueError, EOFError, OSError, RuntimeError) as error:
             ok, detail = False, str(error)
         seconds = round(time.monotonic() - start, 1)
         self.results.append({"name": name, "ok": ok, "seconds": seconds, "detail": str(detail)[-4000:]})
@@ -65,6 +65,8 @@ class Run:
 def run_checks(run: Run, args: argparse.Namespace) -> dict | None:
     sh = run.sh
     sh("dmesg -n 1")
+    if args.disable_jarvis_apt:
+        sh(scenarios.DISABLE_JARVIS_APT)
     sh(scenarios.wait_for_user(150), 320)
     uid = int(sh("id -u jarvis").strip())
     ctl = lambda a: scenarios.jarvisctl(uid, a)  # noqa: E731
@@ -185,6 +187,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--ram-fail-mb", type=int, default=900)
     p.add_argument("--settle-seconds", type=int, default=60)
     p.add_argument("--port", type=int, default=8099)
+    p.add_argument("--disable-jarvis-apt", action="store_true")
     args = p.parse_args(argv)
 
     out = args.out

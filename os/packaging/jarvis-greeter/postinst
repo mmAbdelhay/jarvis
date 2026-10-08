@@ -1,0 +1,8 @@
+#!/bin/sh
+# Put our greetd config at greetd's path (contracts §7). Only when absent, so
+# upgrades keep the installer's [initial_session] (contracts §10).
+set -e
+if [ "$1" = configure ] && [ ! -e /etc/greetd/config.toml ]; then
+  install -D -m0644 /usr/share/jarvis-greeter/greetd-config.toml /etc/greetd/config.toml
+fi
+exit 0

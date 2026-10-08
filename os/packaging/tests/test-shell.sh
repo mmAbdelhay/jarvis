@@ -46,6 +46,7 @@ check "binary executable" test "$(deb_mode "$deb" usr/bin/jarvis-shell)" = "-rwx
 check "labwc keybinds shipped" deb_has "$deb" usr/share/jarvis-shell/labwc/rc.xml
 check "relaunch loop shipped" deb_has "$deb" usr/share/jarvis-shell/labwc/autostart
 check "needs the same-version jarvisd" grep -qF "jarvisd (= $OS_VERSION)" <<<"$deps"
+check "needs the same-version jarvis-ui" grep -qF "jarvis-ui (= $OS_VERSION)" <<<"$deps"
 for p in qt6-wayland layer-shell-qt qml6-module-qtquick-shapes fonts-ibm-plex foot; do
   check "Depends has C's runtime package $p" grep -qw -- "$p" <<<"$deps"
 done

@@ -13,5 +13,5 @@ jarvis-ui
 # Platform and session:
 qt6-wayland
 layer-shell-qt
-fonts-ibm-plex
+fonts-inter
 foot

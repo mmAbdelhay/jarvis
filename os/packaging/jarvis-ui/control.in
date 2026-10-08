@@ -1,0 +1,10 @@
+Package: jarvis-ui
+Version: @VERSION@
+Architecture: amd64
+Maintainer: Muhammad AbdElHay <mmAbdelhay@users.noreply.github.com>
+Installed-Size: @INSTALLED_SIZE@
+Section: x11
+Priority: optional
+Homepage: @HOME_URL@
+Description: Shared look of the @DISTRO_NAME@ shell, installer and login screen
+ QML module Jarvis.UI: theme, icons, buttons and cards.

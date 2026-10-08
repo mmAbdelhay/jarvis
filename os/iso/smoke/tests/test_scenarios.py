@@ -10,6 +10,7 @@ CONTRACT_TOOLS = {
     "pkg.search", "pkg.info", "pkg.list_installed", "disk.usage", "pkg.install", "pkg.remove",
     "sys.health", "logs.query", "svc.status", "svc.list_failed", "net.status", "net.wifi_scan",
     "hw.info", "svc.restart", "net.connection_up", "net.wifi_connect", "net.radio_on",
+    "updates.list", "updates.apply",
 }
 
 
@@ -68,7 +69,7 @@ class FakeProviderScriptsTest(unittest.TestCase):
 
     def test_scripts(self):
         files = sorted(SCRIPTS.glob("*.json"))
-        self.assertEqual([f.name for f in files], ["install-hello.json", "net-restart.json"])
+        self.assertEqual([f.name for f in files], ["install-hello.json", "net-restart.json", "update-computer.json"])
         for file in files:
             turns = json.loads(file.read_text())
             self.assertIsInstance(turns, list, file)
@@ -84,6 +85,23 @@ class FakeProviderScriptsTest(unittest.TestCase):
         turns = json.loads((SCRIPTS / "install-hello.json").read_text())
         calls = [c for r in turns[0]["replies"] for c in r.get("toolCalls", [])]
         self.assertIn({"name": "pkg.install", "input": {"items": [{"source": "apt", "id": "hello"}]}}, calls)
+
+    def test_user_parameter_threads_through(self):
+        from jarvis_smoke import scenarios as sc
+
+        self.assertIn("runuser -u tester", sc.jarvisctl(1000, "wait", user="tester"))
+        line = sc.use_fake_provider(1000, "x.json", user="tester")
+        self.assertNotIn("runuser -u jarvis ", line)
+        self.assertIn("runuser -u jarvis", sc.jarvisctl(1000, "wait"))
+
+
+class JarvisAptTest(unittest.TestCase):
+    def test_disable_moves_the_source_aside_in_the_overlay(self):
+        from jarvis_smoke import scenarios
+        self.assertEqual(
+            scenarios.DISABLE_JARVIS_APT,
+            "mv /etc/apt/sources.list.d/jarvis.sources /run/jarvis.sources.disabled",
+        )
 
 
 if __name__ == "__main__":

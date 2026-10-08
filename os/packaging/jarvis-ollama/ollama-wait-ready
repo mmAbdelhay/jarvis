@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# ExecStartPost: the unit is "active" only once the API answers, so
+# `systemctl is-active ollama` means ready (greeter status, install tests).
+set -euo pipefail
+export OLLAMA_HOST=${OLLAMA_HOST:-127.0.0.1:11434}
+for _ in $(seq 120); do
+  /usr/bin/ollama list >/dev/null 2>&1 && exit 0
+  sleep 0.5
+done
+echo "ollama-wait-ready: API on $OLLAMA_HOST did not answer in 60 s" >&2
+exit 1
