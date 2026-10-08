@@ -1,0 +1,17 @@
+Origin: @DISTRO_NAME@
+Label: @DISTRO_NAME@
+Suite: stable
+Codename: trixie
+Architectures: amd64
+Components: main
+Description: @DISTRO_NAME@ packages for Debian 13 (trixie), stable
+SignWith: @SIGN_WITH@
+
+Origin: @DISTRO_NAME@
+Label: @DISTRO_NAME@
+Suite: testing
+Codename: trixie-testing
+Architectures: amd64
+Components: main
+Description: @DISTRO_NAME@ packages for Debian 13 (trixie), every merge to master
+SignWith: @SIGN_WITH@
