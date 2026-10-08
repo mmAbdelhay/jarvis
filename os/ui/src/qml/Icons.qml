@@ -19,4 +19,9 @@ QtObject {
     readonly property string done: "M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0 M8 12.5l3 3 5-6"
     readonly property string download: "M12 4v11 M7 10l5 5 5-5 M5 20h14"
     readonly property string rings: "M1 12a11 11 0 1 0 22 0a11 11 0 1 0 -22 0 M4 12a8 8 0 1 0 16 0a8 8 0 1 0 -16 0 M7 12a5 5 0 1 0 10 0a5 5 0 1 0 -10 0"
+    readonly property string mic: "M9 5a3 3 0 0 1 6 0v6a3 3 0 0 1-6 0z M5 11a7 7 0 0 0 14 0 M12 18v3"
+    readonly property string lock: "M6 11h12v10H6z M8 11V7a4 4 0 0 1 8 0v4"
+    readonly property string undo: "M9 14L4 9l5-5 M4 9h10a6 6 0 0 1 0 12h-3"
+    readonly property string phone: "M8 2h8a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z M11 18h2"
+    readonly property string speaker: "M4 9h4l5-4v14l-5-4H4z M16 9a4 4 0 0 1 0 6 M18.5 6.5a8 8 0 0 1 0 11"
 }
