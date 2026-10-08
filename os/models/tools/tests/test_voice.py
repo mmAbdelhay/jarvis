@@ -47,8 +47,12 @@ class RegistryFileTest(unittest.TestCase):
                         "at least one redistributable STT model (whisper.cpp, MIT)")
         tts = [m for m in models if m["kind"] == "tts"]
         self.assertTrue(tts, "at least one Piper voice")
-        self.assertTrue(all(m["redistributable"] for m in tts),
-                        "design §3.6: only Piper voices with redistributable licenses are listed")
+        by_id = {m["id"]: m for m in tts}
+        amy = by_id["piper-en_US-amy-medium"]
+        self.assertEqual((amy["license"], amy["redistributable"]), ("CC-BY-4.0", True))
+        self.assertFalse(by_id["piper-ar_JO-kareem-medium"]["redistributable"])
+        # Arabic is registered for config coverage, but may ship only once its
+        # redistribution license is verified; the scan gate enforces the flag.
         hey = [m for m in models if m["id"] == "oww-hey-jarvis"]
         self.assertEqual(len(hey), 1, "the hey-jarvis model is listed so the gate refuses it")
         self.assertEqual((hey[0]["kind"], hey[0]["redistributable"]), ("wake", False))
