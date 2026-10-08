@@ -63,7 +63,7 @@ printf 'XKBLAYOUT="de"\n' > "$tmp/keyboard"
 check "greeter wrapper clears a stale variant" \
   test "$(GREETER_KEYBOARD_FILE="$tmp/keyboard" XKB_DEFAULT_VARIANT=stale sh "$wk" "$tmp/show-xkb")" = 'de::'
 check "greeter wrapper without a keyboard file runs the command" \
-  test "$(GREETER_KEYBOARD_FILE="$tmp/missing" XKB_DEFAULT_LAYOUT= sh "$wk" "$tmp/show-xkb" x)" = '::x'
+  test "$(GREETER_KEYBOARD_FILE="$tmp/missing" XKB_DEFAULT_LAYOUT='' sh "$wk" "$tmp/show-xkb" x)" = '::x'
 check "greetd greeter user" grep -qx 'user = "_greetd"' <<<"$cfg"
 check "no autologin in the package" bash -c '! grep -v "^[[:space:]]*#" <<<"$1" | grep -q initial_session' _ "$cfg"
 # A conffile over greetd's diverted conffile prompts (and fails unattended),
