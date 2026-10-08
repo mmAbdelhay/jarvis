@@ -292,7 +292,16 @@ func TestAdminPasswordThrottle(t *testing.T) {
 	if err := try("right"); helperErr(t, err).Name != helperapi.ErrDenied || !strings.Contains(err.Error(), "too many") || len(pam.checked) != 3 {
 		t.Fatalf("locked out: %v, %d checks", err, len(pam.checked))
 	}
+	// The lockout lives in memory, so the helper must not idle-exit while it
+	// holds one, whatever main's idleExit is (D-Bus activation would start a
+	// fresh process with no lockout).
+	if d := s.IdleFor(now.Add(5*time.Minute - time.Second)); d != 0 {
+		t.Fatalf("idle %v while locked out", d)
+	}
 	now = now.Add(5*time.Minute + time.Second)
+	if d := s.IdleFor(now); d == 0 {
+		t.Fatal("still busy after the lockout expired")
+	}
 	if err := try("right"); err != nil {
 		t.Fatalf("lock expires: %v", err)
 	}

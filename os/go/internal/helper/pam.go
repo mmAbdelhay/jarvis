@@ -26,14 +26,14 @@ var ErrBadPassword = errors.New("wrong password")
 // empty-password account never verifies. The password travels only over
 // stdin, never in argv or the environment.
 //
-// DEVIATION from Rafiq M3 contracts §5.5 (open, for the coordinator): §5.5
-// names the PAM service `jarvis-admin`. This is not a PAM conversation, so
-// /etc/pam.d/jarvis-admin is never read and pam_faillock, pam_faildelay,
-// PAM audit records and sssd/LDAP accounts are bypassed; only local shadow
-// accounts verify. The plan forbids what a real conversation needs here (a
-// cgo build of jarvis-helper, a new module dependency, files outside os/go),
-// and the helper's own 3-failures-per-5-minutes limit below stands in for
-// pam_faillock.
+// Decided scope (recorded in docs/os/threat-model.md M28, replacing the
+// `jarvis-admin` PAM service named in Rafiq M3 contracts §5.5): this is not a
+// PAM conversation, so no /etc/pam.d file is read and none is shipped. Only
+// local shadow accounts verify; pam_faillock, pam_faildelay, PAM audit
+// records and sssd/LDAP accounts do not apply. The helper's own lockout
+// (3 wrong passwords in 5 minutes, then 5 minutes refused, see lockedOut)
+// replaces pam_faillock. A cgo libpam build of jarvis-helper would restore a
+// real `jarvis-admin` conversation.
 type PAMVerifier struct{ Run execx.Runner }
 
 // Verify implements PasswordVerifier.
@@ -66,4 +66,19 @@ const (
 type failState struct {
 	times       []time.Time
 	lockedUntil time.Time
+}
+
+// lockedOut reports whether any user's admin-password lockout is still
+// running at now. The lockout lives only in this process, so IdleFor treats
+// it as busy: the helper never idle-exits (and is never re-activated with a
+// clean slate) while a lockout holds, whatever main's idleExit is.
+func (s *Service) lockedOut(now time.Time) bool {
+	s.failMu.Lock()
+	defer s.failMu.Unlock()
+	for _, st := range s.fails {
+		if now.Before(st.lockedUntil) {
+			return true
+		}
+	}
+	return false
 }

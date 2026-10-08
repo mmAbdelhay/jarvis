@@ -36,11 +36,9 @@ for p in passwd dosfstools exfatprogs e2fsprogs util-linux libpam-modules; do
   check "helper Depends has $p (admin methods)" grep -qw -- "$p" <<<"$hdeps"
 done
 
-check "helper ships jarvis-admin PAM service 0644" test "$(deb_mode "$(d jarvis-helper)" etc/pam.d/jarvis-admin)" = "-rw-r--r--"
-pam=$(dpkg-deb --fsys-tarfile "$(d jarvis-helper)" | tar -xO ./etc/pam.d/jarvis-admin)
-check "admin PAM authenticates with pam_unix" grep -qx 'auth required pam_unix.so' <<<"$pam"
-check "admin PAM checks account validity" grep -qx 'account required pam_unix.so' <<<"$pam"
-check "admin PAM service is a conffile" grep -qx '/etc/pam.d/jarvis-admin' <<<"$(dpkg-deb --ctrl-tarfile "$(d jarvis-helper)" | tar -xO ./conffiles)"
+# The helper checks admin passwords with unix_chkpwd, not a PAM conversation
+# (threat model M28), so it ships no /etc/pam.d file that would have no effect.
+check "helper ships no jarvis-admin PAM service (it would never be read)" test -z "$(dpkg-deb -c "$(d jarvis-helper)" | grep 'pam.d/jarvis-admin' || true)"
 
 rm "$dist/usr/libexec/jarvis/jarvis-wl"
 err=$(GO_DIST=$dist "$PACKAGING_DIR/build.sh" --out "$tmp/out2" jarvis-wl 2>&1 || true)

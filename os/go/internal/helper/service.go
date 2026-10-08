@@ -89,7 +89,7 @@ func (s *Service) begin() func() {
 // IdleFor reports how long the service has had nothing to do (0 while busy).
 // main uses it to exit after a few idle minutes; D-Bus activation restarts it.
 func (s *Service) IdleFor(now time.Time) time.Duration {
-	if s.busy.Load() > 0 {
+	if s.busy.Load() > 0 || s.lockedOut(now) {
 		return 0
 	}
 	last := s.lastDone.Load()

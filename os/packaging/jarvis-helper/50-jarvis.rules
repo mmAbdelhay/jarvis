@@ -4,7 +4,8 @@
 // jarvis-admins (the live user "jarvis") may use the helper's package and
 // service actions without a password: the confirm card is the gate (design
 // §6.4). Admin operations additionally require the helper to verify the
-// calling user's adminPassword through jarvis-admin PAM (M3 contracts §5.5).
+// calling user's adminPassword itself (unix_chkpwd, with its own lockout; M3
+// contracts §5.5, docs/os/threat-model.md M28).
 polkit.addRule(function (action, subject) {
   if (
     (action.id === "os.jarvis.helper.packages" || action.id === "os.jarvis.helper.services" ||
