@@ -248,6 +248,36 @@ private slots:
         QCOMPARE(model.cardId(), QString());
         QCOMPARE(model.decision(true)["secrets"].toObject(), QJsonObject());
     }
+    void twoHundredItemsAndSelectAll()
+    {
+        QJsonArray items;
+        for (int i = 0; i < 200; ++i)
+            items.append(item(u"apt-%1"_s.arg(i), u"updates.apply"_s, u"Update package %1"_s.arg(i), u"debian"_s));
+        CardModel model;
+        QAbstractItemModelTester tester(&model);
+        model.setClockForTest(kNow);
+        QVERIFY(model.load(card(items)));
+        QCOMPARE(model.itemCount(), 200);
+        QVERIFY(model.allTicked());
+        QCOMPARE(model.decision(true).value("ticked").toArray().size(), 200);
+        model.setAllTicked(false);
+        QCOMPARE(model.tickedCount(), 0);
+        QVERIFY(!model.canApprove());
+        model.setTicked(7, true);
+        QCOMPARE(model.approveLabel(), u"Approve 1 of 200"_s);
+        model.setAllTicked(true);
+        QVERIFY(model.allTicked());
+        QCOMPARE(model.approveLabel(), u"Approve all 200"_s);
+    }
+
+    void selectAllIsIgnoredOnPickOneCards()
+    {
+        CardModel model;
+        model.setClockForTest(kNow);
+        QVERIFY(model.load(card(wifi({u"a"_s, u"b"_s, u"c"_s}), QJsonValue::Null)));
+        model.setAllTicked(true);
+        QCOMPARE(model.tickedCount(), 0);
+    }
 };
 
 QTEST_GUILESS_MAIN(TestCardModel)

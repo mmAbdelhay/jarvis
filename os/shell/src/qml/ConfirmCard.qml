@@ -13,6 +13,7 @@ Rectangle {
     signal decided(bool approve)
 
     property string shownCardId: ""
+    property int maxListHeight: 440
 
     visible: card.active
     implicitWidth: 760
@@ -66,6 +67,18 @@ Rectangle {
                 font.weight: Font.DemiBold
                 elide: Text.ElideRight
             }
+            ActionButton {
+                objectName: "tickAll"
+                visible: !root.card.exclusive && root.card.itemCount >= 3
+                variant: "quiet"
+                focusPolicy: Qt.TabFocus // a click must not take focus from Deny
+                implicitHeight: 30
+                leftPadding: 12
+                rightPadding: 12
+                font.pixelSize: Theme.fontSmall
+                text: root.card.allTicked ? "Select none" : "Select all"
+                onClicked: root.card.setAllTicked(!root.card.allTicked)
+            }
             Text {
                 objectName: "countdown"
                 text: root.card.countdownText
@@ -76,8 +89,16 @@ Rectangle {
         }
         Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: Theme.approvalBorder }
 
-        Repeater {
+        ListView {
+            id: itemList
+            objectName: "cardItems"
+            Layout.fillWidth: true
+            Layout.preferredHeight: Math.min(contentHeight, root.maxListHeight)
+            clip: true
+            interactive: contentHeight > height
+            boundsBehavior: Flickable.StopAtBounds
             model: root.card
+            ScrollBar.vertical: ScrollBar { policy: itemList.interactive ? ScrollBar.AlwaysOn : ScrollBar.AsNeeded }
             delegate: ColumnLayout {
                 id: row
                 required property int index
@@ -88,7 +109,7 @@ Rectangle {
                 required property bool ticked
                 required property var secretFields
 
-                Layout.fillWidth: true
+                width: itemList.width
                 spacing: 0
 
                 RowLayout {

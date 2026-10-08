@@ -226,6 +226,25 @@ QJsonObject CardModel::decision(bool approve) const
     return {{"cardId", m_cardId}, {"approve", runs}, {"ticked", ticked}, {"secrets", secrets}};
 }
 
+void CardModel::setAllTicked(bool ticked)
+{
+    if (m_exclusive || m_items.isEmpty())
+        return; // pick-one cards (Wi-Fi) tick exactly one, never all
+    bool any = false;
+    for (Item& item : m_items) {
+        if (item.ticked == ticked)
+            continue;
+        item.ticked = ticked;
+        if (!ticked)
+            wipeSecrets(item);
+        any = true;
+    }
+    if (!any)
+        return;
+    emit dataChanged(index(0), index(int(m_items.size()) - 1), {TickedRole});
+    emit changed();
+}
+
 void CardModel::wipeSecrets(Item& item)
 {
     for (auto it = item.secrets.begin(); it != item.secrets.end(); ++it)

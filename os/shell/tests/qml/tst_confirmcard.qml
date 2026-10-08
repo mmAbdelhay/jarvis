@@ -141,4 +141,38 @@ TestCase {
         compare(title.text, "<b>Install</b> <a href='http://evil'>me</a>")
         compare(findChild(c.view, "detail_x").textFormat, Text.PlainText)
     }
+
+    function manyItems(n) {
+        const out = []
+        for (let i = 0; i < n; ++i)
+            out.push({ itemId: "apt-" + i, tool: "updates.apply", title: "Update package " + i, detail: "1." + i + " → 1." + (i + 1),
+                       source: "debian", risk: "confirm", secretFields: [] })
+        return out
+    }
+
+    function test_twoHundredItemsScrollAndSelectAll() {
+        const c = makeCard(manyItems(200))
+        const list = findChild(c.view, "cardItems")
+        verify(list.height <= c.view.maxListHeight)
+        verify(list.contentHeight > list.height)
+        verify(c.view.height < 700)                          // the card stays on screen
+        const toggle = findChild(c.view, "tickAll")
+        verify(toggle.visible)
+        compare(toggle.text, "Select none")
+        mouseClick(toggle)
+        compare(c.model.tickedCount, 0)
+        compare(toggle.text, "Select all")
+        verify(!findChild(c.view, "approveButton").enabled)
+        mouseClick(toggle)
+        compare(findChild(c.view, "approveButton").text, "Approve all 200")
+        verify(findChild(c.view, "denyButton").activeFocus)  // Deny keeps the default focus
+        list.positionViewAtEnd()
+        waitForRendering(c.view)
+        verify(findChild(c.view, "tick_apt-199") !== null)
+    }
+
+    function test_smallCardsHaveNoToggle() {
+        const c = makeCard(installItems.slice(0, 2))
+        verify(!findChild(c.view, "tickAll").visible)
+    }
 }
