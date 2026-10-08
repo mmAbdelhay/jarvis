@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import shutil
 import sys
 import urllib.request
@@ -96,6 +97,22 @@ def _ver(v: str) -> tuple[int, ...]:
     return tuple(int(x) for x in v.split("."))
 
 
+def _unsafe_previous(previous: Path) -> list[str]:
+    """PREV is a checkout of the Pages repo (untrusted): allow only plain dirs and regular files."""
+    p: list[str] = []
+    for d in schema.CHANNEL_DIRS.values():
+        root = previous / d
+        if root.is_symlink():
+            p.append(f"{root}: symlink in the previous site; refusing (check the Pages repo)")
+            continue
+        for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+            for n in dirnames + filenames:
+                f = Path(dirpath) / n
+                if f.is_symlink() or not (f.is_dir() or f.is_file()):
+                    p.append(f"{f}: symlink or special file in the previous site; refusing (check the Pages repo)")
+    return p
+
+
 def build(servers: Path, artifacts: Path, out: Path, channel: str, previous: Path | None = None,
           generated_at: str | None = None, verify=None, warn=_stderr) -> list[str]:
     entries, problems = load_sources(servers)
@@ -103,6 +120,11 @@ def build(servers: Path, artifacts: Path, out: Path, channel: str, previous: Pat
         return problems
     chan = schema.CHANNEL_DIRS[channel]
     stamp = generated_at or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    if previous is not None:
+        bad = _unsafe_previous(previous)
+        if bad:
+            return bad
 
     prev_index = None
     if previous is not None and (previous / chan / "index.json").is_file():
@@ -135,6 +157,12 @@ def build(servers: Path, artifacts: Path, out: Path, channel: str, previous: Pat
                          f"artifact (bump the version in os/registry/servers/{e['id']}.json to ship new code)")
             elif fresh.is_file():
                 digest = sha256_file(fresh)
+                want = prev_sha.get((e["id"], e["version"]))
+                if want is not None and want != digest:
+                    problems.append(f"{e['id']} {e['version']}: the previous index lists this version but its artifact "
+                                    f"is missing from the previous site, and the new build differs; refusing to "
+                                    f"re-publish different bytes under the same version (bump the version)")
+                    continue
                 staged.append((fresh, out / rel))
             else:
                 problems.append(f"{e['id']}: no artifact {fresh} (os/registry/package-official.sh)")

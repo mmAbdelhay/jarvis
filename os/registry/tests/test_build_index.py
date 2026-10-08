@@ -129,6 +129,33 @@ class BuildIndexTest(unittest.TestCase):
         problems = self.build(s2, previous=s1, at=T2)
         self.assertTrue(any("previously signed index" in p for p in problems), problems)
 
+    def test_missing_published_artifact_not_republished_with_new_bytes(self):
+        s1, s2 = self.tmp / "s1", self.tmp / "s2"
+        self.build(s1)
+        name = schema.artifact_name("jarvis-clock", "0.1.0")
+        (s1 / "registry/artifacts/jarvis-clock/0.1.0" / name).unlink()
+        art2 = self.tmp / "art2"
+        self.write_artifacts(b"v2", art2)
+        problems = self.build(s2, previous=s1, at=T2, art=art2)
+        self.assertTrue(any("jarvis-clock" in p and "missing" in p for p in problems), problems)
+        self.assertFalse((s2 / "registry/index.json").exists())
+        # identical bytes may restore the missing file
+        self.assertEqual(self.build(s2, previous=s1, at=T2), [])
+        self.assertEqual(self.index(s2)["entries"][0]["artifact"]["sha256"], sha(b"v1jarvis-clock"))
+
+    def test_symlinks_in_previous_refused(self):
+        s1 = self.tmp / "s1"
+        self.build(s1, "testing")
+        secret = self.tmp / "secret"
+        secret.write_text("private")
+        (s1 / "registry-testing" / "leak").symlink_to(secret)
+        problems = self.build(self.tmp / "s2", "stable", previous=s1, at=T2)
+        self.assertTrue(any("symlink" in p for p in problems), problems)
+        self.assertFalse((self.tmp / "s2").exists())
+        (s1 / "registry-testing" / "leak").unlink()
+        (s1 / "registry-testing" / "leakdir").symlink_to(self.tmp)
+        self.assertTrue(any("symlink" in p for p in self.build(self.tmp / "s3", previous=s1, at=T2)))
+
     def test_version_may_not_go_backwards(self):
         s1, s2 = self.tmp / "s1", self.tmp / "s2"
         clock = json.loads((self.servers / "jarvis-clock.json").read_text())
