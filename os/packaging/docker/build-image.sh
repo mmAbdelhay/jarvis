@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # build-image.sh --debs DIR --tag TAG [--context-only DIR]
 # The jarvis-agent image (M2.5 contracts §6) from this build's jarvisd,
-# jarvis-diag and jarvis-cli .debs. Never the helper, never pushes.
+# jarvis-diag, jarvis-cli and jarvis-archive-keyring .debs. Never the helper, never pushes.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 debs="" tag="" ctx_only=""
@@ -17,7 +17,7 @@ die() { echo "build-image: $*" >&2; exit 1; }
 [ -d "$debs" ] && [ -n "$tag" ] || die "usage: build-image.sh --debs DIR --tag TAG [--context-only DIR]"
 version=""
 files=()
-for p in jarvisd jarvis-diag jarvis-cli; do
+for p in jarvisd jarvis-diag jarvis-cli jarvis-archive-keyring; do
   mapfile -t found < <(compgen -G "$debs/${p}_*.deb" || true)
   [ "${#found[@]}" -eq 1 ] || die "need exactly one $p .deb in $debs (found ${#found[@]})"
   v=${found[0]##*/}; v=${v#"${p}"_}; v=${v%_*.deb}
