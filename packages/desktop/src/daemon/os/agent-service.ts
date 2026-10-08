@@ -7,6 +7,16 @@
 // No electron here (core/no-electron.test.ts).
 import {
   AGENT_TEXT,
+  BACKUP_BASE_URL,
+  BACKUP_PROVIDER_ID,
+  FULL_PROFILE,
+  SIMPLE_PROFILE,
+  simpleToolSpecs,
+  withSimpleProfile,
+  DEFAULT_LANG,
+  type Lang,
+  turnLanguage,
+  USER_TEXT,
   type Card,
   CONTROL_TEXT,
   type ConfirmFrom,
@@ -64,6 +74,7 @@ import {
   type SysSnapshot,
   type ProbeResult,
   type ProviderDraft,
+  type RecipeEngine,
   runTurn,
   type ToolRegistry,
   TRUSTED_MCP_SERVERS,
@@ -72,6 +83,7 @@ import {
 } from "@jarvis/core";
 import type { SecretStore } from "@jarvis/platform/model";
 import { OS_CONTROL_PUSHES } from "@jarvis/wire";
+import { createBackupProvider } from "./backup-model.js";
 import type { LockStore } from "./lock-store.js";
 import type { MemoryOpener } from "./memory-backend.js";
 import type { ConfigIo, ProviderSection } from "./provider-config.js";
@@ -85,6 +97,7 @@ import {
   readOsBrainConfig,
   writeOsMemoryEnabled,
   writeOsProviders,
+  writeOsLanguage,
 } from "./provider-list-config.js";
 import { createProviderMonitor } from "./provider-monitor.js";
 import { createSysMonitor } from "./sys-monitor.js";
@@ -101,6 +114,9 @@ export class OsAgentError extends Error {
 }
 
 export type OsAgentDeps = {
+  /** M4 §4: runs recipes locally with one card item per step. */
+  recipes?: RecipeEngine;
+  defaultLanguage?: Lang;
   push(channel: string, payload: unknown): void;
   configPath: string;
   configIo: ConfigIo;
@@ -116,6 +132,9 @@ export type OsAgentDeps = {
    *  since the host servers started (session-env.ts); they restart before
    *  the next turn. */
   sessionChanged?(): Promise<boolean>;
+  /** M4 §1: the catalog's backup model tag (backup-model.ts readBackupTag);
+   *  null or absent: no backup. Read at start and after provider:save. */
+  readBackupTag?(): Promise<string | null>;
   /** Add-on servers from mcp.d (registry-servers.ts); none when absent. */
   registryServers?: { load(): Promise<LoadedRegistry> };
   /** Calls onChange when mcp.d changes; returns a stop function. */
@@ -155,6 +174,8 @@ export type OsAgentDeps = {
 };
 
 export interface OsAgent {
+  language(): Lang;
+  setLanguage(lang: Lang): Promise<null>;
   start(): Promise<void>;
   prompt(text: string, from?: ConfirmFrom): { turnId: string };
   stop(turnId: string): null;
@@ -219,7 +240,8 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
       });
     }
   };
-  let provider: ModelProvider = unavailableProvider(AGENT_TEXT.noProvider);
+  let uiLanguage: Lang = deps.defaultLanguage ?? DEFAULT_LANG;
+  let provider: ModelProvider = unavailableProvider(() => USER_TEXT[uiLanguage].noProvider);
   let brain: OsBrainConfig = emptyBrain();
   let failover: FailoverProvider | undefined;
   const keyStores = (): ProviderKeyStores => ({
@@ -228,14 +250,30 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
     migrateLegacy: brain.migratedFromLegacy,
     log: deps.log,
   });
+  let backupTag: string | null = null;
+  /** The backup as a provider entry (fixed loopback URL, M4 §1). */
+  function backupEntry(): ProviderEntry | null {
+    return backupTag === null
+      ? null
+      : {
+          id: BACKUP_PROVIDER_ID,
+          kind: "ollama",
+          baseUrl: BACKUP_BASE_URL,
+          model: backupTag,
+          auth: "api-key",
+          supportsTools: true,
+        };
+  }
   /** The provider answering now; the first one before any answer. */
   function activeEntry(): ProviderEntry | null {
     const id = failover?.status().activeId;
-    return brain.providers.find((entry) => entry.id === id) ?? brain.providers[0] ?? null;
+    if (id === BACKUP_PROVIDER_ID) return backupEntry();
+    return brain.providers.find((entry) => entry.id === id) ?? brain.providers[0] ?? backupEntry();
   }
-  /** The smallest context in the list: a failover mid-turn must still fit. */
+  /** The smallest context in the chain: a failover mid-turn must still fit. */
   function contextTokens(): number {
-    const sizes = brain.providers.map(
+    const backup = backupEntry();
+    const sizes = [...brain.providers, ...(backup === null ? [] : [backup])].map(
       (entry) => CONTEXT_TOKENS[entry.kind] ?? DEFAULT_CONTEXT_TOKENS,
     );
     return sizes.length === 0 ? DEFAULT_CONTEXT_TOKENS : Math.min(...sizes);
@@ -360,8 +398,9 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
   }
 
   const gate = createRiskGate({
+    language: () => uiLanguage,
     emit,
-    describe: async (tool, input) => (await ensureRegistry()).describe(tool, input),
+    describe: async (tool, input, lang) => (await ensureRegistry()).describe(tool, input, lang),
     audit: async (entry) => {
       await deps.audit.append(entry);
       memory.recordAudit(entry);
@@ -381,7 +420,7 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
       );
       if (undo === undefined) return;
       undoStack.push({
-        title: stepTitle(ran.titles),
+        title: stepTitle(ran.titles, uiLanguage),
         tool: undo.tool.name,
         input: undo.input,
         server: undo.tool.server,
@@ -400,6 +439,7 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
   });
 
   const doctor = createNetworkDoctor({
+    language: () => uiLanguage,
     prepare: async () => {
       await ensureRegistry();
     },
@@ -494,14 +534,37 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
       deps.log(`[agent] ${describeError(error)}`);
       brain = emptyBrain();
     }
+    if (brain.language !== null) uiLanguage = brain.language;
     failover = undefined;
     // JARVIS_FAKE_PROVIDER replaces the configured providers entirely (contracts §6 #11).
     if (deps.fakeScript !== undefined) {
       provider = createFakeProvider(deps.fakeScript);
       return;
     }
-    if (brain.providers.length === 0) {
-      provider = unavailableProvider(AGENT_TEXT.noProvider);
+    backupTag = null;
+    if (deps.readBackupTag !== undefined) {
+      try {
+        backupTag = await deps.readBackupTag();
+      } catch (error) {
+        deps.log(`[backup] ${describeError(error)}`);
+      }
+    }
+    const backup =
+      backupTag === null
+        ? undefined
+        : {
+            id: BACKUP_PROVIDER_ID,
+            locality: "local" as const,
+            provider: withSimpleProfile(
+              createBackupProvider({
+                tag: backupTag,
+                make: (section) => deps.makeProvider(section, undefined),
+              }),
+              () => (registry === undefined ? [] : simpleToolSpecs(registry)),
+            ),
+          };
+    if (brain.providers.length === 0 && backup === undefined) {
+      provider = unavailableProvider(() => USER_TEXT[uiLanguage].noProvider);
       return;
     }
     failover = createFailoverProvider({
@@ -511,7 +574,9 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
         provider: keyedProvider(entry, entry),
       })),
       allowCloudFallback: brain.allowCloudFallback,
+      ...(backup === undefined ? {} : { backup }),
       timers: deps.timers,
+      language: () => uiLanguage,
       onSwitch: (change) => {
         deps.log(`[provider] ${change.fromId} -> ${change.toId}: ${change.reason}`);
         monitor.noteActive();
@@ -544,21 +609,21 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
   }
 
   async function runUndo(request: UndoRequest, from: ConfirmFrom): Promise<UndoResult> {
-    if (locked) throw new OsAgentError("locked", CONTROL_TEXT.locked);
+    if (locked) throw new OsAgentError("locked", CONTROL_TEXT[uiLanguage].locked);
     const step = undoStack.pop(request.kind === "files" ? (s) => s.family === "files." : undefined);
     if (step === undefined) return { undone: null };
     const tools = await ensureRegistry();
     // The registry may have been reloaded since: the same name must still be
     // served by the same host server, or nothing runs.
     if (tools.get(step.tool)?.server !== step.server) {
-      throw new OsAgentError("internal", CONTROL_TEXT.undoMoved(step.title));
+      throw new OsAgentError("internal", CONTROL_TEXT[uiLanguage].undoMoved(step.title));
     }
     const outcome = await tools.call(step.tool, step.input);
     try {
       await deps.audit.append({
         ts: deps.now(),
         tool: step.tool,
-        title: CONTROL_TEXT.undoTitle(step.title),
+        title: CONTROL_TEXT[uiLanguage].undoTitle(step.title),
         input: step.input,
         decision: "approved",
         via: from.via,
@@ -571,7 +636,7 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
     if (!outcome.ok) {
       throw new OsAgentError(
         "internal",
-        CONTROL_TEXT.undoFailed(step.title, outcome.text.slice(0, 200)),
+        CONTROL_TEXT[uiLanguage].undoFailed(step.title, outcome.text.slice(0, 200)),
       );
     }
     void sys.refresh();
@@ -588,7 +653,9 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
       try {
         const result = await runUndo(request, from);
         reply =
-          result.undone === null ? CONTROL_TEXT.nothingToUndo : CONTROL_TEXT.undone(result.undone);
+          result.undone === null
+            ? CONTROL_TEXT[uiLanguage].nothingToUndo
+            : CONTROL_TEXT[uiLanguage].undone(result.undone);
       } catch (error) {
         reply = describeError(error);
       }
@@ -619,8 +686,10 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
     },
 
     prompt(text, from = LOCAL_CONFIRM) {
-      if (turn !== undefined) throw new OsAgentError("bad-request", AGENT_TEXT.turnRunning);
-      if (doctor.running) throw new OsAgentError("bad-request", AGENT_TEXT.doctorRunning);
+      if (turn !== undefined)
+        throw new OsAgentError("bad-request", USER_TEXT[uiLanguage].turnRunning);
+      if (doctor.running)
+        throw new OsAgentError("bad-request", USER_TEXT[uiLanguage].doctorRunning);
       const undoRequest = undoRequestOf(text);
       if (undoRequest !== undefined) return promptUndo(text, undoRequest, from);
       const turnId = deps.newId();
@@ -637,11 +706,14 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
           failover?.beginTurn();
           const result = await runTurn(
             {
+              ...(deps.recipes === undefined ? {} : { recipes: deps.recipes }),
               provider,
               registry: tools,
               gate,
               contextTokens: contextTokens(),
               toolsEnabled: deps.fakeScript !== undefined || activeEntry()?.supportsTools !== false,
+              profile: () =>
+                failover?.status().activeId === BACKUP_PROVIDER_ID ? SIMPLE_PROFILE : FULL_PROFILE,
               emit,
               newId: deps.newId,
               selectTools: (query, all) =>
@@ -653,6 +725,7 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
             },
             {
               turnId,
+              lang: turnLanguage(uiLanguage, text),
               history,
               text,
               signal: controller.signal,
@@ -688,7 +761,7 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
 
     confirm(answer, from = LOCAL_CONFIRM) {
       // Rafiq M3 §2: no card is answered while the screen is locked, by anyone.
-      if (locked) throw new OsAgentError("locked", CONTROL_TEXT.locked);
+      if (locked) throw new OsAgentError("locked", CONTROL_TEXT[uiLanguage].locked);
       try {
         gate.confirm(answer, from);
       } catch (error) {
@@ -699,8 +772,9 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
     },
 
     async undo(from = LOCAL_CONFIRM) {
-      if (locked) throw new OsAgentError("locked", CONTROL_TEXT.locked);
-      if (turn !== undefined) throw new OsAgentError("bad-request", AGENT_TEXT.turnRunning);
+      if (locked) throw new OsAgentError("locked", CONTROL_TEXT[uiLanguage].locked);
+      if (turn !== undefined)
+        throw new OsAgentError("bad-request", USER_TEXT[uiLanguage].turnRunning);
       return runUndo({ kind: "any" }, from);
     },
 
@@ -772,7 +846,7 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
 
     async save(request) {
       if (request.providers.some((draft) => draft.model === "")) {
-        throw new OsAgentError("bad-request", "Pick a model before saving");
+        throw new OsAgentError("bad-request", USER_TEXT[uiLanguage].pickModel);
       }
       // Contracts §7 #11: probe only new or changed providers (or ones that
       // carry a key); an unchanged saved entry keeps its saved supportsTools.
@@ -851,7 +925,8 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
     },
 
     doctorStart() {
-      if (turn !== undefined) throw new OsAgentError("bad-request", AGENT_TEXT.turnRunning);
+      if (turn !== undefined)
+        throw new OsAgentError("bad-request", USER_TEXT[uiLanguage].turnRunning);
       return doctor.start();
     },
 
@@ -903,11 +978,11 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
 
     async memoryList(limit) {
       if (!memoryOn() || deps.memory === undefined) {
-        throw new OsAgentError("unsupported", AGENT_TEXT.memoryOff);
+        throw new OsAgentError("unsupported", USER_TEXT[uiLanguage].memoryOff);
       }
       // No keyring (or locked) → open() yields null → memory is off (§7 #9).
       if ((await deps.memory?.open()) == null) {
-        throw new OsAgentError("unsupported", AGENT_TEXT.memoryOff);
+        throw new OsAgentError("unsupported", USER_TEXT[uiLanguage].memoryOff);
       }
       return memory.list(limit);
     },
@@ -945,13 +1020,29 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
         return { count: summary.count, security: summary.security };
       } catch (error) {
         if (error instanceof UpdatesCheckError && error.code === "not_found") {
-          throw new OsAgentError("unsupported", AGENT_TEXT.updatesUnavailable);
+          throw new OsAgentError("unsupported", USER_TEXT[uiLanguage].updatesUnavailable);
         }
-        throw new OsAgentError("internal", AGENT_TEXT.updatesCheckFailed(describeError(error)));
+        throw new OsAgentError(
+          "internal",
+          USER_TEXT[uiLanguage].updatesCheckFailed(describeError(error)),
+        );
       }
     },
 
+    language: () => uiLanguage,
+    async setLanguage(lang) {
+      try {
+        await writeOsLanguage(deps.configPath, lang, deps.configIo);
+      } catch (error) {
+        throw new OsAgentError("internal", describeError(error));
+      }
+      brain = { ...brain, language: lang };
+      uiLanguage = lang;
+      deps.push(OS_CONTROL_PUSHES.uiLanguage, { lang });
+      return null;
+    },
     resync() {
+      deps.push(OS_CONTROL_PUSHES.uiLanguage, { lang: uiLanguage });
       // Contracts §6 #7: on every new connection, re-push provider:status,
       // doctor:state, sys:snapshot and every open card (the shell de-dups
       // cards by cardId).

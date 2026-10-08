@@ -134,17 +134,19 @@ describe("allowedChain (design §3.5 privacy ruling)", () => {
 describe("failoverReason", () => {
   it("fails over on network, 429, 5xx and overload only", () => {
     expect(failoverReason(new ProviderError("network", "Cannot reach x"))).toBe(
-      FAILOVER_TEXT.unreachable("Cannot reach x"),
+      FAILOVER_TEXT.en.unreachable("Cannot reach x"),
     );
     expect(failoverReason(new ProviderError("http", "429 slow down", 429))).toBe(
-      FAILOVER_TEXT.rateLimited,
+      FAILOVER_TEXT.en.rateLimited,
     );
     expect(failoverReason(new ProviderError("http", "503 unavailable", 503))).toBe(
-      FAILOVER_TEXT.serverError(503),
+      FAILOVER_TEXT.en.serverError(503),
     );
-    expect(failoverReason(new ProviderError("http", "Overloaded"))).toBe(FAILOVER_TEXT.overloaded);
+    expect(failoverReason(new ProviderError("http", "Overloaded"))).toBe(
+      FAILOVER_TEXT.en.overloaded,
+    );
     expect(failoverReason(new ProviderError("http", "529 overloaded_error", 529))).toBe(
-      FAILOVER_TEXT.overloaded,
+      FAILOVER_TEXT.en.overloaded,
     );
     expect(failoverReason(new ProviderError("auth", "401 invalid x-api-key", 401))).toBeNull();
     expect(failoverReason(new ProviderError("http", "400 bad request", 400))).toBeNull();
@@ -235,7 +237,7 @@ describe("createFailoverProvider (design §3.5, criterion 5)", () => {
     const events = await done;
     expect(events[0]).toEqual({ type: "text", delta: "from lan" });
     expect(timers.pending).toHaveLength(1);
-    expect(provider.status().fallbackReason).toBe(`cloud ${FAILOVER_TEXT.slow}`);
+    expect(provider.status().fallbackReason).toBe(`cloud ${FAILOVER_TEXT.en.slow}`);
   });
 
   it("is sticky for the rest of the turn and retries the first on the next turn", async () => {
@@ -288,7 +290,7 @@ describe("createFailoverProvider (design §3.5, criterion 5)", () => {
     await expect(down.provider.reachable()).resolves.toEqual({ ok: true });
     expect(down.provider.status()).toEqual({
       activeId: "lan",
-      fallbackReason: `cloud ${FAILOVER_TEXT.unreachable("Cannot reach")}`,
+      fallbackReason: `cloud ${FAILOVER_TEXT.en.unreachable("Cannot reach")}`,
     });
     const badKey = setup([
       entry("cloud", "cloud", failing("cloud", new ProviderError("auth", "401 bad key"), seen)),

@@ -8,6 +8,7 @@
 import { posix } from "node:path";
 import {
   CONTROL_TEXT,
+  type Lang,
   type CommandRunner,
   type VoiceAvailability,
   type VoiceLang,
@@ -139,13 +140,14 @@ export type VoiceIo = {
 };
 
 export class VoiceUnavailableError extends Error {
-  constructor() {
-    super(CONTROL_TEXT.voiceUnavailable);
+  constructor(lang: Lang = "en") {
+    super(CONTROL_TEXT[lang].voiceUnavailable);
     this.name = "VoiceUnavailableError";
   }
 }
 
 export function createVoiceIo(deps: {
+  language?(): Lang;
   models: VoiceModels;
   makeTempDir(): Promise<string>;
   writeFile(path: string, bytes: Uint8Array): Promise<void>;
@@ -158,7 +160,7 @@ export function createVoiceIo(deps: {
     availability: () => availability,
     async transcribe(wav, lang) {
       const stt = deps.models.stt;
-      if (stt === null) throw new VoiceUnavailableError();
+      if (stt === null) throw new VoiceUnavailableError(deps.language?.() ?? "en");
       const dir = await deps.makeTempDir();
       try {
         const path = posix.join(dir, "utterance.wav");

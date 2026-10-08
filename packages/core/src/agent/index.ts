@@ -1,5 +1,6 @@
 export * from "./types.js";
 export * from "./contract.js";
+export * from "./i18n.js";
 export * from "./messages.js";
 export * from "./fence.js";
 export * from "./audit.js";
@@ -23,3 +24,6 @@ export * from "./registry-entry.js";
 export * from "./phrases.js";
 export * from "./undo.js";
 export * from "./voice-intent.js";
+export * from "./backup.js";
+export * from "./recipes.js";
+export * from "./recipe-engine.js";

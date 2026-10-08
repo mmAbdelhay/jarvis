@@ -7,6 +7,7 @@ import {
   parseOsBrainConfig,
   readOsBrainConfig,
   writeOsProviders,
+  writeOsLanguage,
 } from "./provider-list-config.js";
 
 const PATH = "/home/u/.config/jarvis/jarvis.yaml";
@@ -47,6 +48,7 @@ describe("parseOsBrainConfig (M2.5 contracts §1)", () => {
       allowCloudFallback: false,
       memoryEnabled: true,
       migratedFromLegacy: true,
+      language: null,
     });
   });
 
@@ -188,5 +190,40 @@ describe("readOsBrainConfig / writeOsProviders", () => {
     expect(parse(fresh.files.get(PATH) ?? "")).toEqual({
       os: { providers: [], allowCloudFallback: false },
     });
+  });
+});
+
+describe("os.language and the reserved id (M4 §1, §3)", () => {
+  it("reads en and ar, and null for anything else", () => {
+    expect(parseOsBrainConfig({ os: { language: "ar" } }).language).toBe("ar");
+    expect(parseOsBrainConfig({ os: { language: "fr" } }).language).toBeNull();
+    expect(parseOsBrainConfig({ os: { language: 7 } }).language).toBeNull();
+    expect(parseOsBrainConfig({}).language).toBeNull();
+  });
+
+  it("refuses a configured provider called backup", () => {
+    expect(() =>
+      parseOsBrainConfig({
+        os: {
+          providers: [
+            { id: "backup", kind: "ollama", baseUrl: "http://127.0.0.1:11434", model: "x" },
+          ],
+        },
+      }),
+    ).toThrow(/reserved/);
+  });
+
+  it("writes os.language and keeps the rest of the file", async () => {
+    const files = new Map([["/c.yaml", "# mine\nos:\n  allowCloudFallback: true\n"]]);
+    const io = {
+      readFile: async (path: string) => files.get(path) ?? "",
+      writeFile: async (path: string, text: string) => {
+        files.set(path, text);
+      },
+    };
+    await writeOsLanguage("/c.yaml", "ar", io);
+    expect(files.get("/c.yaml")).toContain("# mine");
+    expect(files.get("/c.yaml")).toContain("allowCloudFallback: true");
+    expect(files.get("/c.yaml")).toContain("language: ar");
   });
 });

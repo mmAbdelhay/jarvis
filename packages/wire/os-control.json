@@ -37,7 +37,8 @@
     "remote:setOwnerPassword",
     "remote:revoke",
     "pairing:open",
-    "pairing:cancel"
+    "pairing:cancel",
+    "ui:setLanguage"
   ],
   "pushes": [
     "agent:events",
@@ -46,7 +47,8 @@
     "sys:snapshot",
     "voice:state",
     "pairing:pending",
-    "remote:status"
+    "remote:status",
+    "ui:language"
   ],
   "blobs": ["voice:utterance"],
   "otherClients": ["sys:setLocked"]

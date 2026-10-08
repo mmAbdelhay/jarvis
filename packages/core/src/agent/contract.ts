@@ -156,3 +156,6 @@ export type VoiceAvailability = {
   speak: boolean;
 };
 export type UndoResult = { undone: string | null };
+
+/** Rafiq M4 §3 (copied from @jarvis/wire; contract-types.test.ts pins them equal). */
+export type UiLanguage = "en" | "ar";

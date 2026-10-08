@@ -47,6 +47,7 @@ describe("OS control channel names (contracts §3, M2 §2)", () => {
         "remote:revoke",
         "pairing:open",
         "pairing:cancel",
+        "ui:setLanguage",
       ].sort(),
     );
     expect(Object.values(OS_CONTROL_PUSHES).sort()).toEqual(
@@ -58,6 +59,7 @@ describe("OS control channel names (contracts §3, M2 §2)", () => {
         "voice:state",
         "pairing:pending",
         "remote:status",
+        "ui:language",
       ].sort(),
     );
     expect(CARD_TIMEOUT_MS).toBe(300_000);

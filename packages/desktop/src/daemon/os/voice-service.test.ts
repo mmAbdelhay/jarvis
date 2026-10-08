@@ -53,6 +53,7 @@ function harness(
   const voice = createOsVoice({
     io,
     agent: {
+      language: () => "en" as const,
       prompt: (text, from) => {
         prompts.push({ text, ...(from === undefined ? {} : { from }) });
         turn = "t1";

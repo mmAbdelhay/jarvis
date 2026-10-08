@@ -1,4 +1,4 @@
-import { AGENT_TEXT, type ModelProvider, ProviderError } from "@jarvis/core";
+import { USER_TEXT, type ModelProvider, ProviderError } from "@jarvis/core";
 import type { FetchLike } from "@jarvis/platform/model";
 import { describe, expect, it } from "vitest";
 import { buildProvider, createLazyKeyProvider, unavailableProvider } from "./provider-factory.js";
@@ -55,7 +55,7 @@ describe("buildProvider", () => {
       key: "AIza-k",
     });
     const missing = await firstError(buildProvider(section, undefined, { fetch }));
-    expect(missing).toMatchObject({ kind: "auth", message: AGENT_TEXT.noKey });
+    expect(missing).toMatchObject({ kind: "auth", message: USER_TEXT.en.noKey });
   });
 
   it("builds each kind against its own endpoint", async () => {
@@ -90,7 +90,7 @@ describe("buildProvider", () => {
     );
     const error = await firstError(provider);
     expect(error).toBeInstanceOf(ProviderError);
-    expect((error as ProviderError).message).toBe(AGENT_TEXT.noKey);
+    expect((error as ProviderError).message).toBe(USER_TEXT.en.noKey);
     expect(calls).toHaveLength(0);
   });
 
@@ -112,7 +112,7 @@ describe("buildProvider", () => {
     const error = await firstError(
       buildProvider(section, undefined, { fetch: recordingFetch([]).fetch }),
     );
-    expect((error as Error).message).toBe(AGENT_TEXT.subscriptionUnavailable);
+    expect((error as Error).message).toBe(USER_TEXT.en.subscriptionUnavailable);
   });
 });
 
@@ -198,5 +198,35 @@ describe("createLazyKeyProvider (contracts §6 #12)", () => {
     });
     await provider.reachable();
     expect(built).toEqual([undefined]);
+  });
+});
+
+describe("unavailable provider messages follow the language (M4 §3)", () => {
+  it("says the key is missing in the language asked for at use time", async () => {
+    let language: "en" | "ar" = "en";
+    const provider = buildProvider(
+      {
+        kind: "anthropic",
+        baseUrl: "https://api.anthropic.com",
+        model: "claude-sonnet-5-5",
+        auth: "api-key",
+        supportsTools: true,
+      },
+      undefined,
+      { fetch: async () => new Response(""), language: () => language },
+    );
+    language = "ar";
+    const run = async () => {
+      for await (const _ of provider.chat({
+        system: "",
+        messages: [],
+        tools: [],
+        signal: new AbortController().signal,
+      })) {
+        // nothing
+      }
+    };
+    await expect(run()).rejects.toThrow(USER_TEXT.ar.noKey);
+    await expect(run()).rejects.toBeInstanceOf(ProviderError);
   });
 });

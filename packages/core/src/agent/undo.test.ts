@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { CONTROL_TEXT } from "./messages.js";
 import type { RegisteredTool } from "./tool-registry.js";
 import {
   createUndoStack,
@@ -196,5 +197,13 @@ describe("undo phrases", () => {
     expect(stepTitle(["Set brightness to 80%"])).toBe("Set brightness to 80%");
     expect(stepTitle(["Move a.png", "Move b.png", "Move c.png"])).toBe("Move a.png (+2 more)");
     expect(stepTitle([])).toBe("the last change");
+  });
+});
+
+describe("stepTitle language (M4 §3)", () => {
+  it("names the last change and the count in Arabic", () => {
+    expect(stepTitle([], "ar")).toBe(CONTROL_TEXT.ar.lastChange);
+    expect(stepTitle(["أ", "ب"], "ar")).toBe(CONTROL_TEXT.ar.moreItems("أ", 1));
+    expect(stepTitle([])).toBe(CONTROL_TEXT.en.lastChange);
   });
 });

@@ -23,7 +23,13 @@ import { mkdtemp, rm, mkdir, readdir, readFile, rename, writeFile } from "node:f
 import { homedir, tmpdir, totalmem } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { type FakeTurn, parseFakeScript, TRUSTED_MCP_SERVERS } from "@jarvis/core";
+import {
+  createRecipeEngine,
+  langFromLocale,
+  type FakeTurn,
+  parseFakeScript,
+  TRUSTED_MCP_SERVERS,
+} from "@jarvis/core";
 import {
   auditLogPath,
   createAuditLog,
@@ -54,7 +60,9 @@ import {
   redirectConsole,
   scrubSecrets,
 } from "../log-file.js";
+import { loadRecipeFiles, parseOsReleaseId } from "./recipe-files.js";
 import { createOsAgent } from "./agent-service.js";
+import { readBackupTag } from "./backup-model.js";
 import { createEnvKeyStore, takeEnvProviderKeys } from "./provider-keys.js";
 import { createMemoryBackendOpener } from "./memory-backend.js";
 import { connectOsMcpServers } from "./mcp-servers.js";
@@ -81,11 +89,13 @@ import {
   LOCK_CLIENT_PATH,
   lockStatePath,
   buildStampCandidates,
+  MODEL_CATALOG_PATH,
   MODEL_STATE_PATH,
   mcpConfigDir,
   mcpDirFrom,
   memoryDbPath,
   osConfigPath,
+  recipesDirFrom,
   readOsBuildId,
   registryIndexPath,
   toolIndexPath,
@@ -301,6 +311,7 @@ async function main(argv: readonly string[]): Promise<void> {
     }
   }
   const voiceIo = createVoiceIo({
+    language: () => agent.language(),
     models,
     // mkdtemp makes a 0700 directory; the runtime dir is per-login tmpfs.
     makeTempDir: () => mkdtemp(join(env["XDG_RUNTIME_DIR"] ?? tmpdir(), "jarvis-voice-")),
@@ -324,7 +335,33 @@ async function main(argv: readonly string[]): Promise<void> {
   );
 
   let voice: ReturnType<typeof createOsVoice> | undefined;
+  const recipes = createRecipeEngine({
+    load: () =>
+      loadRecipeFiles(
+        recipesDirFrom(env),
+        {
+          listDir: (dir) => readdir(dir),
+          readFile: (path) => readFile(path, "utf8"),
+        },
+        info,
+      ),
+    machine: async () => ({
+      osId: await readFile("/etc/os-release", "utf8").then(parseOsReleaseId, () => null),
+      memTotalBytes: totalmem(),
+    }),
+    hostServers: new Set(TRUSTED_MCP_SERVERS),
+    log: info,
+  });
   const agent = createOsAgent({
+    ...(readonlyProfile ? {} : { recipes }),
+    defaultLanguage: langFromLocale({ LANG: process.env["LANG"] }),
+    // The Docker image (read-only profile) ships no model and no catalog.
+    ...(readonlyProfile
+      ? {}
+      : {
+          readBackupTag: () =>
+            readBackupTag(MODEL_CATALOG_PATH, (path) => readFile(path, "utf8"), info),
+        }),
     push: (channel, payload) => push(channel, payload),
     configPath: osConfigPath(home),
     configIo,
@@ -340,7 +377,10 @@ async function main(argv: readonly string[]): Promise<void> {
         }),
     ...(readonlyProfile ? { toolProfile: "readonly" as const } : {}),
     makeProvider: (section, apiKey) =>
-      buildProvider(section, apiKey, { fetch: (url, init) => fetch(url, init) }),
+      buildProvider(section, apiKey, {
+        fetch: (url, init) => fetch(url, init),
+        language: () => agent.language(),
+      }),
     ...(fakeScript === undefined ? {} : { fakeScript }),
     connectMcp: async () => {
       await sessionEnv.changed();
@@ -383,6 +423,7 @@ async function main(argv: readonly string[]): Promise<void> {
   const remoteDir = join(home, ".config", "jarvis", "remote");
   let router: OsRouter | undefined;
   const remote = createOsRemote({
+    language: () => agent.language(),
     createBridge,
     io: {
       dir: remoteDir,

@@ -46,7 +46,10 @@ export type OsVoice = {
 
 export function createOsVoice(deps: {
   io: VoiceIo;
-  agent: Pick<OsAgent, "prompt" | "stop" | "card" | "isLocked" | "onEvent" | "currentTurnId">;
+  agent: Pick<
+    OsAgent,
+    "language" | "prompt" | "stop" | "card" | "isLocked" | "onEvent" | "currentTurnId"
+  >;
   push(channel: string, payload: unknown): void;
   log(line: string): void;
   /** Initial speak setting (default on). */
@@ -98,9 +101,10 @@ export function createOsVoice(deps: {
 
   return {
     async utterance(meta, wav, origin) {
-      if (!checkWav(wav).ok) throw new OsAgentError("bad-request", CONTROL_TEXT.badAudio);
+      if (!checkWav(wav).ok)
+        throw new OsAgentError("bad-request", CONTROL_TEXT[deps.agent.language()].badAudio);
       if (!deps.io.availability().available) {
-        throw new OsAgentError("unsupported", CONTROL_TEXT.voiceUnavailable);
+        throw new OsAgentError("unsupported", CONTROL_TEXT[deps.agent.language()].voiceUnavailable);
       }
       silence(); // barge-in: a new utterance stops whatever is being said
       setState({ state: "transcribing" });
@@ -110,10 +114,13 @@ export function createOsVoice(deps: {
       } catch (error) {
         setState({ state: "idle" });
         if (error instanceof VoiceUnavailableError) {
-          throw new OsAgentError("unsupported", CONTROL_TEXT.voiceUnavailable);
+          throw new OsAgentError(
+            "unsupported",
+            CONTROL_TEXT[deps.agent.language()].voiceUnavailable,
+          );
         }
         deps.log("[voice] transcription failed");
-        throw new OsAgentError("internal", CONTROL_TEXT.transcriptionFailed);
+        throw new OsAgentError("internal", CONTROL_TEXT[deps.agent.language()].transcriptionFailed);
       }
       setState({ state: "idle" });
       const text = heard.text.trim().slice(0, MAX_PROMPT_CHARS);

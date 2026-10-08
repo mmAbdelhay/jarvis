@@ -6,6 +6,7 @@
 // password-tier or secret-taking tool, never anything an add-on suggests. A hidden tool
 // qualifies only as the family's own `.undo` (files.undo, settings.undo).
 // Pure.
+import type { Lang } from "./i18n.js";
 import { CONTROL_TEXT } from "./messages.js";
 import { normalizePhrase } from "./phrases.js";
 import { HOST_FORCED_RISK, type RegisteredTool } from "./tool-registry.js";
@@ -91,10 +92,10 @@ export function createUndoStack(limit = UNDO_LIMIT): UndoStack {
   };
 }
 
-export function stepTitle(titles: readonly string[]): string {
+export function stepTitle(titles: readonly string[], lang: Lang = "en"): string {
   const first = titles[0];
-  if (first === undefined) return CONTROL_TEXT.lastChange;
-  return titles.length === 1 ? first : CONTROL_TEXT.moreItems(first, titles.length - 1);
+  if (first === undefined) return CONTROL_TEXT[lang].lastChange;
+  return titles.length === 1 ? first : CONTROL_TEXT[lang].moreItems(first, titles.length - 1);
 }
 
 export type UndoRequest = { kind: "any" } | { kind: "files" };

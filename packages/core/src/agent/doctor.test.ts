@@ -58,6 +58,7 @@ function harness(options: {
   statusFails?: boolean;
   /** svc.status systemd-resolved answers not_found (contracts §6 #13). */
   resolvedMissing?: boolean;
+  language?: "ar" | "en";
 }) {
   const calls: { name: string; input: Record<string, unknown> }[] = [];
   const states: DoctorState[] = [];
@@ -151,6 +152,7 @@ function harness(options: {
       summary = text;
     },
     log: () => {},
+    ...(options.language === undefined ? {} : { language: () => options.language as "ar" | "en" }),
   });
   const finished = async () => {
     for (let i = 0; i < 500 && doctor.running; i++)
@@ -405,5 +407,17 @@ describe("NetworkDoctor", () => {
     await h.finished();
     expect(h.calls.filter((c) => c.name === "svc.restart")).toHaveLength(1);
     expect(h.summary()).toContain("NetworkManager running: NetworkManager restarted.");
+  });
+
+  it("keeps the model-facing summary in English when the UI language is Arabic", async () => {
+    const h = harness({
+      statuses: [{ ...offline, nmRunning: false }, connected],
+      answer: approveAll,
+      language: "ar",
+    });
+    h.doctor.start();
+    await h.finished();
+    expect(h.summary()).toContain("NetworkManager running: NetworkManager restarted.");
+    expect(h.summary()).not.toMatch(/[\u0600-\u06FF]/);
   });
 });

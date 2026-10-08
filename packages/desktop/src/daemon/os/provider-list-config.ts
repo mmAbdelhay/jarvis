@@ -5,7 +5,8 @@
 // and removes it. Keys are never here — they live in the keyring per id.
 //
 // No electron here (core/no-electron.test.ts).
-import { MAX_PROVIDERS, PROVIDER_ID_PATTERN } from "@jarvis/wire";
+import { type Lang, parseLang } from "@jarvis/core";
+import { MAX_PROVIDERS, PROVIDER_ID_PATTERN, RESERVED_PROVIDER_IDS } from "@jarvis/wire";
 import { isMap, isScalar, parse, parseDocument } from "yaml";
 import { type ConfigIo, type ProviderSection, parseProviderSection } from "./provider-config.js";
 
@@ -14,6 +15,7 @@ export type OsBrainConfig = {
   providers: ProviderEntry[];
   allowCloudFallback: boolean;
   memoryEnabled: boolean;
+  language: Lang | null;
   /** True when the providers came from the legacy top-level `provider:` key. */
   migratedFromLegacy: boolean;
 };
@@ -25,6 +27,7 @@ export function emptyBrain(): OsBrainConfig {
     providers: [],
     allowCloudFallback: false,
     memoryEnabled: true,
+    language: null,
     migratedFromLegacy: false,
   };
 }
@@ -43,6 +46,8 @@ function parseEntry(raw: unknown, index: number, seen: Set<string>): ProviderEnt
       `Config \`os.providers[${index}].id\` must be a-z, 0-9 and -, up to 32 characters`,
     );
   }
+  if (RESERVED_PROVIDER_IDS.has(id))
+    throw new Error(`${where}.id "${id}" is reserved for the backup model`);
   if (seen.has(id)) throw new Error(`${where}: provider ids must be unique ("${id}" repeats)`);
   seen.add(id);
   let section: ProviderSection | null;
@@ -75,7 +80,11 @@ export function parseOsBrainConfig(root: unknown): OsBrainConfig {
     }
     memoryEnabled = enabled !== false;
   }
-  const base = { allowCloudFallback: allow === true, memoryEnabled };
+  const base = {
+    allowCloudFallback: allow === true,
+    memoryEnabled,
+    language: parseLang(section["language"]) ?? null,
+  };
   const list = section["providers"];
   if (list !== undefined && list !== null) {
     if (!Array.isArray(list)) throw new Error("Config `os.providers` must be a list");
@@ -168,5 +177,22 @@ export async function writeOsMemoryEnabled(
   }
   if (!isMap(document.get("os", true))) document.set("os", document.createNode({}));
   document.setIn(["os", "memory", "enabled"], enabled);
+  await io.writeFile(path, document.toString());
+}
+
+/** Persist os.language (Rafiq M4 §3), keeping the rest of the file. */
+export async function writeOsLanguage(path: string, lang: Lang, io: ConfigIo): Promise<void> {
+  let text = "";
+  try {
+    text = await io.readFile(path);
+  } catch (error) {
+    if (!isMissing(error)) throw error;
+  }
+  const document = parseDocument(text);
+  if (document.errors.length > 0) {
+    throw new Error(`jarvis.yaml does not parse: ${document.errors[0]?.message ?? "unknown"}`);
+  }
+  if (!isMap(document.get("os", true))) document.set("os", document.createNode({}));
+  document.setIn(["os", "language"], lang);
   await io.writeFile(path, document.toString());
 }

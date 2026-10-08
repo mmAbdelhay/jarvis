@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AgentEvent, Card } from "./contract.js";
-import { AGENT_TEXT } from "./messages.js";
+import { AGENT_TEXT, USER_TEXT } from "./messages.js";
 import { createRiskGate, type RiskGate } from "./risk-gate.js";
 import { MAX_STEPS, runTurn, trimHistory } from "./tool-loop.js";
 import { loadToolRegistry } from "./tool-registry.js";
@@ -414,7 +414,7 @@ describe("runTurn", () => {
     expect(h.events).toContainEqual({
       type: "text",
       turnId: "t1",
-      delta: AGENT_TEXT.stepLimitFallback(MAX_STEPS, ["net.status"]),
+      delta: USER_TEXT.en.stepLimitFallback(MAX_STEPS, ["net.status"]),
     });
   });
 

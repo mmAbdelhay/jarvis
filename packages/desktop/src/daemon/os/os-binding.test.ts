@@ -27,6 +27,8 @@ function fakeAgent() {
     };
   const idle = { active: false, steps: [], networks: [], done: null };
   const agent: OsAgent = {
+    language: () => "en" as const,
+    setLanguage: record("setLanguage", Promise.resolve(null)) as OsAgent["setLanguage"],
     start: async () => {},
     prompt: record("prompt", { turnId: "t1" }) as OsAgent["prompt"],
     stop: record("stop", null) as OsAgent["stop"],
@@ -563,5 +565,30 @@ describe("phone settings channels are local-only (plan N gap channels)", () => {
     await expect(
       createOsRouter({ agent }).invoke("remote:status", [], { kind: "local", connection }),
     ).rejects.toMatchObject({ code: "unsupported" });
+  });
+});
+
+describe("ui:setLanguage (Rafiq M4 §3)", () => {
+  const phone = { kind: "phone" as const, device: { id: "d".repeat(32), name: "Pixel 8" } };
+
+  it("sets the language for a local client", async () => {
+    const { agent, calls } = fakeAgent();
+    const router = createOsRouter({ agent });
+    await expect(
+      router.invoke("ui:setLanguage", [{ lang: "ar" }], { kind: "local", connection }),
+    ).resolves.toBeNull();
+    expect(calls.map((c) => c.method)).toEqual(["setLanguage"]);
+  });
+
+  it("refuses bad arguments and phones", async () => {
+    const { agent, calls } = fakeAgent();
+    const router = createOsRouter({ agent });
+    await expect(
+      router.invoke("ui:setLanguage", [{ lang: "fr" }], { kind: "local", connection }),
+    ).rejects.toMatchObject({ code: "bad-request" });
+    await expect(router.invoke("ui:setLanguage", [{ lang: "ar" }], phone)).rejects.toMatchObject({
+      code: "forbidden",
+    });
+    expect(calls).toEqual([]);
   });
 });

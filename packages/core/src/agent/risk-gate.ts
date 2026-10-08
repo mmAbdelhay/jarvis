@@ -5,6 +5,7 @@
 // whatever it returns — and never into events, model messages or the audit
 // log. One audit line per item, approved or not.
 import { auditInput } from "./audit.js";
+import type { Lang } from "./i18n.js";
 import { mapLimit } from "./map-limit.js";
 import { AGENT_TEXT, CONTROL_TEXT } from "./messages.js";
 import {
@@ -19,7 +20,21 @@ import {
 import type { CardDescription, RegisteredTool } from "./tool-registry.js";
 import { type ToolOutcome, isRecord } from "./types.js";
 
-export type GateCall = { callId: string; tool: RegisteredTool; input: Record<string, unknown> };
+/** Card items the caller computed (a recipe: one item per step, M4 §4). Like
+ *  a batch tool, the call runs ONCE with `items` = the ticked elements. */
+export type GatePreset = {
+  elements: unknown[];
+  items: { tool: string; description: CardDescription }[];
+  /** The audit result of one element once the call ran. */
+  resultOf(elementIndex: number, outcome: ToolOutcome): "ok" | "failed" | "skipped";
+};
+
+export type GateCall = {
+  callId: string;
+  tool: RegisteredTool;
+  input: Record<string, unknown>;
+  preset?: GatePreset;
+};
 export type GateItemStatus = "ran" | "unticked" | "denied" | "timeout" | "stopped";
 export type GateItemResult = {
   callId: string;
@@ -36,6 +51,8 @@ export type GateBatchRequest = {
   signal?: AbortSignal;
   /** At most this many items may be ticked (the doctor's Wi-Fi pick: 1). */
   maxTicked?: number;
+  /** The turn's language for card texts (M4 §3). Default en. */
+  lang?: Lang;
   execute(call: GateCall, input: Record<string, unknown>): Promise<ToolOutcome>;
 };
 
@@ -69,7 +86,11 @@ function auditVia(requested: GateBatchRequest["via"], from: ConfirmFrom | undefi
 
 export type RiskGateDeps = {
   emit(event: AgentEvent): void;
-  describe(tool: RegisteredTool, input: Record<string, unknown>): Promise<CardDescription>;
+  describe(
+    tool: RegisteredTool,
+    input: Record<string, unknown>,
+    lang: Lang,
+  ): Promise<CardDescription>;
   audit(entry: AuditEntry): Promise<void>;
   now(): number;
   newId(): string;
@@ -80,6 +101,8 @@ export type RiskGateDeps = {
   log(line: string): void;
   /** Called after a ticked call ran and returned ok. Must not throw. */
   onRan?(ran: GateRan): void;
+  /** The UI language for refusals (M4 §3). Default en. */
+  language?(): Lang;
 };
 
 export interface RiskGate {
@@ -162,6 +185,7 @@ function batchLimit(tool: RegisteredTool): number {
 }
 
 export function createRiskGate(deps: RiskGateDeps): RiskGate {
+  const text = () => CONTROL_TEXT[deps.language?.() ?? "en"];
   const open = new Map<
     string,
     { card: Card; maxTicked: number; settle(decision: Decision): void }
@@ -189,6 +213,17 @@ export function createRiskGate(deps: RiskGateDeps): RiskGate {
       call: GateCall;
     }[] = [];
     for (const [callIndex, call] of request.calls.entries()) {
+      if (call.preset !== undefined) {
+        for (const [elementIndex, element] of call.preset.elements.entries()) {
+          jobs.push({
+            callIndex,
+            elementIndex,
+            describedInput: { ...call.input, items: [element] },
+            call,
+          });
+        }
+        continue;
+      }
       const elements = batchElements(call);
       if (elements === undefined) {
         jobs.push({ callIndex, elementIndex: undefined, describedInput: call.input, call });
@@ -208,9 +243,12 @@ export function createRiskGate(deps: RiskGateDeps): RiskGate {
         });
       }
     }
-    const descriptions = await mapLimit(jobs, DESCRIBE_CONCURRENCY, (job) =>
-      deps.describe(job.call.tool, job.describedInput),
-    );
+    const descriptions = await mapLimit(jobs, DESCRIBE_CONCURRENCY, (job) => {
+      const preset = job.call.preset?.items[job.elementIndex ?? -1];
+      return preset !== undefined
+        ? Promise.resolve(preset.description)
+        : deps.describe(job.call.tool, job.describedInput, request.lang ?? "en");
+    });
     const units: Unit[] = jobs.map((job, index) => {
       const description = descriptions[index] as CardDescription;
       return {
@@ -219,7 +257,7 @@ export function createRiskGate(deps: RiskGateDeps): RiskGate {
         describedInput: job.describedInput,
         item: {
           itemId: `item-${index + 1}`,
-          tool: job.call.tool.name,
+          tool: job.call.preset?.items[job.elementIndex ?? -1]?.tool ?? job.call.tool.name,
           title: description.title,
           detail: description.detail,
           source: description.source,
@@ -296,7 +334,7 @@ export function createRiskGate(deps: RiskGateDeps): RiskGate {
         status = "stopped";
       } else {
         status = "ran";
-        const elements = batchElements(call);
+        const elements = call.preset?.elements ?? batchElements(call);
         // A batch tool runs ONCE with only its ticked elements (criterion 8).
         const input =
           elements === undefined
@@ -346,6 +384,14 @@ export function createRiskGate(deps: RiskGateDeps): RiskGate {
       // One audit line per card item.
       for (const unit of mine) {
         const wasTicked = ticked.includes(unit);
+        const result: AuditEntry["result"] =
+          !wasTicked || outcome === undefined
+            ? "skipped"
+            : call.preset !== undefined
+              ? call.preset.resultOf(unit.elementIndex as number, outcome)
+              : outcome.ok
+                ? "ok"
+                : "failed";
         await writeAudit({
           ts: deps.now(),
           tool: call.tool.name,
@@ -361,8 +407,8 @@ export function createRiskGate(deps: RiskGateDeps): RiskGate {
               ? "denied"
               : decision.decision,
           via,
-          result: !wasTicked || outcome === undefined ? "skipped" : outcome.ok ? "ok" : "failed",
-          ...(wasTicked && outcome !== undefined && !outcome.ok
+          result,
+          ...(result === "failed" && outcome !== undefined
             ? { message: outcome.text.slice(0, 500) }
             : {}),
         });
@@ -375,33 +421,32 @@ export function createRiskGate(deps: RiskGateDeps): RiskGate {
     runBatch,
     confirm(answer, from = LOCAL_CONFIRM) {
       const entry = open.get(answer.cardId);
-      if (entry === undefined) throw new GateError("That card is no longer open");
+      if (entry === undefined) throw new GateError(text().cardClosed);
       const items = new Map(entry.card.items.map((item) => [item.itemId, item]));
       for (const id of answer.ticked) {
-        if (!items.has(id)) throw new GateError(`The card has no item ${id}`);
+        if (!items.has(id)) throw new GateError(text().noItem(id));
       }
       const secrets: Record<string, Record<string, string>> = Object.create(null);
       for (const [itemId, fields] of Object.entries(answer.secrets)) {
         const item = items.get(itemId);
-        if (item === undefined) throw new GateError(`The card has no item ${itemId}`);
+        if (item === undefined) throw new GateError(text().noItem(itemId));
         const allowed = new Set(item.secretFields.map((field) => field.name));
         const kept: Record<string, string> = Object.create(null);
         for (const [name, value] of Object.entries(fields)) {
-          if (!allowed.has(name)) throw new GateError(`Item ${itemId} has no secret field ${name}`);
+          if (!allowed.has(name)) throw new GateError(text().noSecretField(itemId, name));
           kept[name] = value;
         }
         secrets[itemId] = kept;
       }
       const ticked = new Set(answer.ticked);
-      if (ticked.size > entry.maxTicked)
-        throw new GateError(`Tick at most ${entry.maxTicked} item(s) on this card`);
+      if (ticked.size > entry.maxTicked) throw new GateError(text().tickAtMost(entry.maxTicked));
       // Design §3.3 ruling: password-tier items are approved on the computer only.
       if (
         answer.approve &&
         !from.allowPassword &&
         [...ticked].some((id) => items.get(id)?.risk === "password")
       ) {
-        throw new GateError(CONTROL_TEXT.passwordNotFromPhone, "forbidden");
+        throw new GateError(text().passwordNotFromPhone, "forbidden");
       }
       entry.settle(
         answer.approve && ticked.size > 0
