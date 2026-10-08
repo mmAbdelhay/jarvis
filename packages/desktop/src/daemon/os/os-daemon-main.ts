@@ -55,6 +55,7 @@ import {
   scrubSecrets,
 } from "../log-file.js";
 import { createOsAgent } from "./agent-service.js";
+import { readBackupTag } from "./backup-model.js";
 import { createEnvKeyStore, takeEnvProviderKeys } from "./provider-keys.js";
 import { createMemoryBackendOpener } from "./memory-backend.js";
 import { connectOsMcpServers } from "./mcp-servers.js";
@@ -81,6 +82,7 @@ import {
   LOCK_CLIENT_PATH,
   lockStatePath,
   buildStampCandidates,
+  MODEL_CATALOG_PATH,
   MODEL_STATE_PATH,
   mcpConfigDir,
   mcpDirFrom,
@@ -327,6 +329,13 @@ async function main(argv: readonly string[]): Promise<void> {
   let voice: ReturnType<typeof createOsVoice> | undefined;
   const agent = createOsAgent({
     defaultLanguage: langFromLocale({ LANG: process.env["LANG"] }),
+    // The Docker image (read-only profile) ships no model and no catalog.
+    ...(readonlyProfile
+      ? {}
+      : {
+          readBackupTag: () =>
+            readBackupTag(MODEL_CATALOG_PATH, (path) => readFile(path, "utf8"), info),
+        }),
     push: (channel, payload) => push(channel, payload),
     configPath: osConfigPath(home),
     configIo,

@@ -7,6 +7,12 @@
 // No electron here (core/no-electron.test.ts).
 import {
   AGENT_TEXT,
+  BACKUP_BASE_URL,
+  BACKUP_PROVIDER_ID,
+  FULL_PROFILE,
+  SIMPLE_PROFILE,
+  simpleToolSpecs,
+  withSimpleProfile,
   DEFAULT_LANG,
   type Lang,
   turnLanguage,
@@ -76,6 +82,7 @@ import {
 } from "@jarvis/core";
 import type { SecretStore } from "@jarvis/platform/model";
 import { OS_CONTROL_PUSHES } from "@jarvis/wire";
+import { createBackupProvider } from "./backup-model.js";
 import type { LockStore } from "./lock-store.js";
 import type { MemoryOpener } from "./memory-backend.js";
 import type { ConfigIo, ProviderSection } from "./provider-config.js";
@@ -122,6 +129,9 @@ export type OsAgentDeps = {
    *  since the host servers started (session-env.ts); they restart before
    *  the next turn. */
   sessionChanged?(): Promise<boolean>;
+  /** M4 §1: the catalog's backup model tag (backup-model.ts readBackupTag);
+   *  null or absent: no backup. Read at start and after provider:save. */
+  readBackupTag?(): Promise<string | null>;
   /** Add-on servers from mcp.d (registry-servers.ts); none when absent. */
   registryServers?: { load(): Promise<LoadedRegistry> };
   /** Calls onChange when mcp.d changes; returns a stop function. */
@@ -237,14 +247,30 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
     migrateLegacy: brain.migratedFromLegacy,
     log: deps.log,
   });
+  let backupTag: string | null = null;
+  /** The backup as a provider entry (fixed loopback URL, M4 §1). */
+  function backupEntry(): ProviderEntry | null {
+    return backupTag === null
+      ? null
+      : {
+          id: BACKUP_PROVIDER_ID,
+          kind: "ollama",
+          baseUrl: BACKUP_BASE_URL,
+          model: backupTag,
+          auth: "api-key",
+          supportsTools: true,
+        };
+  }
   /** The provider answering now; the first one before any answer. */
   function activeEntry(): ProviderEntry | null {
     const id = failover?.status().activeId;
-    return brain.providers.find((entry) => entry.id === id) ?? brain.providers[0] ?? null;
+    if (id === BACKUP_PROVIDER_ID) return backupEntry();
+    return brain.providers.find((entry) => entry.id === id) ?? brain.providers[0] ?? backupEntry();
   }
-  /** The smallest context in the list: a failover mid-turn must still fit. */
+  /** The smallest context in the chain: a failover mid-turn must still fit. */
   function contextTokens(): number {
-    const sizes = brain.providers.map(
+    const backup = backupEntry();
+    const sizes = [...brain.providers, ...(backup === null ? [] : [backup])].map(
       (entry) => CONTEXT_TOKENS[entry.kind] ?? DEFAULT_CONTEXT_TOKENS,
     );
     return sizes.length === 0 ? DEFAULT_CONTEXT_TOKENS : Math.min(...sizes);
@@ -512,7 +538,29 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
       provider = createFakeProvider(deps.fakeScript);
       return;
     }
-    if (brain.providers.length === 0) {
+    backupTag = null;
+    if (deps.readBackupTag !== undefined) {
+      try {
+        backupTag = await deps.readBackupTag();
+      } catch (error) {
+        deps.log(`[backup] ${describeError(error)}`);
+      }
+    }
+    const backup =
+      backupTag === null
+        ? undefined
+        : {
+            id: BACKUP_PROVIDER_ID,
+            locality: "local" as const,
+            provider: withSimpleProfile(
+              createBackupProvider({
+                tag: backupTag,
+                make: (section) => deps.makeProvider(section, undefined),
+              }),
+              () => (registry === undefined ? [] : simpleToolSpecs(registry)),
+            ),
+          };
+    if (brain.providers.length === 0 && backup === undefined) {
       provider = unavailableProvider(() => USER_TEXT[uiLanguage].noProvider);
       return;
     }
@@ -523,7 +571,9 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
         provider: keyedProvider(entry, entry),
       })),
       allowCloudFallback: brain.allowCloudFallback,
+      ...(backup === undefined ? {} : { backup }),
       timers: deps.timers,
+      language: () => uiLanguage,
       onSwitch: (change) => {
         deps.log(`[provider] ${change.fromId} -> ${change.toId}: ${change.reason}`);
         monitor.noteActive();
@@ -658,6 +708,8 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
               gate,
               contextTokens: contextTokens(),
               toolsEnabled: deps.fakeScript !== undefined || activeEntry()?.supportsTools !== false,
+              profile: () =>
+                failover?.status().activeId === BACKUP_PROVIDER_ID ? SIMPLE_PROFILE : FULL_PROFILE,
               emit,
               newId: deps.newId,
               selectTools: (query, all) =>

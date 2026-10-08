@@ -81,3 +81,6 @@ export function lockStatePath(env: { XDG_RUNTIME_DIR?: string | undefined }): st
   if (dir === undefined || !posix.isAbsolute(dir)) return undefined;
   return posix.join(dir, "jarvis", "lock-state.json");
 }
+
+/** M2 contracts §4 + M4 §1: the model catalog; its role "backup" entry is the backup brain. */
+export const MODEL_CATALOG_PATH = "/usr/share/jarvis/models/catalog.json";
