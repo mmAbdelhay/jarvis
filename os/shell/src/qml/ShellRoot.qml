@@ -106,6 +106,7 @@ Rectangle {
                     provider: root.shell.provider
                     providers: root.shell.providers
                     memory: root.shell.memory
+                    registry: root.shell.registry
                     doctorAvailable: root.shell.system.known && !root.shell.system.online
                     onDoctorRequested: root.shell.openDoctor()
                 }

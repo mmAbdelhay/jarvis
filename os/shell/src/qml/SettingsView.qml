@@ -3,16 +3,16 @@ import QtQuick.Layouts
 import QtQuick.Controls.Basic
 import Jarvis.UI
 
-// Settings (Rafiq M2.5): model providers in failover order; later sections
-// (memory, tools) are added to `sections` and get one Loader each.
+// Settings: model providers in failover order, memory, and tool servers.
 Item {
     id: root
     required property ProviderModel provider
     required property ProviderListModel providers
     property MemoryModel memory: null
+    property RegistryModel registry: null
     property bool doctorAvailable: false // sys:snapshot says offline (contracts §6.8)
     property string section: "providers"
-    readonly property var sections: [{ id: "providers", label: "Model providers" }, { id: "memory", label: "Memory" }]
+    readonly property var sections: [{ id: "providers", label: "Model providers" }, { id: "memory", label: "Memory" }, { id: "tools", label: "Tools" }]
     signal doctorRequested()
 
     Flickable {
@@ -93,6 +93,14 @@ Item {
                 visible: root.section === "memory"
                 active: root.memory !== null
                 sourceComponent: MemorySection { memory: root.memory }
+            }
+
+            Loader {
+                objectName: "toolsSection"
+                Layout.fillWidth: true
+                visible: root.section === "tools"
+                active: root.registry !== null
+                sourceComponent: ToolsSection { registry: root.registry }
             }
         }
     }
