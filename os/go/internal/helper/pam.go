@@ -22,10 +22,18 @@ var ErrBadPassword = errors.New("wrong password")
 // PAMVerifier verifies with pam_unix's own checker, /usr/sbin/unix_chkpwd,
 // which pam_unix itself runs: it reads the NUL-terminated password on stdin
 // and exits 0 when it matches the shadow entry. Run as root it may check any
-// user. It is used instead of libpam bindings so the helper stays a static,
-// cgo-free binary; argv is "<user> nonull" (unix_chkpwd needs exactly 3 args), so an empty-password account never
-// verifies. The password travels only over stdin, never in argv or the
-// environment.
+// user. argv is "<user> nonull" (unix_chkpwd needs exactly 3 args), so an
+// empty-password account never verifies. The password travels only over
+// stdin, never in argv or the environment.
+//
+// DEVIATION from Rafiq M3 contracts §5.5 (open, for the coordinator): §5.5
+// names the PAM service `jarvis-admin`. This is not a PAM conversation, so
+// /etc/pam.d/jarvis-admin is never read and pam_faillock, pam_faildelay,
+// PAM audit records and sssd/LDAP accounts are bypassed; only local shadow
+// accounts verify. The plan forbids what a real conversation needs here (a
+// cgo build of jarvis-helper, a new module dependency, files outside os/go),
+// and the helper's own 3-failures-per-5-minutes limit below stands in for
+// pam_faillock.
 type PAMVerifier struct{ Run execx.Runner }
 
 // Verify implements PasswordVerifier.
