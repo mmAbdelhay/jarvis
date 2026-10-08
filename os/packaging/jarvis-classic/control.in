@@ -1,0 +1,13 @@
+Package: jarvis-classic
+Version: @VERSION@
+Architecture: amd64
+Maintainer: Muhammad AbdElHay <mmAbdelhay@users.noreply.github.com>
+Installed-Size: @INSTALLED_SIZE@
+Depends: jarvis-ui (= @VERSION@), jarvis-shell (= @VERSION@), jarvis-session (= @VERSION@), pcmanfm-qt, foot
+Section: x11
+Priority: optional
+Homepage: https://github.com/mmAbdelhay/jarvis
+Description: @DISTRO_NAME@ classic desktop
+ A taskbar with Apps, Terminal, Files and Settings, a clock, the network
+ status, and a Jarvis button that opens a docked chat. Used when the full
+ @DISTRO_NAME@ shell cannot start, or when chosen on the login screen.
