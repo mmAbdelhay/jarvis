@@ -1,0 +1,24 @@
+// Rafiq M3 (contracts §1). jarvis-settings and the disks tools run under
+// jarvisd's systemd user service, outside any logind session, so the
+// "active local session" defaults of NetworkManager, power-profiles-daemon
+// and udisks2 do not match them (same reason as 50-jarvis.rules, M1 §6 #19).
+// Members of jarvis-admins get exactly what an active desktop session already
+// has for these six actions; the confirm card is the gate, and jarvisd
+// refuses approvals while the screen is locked (contracts §2).
+// Formatting, system-disk mounts, device changes and the helper's
+// password-tier action are deliberately absent: they keep asking for a
+// password every time.
+var JARVIS_SETTINGS_ACTIONS = [
+  "org.freedesktop.NetworkManager.enable-disable-wifi",
+  "org.freedesktop.UPower.PowerProfiles.switch-profile",
+  "net.hadess.PowerProfiles.switch-profile",
+  "org.freedesktop.udisks2.filesystem-mount",
+  "org.freedesktop.udisks2.eject-media",
+  "org.freedesktop.udisks2.power-off-drive",
+];
+polkit.addRule(function (action, subject) {
+  if (JARVIS_SETTINGS_ACTIONS.indexOf(action.id) >= 0 && subject.isInGroup("jarvis-admins")) {
+    return polkit.Result.YES;
+  }
+  return polkit.Result.NOT_HANDLED;
+});
