@@ -1,0 +1,18 @@
+# Build dependencies of jarvis-lock on Debian 13 (trixie). One package per line.
+cmake
+ninja-build
+g++
+pkgconf
+qt6-base-dev
+qt6-declarative-dev
+libpam0g-dev
+# needed only to run the tests
+libpam-wrapper
+qml6-module-qttest
+qml6-module-qtquick
+qml6-module-qtquick-controls
+qml6-module-qtquick-templates
+qml6-module-qtquick-layouts
+qml6-module-qtquick-shapes
+qml6-module-qtquick-window
+qml6-module-qtqml-workerscript
