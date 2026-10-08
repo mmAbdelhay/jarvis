@@ -523,6 +523,60 @@ describe("createOsAgent", () => {
     await h.until(() => h.events().filter((e) => e.type === "turn-end").length === 2);
     expect(h.connects()).toBe(before + 1);
   });
+
+  it("restarts the host servers before a turn when the session environment changed (Rafiq M3 §5.14)", async () => {
+    const changes = [false, true, false];
+    const h = harness({
+      fakeScript: parseFakeScript([
+        { replies: [{ text: "a" }] },
+        { replies: [{ text: "b" }] },
+        { replies: [{ text: "c" }] },
+      ]),
+      sessionChanged: async () => changes.shift() ?? false,
+    });
+    await h.agent.start();
+    const turn = async (text: string, ended: number) => {
+      await h.until(() => {
+        try {
+          h.agent.prompt(text);
+          return true;
+        } catch {
+          return false;
+        }
+      });
+      await h.until(() => h.events().filter((e) => e.type === "turn-end").length === ended);
+    };
+    await turn("one", 1);
+    const before = h.connects();
+    await turn("two", 2);
+    expect(h.connects()).toBe(before + 1);
+    await turn("three", 3);
+    expect(h.connects()).toBe(before + 1);
+    expect(changes).toEqual([]);
+  });
+
+  it("keeps the servers when the session environment cannot be read", async () => {
+    const h = harness({
+      fakeScript: parseFakeScript([{ replies: [{ text: "a" }] }, { replies: [{ text: "b" }] }]),
+      sessionChanged: async () => {
+        throw new Error("no user manager");
+      },
+    });
+    await h.agent.start();
+    h.agent.prompt("one");
+    await h.until(() => h.events().filter((e) => e.type === "turn-end").length === 1);
+    const before = h.connects();
+    await h.until(() => {
+      try {
+        h.agent.prompt("two");
+        return true;
+      } catch {
+        return false;
+      }
+    });
+    await h.until(() => h.events().filter((e) => e.type === "turn-end").length === 2);
+    expect(h.connects()).toBe(before);
+  });
 });
 
 describe("updates and model download (M2 contracts §2, §5)", () => {

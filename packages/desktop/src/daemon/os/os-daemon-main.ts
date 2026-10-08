@@ -65,6 +65,7 @@ import { listenTls, loadCertificate, nodeFs, nodeTimers } from "@jarvis/remote/l
 import { createLockStore } from "./lock-store.js";
 import { createOsBinding, createOsRouter, type OsRouter } from "./os-binding.js";
 import { createOsRemote } from "./os-remote.js";
+import { createSessionEnv } from "./session-env.js";
 import { readOsRemoteConfig, writeOsRemoteSection } from "./remote-config.js";
 import {
   createVoiceIo,
@@ -171,6 +172,20 @@ async function main(argv: readonly string[]): Promise<void> {
   }
   const env = { ...process.env };
   const mcpDir = mcpDirFrom(env);
+  // Rafiq M3 §5.14: host servers get the graphical session's display and
+  // desktop from the user manager, re-read before each turn (session-env.ts).
+  const sessionEnv = createSessionEnv({
+    base: env,
+    read: async () => {
+      const ran = await runCommandWithLimits(
+        "systemctl",
+        ["--user", "show-environment"],
+        { timeoutMs: 5_000, maxOutputBytes: 262_144 },
+        env,
+      );
+      return ran.code === 0 && !ran.timedOut && !ran.truncated ? ran.stdout : undefined;
+    },
+  });
   const timers = {
     setTimeout: (callback: () => void, ms: number) => {
       const handle = setTimeout(callback, ms);
@@ -327,18 +342,21 @@ async function main(argv: readonly string[]): Promise<void> {
     makeProvider: (section, apiKey) =>
       buildProvider(section, apiKey, { fetch: (url, init) => fetch(url, init) }),
     ...(fakeScript === undefined ? {} : { fakeScript }),
-    connectMcp: () =>
-      connectOsMcpServers({
+    connectMcp: async () => {
+      await sessionEnv.changed();
+      return connectOsMcpServers({
         // The image ships no jarvis-pkg (M2.5 contracts §6, §7 #14).
         servers: readonlyProfile
           ? TRUSTED_MCP_SERVERS.filter((name) => existsSync(join(mcpDir, name)))
           : TRUSTED_MCP_SERVERS,
         commandFor: (name) => ({ command: join(mcpDir, name), args: [] }),
-        spawn: nodeMcpSpawn(env, info),
+        spawn: nodeMcpSpawn(sessionEnv.current(), info),
         timers,
         clientVersion: build,
         log: info,
-      }),
+      });
+    },
+    sessionChanged: () => sessionEnv.changed(),
     ...(readonlyProfile ? {} : { registryServers }),
     embedder,
     memoryEmbedder,

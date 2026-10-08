@@ -112,6 +112,10 @@ export type OsAgentDeps = {
   /** Set only from JARVIS_FAKE_PROVIDER (contracts §5). */
   fakeScript?: readonly FakeTurn[];
   connectMcp(): Promise<McpSession[]>;
+  /** Rafiq M3 §5.14: true when the graphical session's environment changed
+   *  since the host servers started (session-env.ts); they restart before
+   *  the next turn. */
+  sessionChanged?(): Promise<boolean>;
   /** Add-on servers from mcp.d (registry-servers.ts); none when absent. */
   registryServers?: { load(): Promise<LoadedRegistry> };
   /** Calls onChange when mcp.d changes; returns a stop function. */
@@ -278,6 +282,7 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
     deps.log(line);
   };
   let hostSessions: McpSession[] = [];
+  let hostStale = false;
   let addOns: LoadedRegistry = EMPTY_REGISTRY;
   let addOnsDirty = true;
   let stopWatching: () => void = () => {};
@@ -290,7 +295,7 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
   /** Host servers reconnect when one died; add-ons reload only when asked
    *  (before a turn) and something changed, never under a running turn. */
   function ensureRegistry(options: { reloadAddOns?: boolean } = {}): Promise<ToolRegistry> {
-    const hostOk = hostSessions.length > 0 && hostSessions.every((s) => s.alive);
+    const hostOk = !hostStale && hostSessions.length > 0 && hostSessions.every((s) => s.alive);
     const reloadAddOns =
       deps.registryServers !== undefined &&
       addOnsDirty &&
@@ -301,6 +306,7 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
     if (loading !== undefined) return loading;
     loading = (async () => {
       if (!hostOk) {
+        hostStale = false;
         for (const old of hostSessions) old.close();
         try {
           hostSessions = await deps.connectMcp();
@@ -340,6 +346,17 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
       loading = undefined;
     });
     return loading;
+  }
+
+  /** Before a turn (never under one): a new display or desktop restarts the
+   *  host servers so they spawn with it (Rafiq M3 §5.14). */
+  async function checkSession(): Promise<void> {
+    if (deps.sessionChanged === undefined) return;
+    try {
+      if (await deps.sessionChanged()) hostStale = true;
+    } catch (error) {
+      deps.log(`[agent] could not read the session environment: ${describeError(error)}`);
+    }
   }
 
   const gate = createRiskGate({
@@ -613,6 +630,7 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
       doctorNote = undefined;
       void (async () => {
         try {
+          await checkSession();
           const tools = await ensureRegistry({ reloadAddOns: true });
           const notes = await memory.recall(text).catch(() => []);
           const before = history.length;
