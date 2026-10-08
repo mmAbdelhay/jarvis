@@ -4,7 +4,7 @@
 #
 #   build.sh --debs DIR --out DIR [--work DIR] [--cache DIR]
 #
-# The five Jarvis .debs go into config/packages.chroot/, which live-build
+# The fourteen Jarvis .debs go into config/packages.chroot/, which live-build
 # turns into a trusted local apt repository inside the chroot, so they are
 # installed with normal dependency resolution and the repo is removed after.
 set -euo pipefail
@@ -25,24 +25,31 @@ die() { echo "build.sh: $*" >&2; exit 1; }
 # shellcheck source=/dev/null
 . /etc/os-release
 [ "${VERSION_CODENAME:-}" = trixie ] || die "run in Debian trixie (found ${VERSION_CODENAME:-unknown})"
-for p in jarvisd jarvis-shell jarvis-pkg jarvis-diag jarvis-helper; do
-  compgen -G "$debs/${p}_*_amd64.deb" >/dev/null || die "no $p .deb in $debs"
+# shellcheck source=../branding/lib/brand.sh
+. "$here/../branding/lib/brand.sh"
+brand_load
+required="jarvisd jarvis-shell jarvis-pkg jarvis-diag jarvis-helper jarvis-ui jarvis-installer jarvis-greeter
+  jarvis-installer-backend jarvis-model-fetch jarvis-ollama jarvis-models-catalog jarvis-archive-keyring jarvis-branding"
+for p in $required; do
+  compgen -G "$debs/${p}_*.deb" >/dev/null || die "no $p .deb in $debs"
 done
 
 if ! command -v lb >/dev/null; then
   apt-get update -qq
   DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
-    live-build xorriso squashfs-tools ca-certificates dpkg-dev >/dev/null
+    live-build xorriso squashfs-tools ca-certificates dpkg-dev gpg >/dev/null
 fi
 
 mkdir -p "$out"
 rm -rf "$work"
 mkdir -p "$work"
 cp -a "$here/auto" "$here/config" "$here/bootappend" "$work/"
-cp "$here/../branding/brand.env" "$work/"
+cp "$here/../branding/brand.env" "$work/brand.env"
 mkdir -p "$work/config/packages.chroot"
 cp "$debs"/*.deb "$work/config/packages.chroot/"
-"$here/scripts/bootloader-timeouts.sh" "$work"
+mkdir -p "$work/branding"
+dpkg-deb -x "$(compgen -G "$debs/jarvis-branding_*_all.deb" | head -n1)" "$work/branding"
+"$here/scripts/bootloader-config.sh" "$work" "$work/branding"
 if [ -n "$cache" ] && [ -d "$cache" ]; then
   mkdir -p "$work/cache"
   cp -a "$cache/." "$work/cache/"
@@ -53,15 +60,16 @@ lb config
 lb build 2>&1 | tee "$out/build.log"
 
 "$here/scripts/verify-chroot.sh" "$work/chroot" 2>&1 | tee -a "$out/build.log"
-"$here/scripts/release-guard.sh" "$work/chroot" "$work/binary"
+if [ "${JARVIS_RELEASE:-0}" = 1 ]; then
+  "$here/scripts/release-guard.sh" "$work/chroot" "$work/binary" --release "$here/../repo/keys"
+else
+  "$here/scripts/release-guard.sh" "$work/chroot" "$work/binary"
+fi
 
 # Soft failures (e.g. Flathub appstream) for the CI job summary.
 grep -o 'JARVIS-BUILD-WARNING: .*' "$out/build.log" | sort -u > "$out/warnings.txt" || true
 
 version=$(dpkg-deb -f "$(compgen -G "$debs/jarvisd_*_amd64.deb" | head -n1)" Version)
-# shellcheck source=../branding/lib/brand.sh
-. "$here/../branding/lib/brand.sh"
-brand_load
 name="${DISTRO_ID}-${version}-amd64.iso"
 mv "$work"/*.hybrid.iso "$out/$name"
 cp "$work"/*.packages "$out/$name.packages"

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# stub-debs.sh OUT — five stand-in Jarvis packages, so the ISO can be built
-# and booted before Plans A, B and C have landed. jarvisd keeps the real
+# stub-debs.sh OUT — ten stand-in Jarvis packages, so the ISO can be built
+# and booted before the real E, F and G packages have landed. jarvisd keeps the real
 # maintainer scripts and a unit that runs /bin/true; jarvis-shell opens a
 # terminal (relaunch-loop snippet at the real package's path), which shows the
 # session works; jarvis-helper keeps its real postinst and polkit rule.
@@ -55,3 +55,19 @@ stub jarvis-diag
 mkdir -p "$tmp/jarvis-helper/usr/share/polkit-1/rules.d"
 cp "$packaging/jarvis-helper/50-jarvis.rules" "$tmp/jarvis-helper/usr/share/polkit-1/rules.d/"
 stub jarvis-helper "$packaging/jarvis-helper"
+
+mkdir -p "$tmp/jarvis-ui/usr/lib/x86_64-linux-gnu/qt6/qml/Jarvis/UI"
+echo 'module Jarvis.UI' > "$tmp/jarvis-ui/usr/lib/x86_64-linux-gnu/qt6/qml/Jarvis/UI/qmldir"
+stub jarvis-ui
+# The stub greeter is a terminal login inside cage; config and diversion are real.
+mkdir -p "$tmp/jarvis-greeter/usr/bin" "$tmp/jarvis-greeter/etc/greetd"
+printf '#!/bin/sh\nexec foot -e agreety --cmd labwc\n' > "$tmp/jarvis-greeter/usr/bin/jarvis-greeter"
+chmod 0755 "$tmp/jarvis-greeter/usr/bin/jarvis-greeter"
+cp "$packaging/jarvis-greeter/config.toml" "$tmp/jarvis-greeter/etc/greetd/config.toml"
+stub jarvis-greeter "$packaging/jarvis-greeter"
+stub jarvis-installer
+stub jarvis-installer-backend
+mkdir -p "$tmp/jarvis-model-fetch/usr/lib/systemd/system"
+printf '[Unit]\nConditionPathExists=/var/lib/jarvis/model-pending\n[Service]\nType=oneshot\nExecStart=/bin/true\n[Install]\nWantedBy=multi-user.target\n' \
+  > "$tmp/jarvis-model-fetch/usr/lib/systemd/system/jarvis-model-fetch.service"
+stub jarvis-model-fetch "$packaging/jarvis-model-fetch"
