@@ -82,7 +82,9 @@ def run_updates(run, m, site: Path) -> None:
             new = sh("dpkg-query -W -f='${Version}' jarvis-shell").strip()
             assert new == f"{old}+update1", f"jarvis-shell {old} -> {new}"
             last = sh("awk 'BEGIN{RS=\"\"} END{print}' /var/log/apt/history.log")
-            assert "Upgrade: jarvis-shell" in last and "Remove:" not in last, last
+            # jarvis-classic pins jarvis-shell (= V), so it upgrades in the same run.
+            upgraded = [l for l in last.splitlines() if l.startswith("Upgrade:")]
+            assert upgraded and "jarvis-shell:" in upgraded[0] and "Remove:" not in last, last
             return f"jarvis-shell {old} -> {new}"
 
         run.check("criterion 9: update my computer → one card → upgrade, nothing removed", update_my_computer)
