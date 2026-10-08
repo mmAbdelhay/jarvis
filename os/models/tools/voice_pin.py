@@ -20,7 +20,7 @@ from pathlib import Path
 
 REGISTRY = Path(__file__).resolve().parents[1] / "voice.json"
 HF = re.compile(r"^https://huggingface\.co/(?P<repo>[^/]+/[^/]+)/resolve/(?P<rev>[^/]+)/(?P<path>.+)$")
-UA = {"User-Agent": "rafiq-voice-pin/1"}
+UA = {"User-Agent": "jarvis-voice-pin/1"}
 
 
 def http_json(url: str):
