@@ -74,7 +74,7 @@ func TestEntryRefusals(t *testing.T) {
 
 func TestParseIndexDropsBadEntriesKeepsGood(t *testing.T) {
 	good, _ := json.Marshal(validEntry())
-	doc := `{"version":1,"generatedAt":"2026-10-09T08:00:00Z","future":true,"entries":[` +
+	doc := `{"version":1,"generatedAt":"2026-10-09T08:00:00Z","validUntil":"2026-10-16T08:00:00Z","future":true,"entries":[` +
 		string(good) + `,{"id":"../evil"},` + string(good) + `]}`
 	ix, err := ParseIndex([]byte(doc))
 	if err != nil {
@@ -97,9 +97,9 @@ func TestParseIndexDropsBadEntriesKeepsGood(t *testing.T) {
 func TestParseIndexRefusesTheWholeDocument(t *testing.T) {
 	for name, doc := range map[string]string{
 		"not an object": `[]`,
-		"format 2":      `{"version":2,"generatedAt":"2026-10-09T08:00:00Z","entries":[]}`,
+		"format 2":      `{"version":2,"generatedAt":"2026-10-09T08:00:00Z","validUntil":"2026-10-16T08:00:00Z","entries":[]}`,
 		"bad date":      `{"version":1,"generatedAt":"yesterday","entries":[]}`,
-		"too large":     `{"version":1,"generatedAt":"2026-10-09T08:00:00Z","entries":[]}` + strings.Repeat(" ", MaxIndexBytes),
+		"too large":     `{"version":1,"generatedAt":"2026-10-09T08:00:00Z","validUntil":"2026-10-16T08:00:00Z","entries":[]}` + strings.Repeat(" ", MaxIndexBytes),
 	} {
 		if _, err := ParseIndex([]byte(doc)); !errors.Is(err, ErrInvalid) {
 			t.Errorf("%s: err = %v", name, err)
@@ -111,7 +111,7 @@ func TestPathsAndToolsMarshalAsLists(t *testing.T) {
 	e := validEntry()
 	e.Permissions.Paths = nil
 	b, _ := json.Marshal(e)
-	ix, err := ParseIndex([]byte(`{"version":1,"generatedAt":"2026-10-09T08:00:00Z","entries":[` + string(b) + `]}`))
+	ix, err := ParseIndex([]byte(`{"version":1,"generatedAt":"2026-10-09T08:00:00Z","validUntil":"2026-10-16T08:00:00Z","entries":[` + string(b) + `]}`))
 	if err != nil || len(ix.Entries) != 1 {
 		t.Fatalf("%v %v", ix, err)
 	}
@@ -132,7 +132,7 @@ func TestValidUntilBounded(t *testing.T) {
 	if err != nil || !ix.Expiry().Equal(time.Date(2026, 11, 8, 8, 0, 0, 0, time.UTC)) {
 		t.Fatalf("%v %v", ix, err)
 	}
-	for _, vu := range []string{"2026-11-09T08:00:00Z", "soon"} {
+	for _, vu := range []string{"2026-11-09T08:00:00Z", "soon", ""} {
 		doc := `{"version":1,"generatedAt":"2026-10-09T08:00:00Z","validUntil":"` + vu + `","entries":[]}`
 		if _, err := ParseIndex([]byte(doc)); !errors.Is(err, ErrInvalid) {
 			t.Errorf("%s: err = %v", vu, err)

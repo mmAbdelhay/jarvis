@@ -79,9 +79,9 @@ const MaxIndexLifetime = 30 * 24 * time.Hour
 type Index struct {
 	Version     int    `json:"version"`
 	GeneratedAt string `json:"generatedAt"`
-	// ValidUntil is the index expiry (contracts §7.6); empty when absent.
+	// ValidUntil is the index expiry (contracts §7.6); required, so an old signed index cannot be replayed forever.
 	// Task 3 refuses an index past it.
-	ValidUntil string  `json:"validUntil,omitempty"`
+	ValidUntil string  `json:"validUntil"`
 	Entries    []Entry `json:"entries"`
 	// Rejected says why each dropped entry was dropped (never sent anywhere).
 	Rejected []string `json:"-"`
@@ -264,14 +264,15 @@ func ParseIndex(b []byte) (*Index, error) {
 	if err != nil {
 		return nil, invalid("index generatedAt %q is not RFC 3339", raw.GeneratedAt)
 	}
-	if raw.ValidUntil != "" {
-		vu, err := time.Parse(time.RFC3339, raw.ValidUntil)
-		if err != nil {
-			return nil, invalid("index validUntil %q is not RFC 3339", raw.ValidUntil)
-		}
-		if vu.After(gen.Add(MaxIndexLifetime)) {
-			return nil, invalid("index validUntil is more than 30 days after generatedAt")
-		}
+	if raw.ValidUntil == "" {
+		return nil, invalid("index has no validUntil")
+	}
+	vu, err := time.Parse(time.RFC3339, raw.ValidUntil)
+	if err != nil {
+		return nil, invalid("index validUntil %q is not RFC 3339", raw.ValidUntil)
+	}
+	if vu.After(gen.Add(MaxIndexLifetime)) {
+		return nil, invalid("index validUntil is more than 30 days after generatedAt")
 	}
 	ix := &Index{Version: raw.Version, GeneratedAt: raw.GeneratedAt, ValidUntil: raw.ValidUntil, Entries: []Entry{}}
 	seen := map[string]bool{}
@@ -313,7 +314,7 @@ func (ix *Index) Generated() time.Time {
 	return t
 }
 
-// Expiry is ValidUntil as a time; the zero time when the index has none.
+// Expiry is ValidUntil as a time; ParseIndex guarantees it is set.
 func (ix *Index) Expiry() time.Time {
 	t, _ := time.Parse(time.RFC3339, ix.ValidUntil)
 	return t
