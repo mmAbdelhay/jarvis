@@ -30,7 +30,7 @@ class CardModel : public QAbstractListModel {
 public:
     enum Role {
         ItemIdRole = Qt::UserRole + 1, ToolRole, TitleRole, DetailRole, SourceRole,
-        SourceLabelRole, RiskRole, TickedRole, SecretFieldsRole
+        SourceLabelRole, RiskRole, TickedRole, SecretFieldsRole, ChangeFromRole, ChangeToRole
     };
     Q_ENUM(Role)
 

@@ -108,6 +108,8 @@ Rectangle {
                 required property string sourceLabel
                 required property bool ticked
                 required property var secretFields
+                required property string changeFrom
+                required property string changeTo
 
                 width: itemList.width
                 spacing: 0
@@ -175,12 +177,20 @@ Rectangle {
                         Text {
                             objectName: "detail_" + row.itemId
                             Layout.fillWidth: true
-                            visible: text.length > 0
+                            visible: text.length > 0 && row.changeFrom === ""
                             text: row.detail
                             textFormat: Text.PlainText
                             color: Theme.approvalMuted
                             font.pixelSize: Theme.fontSmall
                             wrapMode: Text.Wrap
+                        }
+                        ChangeValue {
+                            objectName: "change_" + row.itemId
+                            visible: row.changeFrom !== ""
+                            from: row.changeFrom
+                            to: row.changeTo
+                            fromColor: Theme.approvalMuted
+                            toColor: Theme.text
                         }
                     }
 

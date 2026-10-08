@@ -1,4 +1,5 @@
 #include "models/CardModel.h"
+#include "models/SettingChange.h"
 
 #include <QDateTime>
 #include <QJsonArray>
@@ -55,6 +56,11 @@ QVariant CardModel::data(const QModelIndex& index, int role) const
     case RiskRole: return item.risk;
     case TickedRole: return item.ticked;
     case SecretFieldsRole: return item.secretFields;
+    case ChangeFromRole:
+    case ChangeToRole: {
+        const auto change = settingChange(item.tool, item.detail);
+        return change ? (role == ChangeFromRole ? change->first : change->second) : QString();
+    }
     default: return {};
     }
 }
@@ -63,7 +69,7 @@ QHash<int, QByteArray> CardModel::roleNames() const
 {
     return {{ItemIdRole, "itemId"}, {ToolRole, "tool"}, {TitleRole, "title"}, {DetailRole, "detail"},
             {SourceRole, "source"}, {SourceLabelRole, "sourceLabel"}, {RiskRole, "risk"},
-            {TickedRole, "ticked"}, {SecretFieldsRole, "secretFields"}};
+            {TickedRole, "ticked"}, {SecretFieldsRole, "secretFields"}, {ChangeFromRole, "changeFrom"}, {ChangeToRole, "changeTo"}};
 }
 
 int CardModel::tickedCount() const

@@ -1,4 +1,5 @@
 #include "models/Conversation.h"
+#include "models/SettingChange.h"
 
 using namespace Qt::StringLiterals;
 
@@ -25,6 +26,13 @@ QVariant Conversation::data(const QModelIndex& index, int role) const
     case CallIdRole: return entry.callId;
     case ToolNameRole: return entry.toolName;
     case ToolStatusRole: return entry.toolStatus;
+    case ChangeFromRole:
+    case ChangeToRole: {
+        if (entry.kind != u"tool")
+            return QString();
+        const auto change = settingChange(entry.toolName, entry.text);
+        return change ? (role == ChangeFromRole ? change->first : change->second) : QString();
+    }
     default: return {};
     }
 }
@@ -32,7 +40,7 @@ QVariant Conversation::data(const QModelIndex& index, int role) const
 QHash<int, QByteArray> Conversation::roleNames() const
 {
     return {{KindRole, "kind"}, {TextRole, "text"}, {TurnIdRole, "turnId"},
-            {CallIdRole, "callId"}, {ToolNameRole, "toolName"}, {ToolStatusRole, "toolStatus"}};
+            {CallIdRole, "callId"}, {ToolNameRole, "toolName"}, {ToolStatusRole, "toolStatus"}, {ChangeFromRole, "changeFrom"}, {ChangeToRole, "changeTo"}};
 }
 
 QVariantMap Conversation::get(int row) const
@@ -104,7 +112,7 @@ void Conversation::applyEvent(const QJsonObject& event)
             if (entry.kind == u"tool" && entry.callId == callId) {
                 entry.toolStatus = status;
                 entry.text = summary;
-                emit dataChanged(index(int(row)), index(int(row)), {TextRole, Qt::DisplayRole, ToolStatusRole});
+                emit dataChanged(index(int(row)), index(int(row)), {TextRole, Qt::DisplayRole, ToolStatusRole, ChangeFromRole, ChangeToRole});
                 return;
             }
         }

@@ -14,7 +14,7 @@ class Conversation : public QAbstractListModel {
     Q_PROPERTY(bool busy READ busy NOTIFY activeTurnChanged)
 
 public:
-    enum Role { KindRole = Qt::UserRole + 1, TextRole, TurnIdRole, CallIdRole, ToolNameRole, ToolStatusRole };
+    enum Role { KindRole = Qt::UserRole + 1, TextRole, TurnIdRole, CallIdRole, ToolNameRole, ToolStatusRole, ChangeFromRole, ChangeToRole };
     Q_ENUM(Role)
 
     explicit Conversation(QObject* parent = nullptr);

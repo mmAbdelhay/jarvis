@@ -47,6 +47,8 @@ Item {
                 required property string text
                 required property string toolName
                 required property string toolStatus
+                required property string changeFrom
+                required property string changeTo
 
                 x: (list.width - list.columnWidth) / 2
                 width: list.columnWidth
@@ -118,10 +120,19 @@ Item {
                             Layout.fillWidth: true
                             text: entry.text
                             textFormat: Text.PlainText
+                            visible: entry.changeFrom === ""
                             color: Theme.muted
                             elide: Text.ElideRight
                             font.family: Theme.mono
                             font.pixelSize: Theme.fontSmall
+                        }
+                        ChangeValue {
+                            objectName: "toolChange"
+                            Layout.fillWidth: true
+                            visible: entry.changeFrom !== ""
+                            from: entry.changeFrom
+                            to: entry.changeTo
+                            pixelSize: Theme.fontSmall
                         }
                     }
                 }
