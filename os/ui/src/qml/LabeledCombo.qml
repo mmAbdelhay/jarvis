@@ -39,6 +39,8 @@ ColumnLayout {
         Accessible.name: root.label
         contentItem: Text {
             leftPadding: 12
+            rightPadding: 12
+            horizontalAlignment: Text.AlignLeft
             text: box.displayText
             textFormat: Text.PlainText
             font: box.font

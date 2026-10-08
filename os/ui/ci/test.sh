@@ -14,4 +14,6 @@ test -f "$dir/qmldir"
 test -f "$dir/jarvis_ui.qmltypes"
 test -f "$dir/libjarvis_ui.so"
 grep -qx 'module Jarvis.UI' "$dir/qmldir"
+test -f os/ui/build/stage/usr/share/jarvis/i18n/jarvis-ui_ar.qm   # contracts §3
+test -f os/ui/build/stage/usr/share/jarvis/i18n/jarvis-ui_en.qm
 echo "jarvis-ui: build, tests and install layout OK"

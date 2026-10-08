@@ -13,7 +13,7 @@ RowLayout {
 
     spacing: 8
     Accessible.role: Accessible.StaticText
-    Accessible.name: "From " + from + " to " + to
+    Accessible.name: qsTr("From %1 to %2").arg(from).arg(to)
 
     Text {
         objectName: "changeFrom"
@@ -24,7 +24,7 @@ RowLayout {
         font.pixelSize: root.pixelSize
         elide: Text.ElideRight
     }
-    Icon { path: Icons.arrowRight; color: root.fromColor; size: 14; strokeWidth: 2 }
+    Icon { path: Icons.arrowRight; mirrorInRtl: true; color: root.fromColor; size: 14; strokeWidth: 2 }
     Text {
         objectName: "changeTo"
         Layout.maximumWidth: 260

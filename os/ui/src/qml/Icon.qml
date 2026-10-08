@@ -8,6 +8,12 @@ Item {
     property color color: Theme.muted
     property real strokeWidth: 1.8
     property int size: 22
+    // Directional glyphs (arrows, chevrons) point the other way in Arabic.
+    property bool mirrorInRtl: false
+    transform: Scale {
+        origin.x: icon.width / 2
+        xScale: icon.mirrorInRtl && Qt.application.layoutDirection === Qt.RightToLeft ? -1 : 1
+    }
 
     implicitWidth: size
     implicitHeight: size

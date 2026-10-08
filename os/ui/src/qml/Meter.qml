@@ -12,6 +12,7 @@ Rectangle {
     Accessible.role: Accessible.ProgressBar
 
     Rectangle {
+        anchors.left: parent.left
         width: root.width * Math.max(0, Math.min(1, root.fraction))
         height: root.height
         radius: root.radius
