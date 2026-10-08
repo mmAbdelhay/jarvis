@@ -28,7 +28,6 @@ check "no secret echoed" bash -c "! grep -nE 'echo .*secrets\\.' '$wf'"
 check "os paths still filtered" grep -q '"os/\*\*"' "$wf"
 # --- M2.5 Plan L ---
 for j in agent-install docker-image docker-publish; do check "job $j" grep -qw "$j" <<<"$jobs"; done
-check "M2.5 CI version" grep -qF "'0.2.5~ci{0}'" "$wf"
 check "CLI sources trigger the workflow" grep -qF '"packages/cli/**"' "$wf"
 check "M2.5 wiring" python3 - "$wf" <<'PY'
 import sys, yaml
@@ -66,5 +65,31 @@ for s in ("os/registry/tests/run.sh", "discover -s os/registry/tests", "voice.py
     assert s in chk, s
 assert "jarvis-cli" in d("build-daemon") and "@jarvis/cli build" in d("build-daemon")
 assert "jarvis-agent" in d("build-distro")
+PY
+# --- Rafiq M3 Plan P ---
+for j in build-voice voice-roundtrip session-test; do check "job $j" grep -qw "$j" <<<"$jobs"; done
+check "M3 CI version" grep -qF "'0.3.0~ci{0}'" "$wf"
+check "M3 wiring" python3 - "$wf" <<'PY'
+import sys, yaml
+w = yaml.safe_load(open(sys.argv[1]))
+j = w["jobs"]
+d = lambda n: yaml.safe_dump(j[n])
+needs = lambda n: {j[n]["needs"]} if isinstance(j[n]["needs"], str) else set(j[n]["needs"])
+assert "jarvis-settings jarvis-apps jarvis-wl" in d("build-go")
+qt = d("build-qt")
+for s in ("os/lock/deps/debian-build.txt", "os/idle/deps/debian-build.txt", "os/lock/ci/test.sh",
+          "os/idle/ci/test.sh", "jarvis-lock jarvis-idle"):
+    assert s in qt, s
+v = d("build-voice")
+for s in ("jarvis-voice-engines jarvis-voice-models", "debs-voice", "voice.json", "engines.env", "voice.py scan-debs"):
+    assert s in v, s
+assert "build-voice" in needs("build-iso")
+assert needs("voice-roundtrip") == {"build-voice"} and "os/packaging/voice/roundtrip.sh" in d("voice-roundtrip")
+assert "build-qt" in needs("session-test") and "os/iso/session/run.sh" in d("session-test")
+for n in ("voice-roundtrip", "session-test"):
+    assert "--privileged" not in d(n), n
+for n in ("repo", "release"):
+    assert {"session-test", "voice-roundtrip"} <= needs(n), n
+assert "discover -s os/packaging/lib/tests" in d("checks")
 PY
 finish
