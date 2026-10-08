@@ -6,6 +6,7 @@
 #include "GreetdClient.h"
 #include "DesktopEntry.h"
 #include "Language.h"
+#include "GreeterLanguage.h"
 #include "PowerActions.h"
 
 using namespace Qt::StringLiterals;
@@ -145,8 +146,10 @@ void LoginModel::onResponse(const QJsonObject& response)
         wipePending();
         m_phase = Phase::Starting;
         setState(u"starting"_s);
+        const QString locale = GreeterLanguage::sessionLocale(jarvis::ui::currentLanguage());
+        const QJsonArray environment = locale.isEmpty() ? QJsonArray{} : QJsonArray{u"LANG="_s + locale};
         m_client->send({{"type", "start_session"}, {"cmd", QJsonArray::fromStringList(m_sessionCommand)},
-                        {"env", QJsonArray{jarvis::ui::currentLanguage() == u"ar" ? u"LANG=ar_EG.UTF-8"_s : u"LANG=en_US.UTF-8"_s}}});
+                        {"env", environment}});
         return;
     }
     if (type == u"auth_message") {
@@ -209,6 +212,15 @@ void LoginModel::onFailed(const QString& message)
     emit failuresChanged();
     m_client->reset();
     setState(u"idle"_s);
+}
+
+void LoginModel::setSessionFile(const QString& path, bool explicitChoice)
+{
+    m_sessionCommand.clear();
+    if (const auto entry = jarvis::ui::parseDesktopEntry(path))
+        setSessionExec(entry->exec);
+    if (m_sessionCommand.isEmpty() && !explicitChoice)
+        m_sessionCommand = QStringList{u"labwc"_s};
 }
 
 void LoginModel::setSessionExec(const QString& exec)

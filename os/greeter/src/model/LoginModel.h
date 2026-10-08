@@ -52,6 +52,8 @@ public:
     int failures() const { return m_failures; }
 
     void setSessionExec(const QString& exec);
+    // Only an explicitly chosen unavailable session blocks login.
+    void setSessionFile(const QString& path, bool explicitChoice);
 
 public slots:
     void retranslate();

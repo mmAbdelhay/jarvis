@@ -37,6 +37,20 @@ private slots:
         QCOMPARE(GreeterLanguage::systemLanguage(QStringLiteral(JARVIS_GREETER_TEST_DATA "/locale-ar")), u"ar"_s);
     }
 
+    void sessionLocalePreservesSystemUnlessLanguageDiffers()
+    {
+        const QString british = QStringLiteral(JARVIS_GREETER_TEST_DATA "/locale-quoted");
+        const QString arabic = QStringLiteral(JARVIS_GREETER_TEST_DATA "/locale-ar");
+        qputenv("LANG", "en_US.UTF-8");
+        QCOMPARE(GreeterLanguage::sessionLocale(u"en"_s, british), u"en_GB.UTF-8"_s);
+        QCOMPARE(GreeterLanguage::sessionLocale(u"ar"_s, british), u"ar_EG.UTF-8"_s);
+        QCOMPARE(GreeterLanguage::sessionLocale(u"en"_s, british), u"en_GB.UTF-8"_s);
+        QCOMPARE(GreeterLanguage::sessionLocale(u"ar"_s, arabic), u"ar_EG.UTF-8"_s);
+        QCOMPARE(GreeterLanguage::sessionLocale(u"en"_s, arabic), u"en_US.UTF-8"_s);
+        qputenv("LANG", "en_GB.UTF-8");
+        QCOMPARE(GreeterLanguage::sessionLocale(u"en"_s, u"/nonexistent/locale"_s), u"en_GB.UTF-8"_s);
+    }
+
     void toggleSwitchesBothWays()
     {
         QStringList applied;

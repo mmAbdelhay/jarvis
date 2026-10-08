@@ -27,6 +27,9 @@ public:
     // System LANG= in localeFile wins (contracts §6); environment is a fallback.
     static QString systemLanguage(const QString& localeFile = QStringLiteral("/etc/default/locale"));
 
+    // Preserve the system locale unless the screen selected another language.
+    static QString sessionLocale(const QString& language, const QString& localeFile = QStringLiteral("/etc/default/locale"));
+
 signals:
     void changed();
 

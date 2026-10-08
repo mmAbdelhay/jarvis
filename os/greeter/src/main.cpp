@@ -13,7 +13,6 @@
 #include "LoginModel.h"
 #include "GreeterLanguage.h"
 #include "Language.h"
-#include "DesktopEntry.h"
 #include "ModelStatus.h"
 #include "UserList.h"
 #ifdef JARVIS_HAVE_DBUS
@@ -56,8 +55,7 @@ int main(int argc, char* argv[])
     PowerActions* power = new FakePower(&app);
 #endif
     auto* login = new LoginModel(client, power, readUsers(), &app);
-    if (const auto entry = jarvis::ui::parseDesktopEntry(parser.value(session)))
-        login->setSessionExec(entry->exec);
+    login->setSessionFile(parser.value(session), parser.isSet(session));
     auto* status = new ModelStatus(ModelStatus::defaultStatePath(), ModelStatus::defaultCatalogPath(), &app);
     // greetd starts the session once the greeter exits after start_session succeeded.
     QObject::connect(login, &LoginModel::sessionStarted, &app, [] { QCoreApplication::exit(0); });

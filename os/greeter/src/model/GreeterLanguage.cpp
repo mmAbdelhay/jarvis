@@ -27,7 +27,8 @@ void GreeterLanguage::toggle()
     emit changed();
 }
 
-QString GreeterLanguage::systemLanguage(const QString& localeFile)
+namespace {
+QString localeFromFile(const QString& localeFile)
 {
     QFile file(localeFile);
     if (file.open(QIODevice::ReadOnly)) {
@@ -38,8 +39,23 @@ QString GreeterLanguage::systemLanguage(const QString& localeFile)
             QString value = line.mid(5).trimmed();
             if (value.size() >= 2 && value.startsWith(u'"') && value.endsWith(u'"'))
                 value = value.mid(1, value.size() - 2);
-            return jarvis::ui::languageForLocale(value);
+            return value;
         }
     }
-    return jarvis::ui::languageFromEnvironment();
+    return {};
+}
+} // namespace
+
+QString GreeterLanguage::systemLanguage(const QString& localeFile)
+{
+    const QString locale = localeFromFile(localeFile);
+    return locale.isEmpty() ? jarvis::ui::languageFromEnvironment() : jarvis::ui::languageForLocale(locale);
+}
+
+QString GreeterLanguage::sessionLocale(const QString& language, const QString& localeFile)
+{
+    if (language != systemLanguage(localeFile))
+        return language == u"ar" ? u"ar_EG.UTF-8"_s : u"en_US.UTF-8"_s;
+    const QString locale = localeFromFile(localeFile);
+    return locale.isEmpty() ? qEnvironmentVariable("LANG") : locale;
 }
