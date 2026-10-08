@@ -21,6 +21,10 @@ m4_fixture() {
     echo '. /usr/share/jarvis-session/labwc/autostart' >> "$c/etc/xdg/labwc/autostart"
   grep -q 'jarvis-session-key --focus' "$c/etc/xdg/labwc/rc.xml" 2>/dev/null ||
     echo '<keybind key="Super_L" onRelease="yes"><action name="Execute" command="/usr/libexec/jarvis/jarvis-session-key --focus" />' >> "$c/etc/xdg/labwc/rc.xml"
+  mkdir -p "$c/etc/xdg/labwc-classic"
+  echo 'JARVIS_SHELL_BIN=/usr/bin/jarvis-classic JARVIS_CLASSIC_BIN=/usr/bin/jarvis-classic /usr/share/jarvis-shell/jarvis-shell-loop &' > "$c/etc/xdg/labwc-classic/autostart"
+  echo '<keybind key="Super_L" onRelease="yes"><action name="Execute" command="/usr/libexec/jarvis/jarvis-session-key --focus" />' > "$c/etc/xdg/labwc-classic/rc.xml"
+  echo 'QT_QPA_PLATFORM=wayland' > "$c/etc/xdg/labwc-classic/environment"
   # The pinned backup model, as sparse files of the right sizes, in a store owned by "ollama" (= us).
   grep -q '^ollama:' "$c/etc/passwd" 2>/dev/null ||
     echo "ollama:x:$(id -u):$(id -g)::/var/lib/ollama:/usr/sbin/nologin" >> "$c/etc/passwd"

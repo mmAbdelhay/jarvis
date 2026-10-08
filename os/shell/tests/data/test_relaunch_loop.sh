@@ -79,4 +79,18 @@ expect classic-session-sleeps "$(cat "$T/sleeps")" "1 2 4 "
 [ ! -e "$MARKER" ] || { echo "FAIL classic session: marker written"; exit 1; }
 [ ! -s "$T/stderr" ] || { echo "FAIL classic session: unexpected stderr"; exit 1; }
 
+# 7. Run through jarvis-shell-guard, which owns the fallback: the loop neither
+#    counts exits nor writes or empties the guard's marker.
+reset_state; touch "$SOCKET"; mkdir -p "$T/g"
+cp "$T/fake-shell" "$T/g/jarvis-shell-guard"
+(JARVIS_SHELL_BIN="$T/g/jarvis-shell-guard" DURATIONS="0 0 0 0" STOP_AFTER=4 sh "$loop") 2> "$T/stderr"
+expect guarded-runs "$(cat "$T/log")" "shell shell shell shell "
+[ ! -e "$MARKER" ] || { echo "FAIL guarded: loop wrote the marker"; exit 1; }
+mkdir -p "$T/jarvis"; printf 'reason=shell-failed\nsince=5\n' > "$MARKER"; chmod 0600 "$MARKER"
+reset_state_keep() { echo 0 > "$T/runs"; : > "$T/log"; touch "$SOCKET"; }
+reset_state_keep
+JARVIS_SHELL_BIN="$T/g/jarvis-shell-guard" JARVIS_CLASSIC_BIN="$T/fake-classic" DURATIONS="0 0" STOP_AFTER=2 sh "$loop" 2>/dev/null
+expect guarded-marker "$(cat "$MARKER")" "$(printf 'reason=shell-failed\nsince=5')"
+expect guarded-marker-mode "$(python3 -c 'import os,stat,sys; print(oct(stat.S_IMODE(os.stat(sys.argv[1]).st_mode)))' "$MARKER")" 0o600
+
 echo "relaunch loop: backoff, classic fallback and exit-with-labwc OK"

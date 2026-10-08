@@ -13,12 +13,11 @@ install -d -m0755 /etc/xdg/labwc /usr/share/jarvis-shell
 cp "$inc/etc/xdg/labwc/rc.xml" "$inc/etc/xdg/labwc/environment" /etc/xdg/labwc/
 # The real autostart minus what this container does not have.
 grep -v -e 'jarvis-idle' -e 'jarvis-installer' -e '^mako &' "$inc/etc/xdg/labwc/autostart" > /etc/xdg/labwc/autostart
-# The classic session's config directory (contracts §6.14): the classic
-# desktop's own autostart and the ISO's keybinds (Super and Super+Space go
-# through jarvis-session-key, which opens the docked chat in this session).
+# The classic session's config directory, exactly as the ISO ships it
+# (contracts §6.14), minus what this container does not have.
 install -d -m0755 /etc/xdg/labwc-classic
-cp /src/os/classic/data/labwc/autostart /etc/xdg/labwc-classic/autostart
-cp "$inc/etc/xdg/labwc/rc.xml" "$inc/etc/xdg/labwc/environment" /etc/xdg/labwc-classic/
+cp "$inc/etc/xdg/labwc-classic/rc.xml" "$inc/etc/xdg/labwc-classic/environment" /etc/xdg/labwc-classic/
+grep -v -e 'jarvis-idle' -e 'jarvis-installer' -e '^mako &' "$inc/etc/xdg/labwc-classic/autostart" > /etc/xdg/labwc-classic/autostart
 install -m0755 "$inc/usr/local/bin/labwc" /usr/local/bin/labwc
 install -m0755 /src/os/shell/data/jarvis-shell-loop /usr/share/jarvis-shell/jarvis-shell-loop
 cat > /usr/local/bin/jarvis-shell <<'EOF'

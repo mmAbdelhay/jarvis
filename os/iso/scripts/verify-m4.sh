@@ -41,6 +41,14 @@ grep -q 'JARVIS_SHELL_BIN=/usr/libexec/jarvis/jarvis-shell-guard' "$c/usr/share/
   problems+=("the jarvis-session autostart fragment does not use the guard")
 grep -q 'command="/usr/libexec/jarvis/jarvis-session-key --focus"' "$c/etc/xdg/labwc/rc.xml" 2>/dev/null ||
   problems+=("Super does not go through jarvis-session-key (would start the full shell over classic)")
+# The classic session's labwc config (contracts §6.14): jarvis-session classic runs labwc -C here.
+for f in autostart rc.xml environment; do
+  [ -s "$c/etc/xdg/labwc-classic/$f" ] || problems+=("/etc/xdg/labwc-classic/$f missing (the classic session would start without it)")
+done
+grep -q 'JARVIS_SHELL_BIN=/usr/bin/jarvis-classic JARVIS_CLASSIC_BIN=/usr/bin/jarvis-classic' "$c/etc/xdg/labwc-classic/autostart" 2>/dev/null ||
+  problems+=("the classic session's autostart does not run jarvis-classic")
+grep -q 'command="/usr/libexec/jarvis/jarvis-session-key --focus"' "$c/etc/xdg/labwc-classic/rc.xml" 2>/dev/null ||
+  problems+=("Super does not go through jarvis-session-key in the classic session")
 
 # Backup model (§1): the pinned files at Ollama's paths, directories owned by ollama.
 if [[ "$(field jarvis-backup-model Version)" == *~stub* ]]; then

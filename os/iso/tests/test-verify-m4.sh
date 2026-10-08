@@ -16,6 +16,8 @@ fresh; rm "$c/usr/share/wayland-sessions/rafiq-classic.desktop"; check "missing 
 fresh; rm "$c/usr/libexec/jarvis/jarvis-shell-guard"; check "missing fallback guard is caught" caught
 fresh; sed -i 's#jarvis-session/labwc#jarvis-shell/labwc#' "$c/etc/xdg/labwc/autostart"; check "shell started without the guard is caught" caught
 fresh; sed -i 's#/usr/libexec/jarvis/jarvis-session-key --focus#jarvis-shell --focus#' "$c/etc/xdg/labwc/rc.xml"; check "Super straight to jarvis-shell is caught" caught
+fresh; rm "$c/etc/xdg/labwc-classic/autostart"; check "a classic session without its labwc config is caught" caught
+fresh; sed -i 's#/usr/bin/jarvis-classic JARVIS#jarvis-shell JARVIS#' "$c/etc/xdg/labwc-classic/autostart"; check "a classic autostart that is not jarvis-classic is caught" caught
 fresh; rm "$(blob)"; check "missing backup-model blob is caught" caught
 fresh; truncate -s 1 "$(blob)"; check "a blob of the wrong size is caught" caught
 fresh; sed -i 's/^ollama:x:[0-9]*:/ollama:x:4242:/' "$c/etc/passwd"; check "a store not owned by ollama is caught" caught
