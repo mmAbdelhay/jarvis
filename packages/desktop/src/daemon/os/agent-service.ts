@@ -7,6 +7,9 @@
 // No electron here (core/no-electron.test.ts).
 import {
   AGENT_TEXT,
+  DEFAULT_LANG,
+  type Lang,
+  turnLanguage,
   USER_TEXT,
   type Card,
   CONTROL_TEXT,
@@ -86,6 +89,7 @@ import {
   readOsBrainConfig,
   writeOsMemoryEnabled,
   writeOsProviders,
+  writeOsLanguage,
 } from "./provider-list-config.js";
 import { createProviderMonitor } from "./provider-monitor.js";
 import { createSysMonitor } from "./sys-monitor.js";
@@ -102,6 +106,7 @@ export class OsAgentError extends Error {
 }
 
 export type OsAgentDeps = {
+  defaultLanguage?: Lang;
   push(channel: string, payload: unknown): void;
   configPath: string;
   configIo: ConfigIo;
@@ -156,6 +161,8 @@ export type OsAgentDeps = {
 };
 
 export interface OsAgent {
+  language(): Lang;
+  setLanguage(lang: Lang): Promise<null>;
   start(): Promise<void>;
   prompt(text: string, from?: ConfirmFrom): { turnId: string };
   stop(turnId: string): null;
@@ -220,7 +227,8 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
       });
     }
   };
-  let provider: ModelProvider = unavailableProvider(USER_TEXT.en.noProvider);
+  let uiLanguage: Lang = deps.defaultLanguage ?? DEFAULT_LANG;
+  let provider: ModelProvider = unavailableProvider(() => USER_TEXT[uiLanguage].noProvider);
   let brain: OsBrainConfig = emptyBrain();
   let failover: FailoverProvider | undefined;
   const keyStores = (): ProviderKeyStores => ({
@@ -361,6 +369,7 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
   }
 
   const gate = createRiskGate({
+    language: () => uiLanguage,
     emit,
     describe: async (tool, input, lang) => (await ensureRegistry()).describe(tool, input, lang),
     audit: async (entry) => {
@@ -382,7 +391,7 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
       );
       if (undo === undefined) return;
       undoStack.push({
-        title: stepTitle(ran.titles),
+        title: stepTitle(ran.titles, uiLanguage),
         tool: undo.tool.name,
         input: undo.input,
         server: undo.tool.server,
@@ -401,6 +410,7 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
   });
 
   const doctor = createNetworkDoctor({
+    language: () => uiLanguage,
     prepare: async () => {
       await ensureRegistry();
     },
@@ -495,6 +505,7 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
       deps.log(`[agent] ${describeError(error)}`);
       brain = emptyBrain();
     }
+    if (brain.language !== null) uiLanguage = brain.language;
     failover = undefined;
     // JARVIS_FAKE_PROVIDER replaces the configured providers entirely (contracts §6 #11).
     if (deps.fakeScript !== undefined) {
@@ -502,7 +513,7 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
       return;
     }
     if (brain.providers.length === 0) {
-      provider = unavailableProvider(USER_TEXT.en.noProvider);
+      provider = unavailableProvider(() => USER_TEXT[uiLanguage].noProvider);
       return;
     }
     failover = createFailoverProvider({
@@ -545,21 +556,21 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
   }
 
   async function runUndo(request: UndoRequest, from: ConfirmFrom): Promise<UndoResult> {
-    if (locked) throw new OsAgentError("locked", CONTROL_TEXT.en.locked);
+    if (locked) throw new OsAgentError("locked", CONTROL_TEXT[uiLanguage].locked);
     const step = undoStack.pop(request.kind === "files" ? (s) => s.family === "files." : undefined);
     if (step === undefined) return { undone: null };
     const tools = await ensureRegistry();
     // The registry may have been reloaded since: the same name must still be
     // served by the same host server, or nothing runs.
     if (tools.get(step.tool)?.server !== step.server) {
-      throw new OsAgentError("internal", CONTROL_TEXT.en.undoMoved(step.title));
+      throw new OsAgentError("internal", CONTROL_TEXT[uiLanguage].undoMoved(step.title));
     }
     const outcome = await tools.call(step.tool, step.input);
     try {
       await deps.audit.append({
         ts: deps.now(),
         tool: step.tool,
-        title: CONTROL_TEXT.en.undoTitle(step.title),
+        title: CONTROL_TEXT[uiLanguage].undoTitle(step.title),
         input: step.input,
         decision: "approved",
         via: from.via,
@@ -572,7 +583,7 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
     if (!outcome.ok) {
       throw new OsAgentError(
         "internal",
-        CONTROL_TEXT.en.undoFailed(step.title, outcome.text.slice(0, 200)),
+        CONTROL_TEXT[uiLanguage].undoFailed(step.title, outcome.text.slice(0, 200)),
       );
     }
     void sys.refresh();
@@ -590,8 +601,8 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
         const result = await runUndo(request, from);
         reply =
           result.undone === null
-            ? CONTROL_TEXT.en.nothingToUndo
-            : CONTROL_TEXT.en.undone(result.undone);
+            ? CONTROL_TEXT[uiLanguage].nothingToUndo
+            : CONTROL_TEXT[uiLanguage].undone(result.undone);
       } catch (error) {
         reply = describeError(error);
       }
@@ -622,8 +633,10 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
     },
 
     prompt(text, from = LOCAL_CONFIRM) {
-      if (turn !== undefined) throw new OsAgentError("bad-request", USER_TEXT.en.turnRunning);
-      if (doctor.running) throw new OsAgentError("bad-request", USER_TEXT.en.doctorRunning);
+      if (turn !== undefined)
+        throw new OsAgentError("bad-request", USER_TEXT[uiLanguage].turnRunning);
+      if (doctor.running)
+        throw new OsAgentError("bad-request", USER_TEXT[uiLanguage].doctorRunning);
       const undoRequest = undoRequestOf(text);
       if (undoRequest !== undefined) return promptUndo(text, undoRequest, from);
       const turnId = deps.newId();
@@ -656,6 +669,7 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
             },
             {
               turnId,
+              lang: turnLanguage(uiLanguage, text),
               history,
               text,
               signal: controller.signal,
@@ -691,7 +705,7 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
 
     confirm(answer, from = LOCAL_CONFIRM) {
       // Rafiq M3 §2: no card is answered while the screen is locked, by anyone.
-      if (locked) throw new OsAgentError("locked", CONTROL_TEXT.en.locked);
+      if (locked) throw new OsAgentError("locked", CONTROL_TEXT[uiLanguage].locked);
       try {
         gate.confirm(answer, from);
       } catch (error) {
@@ -702,8 +716,9 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
     },
 
     async undo(from = LOCAL_CONFIRM) {
-      if (locked) throw new OsAgentError("locked", CONTROL_TEXT.en.locked);
-      if (turn !== undefined) throw new OsAgentError("bad-request", USER_TEXT.en.turnRunning);
+      if (locked) throw new OsAgentError("locked", CONTROL_TEXT[uiLanguage].locked);
+      if (turn !== undefined)
+        throw new OsAgentError("bad-request", USER_TEXT[uiLanguage].turnRunning);
       return runUndo({ kind: "any" }, from);
     },
 
@@ -775,7 +790,7 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
 
     async save(request) {
       if (request.providers.some((draft) => draft.model === "")) {
-        throw new OsAgentError("bad-request", USER_TEXT.en.pickModel);
+        throw new OsAgentError("bad-request", USER_TEXT[uiLanguage].pickModel);
       }
       // Contracts §7 #11: probe only new or changed providers (or ones that
       // carry a key); an unchanged saved entry keeps its saved supportsTools.
@@ -854,7 +869,8 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
     },
 
     doctorStart() {
-      if (turn !== undefined) throw new OsAgentError("bad-request", USER_TEXT.en.turnRunning);
+      if (turn !== undefined)
+        throw new OsAgentError("bad-request", USER_TEXT[uiLanguage].turnRunning);
       return doctor.start();
     },
 
@@ -906,11 +922,11 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
 
     async memoryList(limit) {
       if (!memoryOn() || deps.memory === undefined) {
-        throw new OsAgentError("unsupported", USER_TEXT.en.memoryOff);
+        throw new OsAgentError("unsupported", USER_TEXT[uiLanguage].memoryOff);
       }
       // No keyring (or locked) → open() yields null → memory is off (§7 #9).
       if ((await deps.memory?.open()) == null) {
-        throw new OsAgentError("unsupported", USER_TEXT.en.memoryOff);
+        throw new OsAgentError("unsupported", USER_TEXT[uiLanguage].memoryOff);
       }
       return memory.list(limit);
     },
@@ -948,13 +964,29 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
         return { count: summary.count, security: summary.security };
       } catch (error) {
         if (error instanceof UpdatesCheckError && error.code === "not_found") {
-          throw new OsAgentError("unsupported", USER_TEXT.en.updatesUnavailable);
+          throw new OsAgentError("unsupported", USER_TEXT[uiLanguage].updatesUnavailable);
         }
-        throw new OsAgentError("internal", USER_TEXT.en.updatesCheckFailed(describeError(error)));
+        throw new OsAgentError(
+          "internal",
+          USER_TEXT[uiLanguage].updatesCheckFailed(describeError(error)),
+        );
       }
     },
 
+    language: () => uiLanguage,
+    async setLanguage(lang) {
+      try {
+        await writeOsLanguage(deps.configPath, lang, deps.configIo);
+      } catch (error) {
+        throw new OsAgentError("internal", describeError(error));
+      }
+      brain = { ...brain, language: lang };
+      uiLanguage = lang;
+      deps.push(OS_CONTROL_PUSHES.uiLanguage, { lang });
+      return null;
+    },
     resync() {
+      deps.push(OS_CONTROL_PUSHES.uiLanguage, { lang: uiLanguage });
       // Contracts §6 #7: on every new connection, re-push provider:status,
       // doctor:state, sys:snapshot and every open card (the shell de-dups
       // cards by cardId).

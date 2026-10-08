@@ -6,7 +6,7 @@
 // (remote:*, pairing:open/cancel) are local-only.
 //
 // No electron here (core/no-electron.test.ts).
-import { CONTROL_TEXT } from "@jarvis/core";
+import { CONTROL_TEXT, type Lang } from "@jarvis/core";
 import type { Bridge, BridgeDeps, RemoteStatus } from "@jarvis/remote";
 import {
   OS_CONTROL_PUSHES,
@@ -47,6 +47,7 @@ export type OsRemote = OsRemoteControls & {
 };
 
 export type OsRemoteDeps = {
+  language(): Lang;
   createBridge(deps: BridgeDeps): Promise<Bridge>;
   io: Omit<
     BridgeDeps,
@@ -150,7 +151,8 @@ export function createOsRemote(deps: OsRemoteDeps): OsRemote {
   }
 
   function need(): Bridge {
-    if (bridge === undefined) throw new OsAgentError("unsupported", CONTROL_TEXT.en.remoteOff);
+    if (bridge === undefined)
+      throw new OsAgentError("unsupported", CONTROL_TEXT[deps.language()].remoteOff);
     return bridge;
   }
 
@@ -216,7 +218,7 @@ export function createOsRemote(deps: OsRemoteDeps): OsRemote {
       const opened = await target.openPairing();
       const pairing = target.status().pairing;
       if (opened !== "opened" || pairing.kind !== "open") {
-        throw new OsAgentError("unsupported", CONTROL_TEXT.en.pairingUnavailable);
+        throw new OsAgentError("unsupported", CONTROL_TEXT[deps.language()].pairingUnavailable);
       }
       return { uri: pairing.uri, expiresAt: pairing.expiresAt };
     },
@@ -229,10 +231,10 @@ export function createOsRemote(deps: OsRemoteDeps): OsRemote {
     answerPairing(answer) {
       const pairing = need().status().pairing;
       if (pairing.kind !== "confirming") {
-        throw new OsAgentError("bad-request", CONTROL_TEXT.en.noPairingRequest);
+        throw new OsAgentError("bad-request", CONTROL_TEXT[deps.language()].noPairingRequest);
       }
       if (answer.requestId !== pairing.requestId) {
-        throw new OsAgentError("bad-request", CONTROL_TEXT.en.pairingChanged);
+        throw new OsAgentError("bad-request", CONTROL_TEXT[deps.language()].pairingChanged);
       }
       need().decidePairing(pairing.requestId, answer.approve);
       return null;

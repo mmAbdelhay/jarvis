@@ -23,7 +23,7 @@ import { mkdtemp, rm, mkdir, readdir, readFile, rename, writeFile } from "node:f
 import { homedir, tmpdir, totalmem } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { type FakeTurn, parseFakeScript, TRUSTED_MCP_SERVERS } from "@jarvis/core";
+import { langFromLocale, type FakeTurn, parseFakeScript, TRUSTED_MCP_SERVERS } from "@jarvis/core";
 import {
   auditLogPath,
   createAuditLog,
@@ -301,6 +301,7 @@ async function main(argv: readonly string[]): Promise<void> {
     }
   }
   const voiceIo = createVoiceIo({
+    language: () => agent.language(),
     models,
     // mkdtemp makes a 0700 directory; the runtime dir is per-login tmpfs.
     makeTempDir: () => mkdtemp(join(env["XDG_RUNTIME_DIR"] ?? tmpdir(), "jarvis-voice-")),
@@ -325,6 +326,7 @@ async function main(argv: readonly string[]): Promise<void> {
 
   let voice: ReturnType<typeof createOsVoice> | undefined;
   const agent = createOsAgent({
+    defaultLanguage: langFromLocale({ LANG: process.env["LANG"] }),
     push: (channel, payload) => push(channel, payload),
     configPath: osConfigPath(home),
     configIo,
@@ -340,7 +342,10 @@ async function main(argv: readonly string[]): Promise<void> {
         }),
     ...(readonlyProfile ? { toolProfile: "readonly" as const } : {}),
     makeProvider: (section, apiKey) =>
-      buildProvider(section, apiKey, { fetch: (url, init) => fetch(url, init) }),
+      buildProvider(section, apiKey, {
+        fetch: (url, init) => fetch(url, init),
+        language: () => agent.language(),
+      }),
     ...(fakeScript === undefined ? {} : { fakeScript }),
     connectMcp: async () => {
       await sessionEnv.changed();
@@ -383,6 +388,7 @@ async function main(argv: readonly string[]): Promise<void> {
   const remoteDir = join(home, ".config", "jarvis", "remote");
   let router: OsRouter | undefined;
   const remote = createOsRemote({
+    language: () => agent.language(),
     createBridge,
     io: {
       dir: remoteDir,

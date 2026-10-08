@@ -5,7 +5,13 @@
 // Local control and phone callers share routing; phone requests are allowlisted.
 //
 // No electron here (core/no-electron.test.ts).
-import { type AuditVia, CONTROL_TEXT, type ConfirmFrom, LOCAL_CONFIRM } from "@jarvis/core";
+import {
+  type Lang,
+  type AuditVia,
+  CONTROL_TEXT,
+  type ConfirmFrom,
+  LOCAL_CONFIRM,
+} from "@jarvis/core";
 import {
   MAX_VOICE_BYTES,
   OS_CONTROL_BLOBS,
@@ -29,6 +35,7 @@ import {
   parseSetLocked,
   parseSetSpeak,
   parseVoiceUtteranceMeta,
+  parseUiSetLanguage,
 } from "@jarvis/wire";
 import { ControlRequestError } from "../control/messages.js";
 import type { ControlConnection, ControlHandlers } from "../control/server.js";
@@ -95,9 +102,9 @@ export function confirmFrom(origin: OsOrigin): ConfirmFrom {
     : { via: phoneVia(origin.device.name), allowPassword: false };
 }
 
-export function requireLocal(origin: OsOrigin): void {
+export function requireLocal(origin: OsOrigin, lang: Lang = "en"): void {
   if (origin.kind !== "local")
-    throw new ControlRequestError("forbidden", CONTROL_TEXT.en.localOnly);
+    throw new ControlRequestError("forbidden", CONTROL_TEXT[lang].localOnly);
 }
 
 export function createOsRouter(services: OsServices): OsRouter {
@@ -105,13 +112,16 @@ export function createOsRouter(services: OsServices): OsRouter {
 
   function remote(): OsRemoteControls {
     if (services.remote === undefined) {
-      throw new ControlRequestError("unsupported", CONTROL_TEXT.en.remoteOff);
+      throw new ControlRequestError("unsupported", CONTROL_TEXT[agent.language()].remoteOff);
     }
     return services.remote;
   }
 
   async function route(channel: string, args: unknown[], origin: OsOrigin): Promise<unknown> {
     switch (channel) {
+      case OS_CONTROL_REQUESTS.uiSetLanguage:
+        requireLocal(origin, agent.language());
+        return agent.setLanguage(value(parseUiSetLanguage(args)).lang);
       case OS_CONTROL_REQUESTS.agentPrompt:
         return agent.prompt(value(parseAgentPrompt(args)).text, confirmFrom(origin));
       case OS_CONTROL_REQUESTS.agentStop:
@@ -122,13 +132,13 @@ export function createOsRouter(services: OsServices): OsRouter {
         value(parseNoArgs(args));
         return agent.undo(confirmFrom(origin));
       case OS_CONTROL_REQUESTS.sysSetLocked: {
-        requireLocal(origin);
+        requireLocal(origin, agent.language());
         const isLockClient =
           origin.kind === "local" && services.isLockClient !== undefined
             ? await services.isLockClient(origin.connection)
             : false;
         if (!isLockClient)
-          throw new ControlRequestError("forbidden", CONTROL_TEXT.en.lockClientOnly);
+          throw new ControlRequestError("forbidden", CONTROL_TEXT[agent.language()].lockClientOnly);
         return agent.setLocked(value(parseSetLocked(args)).locked);
       }
       case OS_CONTROL_REQUESTS.providerList:
@@ -164,36 +174,39 @@ export function createOsRouter(services: OsServices): OsRouter {
         value(parseNoArgs(args));
         return services.voice?.stop() ?? null;
       case OS_CONTROL_REQUESTS.voiceSetSpeak: {
-        requireLocal(origin);
+        requireLocal(origin, agent.language());
         const { on } = value(parseSetSpeak(args));
         if (services.voice === undefined) {
-          throw new ControlRequestError("unsupported", CONTROL_TEXT.en.voiceUnavailable);
+          throw new ControlRequestError(
+            "unsupported",
+            CONTROL_TEXT[agent.language()].voiceUnavailable,
+          );
         }
         return services.voice.setSpeak(on);
       }
       case OS_CONTROL_REQUESTS.remoteStatus:
-        requireLocal(origin);
+        requireLocal(origin, agent.language());
         value(parseNoArgs(args));
         return remote().status();
       case OS_CONTROL_REQUESTS.remoteConfigure:
-        requireLocal(origin);
+        requireLocal(origin, agent.language());
         return remote().configure(value(parseRemoteConfigure(args)));
       case OS_CONTROL_REQUESTS.remoteSetOwnerPassword:
-        requireLocal(origin);
+        requireLocal(origin, agent.language());
         return remote().setOwnerPassword(value(parseOwnerPassword(args)));
       case OS_CONTROL_REQUESTS.remoteRevoke:
-        requireLocal(origin);
+        requireLocal(origin, agent.language());
         return remote().revoke(value(parseRemoteRevoke(args)).deviceId);
       case OS_CONTROL_REQUESTS.pairingOpen:
-        requireLocal(origin);
+        requireLocal(origin, agent.language());
         value(parseNoArgs(args));
         return remote().openPairing();
       case OS_CONTROL_REQUESTS.pairingCancel:
-        requireLocal(origin);
+        requireLocal(origin, agent.language());
         value(parseNoArgs(args));
         return remote().cancelPairing();
       case OS_CONTROL_REQUESTS.pairingAnswer:
-        requireLocal(origin);
+        requireLocal(origin, agent.language());
         return remote().answerPairing(value(parsePairingAnswer(args)));
       default:
         throw new ControlRequestError("unknown-channel", `No handler for ${channel}`);
@@ -209,11 +222,14 @@ export function createOsRouter(services: OsServices): OsRouter {
     switch (channel) {
       case OS_CONTROL_BLOBS.voiceUtterance: {
         if (bytes.byteLength > MAX_VOICE_BYTES) {
-          throw new ControlRequestError("bad-request", CONTROL_TEXT.en.badAudio);
+          throw new ControlRequestError("bad-request", CONTROL_TEXT[agent.language()].badAudio);
         }
         const meta = value(parseVoiceUtteranceMeta(args));
         if (services.voice === undefined) {
-          throw new ControlRequestError("unsupported", CONTROL_TEXT.en.voiceUnavailable);
+          throw new ControlRequestError(
+            "unsupported",
+            CONTROL_TEXT[agent.language()].voiceUnavailable,
+          );
         }
         return services.voice.utterance(meta, bytes, {
           from: confirmFrom(origin),
@@ -237,7 +253,9 @@ export function createOsRouter(services: OsServices): OsRouter {
   return {
     invoke(channel, args, origin) {
       if (origin.kind === "phone" && !PHONE_REQUESTS.has(channel)) {
-        return Promise.reject(new ControlRequestError("forbidden", CONTROL_TEXT.en.localOnly));
+        return Promise.reject(
+          new ControlRequestError("forbidden", CONTROL_TEXT[agent.language()].localOnly),
+        );
       }
       return translate(() => route(channel, args, origin));
     },

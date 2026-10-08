@@ -1,3 +1,4 @@
+import { CONTROL_TEXT } from "@jarvis/core";
 import { describe, expect, it } from "vitest";
 import { makeWav } from "./__fixtures__/wav.js";
 import {
@@ -128,8 +129,10 @@ describe("createVoiceIo", () => {
     expect(failing.removed).toEqual(["/run/user/1000/jarvis-voice-x"]);
   });
 
-  it("refuses to transcribe with no model", async () => {
+  it("refuses to transcribe with no model in the live UI language", async () => {
+    let language: "en" | "ar" = "ar";
     const voice = createVoiceIo({
+      language: () => language,
       models: {
         whisperBin: "/usr/lib/jarvis/voice/bin/whisper-cli",
         stt: null,
@@ -144,6 +147,13 @@ describe("createVoiceIo", () => {
     });
     await expect(voice.transcribe(makeWav(16_000), "auto")).rejects.toBeInstanceOf(
       VoiceUnavailableError,
+    );
+    await expect(voice.transcribe(makeWav(16_000), "auto")).rejects.toThrow(
+      CONTROL_TEXT.ar.voiceUnavailable,
+    );
+    language = "en";
+    await expect(voice.transcribe(makeWav(16_000), "auto")).rejects.toThrow(
+      CONTROL_TEXT.en.voiceUnavailable,
     );
   });
 

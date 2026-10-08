@@ -50,6 +50,7 @@ function harness(config: OsRemoteConfig = DEFAULT_OS_REMOTE) {
     upload: async () => ({ ok: true }),
   };
   const deps: OsRemoteDeps = {
+    language: () => "en" as const,
     createBridge: async (d) => {
       captured = d;
       return bridge;
