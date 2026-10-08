@@ -51,3 +51,9 @@ add_test(NAME qml_imports_listed
           -DMAP=${CMAKE_CURRENT_SOURCE_DIR}/../deps/qml-runtime.txt -DSKIP=Jarvis.Lock
           -P ${CMAKE_CURRENT_SOURCE_DIR}/../../ui/cmake/check_qml_imports.cmake)
 set_tests_properties(qml_imports_listed PROPERTIES LABELS unit)
+
+add_test(NAME lock_channels_listed
+  COMMAND ${CMAKE_COMMAND} -DSRC_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../src
+          -DLISTED=${CMAKE_CURRENT_SOURCE_DIR}/../../shell/tests/data/other-clients.txt
+          -P ${CMAKE_CURRENT_SOURCE_DIR}/check_lock_channels.cmake)
+set_tests_properties(lock_channels_listed PROPERTIES LABELS unit)
