@@ -64,8 +64,11 @@ int main(int argc, char* argv[])
 #endif
     }
 
-    auto* installer = new InstallerModel(backend, power, jarvis::ui::distroName(), QLocale::system().name(),
-                                         QTimeZone::systemTimeZoneId(), &app);
+    auto* installer = new InstallerModel(backend, power, jarvis::ui::localizedDistroName(language.language()),
+                                         QLocale::system().name(), QTimeZone::systemTimeZoneId(), &app);
+    // M4 contracts §6.8: C++ text names the distro in the UI language too.
+    QObject::connect(&language, &jarvis::ui::LanguageManager::languageChanged, installer,
+                     [installer, &language] { installer->setDistroName(jarvis::ui::localizedDistroName(language.language())); });
 
     installer->setLanguageApplier([&language](const QString& code) { return language.setLanguage(code); });
 

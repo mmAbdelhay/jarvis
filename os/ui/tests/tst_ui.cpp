@@ -12,6 +12,7 @@ public slots:
     {
         QQuickStyle::setStyle(QStringLiteral("Basic"));
         qputenv("JARVIS_OS_RELEASE", QByteArrayLiteral(JARVIS_TEST_OS_RELEASE));
+        qputenv("JARVIS_BRAND_JSON", QByteArrayLiteral(JARVIS_TEST_BRAND_JSON));
         qputenv("JARVIS_I18N_DIR", QByteArrayLiteral(JARVIS_TEST_I18N_DIR));
     }
     void qmlEngineAvailable(QQmlEngine* engine)

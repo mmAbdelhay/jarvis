@@ -31,6 +31,7 @@ target_compile_definitions(tst_ui PRIVATE
   QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml"
   JARVIS_QML_DIR="${JARVIS_QML_DIR}"
   JARVIS_TEST_OS_RELEASE="${CMAKE_CURRENT_SOURCE_DIR}/data/os-release"
+  JARVIS_TEST_BRAND_JSON="${CMAKE_CURRENT_SOURCE_DIR}/data/brand.json"
   JARVIS_TEST_I18N_DIR="${JARVIS_TEST_I18N_DIR}")
 add_dependencies(tst_ui jarvis_ui jarvis_ui_test_qms jarvis-ui_translations)
 add_test(NAME tst_ui COMMAND tst_ui)

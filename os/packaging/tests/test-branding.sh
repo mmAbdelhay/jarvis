@@ -9,7 +9,7 @@ fi
 deb=$tmp/out/jarvis-branding_${OS_VERSION}_all.deb
 for p in usr/share/plymouth/themes/jarvis/jarvis.plymouth usr/share/plymouth/themes/jarvis/jarvis.script \
   usr/share/grub/themes/jarvis/theme.txt usr/share/backgrounds/jarvis/wallpaper-3840x2160.png \
-  usr/share/pixmaps/jarvis.svg usr/lib/os-release etc/default/grub.d/jarvis.cfg etc/grub.d/42_jarvis_timeout; do
+  usr/share/pixmaps/jarvis.svg usr/share/jarvis/brand.json usr/lib/os-release etc/default/grub.d/jarvis.cfg etc/grub.d/42_jarvis_timeout; do
   check "ships /$p" deb_has "$deb" "$p"
 done
 not_has() { ! deb_has "$@"; }

@@ -29,7 +29,7 @@ class InstallerModel : public QObject {
     Q_PROPERTY(int step READ step NOTIFY stepChanged)
     Q_PROPERTY(QStringList stepLabels READ stepLabels NOTIFY languageChanged)
     Q_PROPERTY(QString uiLanguage READ uiLanguage NOTIFY languageChanged)
-    Q_PROPERTY(QString distroName READ distroName CONSTANT)
+    Q_PROPERTY(QString distroName READ distroName NOTIFY languageChanged)
     Q_PROPERTY(bool busy READ busy NOTIFY stateChanged)
     Q_PROPERTY(bool probed READ probed NOTIFY stateChanged)
     Q_PROPERTY(bool canContinue READ canContinue NOTIFY stateChanged)
@@ -59,6 +59,9 @@ public:
     int step() const { return m_step; }
     QStringList stepLabels() const;
     QString distroName() const { return m_distro; }
+    // The distro name in the UI language (M4 contracts §6.8; main.cpp sets it
+    // from jarvis::ui::localizedDistroName on every language switch).
+    void setDistroName(const QString& distro);
     bool busy() const { return m_call != Call::None; }
     bool probed() const { return m_probed; }
     bool canContinue() const;

@@ -58,6 +58,16 @@ struct Fixture {
 class TestInstallerModel : public QObject {
     Q_OBJECT
 private slots:
+    void distroNameCanChange()
+    {
+        Fixture h;
+        QSignalSpy language(&h.model, &InstallerModel::languageChanged);
+        h.model.setDistroName(u"\u0631\u0641\u064a\u0642"_s);
+        QCOMPARE(h.model.distroName(), u"\u0631\u0641\u064a\u0642"_s);
+        QCOMPARE(h.model.disk()->ourLabel(), u"\u0631\u0641\u064a\u0642"_s);
+        QCOMPARE(language.count(), 1);
+    }
+
     void startsOnWelcomeAndProbes()
     {
         Fixture f;

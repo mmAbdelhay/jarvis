@@ -62,6 +62,12 @@ brand_render "$here/grub/jarvis.cfg.in" "$out/etc/default/grub.d/jarvis.cfg"
 chmod 0644 "$out/etc/default/grub.d/jarvis.cfg"
 install -m0755 "$here/grub/42_jarvis_timeout" "$out/etc/grub.d/42_jarvis_timeout"
 
+# The localized distro name for UI text (M4 contracts §6.8): Jarvis.UI's
+# Brand.distroName reads it, falling back to os-release NAME.
+mkdir -p "$out/usr/share/jarvis"
+brand_render "$here/brand.json.in" "$out/usr/share/jarvis/brand.json"
+chmod 0644 "$out/usr/share/jarvis/brand.json"
+
 # os-release (Task 5). /etc/os-release is base-files' symlink to this file.
 mkdir -p "$out/usr/lib"
 brand_render "$here/os-release.in" "$out/usr/lib/os-release"

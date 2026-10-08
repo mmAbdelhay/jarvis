@@ -84,6 +84,15 @@ void InstallerModel::applyLiveKeyboard()
         m_locale->setTypingKeyboard(keyboard);
 }
 
+void InstallerModel::setDistroName(const QString& distro)
+{
+    if (distro.isEmpty() || distro == m_distro)
+        return;
+    m_distro = distro;
+    m_disk->setDistroName(distro);
+    emit languageChanged();
+}
+
 void InstallerModel::setLanguageApplier(LanguageApplier applier)
 {
     m_languageApplier = std::move(applier);

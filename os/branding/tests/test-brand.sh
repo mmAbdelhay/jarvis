@@ -16,6 +16,8 @@ check "only the six keys" test "$(grep -cvE '^[[:space:]]*(#.*)?$' "$BRANDING_DI
 printf 'NAME="@DISTRO_NAME@"\nAR=@DISTRO_NAME_AR@\nID=@DISTRO_ID@\nP="@PRETTY_NAME@"\nU=@HOME_URL@\nV=@DISTRO_VERSION@ L=@ISO_VOLUME@ & keep\n' > "$tmp/in"
 brand_render "$tmp/in" "$tmp/out"
 check "renders every key" test "$(cat "$tmp/out")" = "$(printf 'NAME="Rafiq"\nAR=رفيق\nID=rafiq\nP="Rafiq 0.2 (trixie)"\nU=https://github.com/mmAbdelhay/jarvis\nV=0.2 L=Rafiq 0.2 & keep')"
+brand_render "$BRANDING_DIR/brand.json.in" "$tmp/brand.json"
+check "brand.json is the localized name (M4 §6.8)" python3 -c 'import json,sys; d=json.load(open(sys.argv[1],encoding="utf-8")); assert d=={"name":{"en":"Rafiq","ar":"رفيق"}}, d' "$tmp/brand.json"
 printf 'x @DISTRO_NAMEX@\n' > "$tmp/bad"
 check "leftover placeholder fails" bash -c "! (source '$BRANDING_DIR/lib/brand.sh'; brand_load; brand_render '$tmp/bad' '$tmp/o') 2>/dev/null"
 

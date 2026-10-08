@@ -1,6 +1,8 @@
 #pragma once
 
 #include <QFile>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QString>
 
 // The public distro name (os-release(5) NAME), read in exactly one place so
@@ -36,6 +38,29 @@ inline QString distroName(const QString& path = osReleasePath())
         return out.isEmpty() ? fallback : out;
     }
     return fallback;
+}
+
+// M4 contracts §6.8: jarvis-branding ships {"name": {"en": ..., "ar": ...}}
+// here. Tests set JARVIS_BRAND_JSON.
+inline QString brandPath()
+{
+    const QString env = qEnvironmentVariable("JARVIS_BRAND_JSON");
+    return env.isEmpty() ? QStringLiteral("/usr/share/jarvis/brand.json") : env;
+}
+
+// The distro name in `lang` for UI text: brand.json name[lang] when it is a
+// non-blank string, else os-release NAME (distroName above).
+inline QString localizedDistroName(const QString& lang, const QString& brand = brandPath(),
+                                   const QString& osRelease = osReleasePath())
+{
+    QFile file(brand);
+    if (file.open(QIODevice::ReadOnly)) {
+        const QJsonValue name = QJsonDocument::fromJson(file.read(64 * 1024)).object().value(QLatin1String("name"));
+        const QString value = name.toObject().value(lang).toString().trimmed();
+        if (!value.isEmpty())
+            return value;
+    }
+    return distroName(osRelease);
 }
 
 } // namespace jarvis::ui

@@ -61,6 +61,20 @@ private slots:
         QCOMPARE(d.ourLabel(), u"Rafiq"_s);
     }
 
+    // M4 contracts §6.8: the Arabic installer names the distro in Arabic.
+    void distroNameFollowsTheLanguage()
+    {
+        DiskChoice d(u"Rafiq"_s);
+        d.applyProbe(loadFixture(u"probe-windows.json"_s));
+        QSignalSpy changed(&d, &DiskChoice::changed);
+        d.setDistroName(u"\u0631\u0641\u064a\u0642"_s);
+        QCOMPARE(changed.count(), 1);
+        QCOMPARE(d.ourLabel(), u"\u0631\u0641\u064a\u0642"_s);
+        QVERIFY(d.alongsideText().contains(u"\u0631\u0641\u064a\u0642"_s));
+        d.setDistroName(u"\u0631\u0641\u064a\u0642"_s);
+        QCOMPARE(changed.count(), 1); // unchanged: no signal
+    }
+
     void sliderSnapsAndClamps()
     {
         DiskChoice d(u"Rafiq"_s);

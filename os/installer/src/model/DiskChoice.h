@@ -30,7 +30,7 @@ class DiskChoice : public QObject {
     Q_PROPERTY(bool barVisible READ barVisible NOTIFY changed)
     Q_PROPERTY(double otherFraction READ otherFraction NOTIFY changed)
     Q_PROPERTY(QString otherLabel READ otherLabel CONSTANT)
-    Q_PROPERTY(QString ourLabel READ ourLabel CONSTANT)
+    Q_PROPERTY(QString ourLabel READ ourLabel NOTIFY changed)
     Q_PROPERTY(QVariantList manualRows READ manualRows NOTIFY changed)
     Q_PROPERTY(QStringList mountPoints READ mountPoints CONSTANT)
     Q_PROPERTY(bool valid READ valid NOTIFY changed)
@@ -40,6 +40,8 @@ public:
     explicit DiskChoice(const QString& distro, QObject* parent = nullptr);
 
     void applyProbe(const QJsonObject& probe);
+    // The distro name in the UI language (M4 contracts §6.8).
+    void setDistroName(const QString& distro);
 
     QVariantList disks() const;
     QString diskPath() const { return m_diskPath; }

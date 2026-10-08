@@ -27,6 +27,14 @@ QJsonObject DiskChoice::currentDisk() const
     return {};
 }
 
+void DiskChoice::setDistroName(const QString& distro)
+{
+    if (distro.isEmpty() || distro == m_distro)
+        return;
+    m_distro = distro;
+    emit changed();
+}
+
 void DiskChoice::applyProbe(const QJsonObject& probe)
 {
     // Contracts §10: the live medium is never offered; minRootBytes replaces the UI's 30 GiB guess.
