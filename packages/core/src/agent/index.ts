@@ -11,3 +11,5 @@ export * from "./doctor.js";
 export * from "./sys-snapshot.js";
 export * from "./updates.js";
 export * from "./model-state.js";
+export * from "./safety.js";
+export * from "./context-fit.js";

@@ -14,6 +14,9 @@ import { probeProvider } from "./probe.js";
 import { readLines } from "./stream.js";
 
 export const OLLAMA_DEFAULT_BASE_URL = "http://localhost:11434";
+/** Equal to CONTEXT_TOKENS.ollama in @jarvis/core: the loop fits history to
+ *  it, so Ollama never silently drops the front of the prompt. */
+export const OLLAMA_NUM_CTX = 8_192;
 
 export type OllamaOptions = { baseUrl: string; model: string; apiKey?: string; fetch: FetchLike };
 
@@ -75,6 +78,7 @@ export function createOllamaProvider(options: OllamaOptions): ModelProvider {
         model: options.model,
         messages: toOllamaMessages(chatRequest.system, chatRequest.messages),
         stream: true,
+        options: { num_ctx: OLLAMA_NUM_CTX },
         ...(chatRequest.tools.length === 0
           ? {}
           : {

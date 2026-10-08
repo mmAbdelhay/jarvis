@@ -5,7 +5,9 @@
 // tool result, fenced when it carries tool output. A running tool is never
 // interrupted: Stop takes effect between calls. Never throws.
 import { fenceToolOutput } from "./fence.js";
+import { DEFAULT_CONTEXT_TOKENS, fitHistory, historyBudget } from "./context-fit.js";
 import { AGENT_TEXT, SYSTEM_PROMPT, toolActivity } from "./messages.js";
+import { buildSystemPrompt } from "./safety.js";
 import type { AgentEvent } from "./contract.js";
 import type { GateCall, GateItemStatus, RiskGate } from "./risk-gate.js";
 import type { RegisteredTool, ToolRegistry } from "./tool-registry.js";
@@ -31,6 +33,8 @@ export type ToolLoopDeps = {
   toolsEnabled: boolean;
   emit(event: AgentEvent): void;
   newId(): string;
+  /** The provider's context size in tokens (context-fit.ts CONTEXT_TOKENS). */
+  contextTokens?: number;
 };
 
 export type TurnRequest = {
@@ -39,6 +43,8 @@ export type TurnRequest = {
   text: string;
   /** Prepended to the model's copy of the prompt only (the doctor's note). */
   context?: string;
+  /** Fenced memory notes (memory.ts); placed before the safety rules. */
+  notes?: readonly string[];
   signal: AbortSignal;
 };
 
@@ -219,6 +225,7 @@ async function reportStepLimit(
     signal: AbortSignal;
     turnId: string;
     ran: string[];
+    budget: number;
   },
 ): Promise<void> {
   context.messages.push({ role: "user", text: AGENT_TEXT.stepLimitNote(MAX_STEPS) });
@@ -228,7 +235,7 @@ async function reportStepLimit(
       deps,
       {
         system: context.system,
-        messages: [...context.messages],
+        messages: fitHistory(context.messages, context.budget),
         tools: [],
         signal: context.signal,
       },
@@ -251,9 +258,11 @@ export async function runTurn(deps: ToolLoopDeps, request: TurnRequest): Promise
     request.context === undefined ? request.text : `${request.context}\n\n${request.text}`;
   const messages: ModelMessage[] = [...request.history, { role: "user", text: prompt }];
   const tools = deps.toolsEnabled ? deps.registry.modelTools() : [];
-  const system = deps.toolsEnabled
-    ? SYSTEM_PROMPT
-    : `${SYSTEM_PROMPT}\n\n${AGENT_TEXT.noToolsNote}`;
+  const base = deps.toolsEnabled ? SYSTEM_PROMPT : `${SYSTEM_PROMPT}\n\n${AGENT_TEXT.noToolsNote}`;
+  // Design 3.1: the safety rules close EVERY request's system text; only the
+  // history is cut to fit the context, never the rules.
+  const system = buildSystemPrompt(base, request.notes ?? []);
+  const budget = historyBudget(deps.contextTokens ?? DEFAULT_CONTEXT_TOKENS, system, tools);
   const ran: string[] = [];
 
   const finish = (reason: TurnEndReason, failure?: unknown): TurnResult => {
@@ -277,12 +286,12 @@ export async function runTurn(deps: ToolLoopDeps, request: TurnRequest): Promise
     for (let step = 0; ; step++) {
       if (signal.aborted) return finish("stopped");
       if (step === MAX_STEPS) {
-        await reportStepLimit(deps, { system, messages, signal, turnId, ran });
+        await reportStepLimit(deps, { system, messages, signal, turnId, ran, budget });
         return finish("step-limit");
       }
       const reply = await streamReply(
         deps,
-        { system, messages: [...messages], tools, signal },
+        { system, messages: fitHistory(messages, budget), tools, signal },
         turnId,
       );
       const calls = withUsableIds(reply.calls, deps.newId);
