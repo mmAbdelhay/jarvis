@@ -70,4 +70,13 @@ reset_state; touch "$SOCKET"; mkdir -p "$T/jarvis"; : > "$MARKER"
 DURATIONS="0 0 0" STOP_AFTER=3 sh "$loop"
 expect marker-runs "$(cat "$T/log")" "classic classic classic "
 
+# 6. Classic session (shell and classic binaries are the same): rapid exits
+#    never write the marker or log a shell failure, and just back off.
+reset_state; touch "$SOCKET"
+(JARVIS_SHELL_BIN="$T/fake-classic" DURATIONS="0 0 0 0" STOP_AFTER=4 sh "$loop") 2> "$T/stderr"
+expect classic-session-runs "$(cat "$T/log")" "classic classic classic classic "
+expect classic-session-sleeps "$(cat "$T/sleeps")" "1 2 4 "
+[ ! -e "$MARKER" ] || { echo "FAIL classic session: marker written"; exit 1; }
+[ ! -s "$T/stderr" ] || { echo "FAIL classic session: unexpected stderr"; exit 1; }
+
 echo "relaunch loop: backoff, classic fallback and exit-with-labwc OK"

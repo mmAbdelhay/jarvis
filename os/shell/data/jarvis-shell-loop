@@ -8,6 +8,9 @@
 #    fallback desktop) from then on. A loop started while that marker exists
 #    runs jarvis-classic directly. The marker lives on tmpfs: logging out
 #    clears it.
+#  - When JARVIS_SHELL_BIN equals JARVIS_CLASSIC_BIN (the classic session's
+#    autostart) there is nothing to fall back to: no marker is written and the
+#    loop only relaunches with backoff.
 #  - Exits when the compositor's Wayland socket ($XDG_RUNTIME_DIR/$WAYLAND_DISPLAY)
 #    is gone, so the loop ends with labwc.
 # Test hooks (tests/data/test_relaunch_loop.sh): JARVIS_SHELL_BIN,
@@ -34,7 +37,7 @@ while [ -e "$socket" ]; do
     "$bin"
     ended=$($now_cmd)
     [ -e "$socket" ] || break          # labwc is gone: do not relaunch
-    if [ "$bin" = "$shell_bin" ]; then
+    if [ "$bin" = "$shell_bin" ] && [ "$shell_bin" != "$classic_bin" ]; then
         kept=""
         for t in $recent $ended; do
             if [ $((ended - t)) -lt 60 ]; then
