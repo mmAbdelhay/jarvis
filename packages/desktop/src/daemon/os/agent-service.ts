@@ -282,8 +282,17 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
         }
       }
       // Host servers first: on a name collision the host tool wins.
-      registry = await loadToolRegistry([...hostSessions, ...addOns.sessions], {
-        trusted: new Set(TRUSTED_MCP_SERVERS),
+      // An add-on never takes a host server's name: trust is by name, so a
+      // registry "jarvis-files" would otherwise be trusted as host and shadow
+      // the built-in one (contracts §5.1: jarvisd ignores it).
+      const hostNames = new Set<string>(TRUSTED_MCP_SERVERS);
+      const addOnSessions = addOns.sessions.filter((s) => {
+        if (!hostNames.has(s.name)) return true;
+        deps.log(`[registry] ${s.name}: reuses a host server name; ignored`);
+        return false;
+      });
+      registry = await loadToolRegistry([...hostSessions, ...addOnSessions], {
+        trusted: hostNames,
         trustOf: (name) => addOns.tiers.get(name) ?? "unknown",
         safeOnly,
         log: deps.log,
