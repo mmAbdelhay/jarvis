@@ -167,9 +167,13 @@ def run_checks(run: Run, args: argparse.Namespace) -> dict | None:
     def polkit_settings():
         for action in scenarios.SETTINGS_ACTIONS:
             sh(scenarios.polkit_grants(uid, action))
-        sh(scenarios.polkit_denies(uid, "os.jarvis.helper.admin"))
+        # No pkcheck denial here: live-config's sudo_on_live.rules gives the live
+        # user every action, and 50-jarvis.rules grants os.jarvis.helper.admin
+        # to jarvis-admins on purpose (contracts §5.5, the helper checks the
+        # adminPassword itself). What M3 adds must not name the admin action.
+        sh(scenarios.SETTINGS_RULE_LACKS_ADMIN)
 
-    run.check("M3: polkit grants settings actions to jarvisd, never the admin action", polkit_settings)
+    run.check("M3: polkit grants settings actions to jarvisd; the settings rule never names the admin action", polkit_settings)
     run.check("M3: no network listener by default (phone bridge off)", lambda: sh(scenarios.NO_LAN_LISTENER))
     run.check("M3: the live user has a password the lock screen can check", lambda: sh(scenarios.LIVE_PASSWORD_SET))
 

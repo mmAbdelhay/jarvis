@@ -110,6 +110,7 @@ class M3CommandsTest(unittest.TestCase):
             scenarios.user_env_has(1000, "WAYLAND_DISPLAY"),
             scenarios.process_runs("mako"),
             scenarios.polkit_denies(1000, "os.jarvis.helper.admin"),
+            scenarios.SETTINGS_RULE_LACKS_ADMIN,
             scenarios.start_lock(1000),
             scenarios.NO_IDLE_ON_LIVE,
             scenarios.VOICE_INSTALLED,

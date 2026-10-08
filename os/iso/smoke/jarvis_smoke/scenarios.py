@@ -114,12 +114,15 @@ DISABLE_JARVIS_APT = "mv /etc/apt/sources.list.d/jarvis.sources /run/jarvis.sour
 
 # --- Rafiq M3 (Plan P) ---
 # Session-level actions 51-jarvis-settings.rules grants to jarvisd's tools
-# (the subset whose polkit policy exists on trixie).
+# (the subset whose polkit policy exists on trixie). power-profiles-daemon 0.30
+# registers only org.freedesktop.UPower.PowerProfiles.*; the rule keeps the
+# legacy net.hadess id for older daemons, but pkcheck refuses unregistered ids.
 SETTINGS_ACTIONS = (
     "org.freedesktop.NetworkManager.enable-disable-wifi",
-    "net.hadess.PowerProfiles.switch-profile",
+    "org.freedesktop.UPower.PowerProfiles.switch-profile",
     "org.freedesktop.udisks2.filesystem-mount",
 )
+SETTINGS_RULE_LACKS_ADMIN = "! grep -q 'helper[.]admin' /usr/share/polkit-1/rules.d/51-jarvis-settings.rules"
 # Live boots never idle-lock (jarvis-idle's autostart fragment); the fragment is installed.
 NO_IDLE_ON_LIVE = (
     f"test -f /usr/share/jarvis-idle/labwc/autostart && ! pgrep -u {USER} -f jarvis-idle-loop >/dev/null"
