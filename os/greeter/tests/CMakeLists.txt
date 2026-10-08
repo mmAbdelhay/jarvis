@@ -5,8 +5,10 @@ function(jarvis_add_cpp_test source label timeout)
   get_filename_component(test_name ${source} NAME_WE)
   qt_add_executable(${test_name} ${source} ${JARVIS_TEST_SUPPORT})
   target_include_directories(${test_name} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/support)
-  target_compile_definitions(${test_name} PRIVATE JARVIS_GREETER_TEST_DATA="${JARVIS_GREETER_TEST_DATA}")
+  target_compile_definitions(${test_name} PRIVATE JARVIS_GREETER_TEST_DATA="${JARVIS_GREETER_TEST_DATA}"
+    JARVIS_TEST_I18N_DIR="${CMAKE_BINARY_DIR}/i18n")
   target_link_libraries(${test_name} PRIVATE jarvis_greeter_core Qt6::Test)
+  add_dependencies(${test_name} jarvis-ui_translations jarvis-greeter_translations)
   add_test(NAME ${test_name} COMMAND ${test_name})
   set_tests_properties(${test_name} PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen" LABELS ${label} TIMEOUT ${timeout})

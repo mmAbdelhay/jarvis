@@ -89,7 +89,7 @@ private slots:
             if (wasSet) qputenv("JARVIS_I18N_DIR", previous);
             else qunsetenv("JARVIS_I18N_DIR");
         });
-        qputenv("JARVIS_I18N_DIR", JARVIS_GREETER_TEST_DATA "/../../build/i18n");
+        qputenv("JARVIS_I18N_DIR", JARVIS_TEST_I18N_DIR);
         jarvis::ui::LanguageManager language({u"jarvis-ui"_s, u"jarvis-greeter"_s});
         QVERIFY(language.setLanguage(u"ar"_s));
         Fixture f;
