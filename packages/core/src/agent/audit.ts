@@ -19,6 +19,8 @@ export function auditInput(
 
 const DECISIONS = new Set(["approved", "denied", "timeout"]);
 const VIAS = new Set(["desktop", "doctor"]);
+// biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are what this refuses.
+const PHONE_VIA = /^phone:[^\u0000-\u001f\u007f]{1,64}$/;
 const RESULTS = new Set(["ok", "failed", "skipped"]);
 
 /** One audit.jsonl line, field by field; undefined for anything malformed. */
@@ -28,7 +30,7 @@ export function parseAuditEntry(value: unknown): AuditEntry | undefined {
   if (typeof ts !== "number" || !Number.isFinite(ts)) return undefined;
   if (typeof tool !== "string" || typeof title !== "string") return undefined;
   if (typeof decision !== "string" || !DECISIONS.has(decision)) return undefined;
-  if (typeof via !== "string" || !VIAS.has(via)) return undefined;
+  if (typeof via !== "string" || !(VIAS.has(via) || PHONE_VIA.test(via))) return undefined;
   if (typeof result !== "string" || !RESULTS.has(result)) return undefined;
   if (message !== undefined && typeof message !== "string") return undefined;
   return {

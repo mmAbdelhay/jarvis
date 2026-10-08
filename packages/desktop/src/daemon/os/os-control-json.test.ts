@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { OS_CONTROL_PUSHES, OS_CONTROL_REQUESTS } from "@jarvis/wire";
+import { OS_CONTROL_BLOBS, OS_CONTROL_PUSHES, OS_CONTROL_REQUESTS } from "@jarvis/wire";
 import { describe, expect, it } from "vitest";
 import { CONTROL_PROTOCOL_VERSION, encodeJsonFrame } from "../control/frames.js";
 
@@ -13,10 +13,14 @@ describe("packages/wire/os-control.json", () => {
     handshake: { serverLabel: string; clientLabel: string };
     requests: string[];
     pushes: string[];
+    blobs: string[];
+    otherClients: string[];
   };
 
   it("lists the same channels as @jarvis/wire", () => {
     expect(file.requests).toEqual(Object.values(OS_CONTROL_REQUESTS));
+    expect(file.blobs).toEqual(Object.values(OS_CONTROL_BLOBS));
+    expect(file.otherClients).toEqual(["sys:setLocked"]);
     expect(file.pushes).toEqual(Object.values(OS_CONTROL_PUSHES));
   });
 

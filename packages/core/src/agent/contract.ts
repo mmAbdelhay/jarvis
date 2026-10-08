@@ -72,6 +72,9 @@ export type SysSnapshot = {
     download: ModelDownload | null;
   } | null;
   updates: UpdatesSummary;
+  locked: boolean;
+  voice: VoiceAvailability;
+  undo: { available: boolean; title: string | null };
 };
 
 export type CardSource = "debian" | "flathub" | "system" | "network";
@@ -127,7 +130,7 @@ export type AuditEntry = {
   title: string;
   input: unknown;
   decision: "approved" | "denied" | "timeout";
-  via: "desktop" | "doctor";
+  via: AuditVia;
   result: "ok" | "failed" | "skipped";
   message?: string;
 };
@@ -141,3 +144,15 @@ export type ConfirmAnswer = {
 export type AuditQuery = { limit: number; beforeTs?: number };
 
 export const CARD_TIMEOUT_MS = 300_000;
+
+/** Rafiq M3 §2 (copied from @jarvis/wire; contract-types.test.ts pins them equal). */
+export type AuditVia = "desktop" | "doctor" | `phone:${string}`;
+export type VoiceLang = "en" | "ar";
+export type VoiceAction = "prompt" | "approve" | "deny" | "ignored";
+export type VoiceAvailability = {
+  available: boolean;
+  stt: string | null;
+  tts: string | null;
+  speak: boolean;
+};
+export type UndoResult = { undone: string | null };
