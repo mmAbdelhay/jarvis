@@ -1,0 +1,19 @@
+! model
+  pc105           Generic 105-key PC
+
+! layout
+  us              English (US)
+  ara             Arabic
+  fr              French
+  de              German
+
+! variant
+  intl            us: English (US, intl., with dead keys)
+  dvorak          us: English (Dvorak)
+  azerty          ara: Arabic (AZERTY)
+  digits          ara: Arabic (Eastern Arabic numerals)
+  azerty          fr: French (AZERTY)
+
+! option
+  grp                  Switching to another layout
+  grp:alt_shift_toggle Alt+Shift

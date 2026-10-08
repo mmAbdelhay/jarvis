@@ -1,0 +1,14 @@
+eDP-1 "Chimei Innolux Corporation 0x14C9 (eDP-1)"
+  Physical size: 310x170 mm
+  Enabled: yes
+  Modes:
+    1920x1080 px, 60.008000 Hz (preferred, current)
+  Position: 0,0
+  Transform: normal
+  Scale: 1.250000
+  Adaptive Sync: disabled
+HDMI-A-1 "Dell Inc. DELL U2720Q (HDMI-A-1)"
+  Enabled: no
+  Modes:
+    3840x2160 px, 60.000000 Hz (preferred)
+  Scale: 1.000000
