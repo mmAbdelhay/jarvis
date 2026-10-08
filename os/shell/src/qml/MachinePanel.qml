@@ -123,6 +123,36 @@ Rectangle {
             warn: root.system.failedUnits.length > 0
             detail: root.system.failedUnits.join("\n")
         }
+        Fact {
+            objectName: "panelUpdates"
+            visible: root.system.known
+            name: "Updates"
+            value: root.system.updatesCount > 0 ? root.system.updatesText : "Up to date"
+            warn: root.system.updatesSecurity > 0
+        }
+        RowLayout {
+            Layout.fillWidth: true
+            visible: root.system.known
+            spacing: 8
+            AbstractButton {
+                objectName: "checkUpdates"
+                enabled: !root.shell.updatesChecking
+                text: root.shell.updatesChecking ? "Checking…" : "Check for updates"
+                Accessible.name: text
+                contentItem: Text { text: parent.text; color: Theme.accent; font.pixelSize: Theme.fontSmall }
+                background: null
+                onClicked: root.shell.checkForUpdates()
+            }
+            Text {
+                objectName: "updatesNote"
+                Layout.fillWidth: true
+                text: root.shell.updatesNote
+                textFormat: Text.PlainText
+                color: Theme.mutedSoft
+                font.pixelSize: Theme.fontSmall
+                elide: Text.ElideRight
+            }
+        }
 
         Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: Theme.border }
 

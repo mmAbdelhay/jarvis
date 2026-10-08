@@ -37,6 +37,8 @@ class ShellController : public QObject {
     Q_PROPERTY(bool providerReachable READ providerReachable NOTIFY providerStatusChanged)
     Q_PROPERTY(QString providerError READ providerError NOTIFY providerStatusChanged)
     Q_PROPERTY(QString bannerText READ bannerText NOTIFY bannerChanged)
+    Q_PROPERTY(bool updatesChecking READ updatesChecking NOTIFY updatesChanged)
+    Q_PROPERTY(QString updatesNote READ updatesNote NOTIFY updatesChanged)
 
 public:
     using Launcher = std::function<bool(const QString& program)>;
@@ -57,6 +59,8 @@ public:
     bool providerReachable() const { return m_providerReachable; }
     QString providerError() const { return m_providerError; }
     QString bannerText() const;
+    bool updatesChecking() const { return m_updatesChecking; }
+    QString updatesNote() const { return m_updatesNote; }
 
     void setLauncher(Launcher launcher) { m_launcher = std::move(launcher); }
 
@@ -69,6 +73,7 @@ public:
     Q_INVOKABLE void openTerminal();
     Q_INVOKABLE void requestComposerFocus();
     Q_INVOKABLE void askForUpdates();
+    Q_INVOKABLE void checkForUpdates();
 
 signals:
     void viewChanged();
@@ -77,6 +82,7 @@ signals:
     void bannerChanged();
     void dismissRequested();
     void composerFocusRequested();
+    void updatesChanged();
 
 private:
     void request(const QString& channel, const QJsonArray& args, std::function<void(const ControlResult&)> done = {});
@@ -103,4 +109,6 @@ private:
     QString m_providerError;
     QSet<QString> m_chatCardIds; // chat cards not yet closed, for the single card-closed notice
     Launcher m_launcher;
+    bool m_updatesChecking = false;
+    QString m_updatesNote;
 };

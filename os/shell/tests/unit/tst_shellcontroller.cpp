@@ -404,6 +404,60 @@ private slots:
         QTRY_COMPARE(f.shell->view(), u"chat"_s);
         QCOMPARE(f.daemon.requests(u"provider:save"_s).size(), 1);
     }
+
+    void checkForUpdatesAppliesTheCounts()
+    {
+        Fixture f;
+        auto base = f.daemon.handler;
+        f.daemon.handler = [base](const QString& channel, const QJsonArray& args, quint64 id) -> FakeDaemon::Reply {
+            if (channel == u"updates:check")
+                return {true, QJsonObject{{"count", 4}, {"security", 2}}};
+            return base(channel, args, id);
+        };
+        QVERIFY(f.open());
+        f.shell->checkForUpdates();
+        QVERIFY(f.shell->updatesChecking());
+        f.shell->checkForUpdates();                         // no second request while one runs
+        QTRY_VERIFY(!f.shell->updatesChecking());
+        QCOMPARE(f.daemon.requests(u"updates:check"_s).size(), 1);
+        QCOMPARE(f.daemon.requests(u"updates:check"_s).at(0).value("a").toArray(), QJsonArray{});
+        QCOMPARE(f.shell->system()->updatesCount(), 4);
+        QCOMPARE(f.shell->system()->updatesSecurity(), 2);
+        QCOMPARE(f.shell->updatesNote(), QString());
+    }
+
+    void upToDateIsSaid()
+    {
+        Fixture f;
+        auto base = f.daemon.handler;
+        f.daemon.handler = [base](const QString& channel, const QJsonArray& args, quint64 id) -> FakeDaemon::Reply {
+            if (channel == u"updates:check")
+                return {true, QJsonObject{{"count", 0}, {"security", 0}}};
+            return base(channel, args, id);
+        };
+        QVERIFY(f.open());
+        f.shell->checkForUpdates();
+        QTRY_COMPARE(f.shell->updatesNote(), u"Everything is up to date."_s);
+    }
+
+    void checkErrorsShowTheMessage()
+    {
+        Fixture f;
+        auto base = f.daemon.handler;
+        QString code = u"internal"_s, text = u"apt is locked by another program"_s;
+        f.daemon.handler = [&, base](const QString& channel, const QJsonArray& args, quint64 id) -> FakeDaemon::Reply {
+            if (channel == u"updates:check")
+                return {false, {}, code, text};
+            return base(channel, args, id);
+        };
+        QVERIFY(f.open());
+        f.shell->checkForUpdates();
+        QTRY_COMPARE(f.shell->updatesNote(), u"apt is locked by another program"_s);
+        code = u"unsupported"_s;
+        text.clear();
+        f.shell->checkForUpdates();
+        QTRY_COMPARE(f.shell->updatesNote(), u"This system can't check for updates yet."_s);
+    }
 };
 
 QTEST_GUILESS_MAIN(TestShellController)

@@ -315,3 +315,27 @@ void ShellController::askForUpdates()
     showView(u"chat"_s);
     sendPrompt(u"Update my computer"_s);
 }
+
+void ShellController::checkForUpdates()
+{
+    if (m_updatesChecking)
+        return;
+    m_updatesChecking = true;
+    m_updatesNote.clear();
+    emit updatesChanged();
+    // M2 contracts §2: updates:check → {count, security}; errors unsupported | internal with a message.
+    request(u"updates:check"_s, QJsonArray{}, [this](const ControlResult& r) {
+        m_updatesChecking = false;
+        if (r.ok) {
+            const QJsonObject v = r.value.toObject();
+            m_system->applyUpdateCounts(v.value("count").toInt(), v.value("security").toInt());
+            m_updatesNote = v.value("count").toInt() > 0 ? QString() : u"Everything is up to date."_s;
+        } else if (!r.text.isEmpty()) {
+            m_updatesNote = r.text;
+        } else {
+            m_updatesNote = r.code == u"unsupported" ? u"This system can't check for updates yet."_s
+                                                    : u"Couldn't check for updates."_s;
+        }
+        emit updatesChanged();
+    });
+}

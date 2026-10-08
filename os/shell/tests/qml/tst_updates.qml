@@ -47,4 +47,14 @@ TestCase {
         snap({ count: 0, security: 0, checkedAt: null }, { state: "ready", percent: 100 })
         compare(model.fraction, -1)
     }
+
+    function test_checkLinkInThePanel() {
+        const root = make()
+        snap({ count: 0, security: 0, checkedAt: null }, null)
+        compare(findChild(findChild(root, "panelUpdates"), "value").text, "Up to date")
+        const link = findChild(root, "checkUpdates")
+        verify(link.visible)
+        mouseClick(link)                       // not connected in tests: the error becomes the note
+        tryVerify(() => findChild(root, "updatesNote").text.length > 0)
+    }
 }
