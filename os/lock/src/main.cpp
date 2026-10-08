@@ -26,6 +26,9 @@
 #endif
 #ifdef JARVIS_LOCK_TEST_HOOKS
 #include <QFile>
+// Plain ASCII marker so ci/test.sh can prove the hook build differs from the shipped one
+// (option names are char16_t literals and never appear as ASCII in a binary).
+[[gnu::used]] extern const char kJarvisLockTestHooksMarker[] = "JARVIS_LOCK_TEST_HOOKS_PRESENT";
 #endif
 
 Q_IMPORT_QML_PLUGIN(JarvisLockPlugin)

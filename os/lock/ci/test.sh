@@ -15,7 +15,12 @@ test -f os/lock/build/stage/etc/pam.d/jarvis-lock
 test -z "$(find os/lock/build/stage -path '*Jarvis/UI*' -print -quit)" # jarvis-ui ships separately
 test -x os/lock/build/stage/usr/bin/jarvis-lock
 test ! -e os/lock/build/stage/usr/bin/jarvis-lock-testhooks
-if grep -a -q -- '--test-password-file' os/lock/build/stage/usr/bin/jarvis-lock; then
+# Positive control: the marker must be findable in the hook build, else this check is vacuous.
+grep -a -q -- 'JARVIS_LOCK_TEST_HOOKS_PRESENT' os/lock/build/src/jarvis-lock-testhooks || {
+  echo "jarvis-lock: test-hook marker missing from jarvis-lock-testhooks (check is vacuous)" >&2
+  exit 1
+}
+if grep -a -q -- 'JARVIS_LOCK_TEST_HOOKS_PRESENT' os/lock/build/stage/usr/bin/jarvis-lock; then
   echo "jarvis-lock: the installed binary contains test hooks" >&2
   exit 1
 fi
