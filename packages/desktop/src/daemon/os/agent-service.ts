@@ -362,7 +362,7 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
 
   const gate = createRiskGate({
     emit,
-    describe: async (tool, input) => (await ensureRegistry()).describe(tool, input),
+    describe: async (tool, input, lang) => (await ensureRegistry()).describe(tool, input, lang),
     audit: async (entry) => {
       await deps.audit.append(entry);
       memory.recordAudit(entry);

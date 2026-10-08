@@ -7,6 +7,7 @@
 import { fenceToolOutput } from "./fence.js";
 import { DEFAULT_CONTEXT_TOKENS, fitHistory, historyBudget } from "./context-fit.js";
 import { mapLimit } from "./map-limit.js";
+import { type Lang, languageRule } from "./i18n.js";
 import { AGENT_TEXT, SYSTEM_PROMPT, toolActivity, USER_TEXT } from "./messages.js";
 import { buildSystemPrompt } from "./safety.js";
 import type { AgentEvent } from "./contract.js";
@@ -51,6 +52,8 @@ export type TurnRequest = {
   context?: string;
   /** Fenced memory notes (memory.ts); placed before the safety rules. */
   notes?: readonly string[];
+  /** The turn's language (M4 §3): activity lines, step-limit text, cards. */
+  lang?: Lang;
   signal: AbortSignal;
 };
 
@@ -134,7 +137,13 @@ async function streamReply(
 
 async function runCalls(
   deps: ToolLoopDeps,
-  context: { turnId: string; calls: ModelToolCall[]; signal: AbortSignal; ran: string[] },
+  context: {
+    turnId: string;
+    calls: ModelToolCall[];
+    signal: AbortSignal;
+    ran: string[];
+    lang: Lang;
+  },
 ): Promise<ModelToolResult[]> {
   const { turnId, signal } = context;
   const results = new Map<string, ModelToolResult>();
@@ -143,7 +152,7 @@ async function runCalls(
 
   const execute = async (callId: string, tool: RegisteredTool, input: Record<string, unknown>) => {
     context.ran.push(tool.name);
-    const activity = toolActivity(tool.name);
+    const activity = toolActivity(tool.name, context.lang);
     deps.emit({
       type: "tool",
       turnId,
@@ -160,7 +169,7 @@ async function runCalls(
       name: tool.name,
       status: outcome.ok ? "ok" : "error",
       // Never the tool's output: it may hold a secret the gate has not scrubbed yet.
-      summary: outcome.ok ? activity : USER_TEXT.en.toolFailed(activity, outcome.code),
+      summary: outcome.ok ? activity : USER_TEXT[context.lang].toolFailed(activity, outcome.code),
     });
     return outcome;
   };
@@ -199,6 +208,7 @@ async function runCalls(
           via: "desktop",
           calls: gated.map((g) => g.gateCall),
           signal,
+          lang: context.lang,
           execute: (gateCall, input) => execute(gateCall.callId, gateCall.tool, input),
         });
         for (const outcome of outcomes) {
@@ -239,6 +249,7 @@ async function reportStepLimit(
     turnId: string;
     ran: string[];
     budget: number;
+    lang: Lang;
   },
 ): Promise<void> {
   context.messages.push({ role: "user", text: AGENT_TEXT.stepLimitNote(MAX_STEPS) });
@@ -259,7 +270,7 @@ async function reportStepLimit(
     if (context.signal.aborted) throw error;
   }
   if (text.trim() === "") {
-    text = USER_TEXT.en.stepLimitFallback(MAX_STEPS, context.ran);
+    text = USER_TEXT[context.lang].stepLimitFallback(MAX_STEPS, context.ran);
     deps.emit({ type: "text", turnId: context.turnId, delta: text });
   }
   context.messages.push({ role: "assistant", text, toolCalls: [] });
@@ -267,12 +278,15 @@ async function reportStepLimit(
 
 export async function runTurn(deps: ToolLoopDeps, request: TurnRequest): Promise<TurnResult> {
   const { turnId, signal } = request;
+  const lang: Lang = request.lang ?? "en";
   const prompt =
     request.context === undefined ? request.text : `${request.context}\n\n${request.text}`;
   const messages: ModelMessage[] = [...request.history, { role: "user", text: prompt }];
   const allTools = deps.toolsEnabled ? deps.registry.modelTools() : [];
   let tools = allTools;
-  const base = deps.toolsEnabled ? SYSTEM_PROMPT : `${SYSTEM_PROMPT}\n\n${AGENT_TEXT.noToolsNote}`;
+  const base = `${
+    deps.toolsEnabled ? SYSTEM_PROMPT : `${SYSTEM_PROMPT}\n\n${AGENT_TEXT.noToolsNote}`
+  }\n\n${languageRule(lang)}`;
   // Design 3.1: the safety rules close EVERY request's system text; only the
   // history is cut to fit the context, never the rules.
   const system = buildSystemPrompt(base, request.notes ?? []);
@@ -309,7 +323,7 @@ export async function runTurn(deps: ToolLoopDeps, request: TurnRequest): Promise
     for (let step = 0; ; step++) {
       if (signal.aborted) return finish("stopped");
       if (step === MAX_STEPS) {
-        await reportStepLimit(deps, { system, messages, signal, turnId, ran, budget });
+        await reportStepLimit(deps, { system, messages, signal, turnId, ran, budget, lang });
         return finish("step-limit");
       }
       const reply = await streamReply(
@@ -322,7 +336,7 @@ export async function runTurn(deps: ToolLoopDeps, request: TurnRequest): Promise
       if (calls.length === 0) return finish("done");
       messages.push({
         role: "tool",
-        results: await runCalls(deps, { turnId, calls, signal, ran }),
+        results: await runCalls(deps, { turnId, calls, signal, ran, lang }),
       });
     }
   } catch (error) {

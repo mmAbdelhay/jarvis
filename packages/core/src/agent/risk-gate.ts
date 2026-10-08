@@ -37,6 +37,8 @@ export type GateBatchRequest = {
   signal?: AbortSignal;
   /** At most this many items may be ticked (the doctor's Wi-Fi pick: 1). */
   maxTicked?: number;
+  /** The turn's language for card texts (M4 §3). Default en. */
+  lang?: Lang;
   execute(call: GateCall, input: Record<string, unknown>): Promise<ToolOutcome>;
 };
 
@@ -70,7 +72,11 @@ function auditVia(requested: GateBatchRequest["via"], from: ConfirmFrom | undefi
 
 export type RiskGateDeps = {
   emit(event: AgentEvent): void;
-  describe(tool: RegisteredTool, input: Record<string, unknown>): Promise<CardDescription>;
+  describe(
+    tool: RegisteredTool,
+    input: Record<string, unknown>,
+    lang: Lang,
+  ): Promise<CardDescription>;
   audit(entry: AuditEntry): Promise<void>;
   now(): number;
   newId(): string;
@@ -213,7 +219,7 @@ export function createRiskGate(deps: RiskGateDeps): RiskGate {
       }
     }
     const descriptions = await mapLimit(jobs, DESCRIBE_CONCURRENCY, (job) =>
-      deps.describe(job.call.tool, job.describedInput),
+      deps.describe(job.call.tool, job.describedInput, request.lang ?? "en"),
     );
     const units: Unit[] = jobs.map((job, index) => {
       const description = descriptions[index] as CardDescription;

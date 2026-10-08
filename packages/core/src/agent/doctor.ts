@@ -208,6 +208,7 @@ export function createNetworkDoctor(deps: DoctorDeps): NetworkDoctor {
       results = await deps.gate.runBatch({
         turnId: null,
         via: "doctor",
+        lang,
         signal: controller.signal,
         ...(options.maxTicked === undefined ? {} : { maxTicked: options.maxTicked }),
         calls: calls.map((call, i) => ({
@@ -257,7 +258,8 @@ export function createNetworkDoctor(deps: DoctorDeps): NetworkDoctor {
       };
     }
     if (skipped.has(id)) result = { status: "skipped", detail: msg.skipped };
-    if (result.status === "fixed") fixes.push(`${DOCTOR_TEXT.en.labels[id]}: ${result.en ?? result.detail}`);
+    if (result.status === "fixed")
+      fixes.push(`${DOCTOR_TEXT.en.labels[id]}: ${result.en ?? result.detail}`);
     setStep(id, result.status, result.detail);
   }
 
@@ -382,7 +384,9 @@ export function createNetworkDoctor(deps: DoctorDeps): NetworkDoctor {
         })
         .finally(() => {
           running = false;
-          deps.onFinished(DOCTOR_TEXT.en.summary(state.done === "fixed" ? "fixed" : "unfixed", fixes));
+          deps.onFinished(
+            DOCTOR_TEXT.en.summary(state.done === "fixed" ? "fixed" : "unfixed", fixes),
+          );
         });
       return snapshot();
     },

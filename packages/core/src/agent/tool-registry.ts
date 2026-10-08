@@ -4,6 +4,7 @@
 // model never sees hidden tools or secret fields, and sees each tool under a
 // name providers accept (pkg.install -> pkg_install).
 import type { CardSource } from "./contract.js";
+import type { Lang } from "./i18n.js";
 import {
   type McpSession,
   type ModelToolSpec,
@@ -160,7 +161,11 @@ export interface ToolRegistry {
   get(name: string): RegisteredTool | undefined;
   sanitizeInput(tool: RegisteredTool, input: unknown): Record<string, unknown>;
   call(name: string, input: Record<string, unknown>): Promise<ToolOutcome>;
-  describe(tool: RegisteredTool, input: Record<string, unknown>): Promise<CardDescription>;
+  describe(
+    tool: RegisteredTool,
+    input: Record<string, unknown>,
+    lang?: Lang,
+  ): Promise<CardDescription>;
 }
 
 export function parseJarvisMeta(
@@ -333,7 +338,7 @@ export async function loadToolRegistry(
         };
       }
     },
-    async describe(tool, input) {
+    async describe(tool, input, lang = "en") {
       const fallback: CardDescription = {
         title: tool.name,
         detail: compactJson(input, 300),
@@ -341,12 +346,15 @@ export async function loadToolRegistry(
       };
       const session = bySession.get(tool.server);
       if (session === undefined || !session.alive || !describable.has(tool.server)) return fallback;
+      const ask = (args: Record<string, unknown>) =>
+        session.callTool(DESCRIBE_TOOL, args, { timeoutMs: DESCRIBE_TIMEOUT_MS });
       try {
-        const result = await session.callTool(
-          DESCRIBE_TOOL,
-          { tool: tool.name, input },
-          { timeoutMs: DESCRIBE_TIMEOUT_MS },
+        // M4 §3: lang is optional and defaults to en, so English sends none.
+        let result = await ask(
+          lang === "en" ? { tool: tool.name, input } : { tool: tool.name, input, lang },
         );
+        // A server from before M4 refuses the unknown field: ask again in English.
+        if (result.isError && lang !== "en") result = await ask({ tool: tool.name, input });
         return (
           (result.isError ? undefined : parseDescription(result.structuredContent)) ?? fallback
         );
