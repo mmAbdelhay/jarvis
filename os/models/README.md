@@ -20,6 +20,7 @@ offer (shipped by `jarvis-models-catalog` at
 | `toolCalling` | Always `"verified"`: only models that pass the probe are listed |
 | `languages` | Languages it handles well |
 | `recommendedFor` | One-line guidance |
+| `role` | `main` (offered to the user) or `backup` (exactly one: the small built-in model jarvisd falls back to, M4 contracts §1; shipped by `jarvis-backup-model`) |
 
 ## Adding a model
 
