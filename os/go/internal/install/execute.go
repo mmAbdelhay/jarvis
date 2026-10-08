@@ -655,7 +655,10 @@ func (j *job) copy(ctx context.Context) error {
 }
 
 // bindMounts gives the chroot /dev, /proc, /sys, efivars (grub-install,
-// efibootmgr) and a fresh /run.
+// efibootmgr), a fresh /run and the live system's udev database in it:
+// os-prober (update-grub) only takes a partition for an EFI system
+// partition when udev reports its GPT type, so without /run/udev an
+// alongside install got no "Windows Boot Manager" entry and no 3 s menu.
 func (j *job) bindMounts(ctx context.Context) error {
 	for _, m := range [][]string{
 		{"--bind", "/dev", Target + "/dev"},
@@ -664,6 +667,7 @@ func (j *job) bindMounts(ctx context.Context) error {
 		{"-t", "sysfs", "sysfs", Target + "/sys"},
 		{"--bind", "/sys/firmware/efi/efivars", Target + "/sys/firmware/efi/efivars"},
 		{"-t", "tmpfs", "tmpfs", Target + "/run"},
+		{"--bind", "/run/udev", Target + "/run/udev"},
 	} {
 		if err := j.d.Files.MkdirAll(m[len(m)-1], 0o755); err != nil {
 			return err

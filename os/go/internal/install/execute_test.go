@@ -203,6 +203,7 @@ func eraseScript(t *testing.T, h *harness) {
 		ok("mount", "-t", "sysfs", "sysfs", "/target/sys").
 		ok("mount", "--bind", "/sys/firmware/efi/efivars", "/target/sys/firmware/efi/efivars").
 		ok("mount", "-t", "tmpfs", "tmpfs", "/target/run").
+		ok("mount", "--bind", "/run/udev", "/target/run/udev").
 		on(execx.Result{Stdout: []byte("live-boot\t1:20240525\tinstalled\nlive-config\t11.0.5\tinstalled\njarvis-installer\t0.2.0\tinstalled\nlive-tools\t\tnot-installed\n"), ExitCode: 1},
 			"chroot", "/target", "dpkg-query", "-W", "-f=${Package}\t${Version}\t${db:Status-Status}\n", "--",
 			"live-boot", "live-boot-initramfs-tools", "live-config", "live-config-systemd", "live-tools", "jarvis-installer", "jarvis-installer-backend").
