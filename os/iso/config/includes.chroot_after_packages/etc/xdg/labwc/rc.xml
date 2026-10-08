@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- labwc for Rafiq. <default/> keeps the stock key binds.
      Super alone on release focuses Jarvis; Super+key chords cancel it.
-     Super+Space toggles push-to-talk; Super+L requests the session lock,
-     handled by jarvis-idle (contracts §5.15). Ctrl+Alt+T opens foot. -->
+     Super+Space toggles push-to-talk; Super+L runs jarvis-lock directly,
+     including live boots without jarvis-idle (Task 7's deliberate deviation
+     from contracts §5.15). Ctrl+Alt+T opens foot. -->
 <labwc_config>
   <core>
     <decoration>server</decoration>
@@ -19,7 +20,7 @@
       <action name="Execute" command="jarvis-shell --voice" />
     </keybind>
     <keybind key="W-l">
-      <action name="Execute" command="loginctl lock-session" />
+      <action name="Execute" command="jarvis-lock" />
     </keybind>
     <keybind key="C-A-t">
       <action name="Execute" command="foot" />

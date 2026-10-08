@@ -42,7 +42,7 @@ import sys, xml.etree.ElementTree as ET
 kb = ET.parse(sys.argv[1]).getroot().find("keyboard")
 assert [b for b in kb.findall("keybind") if b.get("key") == "Super_L"][0].get("onRelease") == "yes"
 PY
-check "Super+L requests session lock (contracts §5.15)" grep -Fxq $'W-l\tExecute\tloginctl lock-session' <<<"$ours"
+check "Super+L runs jarvis-lock directly (including live boots without jarvis-idle)" grep -Fxq $'W-l\tExecute\tjarvis-lock' <<<"$ours"
 check "Super+Space is push-to-talk" grep -Fxq $'W-space\tExecute\tjarvis-shell --voice' <<<"$ours"
 check "no key is bound twice" test -z "$(cut -f1 <<<"$ours" | sort | uniq -d)"
 auto=$inc/etc/xdg/labwc/autostart
