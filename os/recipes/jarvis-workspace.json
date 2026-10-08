@@ -1,15 +1,15 @@
 {
   "id": "jarvis-workspace",
-  "title": { "en": "Jarvis Workspace", "ar": "مساحة عمل جارفس" },
+  "title": { "en": "Jarvis Workspace", "ar": "مساحة عمل جارفيس" },
   "description": {
     "en": "The Jarvis coding workspace: agents in real terminals, an editor, databases, an API client and cluster tabs in one window. It keeps its own settings.",
-    "ar": "مساحة عمل جارفس البرمجية: وكلاء يعملون في طرفيات حقيقية، ومحرّر، وقواعد بيانات، وعميل لواجهات البرمجة، وتبويبات للعناقيد، كلها في نافذة واحدة. ولها إعداداتها الخاصة."
+    "ar": "مساحة عمل جارفيس البرمجية: وكلاء يعملون في طرفيات حقيقية، ومحرّر، وقواعد بيانات، وعميل لواجهات البرمجة، وتبويبات للعناقيد، كلها في نافذة واحدة. ولها إعداداتها الخاصة."
   },
   "steps": [
     {
       "tool": "pkg.install",
       "input": { "items": [{ "source": "apt", "id": "jarvis-workspace" }] },
-      "title": { "en": "Install Jarvis Workspace", "ar": "تثبيت مساحة عمل جارفس" }
+      "title": { "en": "Install Jarvis Workspace", "ar": "تثبيت مساحة عمل جارفيس" }
     },
     {
       "tool": "pkg.install",
