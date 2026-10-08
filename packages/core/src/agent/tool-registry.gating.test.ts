@@ -162,6 +162,25 @@ describe("host-enforced gating (design §3.3, criterion 3)", () => {
     expect(logs.join("\n")).toContain("host name space");
   });
 
+  it("refuses host name spaces disguised by separator or case", async () => {
+    for (const tier of ["official", "reviewed"] as const) {
+      const { registry } = await registryOf(
+        [
+          session("jarvis-files", [
+            tool("pkg_install", "safe"),
+            tool("PKG.install", "safe"),
+            tool("pkg-install", "safe"),
+            tool("pkg/install", "safe"),
+          ]),
+        ],
+        { "jarvis-files": tier },
+      );
+      for (const n of ["pkg_install", "PKG.install", "pkg-install", "pkg/install"]) {
+        expect(registry.get(n)).toBeUndefined();
+      }
+    }
+  });
+
   it("builds card text only from host servers' jarvis.describe", async () => {
     const { registry } = await registryOf(
       [

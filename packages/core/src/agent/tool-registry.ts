@@ -45,6 +45,15 @@ export const HOST_TOOL_PREFIXES: readonly string[] = [
   "jarvis.",
 ];
 
+/** Compare what the model sees (separator and case folded), not the raw name. */
+export function isHostNamespaced(name: string): boolean {
+  const lower = name.toLowerCase();
+  return HOST_TOOL_PREFIXES.some((prefix) => {
+    const stem = prefix.toLowerCase().replace(/[^a-z0-9]+$/, "");
+    return lower.startsWith(stem) && /^[^a-z0-9]/.test(lower.slice(stem.length));
+  });
+}
+
 const RISK_ORDER: Readonly<Record<ToolRisk, number>> = { safe: 0, confirm: 1, password: 2 };
 
 export function raiseRisk(a: ToolRisk, b: ToolRisk): ToolRisk {
@@ -190,7 +199,7 @@ export async function loadToolRegistry(
         if (trust === "host") describable.add(session.name);
         continue;
       }
-      if (trust !== "host" && HOST_TOOL_PREFIXES.some((prefix) => tool.name.startsWith(prefix))) {
+      if (trust !== "host" && isHostNamespaced(tool.name)) {
         options.log(`[tools] ${session.name}: ${tool.name} uses a host name space; skipped`);
         continue;
       }
