@@ -63,3 +63,8 @@ if(JARVIS_UI_DBUS)
     message(WARNING "dbus-run-session not found: D-Bus tests are not built (install dbus-daemon)")
   endif()
 endif()
+
+find_package(Python3 3.9 REQUIRED COMPONENTS Interpreter)
+add_test(NAME i18n_tools
+  COMMAND ${Python3_EXECUTABLE} -m unittest discover -s ${CMAKE_CURRENT_SOURCE_DIR}/../i18n/tests -v)
+set_tests_properties(i18n_tools PROPERTIES LABELS "unit;i18n" TIMEOUT 60)
