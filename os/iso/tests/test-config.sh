@@ -86,4 +86,15 @@ check "boot hook refuses an autologin in the image" grep -q 'initial_session' "$
 
 check "daily APT lists refresh" grep -Fxq 'APT::Periodic::Update-Package-Lists "1";' "$ISO_DIR/config/includes.chroot_after_packages/etc/apt/apt.conf.d/20jarvis-periodic"
 
+# live-build copies Debian's os-release over the /etc symlink; the hook restores it.
+osr_hook=$ISO_DIR/config/hooks/normal/0050-os-release.hook.chroot
+osr_tmp=$(mktmp)
+mkdir -p "$osr_tmp/etc" "$osr_tmp/usr/lib"
+printf 'ID=rafiq\nID_LIKE=debian\n' > "$osr_tmp/usr/lib/os-release"
+printf 'ID=debian\nIMAGE_ID=live\n' > "$osr_tmp/etc/os-release"
+check "os-release hook runs" env OSR_ROOT="$osr_tmp" sh "$osr_hook"
+check "os-release hook restores the symlink" test "$(readlink "$osr_tmp/etc/os-release")" = ../usr/lib/os-release
+printf 'ID=debian\n' > "$osr_tmp/usr/lib/os-release"
+check "os-release hook fails without the branded file" bash -c "! OSR_ROOT='$osr_tmp' sh '$osr_hook' 2>/dev/null"
+rm -rf "$osr_tmp"
 finish

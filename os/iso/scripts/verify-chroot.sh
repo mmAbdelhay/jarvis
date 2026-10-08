@@ -42,8 +42,12 @@ grep -q '^\[remote "flathub"\]' "$c/var/lib/flatpak/repo/config" 2>/dev/null ||
 for p in jarvisd jarvis-shell jarvis-pkg jarvis-diag jarvis-helper jarvis-ui jarvis-greeter jarvis-installer \
   jarvis-installer-backend jarvis-model-fetch jarvis-ollama jarvis-models-catalog jarvis-archive-keyring jarvis-branding \
   greetd cage labwc foot flatpak network-manager plymouth cryptsetup-initramfs grub-efi-amd64-signed shim-signed mokutil os-prober; do
-  awk -v p="$p" '$0 == "Package: " p {getline; if ($0 == "Status: install ok installed") found = 1} END {exit !found}' \
-    "$c/var/lib/dpkg/status" || problems+=("package $p is not installed")
+  # Whole stanzas: Essential/Protected (grub-efi-amd64-signed) come before Status.
+  awk -v p="$p" 'BEGIN {RS = ""; FS = "\n"}
+    {pkg = ""; st = ""; for (i = 1; i <= NF; i++) {
+      if ($i ~ /^Package: /) pkg = substr($i, 10); if ($i ~ /^Status: /) st = substr($i, 9) }
+     if (pkg == p && st == "install ok installed") found = 1}
+    END {exit !found}' "$c/var/lib/dpkg/status" || problems+=("package $p is not installed")
 done
 
 grep -q 'command = "/usr/lib/jarvis-greeter/with-keyboard cage -s -- jarvis-greeter"' "$c/etc/greetd/config.toml" 2>/dev/null ||
@@ -53,9 +57,15 @@ if grep -q '^\[initial_session\]' "$c/etc/greetd/config.toml" 2>/dev/null; then
 fi
 [ -x "$c/usr/lib/live/config/2000-jarvis-live-session" ] ||
   problems+=("live-config script for the live autologin is missing")
-grep -qx "ID=$DISTRO_ID" "$c/etc/os-release" 2>/dev/null || problems+=("os-release ID is not $DISTRO_ID")
-grep -qx "PRETTY_NAME=\"$PRETTY_NAME\"" "$c/etc/os-release" 2>/dev/null || problems+=("os-release PRETTY_NAME is not $PRETTY_NAME")
-grep -qx 'ID_LIKE=debian' "$c/etc/os-release" 2>/dev/null || problems+=("os-release lacks ID_LIKE=debian")
+# /etc/os-release must stay base-files' symlink (live-build copies a stale
+# Debian file there; hook 0050-os-release undoes that). Read the target inside
+# the chroot, never through the link, which could resolve on the build host.
+[ "$(readlink "$c/etc/os-release" 2>/dev/null)" = ../usr/lib/os-release ] ||
+  problems+=("/etc/os-release is not the symlink to ../usr/lib/os-release")
+osr=$c/usr/lib/os-release
+grep -qx "ID=$DISTRO_ID" "$osr" 2>/dev/null || problems+=("os-release ID is not $DISTRO_ID")
+grep -qx "PRETTY_NAME=\"$PRETTY_NAME\"" "$osr" 2>/dev/null || problems+=("os-release PRETTY_NAME is not $PRETTY_NAME")
+grep -qx 'ID_LIKE=debian' "$osr" 2>/dev/null || problems+=("os-release lacks ID_LIKE=debian")
 grep -qx 'Theme=jarvis' "$c/etc/plymouth/plymouthd.conf" 2>/dev/null || problems+=("Plymouth theme is not jarvis")
 initrd=$(find "$c/boot" -maxdepth 1 -name 'initrd.img-*' | sort | tail -n1)
 if [ -n "${VERIFY_LSINITRAMFS:-}" ]; then

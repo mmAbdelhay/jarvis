@@ -1,0 +1,16 @@
+#!/bin/sh
+# os-release is the brand (design §11, contracts §9). live-build's bootstrap
+# stage replaces base-files' /etc/os-release symlink with a copy of Debian's
+# /usr/lib/os-release (plus IMAGE_ID=live, BUILD_ID), so jarvis-branding's
+# divert of /usr/lib/os-release would never show and installed systems would
+# keep the stale copy. Put the symlink back; live-build's chroot_hacks then
+# drops its own /etc/os-release divert without touching the file.
+# Test hook: OSR_ROOT.
+set -e
+root=${OSR_ROOT:-}
+rm -f "$root/etc/os-release"
+ln -s ../usr/lib/os-release "$root/etc/os-release"
+if ! grep -qx 'ID_LIKE=debian' "$root/etc/os-release" || grep -qx 'ID=debian' "$root/etc/os-release"; then
+  echo "0050-os-release: /usr/lib/os-release is not jarvis-branding's" >&2
+  exit 1
+fi

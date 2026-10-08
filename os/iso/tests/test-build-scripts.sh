@@ -91,7 +91,8 @@ mkchroot() { # mkchroot DIR — every piece of session wiring present
   mkdir -p "$c/usr/lib/live/config" "$c/etc/plymouth" "$c/boot" "$c/usr/share/keyrings" "$c/etc/apt/sources.list.d" \
     "$c/usr/share/jarvis/models" "$c/usr/lib/systemd/system" "$c/etc/pam.d" "$c/usr/share/grub/themes/jarvis"
   printf '#!/bin/sh\n' > "$c/usr/lib/live/config/2000-jarvis-live-session"; chmod 0755 "$c/usr/lib/live/config/2000-jarvis-live-session"
-  printf 'NAME="Rafiq"\nID=rafiq\nID_LIKE=debian\nPRETTY_NAME="Rafiq 0.2 (trixie)"\n' > "$c/etc/os-release"
+  printf 'NAME="Rafiq"\nID=rafiq\nID_LIKE=debian\nPRETTY_NAME="Rafiq 0.2 (trixie)"\n' > "$c/usr/lib/os-release"
+  ln -s ../usr/lib/os-release "$c/etc/os-release"
   echo 'Theme=jarvis' > "$c/etc/plymouth/plymouthd.conf"
   : > "$c/boot/initrd.img-6.12.0-amd64"
   printf 'Types: deb\nURIs: https://mmabdelhay.github.io/jarvis-apt\nEnabled: no\n' > "$c/etc/apt/sources.list.d/jarvis.sources"
@@ -112,7 +113,11 @@ mkchroot() { # mkchroot DIR — every piece of session wiring present
     "$c/etc/systemd/system/multi-user.target.wants/jarvis-flathub-appstream.service"
   printf '[remote "flathub"]\nurl=https://dl.flathub.org/repo/\n' > "$c/var/lib/flatpak/repo/config"
   for p in $VERIFY_PKGS; do
-    printf 'Package: %s\nStatus: install ok installed\n\n' "$p" >> "$c/var/lib/dpkg/status"
+    case $p in
+      # As in Debian's status file: Protected comes before Status.
+      grub-efi-amd64-signed) printf 'Package: %s\nProtected: yes\nStatus: install ok installed\n\n' "$p" ;;
+      *) printf 'Package: %s\nStatus: install ok installed\n\n' "$p" ;;
+    esac >> "$c/var/lib/dpkg/status"
   done
   m3_fixture "$c"
   m4_fixture "$c"
@@ -122,8 +127,16 @@ check "complete chroot verifies" "$scripts/verify-chroot.sh" "$tmp/c"
 printf '[initial_session]\nuser = "jarvis"\n' >> "$tmp/c/etc/greetd/config.toml"
 check "an autologin in the image is caught" bash -c "! '$scripts/verify-chroot.sh' '$tmp/c' 2>/dev/null"
 mkchroot "$tmp/c"
-sed -i 's/^ID=rafiq/ID=other/' "$tmp/c/etc/os-release"
+sed -i 's/^ID=rafiq/ID=other/' "$tmp/c/usr/lib/os-release"
 check "wrong os-release ID is caught" bash -c "! '$scripts/verify-chroot.sh' '$tmp/c' 2>/dev/null"
+mkchroot "$tmp/c"
+# live-build's bootstrap leaves a copy of Debian's os-release in /etc.
+rm "$tmp/c/etc/os-release"
+printf 'PRETTY_NAME="Debian GNU/Linux 13 (trixie)"\nID=debian\nIMAGE_ID=live\n' > "$tmp/c/etc/os-release"
+check "live-build's stale /etc/os-release copy is caught" bash -c "! '$scripts/verify-chroot.sh' '$tmp/c' 2>/dev/null"
+mkchroot "$tmp/c"
+sed -i '/^Package: grub-efi-amd64-signed$/,/^$/d' "$tmp/c/var/lib/dpkg/status"
+check "missing grub-efi-amd64-signed is caught" bash -c "! '$scripts/verify-chroot.sh' '$tmp/c' 2>/dev/null"
 mkchroot "$tmp/c"
 rm "$tmp/c/usr/lib/live/config/2000-jarvis-live-session"
 check "missing live-config script is caught" bash -c "! '$scripts/verify-chroot.sh' '$tmp/c' 2>/dev/null"
