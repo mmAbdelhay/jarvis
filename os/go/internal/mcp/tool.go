@@ -48,6 +48,8 @@ const (
 	CodeDenied     Code = "denied"
 	CodeNotAllowed Code = "not_allowed"
 	CodeFailed     Code = "failed"
+	// CodeUnsupported: this computer cannot do it (contracts §7 items 9, 15).
+	CodeUnsupported Code = "unsupported"
 )
 
 // ToolError is returned by a handler to produce an isError result.
