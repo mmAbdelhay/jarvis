@@ -7,6 +7,7 @@
 // No electron here (core/no-electron.test.ts).
 import {
   AGENT_TEXT,
+  USER_TEXT,
   type Card,
   CONTROL_TEXT,
   type ConfirmFrom,
@@ -219,7 +220,7 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
       });
     }
   };
-  let provider: ModelProvider = unavailableProvider(AGENT_TEXT.noProvider);
+  let provider: ModelProvider = unavailableProvider(USER_TEXT.en.noProvider);
   let brain: OsBrainConfig = emptyBrain();
   let failover: FailoverProvider | undefined;
   const keyStores = (): ProviderKeyStores => ({
@@ -501,7 +502,7 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
       return;
     }
     if (brain.providers.length === 0) {
-      provider = unavailableProvider(AGENT_TEXT.noProvider);
+      provider = unavailableProvider(USER_TEXT.en.noProvider);
       return;
     }
     failover = createFailoverProvider({
@@ -544,21 +545,21 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
   }
 
   async function runUndo(request: UndoRequest, from: ConfirmFrom): Promise<UndoResult> {
-    if (locked) throw new OsAgentError("locked", CONTROL_TEXT.locked);
+    if (locked) throw new OsAgentError("locked", CONTROL_TEXT.en.locked);
     const step = undoStack.pop(request.kind === "files" ? (s) => s.family === "files." : undefined);
     if (step === undefined) return { undone: null };
     const tools = await ensureRegistry();
     // The registry may have been reloaded since: the same name must still be
     // served by the same host server, or nothing runs.
     if (tools.get(step.tool)?.server !== step.server) {
-      throw new OsAgentError("internal", CONTROL_TEXT.undoMoved(step.title));
+      throw new OsAgentError("internal", CONTROL_TEXT.en.undoMoved(step.title));
     }
     const outcome = await tools.call(step.tool, step.input);
     try {
       await deps.audit.append({
         ts: deps.now(),
         tool: step.tool,
-        title: CONTROL_TEXT.undoTitle(step.title),
+        title: CONTROL_TEXT.en.undoTitle(step.title),
         input: step.input,
         decision: "approved",
         via: from.via,
@@ -571,7 +572,7 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
     if (!outcome.ok) {
       throw new OsAgentError(
         "internal",
-        CONTROL_TEXT.undoFailed(step.title, outcome.text.slice(0, 200)),
+        CONTROL_TEXT.en.undoFailed(step.title, outcome.text.slice(0, 200)),
       );
     }
     void sys.refresh();
@@ -588,7 +589,9 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
       try {
         const result = await runUndo(request, from);
         reply =
-          result.undone === null ? CONTROL_TEXT.nothingToUndo : CONTROL_TEXT.undone(result.undone);
+          result.undone === null
+            ? CONTROL_TEXT.en.nothingToUndo
+            : CONTROL_TEXT.en.undone(result.undone);
       } catch (error) {
         reply = describeError(error);
       }
@@ -619,8 +622,8 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
     },
 
     prompt(text, from = LOCAL_CONFIRM) {
-      if (turn !== undefined) throw new OsAgentError("bad-request", AGENT_TEXT.turnRunning);
-      if (doctor.running) throw new OsAgentError("bad-request", AGENT_TEXT.doctorRunning);
+      if (turn !== undefined) throw new OsAgentError("bad-request", USER_TEXT.en.turnRunning);
+      if (doctor.running) throw new OsAgentError("bad-request", USER_TEXT.en.doctorRunning);
       const undoRequest = undoRequestOf(text);
       if (undoRequest !== undefined) return promptUndo(text, undoRequest, from);
       const turnId = deps.newId();
@@ -688,7 +691,7 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
 
     confirm(answer, from = LOCAL_CONFIRM) {
       // Rafiq M3 §2: no card is answered while the screen is locked, by anyone.
-      if (locked) throw new OsAgentError("locked", CONTROL_TEXT.locked);
+      if (locked) throw new OsAgentError("locked", CONTROL_TEXT.en.locked);
       try {
         gate.confirm(answer, from);
       } catch (error) {
@@ -699,8 +702,8 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
     },
 
     async undo(from = LOCAL_CONFIRM) {
-      if (locked) throw new OsAgentError("locked", CONTROL_TEXT.locked);
-      if (turn !== undefined) throw new OsAgentError("bad-request", AGENT_TEXT.turnRunning);
+      if (locked) throw new OsAgentError("locked", CONTROL_TEXT.en.locked);
+      if (turn !== undefined) throw new OsAgentError("bad-request", USER_TEXT.en.turnRunning);
       return runUndo({ kind: "any" }, from);
     },
 
@@ -772,7 +775,7 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
 
     async save(request) {
       if (request.providers.some((draft) => draft.model === "")) {
-        throw new OsAgentError("bad-request", "Pick a model before saving");
+        throw new OsAgentError("bad-request", USER_TEXT.en.pickModel);
       }
       // Contracts §7 #11: probe only new or changed providers (or ones that
       // carry a key); an unchanged saved entry keeps its saved supportsTools.
@@ -851,7 +854,7 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
     },
 
     doctorStart() {
-      if (turn !== undefined) throw new OsAgentError("bad-request", AGENT_TEXT.turnRunning);
+      if (turn !== undefined) throw new OsAgentError("bad-request", USER_TEXT.en.turnRunning);
       return doctor.start();
     },
 
@@ -903,11 +906,11 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
 
     async memoryList(limit) {
       if (!memoryOn() || deps.memory === undefined) {
-        throw new OsAgentError("unsupported", AGENT_TEXT.memoryOff);
+        throw new OsAgentError("unsupported", USER_TEXT.en.memoryOff);
       }
       // No keyring (or locked) → open() yields null → memory is off (§7 #9).
       if ((await deps.memory?.open()) == null) {
-        throw new OsAgentError("unsupported", AGENT_TEXT.memoryOff);
+        throw new OsAgentError("unsupported", USER_TEXT.en.memoryOff);
       }
       return memory.list(limit);
     },
@@ -945,9 +948,9 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
         return { count: summary.count, security: summary.security };
       } catch (error) {
         if (error instanceof UpdatesCheckError && error.code === "not_found") {
-          throw new OsAgentError("unsupported", AGENT_TEXT.updatesUnavailable);
+          throw new OsAgentError("unsupported", USER_TEXT.en.updatesUnavailable);
         }
-        throw new OsAgentError("internal", AGENT_TEXT.updatesCheckFailed(describeError(error)));
+        throw new OsAgentError("internal", USER_TEXT.en.updatesCheckFailed(describeError(error)));
       }
     },
 

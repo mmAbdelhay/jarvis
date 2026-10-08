@@ -7,7 +7,7 @@
 import { fenceToolOutput } from "./fence.js";
 import { DEFAULT_CONTEXT_TOKENS, fitHistory, historyBudget } from "./context-fit.js";
 import { mapLimit } from "./map-limit.js";
-import { AGENT_TEXT, SYSTEM_PROMPT, toolActivity } from "./messages.js";
+import { AGENT_TEXT, SYSTEM_PROMPT, toolActivity, USER_TEXT } from "./messages.js";
 import { buildSystemPrompt } from "./safety.js";
 import type { AgentEvent } from "./contract.js";
 import type { GateCall, GateItemStatus, RiskGate } from "./risk-gate.js";
@@ -160,7 +160,7 @@ async function runCalls(
       name: tool.name,
       status: outcome.ok ? "ok" : "error",
       // Never the tool's output: it may hold a secret the gate has not scrubbed yet.
-      summary: outcome.ok ? activity : AGENT_TEXT.toolFailed(activity, outcome.code),
+      summary: outcome.ok ? activity : USER_TEXT.en.toolFailed(activity, outcome.code),
     });
     return outcome;
   };
@@ -259,7 +259,7 @@ async function reportStepLimit(
     if (context.signal.aborted) throw error;
   }
   if (text.trim() === "") {
-    text = AGENT_TEXT.stepLimitFallback(MAX_STEPS, context.ran);
+    text = USER_TEXT.en.stepLimitFallback(MAX_STEPS, context.ran);
     deps.emit({ type: "text", turnId: context.turnId, delta: text });
   }
   context.messages.push({ role: "assistant", text, toolCalls: [] });

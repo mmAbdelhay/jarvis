@@ -150,7 +150,7 @@ export function createOsRemote(deps: OsRemoteDeps): OsRemote {
   }
 
   function need(): Bridge {
-    if (bridge === undefined) throw new OsAgentError("unsupported", CONTROL_TEXT.remoteOff);
+    if (bridge === undefined) throw new OsAgentError("unsupported", CONTROL_TEXT.en.remoteOff);
     return bridge;
   }
 
@@ -216,7 +216,7 @@ export function createOsRemote(deps: OsRemoteDeps): OsRemote {
       const opened = await target.openPairing();
       const pairing = target.status().pairing;
       if (opened !== "opened" || pairing.kind !== "open") {
-        throw new OsAgentError("unsupported", CONTROL_TEXT.pairingUnavailable);
+        throw new OsAgentError("unsupported", CONTROL_TEXT.en.pairingUnavailable);
       }
       return { uri: pairing.uri, expiresAt: pairing.expiresAt };
     },
@@ -229,10 +229,10 @@ export function createOsRemote(deps: OsRemoteDeps): OsRemote {
     answerPairing(answer) {
       const pairing = need().status().pairing;
       if (pairing.kind !== "confirming") {
-        throw new OsAgentError("bad-request", CONTROL_TEXT.noPairingRequest);
+        throw new OsAgentError("bad-request", CONTROL_TEXT.en.noPairingRequest);
       }
       if (answer.requestId !== pairing.requestId) {
-        throw new OsAgentError("bad-request", CONTROL_TEXT.pairingChanged);
+        throw new OsAgentError("bad-request", CONTROL_TEXT.en.pairingChanged);
       }
       need().decidePairing(pairing.requestId, answer.approve);
       return null;

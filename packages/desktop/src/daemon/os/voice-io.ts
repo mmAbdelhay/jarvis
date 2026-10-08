@@ -140,7 +140,7 @@ export type VoiceIo = {
 
 export class VoiceUnavailableError extends Error {
   constructor() {
-    super(CONTROL_TEXT.voiceUnavailable);
+    super(CONTROL_TEXT.en.voiceUnavailable);
     this.name = "VoiceUnavailableError";
   }
 }

@@ -36,15 +36,15 @@ export function allowedChain(
 
 export function failoverReason(error: unknown): string | null {
   if (!(error instanceof ProviderError)) return null;
-  if (error.kind === "network") return FAILOVER_TEXT.unreachable(error.message);
+  if (error.kind === "network") return FAILOVER_TEXT.en.unreachable(error.message);
   if (error.kind !== "http") return null;
-  if (error.status === 429) return FAILOVER_TEXT.rateLimited;
+  if (error.status === 429) return FAILOVER_TEXT.en.rateLimited;
   const serverSide = error.status === undefined || error.status >= 500;
   if (error.status === 529 || (serverSide && /overload/i.test(error.message))) {
-    return FAILOVER_TEXT.overloaded;
+    return FAILOVER_TEXT.en.overloaded;
   }
   if (error.status !== undefined && error.status >= 500)
-    return FAILOVER_TEXT.serverError(error.status);
+    return FAILOVER_TEXT.en.serverError(error.status);
   return null;
 }
 
@@ -117,18 +117,18 @@ export function createFailoverProvider(options: {
           return;
         } catch (error) {
           if (request.signal.aborted) throw error;
-          const why = timedOut ? FAILOVER_TEXT.slow : failoverReason(error);
+          const why = timedOut ? FAILOVER_TEXT.en.slow : failoverReason(error);
           if (started || why === null || last) {
             if (timedOut) {
               throw new ProviderError(
                 "network",
-                FAILOVER_TEXT.reason(entry.id, FAILOVER_TEXT.slow),
+                FAILOVER_TEXT.en.reason(entry.id, FAILOVER_TEXT.en.slow),
               );
             }
             throw error;
           }
           const next = chain[index + 1] as FailoverEntry;
-          turnReason = FAILOVER_TEXT.reason(entry.id, why);
+          turnReason = FAILOVER_TEXT.en.reason(entry.id, why);
           cursor = index + 1;
           // Status moves now, so onSwitch listeners (provider:status) see it.
           current = { activeId: next.id, fallbackReason: turnReason };
@@ -138,7 +138,7 @@ export function createFailoverProvider(options: {
           request.signal.removeEventListener("abort", forward);
         }
       }
-      throw new ProviderError("network", FAILOVER_TEXT.noneLeft);
+      throw new ProviderError("network", FAILOVER_TEXT.en.noneLeft);
     },
 
     probe: () => first.provider.probe(),
@@ -155,7 +155,10 @@ export function createFailoverProvider(options: {
             fallbackReason:
               index === 0
                 ? null
-                : FAILOVER_TEXT.reason(first.id, FAILOVER_TEXT.unreachable(firstFailure ?? "")),
+                : FAILOVER_TEXT.en.reason(
+                    first.id,
+                    FAILOVER_TEXT.en.unreachable(firstFailure ?? ""),
+                  ),
           };
           return { ok: true };
         } catch (error) {

@@ -98,9 +98,9 @@ export function createOsVoice(deps: {
 
   return {
     async utterance(meta, wav, origin) {
-      if (!checkWav(wav).ok) throw new OsAgentError("bad-request", CONTROL_TEXT.badAudio);
+      if (!checkWav(wav).ok) throw new OsAgentError("bad-request", CONTROL_TEXT.en.badAudio);
       if (!deps.io.availability().available) {
-        throw new OsAgentError("unsupported", CONTROL_TEXT.voiceUnavailable);
+        throw new OsAgentError("unsupported", CONTROL_TEXT.en.voiceUnavailable);
       }
       silence(); // barge-in: a new utterance stops whatever is being said
       setState({ state: "transcribing" });
@@ -110,10 +110,10 @@ export function createOsVoice(deps: {
       } catch (error) {
         setState({ state: "idle" });
         if (error instanceof VoiceUnavailableError) {
-          throw new OsAgentError("unsupported", CONTROL_TEXT.voiceUnavailable);
+          throw new OsAgentError("unsupported", CONTROL_TEXT.en.voiceUnavailable);
         }
         deps.log("[voice] transcription failed");
-        throw new OsAgentError("internal", CONTROL_TEXT.transcriptionFailed);
+        throw new OsAgentError("internal", CONTROL_TEXT.en.transcriptionFailed);
       }
       setState({ state: "idle" });
       const text = heard.text.trim().slice(0, MAX_PROMPT_CHARS);

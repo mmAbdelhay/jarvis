@@ -4,7 +4,7 @@
 // it and the user gets a plain message instead.
 //
 // No electron here (core/no-electron.test.ts).
-import { AGENT_TEXT, type ModelProvider, ProviderError } from "@jarvis/core";
+import { type Lang, type ModelProvider, ProviderError, USER_TEXT } from "@jarvis/core";
 import {
   createAnthropicProvider,
   createGeminiProvider,
@@ -14,17 +14,18 @@ import {
 } from "@jarvis/platform/model";
 import type { ProviderSection } from "./provider-config.js";
 
-export function unavailableProvider(message: string): ModelProvider {
+export function unavailableProvider(message: string | (() => string)): ModelProvider {
+  const text = () => (typeof message === "string" ? message : message());
   return {
     // biome-ignore lint/correctness/useYield: it fails before it yields anything.
     async *chat() {
-      throw new ProviderError("auth", message);
+      throw new ProviderError("auth", text());
     },
-    probe: async () => ({ ok: false, supportsTools: false, models: [], error: message }),
+    probe: async () => ({ ok: false, supportsTools: false, models: [], error: text() }),
     listModels: async () => {
-      throw new ProviderError("auth", message);
+      throw new ProviderError("auth", text());
     },
-    reachable: async () => ({ ok: false, error: message }),
+    reachable: async () => ({ ok: false, error: text() }),
   };
 }
 
@@ -75,17 +76,18 @@ export function createLazyKeyProvider(options: {
 export function buildProvider(
   section: ProviderSection,
   apiKey: string | undefined,
-  deps: { fetch: FetchLike; subscription?: (model: string) => ModelProvider },
+  deps: { fetch: FetchLike; subscription?: (model: string) => ModelProvider; language?(): Lang },
 ): ModelProvider {
   switch (section.kind) {
     case "anthropic":
       if (section.auth === "subscription") {
         return (
           deps.subscription?.(section.model) ??
-          unavailableProvider(AGENT_TEXT.subscriptionUnavailable)
+          unavailableProvider(() => USER_TEXT[deps.language?.() ?? "en"].subscriptionUnavailable)
         );
       }
-      if (apiKey === undefined || apiKey === "") return unavailableProvider(AGENT_TEXT.noKey);
+      if (apiKey === undefined || apiKey === "")
+        return unavailableProvider(() => USER_TEXT[deps.language?.() ?? "en"].noKey);
       return createAnthropicProvider({
         baseUrl: section.baseUrl,
         model: section.model,
@@ -107,7 +109,8 @@ export function buildProvider(
         fetch: deps.fetch,
       });
     case "gemini":
-      if (apiKey === undefined || apiKey === "") return unavailableProvider(AGENT_TEXT.noKey);
+      if (apiKey === undefined || apiKey === "")
+        return unavailableProvider(() => USER_TEXT[deps.language?.() ?? "en"].noKey);
       return createGeminiProvider({
         baseUrl: section.baseUrl,
         model: section.model,

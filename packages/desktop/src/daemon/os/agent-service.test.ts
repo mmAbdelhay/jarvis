@@ -1,5 +1,5 @@
 import {
-  AGENT_TEXT,
+  USER_TEXT,
   type Card,
   type AgentEvent,
   type AuditEntry,
@@ -610,7 +610,7 @@ describe("updates and model download (M2 contracts §2, §5)", () => {
     await expect(h.agent.checkUpdates()).rejects.toMatchObject({
       name: "OsAgentError",
       code: "unsupported",
-      message: AGENT_TEXT.updatesUnavailable,
+      message: USER_TEXT.en.updatesUnavailable,
     });
   });
 
@@ -630,7 +630,7 @@ describe("updates and model download (M2 contracts §2, §5)", () => {
     await h.agent.start();
     await expect(h.agent.checkUpdates()).rejects.toMatchObject({
       code: "internal",
-      message: AGENT_TEXT.updatesCheckFailed("The repository is not signed."),
+      message: USER_TEXT.en.updatesCheckFailed("The repository is not signed."),
     });
   });
 

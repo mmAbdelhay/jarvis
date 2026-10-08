@@ -96,7 +96,8 @@ export function confirmFrom(origin: OsOrigin): ConfirmFrom {
 }
 
 export function requireLocal(origin: OsOrigin): void {
-  if (origin.kind !== "local") throw new ControlRequestError("forbidden", CONTROL_TEXT.localOnly);
+  if (origin.kind !== "local")
+    throw new ControlRequestError("forbidden", CONTROL_TEXT.en.localOnly);
 }
 
 export function createOsRouter(services: OsServices): OsRouter {
@@ -104,7 +105,7 @@ export function createOsRouter(services: OsServices): OsRouter {
 
   function remote(): OsRemoteControls {
     if (services.remote === undefined) {
-      throw new ControlRequestError("unsupported", CONTROL_TEXT.remoteOff);
+      throw new ControlRequestError("unsupported", CONTROL_TEXT.en.remoteOff);
     }
     return services.remote;
   }
@@ -126,7 +127,8 @@ export function createOsRouter(services: OsServices): OsRouter {
           origin.kind === "local" && services.isLockClient !== undefined
             ? await services.isLockClient(origin.connection)
             : false;
-        if (!isLockClient) throw new ControlRequestError("forbidden", CONTROL_TEXT.lockClientOnly);
+        if (!isLockClient)
+          throw new ControlRequestError("forbidden", CONTROL_TEXT.en.lockClientOnly);
         return agent.setLocked(value(parseSetLocked(args)).locked);
       }
       case OS_CONTROL_REQUESTS.providerList:
@@ -165,7 +167,7 @@ export function createOsRouter(services: OsServices): OsRouter {
         requireLocal(origin);
         const { on } = value(parseSetSpeak(args));
         if (services.voice === undefined) {
-          throw new ControlRequestError("unsupported", CONTROL_TEXT.voiceUnavailable);
+          throw new ControlRequestError("unsupported", CONTROL_TEXT.en.voiceUnavailable);
         }
         return services.voice.setSpeak(on);
       }
@@ -207,11 +209,11 @@ export function createOsRouter(services: OsServices): OsRouter {
     switch (channel) {
       case OS_CONTROL_BLOBS.voiceUtterance: {
         if (bytes.byteLength > MAX_VOICE_BYTES) {
-          throw new ControlRequestError("bad-request", CONTROL_TEXT.badAudio);
+          throw new ControlRequestError("bad-request", CONTROL_TEXT.en.badAudio);
         }
         const meta = value(parseVoiceUtteranceMeta(args));
         if (services.voice === undefined) {
-          throw new ControlRequestError("unsupported", CONTROL_TEXT.voiceUnavailable);
+          throw new ControlRequestError("unsupported", CONTROL_TEXT.en.voiceUnavailable);
         }
         return services.voice.utterance(meta, bytes, {
           from: confirmFrom(origin),
@@ -235,7 +237,7 @@ export function createOsRouter(services: OsServices): OsRouter {
   return {
     invoke(channel, args, origin) {
       if (origin.kind === "phone" && !PHONE_REQUESTS.has(channel)) {
-        return Promise.reject(new ControlRequestError("forbidden", CONTROL_TEXT.localOnly));
+        return Promise.reject(new ControlRequestError("forbidden", CONTROL_TEXT.en.localOnly));
       }
       return translate(() => route(channel, args, origin));
     },

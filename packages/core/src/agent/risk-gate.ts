@@ -5,6 +5,7 @@
 // whatever it returns — and never into events, model messages or the audit
 // log. One audit line per item, approved or not.
 import { auditInput } from "./audit.js";
+import type { Lang } from "./i18n.js";
 import { mapLimit } from "./map-limit.js";
 import { AGENT_TEXT, CONTROL_TEXT } from "./messages.js";
 import {
@@ -80,6 +81,8 @@ export type RiskGateDeps = {
   log(line: string): void;
   /** Called after a ticked call ran and returned ok. Must not throw. */
   onRan?(ran: GateRan): void;
+  /** The UI language for refusals (M4 §3). Default en. */
+  language?(): Lang;
 };
 
 export interface RiskGate {
@@ -162,6 +165,7 @@ function batchLimit(tool: RegisteredTool): number {
 }
 
 export function createRiskGate(deps: RiskGateDeps): RiskGate {
+  const text = () => CONTROL_TEXT[deps.language?.() ?? "en"];
   const open = new Map<
     string,
     { card: Card; maxTicked: number; settle(decision: Decision): void }
@@ -375,33 +379,32 @@ export function createRiskGate(deps: RiskGateDeps): RiskGate {
     runBatch,
     confirm(answer, from = LOCAL_CONFIRM) {
       const entry = open.get(answer.cardId);
-      if (entry === undefined) throw new GateError("That card is no longer open");
+      if (entry === undefined) throw new GateError(text().cardClosed);
       const items = new Map(entry.card.items.map((item) => [item.itemId, item]));
       for (const id of answer.ticked) {
-        if (!items.has(id)) throw new GateError(`The card has no item ${id}`);
+        if (!items.has(id)) throw new GateError(text().noItem(id));
       }
       const secrets: Record<string, Record<string, string>> = Object.create(null);
       for (const [itemId, fields] of Object.entries(answer.secrets)) {
         const item = items.get(itemId);
-        if (item === undefined) throw new GateError(`The card has no item ${itemId}`);
+        if (item === undefined) throw new GateError(text().noItem(itemId));
         const allowed = new Set(item.secretFields.map((field) => field.name));
         const kept: Record<string, string> = Object.create(null);
         for (const [name, value] of Object.entries(fields)) {
-          if (!allowed.has(name)) throw new GateError(`Item ${itemId} has no secret field ${name}`);
+          if (!allowed.has(name)) throw new GateError(text().noSecretField(itemId, name));
           kept[name] = value;
         }
         secrets[itemId] = kept;
       }
       const ticked = new Set(answer.ticked);
-      if (ticked.size > entry.maxTicked)
-        throw new GateError(`Tick at most ${entry.maxTicked} item(s) on this card`);
+      if (ticked.size > entry.maxTicked) throw new GateError(text().tickAtMost(entry.maxTicked));
       // Design §3.3 ruling: password-tier items are approved on the computer only.
       if (
         answer.approve &&
         !from.allowPassword &&
         [...ticked].some((id) => items.get(id)?.risk === "password")
       ) {
-        throw new GateError(CONTROL_TEXT.passwordNotFromPhone, "forbidden");
+        throw new GateError(text().passwordNotFromPhone, "forbidden");
       }
       entry.settle(
         answer.approve && ticked.size > 0
