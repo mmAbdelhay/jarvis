@@ -2,6 +2,8 @@
 # build-image.sh --debs DIR --tag TAG [--context-only DIR]
 # The jarvis-agent image (M2.5 contracts §6) from this build's jarvisd,
 # jarvis-diag, jarvis-cli and jarvis-archive-keyring .debs. Never the helper, never pushes.
+# CI: jarvis-archive-keyring comes from build-distro (artifact debs-distro), so the
+# job that calls this must list build-distro in `needs` (M2.5 contracts §7 #14).
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 debs="" tag="" ctx_only=""
