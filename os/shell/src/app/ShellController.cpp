@@ -79,7 +79,7 @@ ShellController::ShellController(ControlClient* client, QObject* parent)
             if (r.ok)
                 m_doctor->applyState(r.value.toObject());
             else
-                m_conversation->addNotice(u"Network doctor couldn't start: %1"_s.arg(r.text));
+                m_conversation->addNotice(tr("Network doctor couldn't start: %1").arg(r.text));
         });
     });
     connect(m_doctor, &DoctorModel::skipRequested, this, [this](const QString& stepId) {
@@ -134,10 +134,10 @@ ShellController::ShellController(ControlClient* client, QObject* parent)
     });
     // Contracts §2: install/remove happen through tools and cards, never a channel.
     connect(m_registry, &RegistryModel::installRequested, this, [this](const QString& id, const QString& version) {
-        askJarvis(u"Install the tool server %1 version %2 from the Jarvis tool registry."_s.arg(id, version));
+        askJarvis(u"Install the tool server %1 version %2 from the Jarvis tool registry."_s.arg(id, version)); // i18n: ignore
     });
     connect(m_registry, &RegistryModel::removeRequested, this, [this](const QString& id) {
-        askJarvis(u"Remove the installed tool server %1."_s.arg(id));
+        askJarvis(u"Remove the installed tool server %1."_s.arg(id)); // i18n: ignore
     });
     // Settings → Phone (M3 contracts §5.9).
     const auto phoneStatus = [this](const ControlResult& r) {
@@ -239,16 +239,16 @@ bool ShellController::offerDoctor() const
 QString ShellController::bannerText() const
 {
     if (m_connection == u"connecting")
-        return u"Connecting to Jarvis…"_s;
+        return tr("Connecting to Jarvis…");
     if (m_connection == u"reconnecting")
-        return u"Lost the connection to Jarvis. Reconnecting…"_s;
+        return tr("Lost the connection to Jarvis. Reconnecting…");
     if (!m_providerReachable) {
-        const QString who = m_provider->activeModel().isEmpty() ? u"the model provider"_s : m_provider->activeModel();
-        return m_providerError.isEmpty() ? u"Can't reach %1."_s.arg(who)
-                                         : u"Can't reach %1: %2"_s.arg(who, m_providerError);
+        const QString who = m_provider->activeModel().isEmpty() ? tr("the model provider") : m_provider->activeModel();
+        return m_providerError.isEmpty() ? tr("Can't reach %1.").arg(who)
+                                         : tr("Can't reach %1: %2").arg(who, m_providerError);
     }
     if (!m_fallbackReason.isEmpty()) // design §3.5: "Using <provider> — <reason>"
-        return u"Using %1 — %2"_s.arg(m_providers->displayName(m_providers->activeId()), m_fallbackReason);
+        return tr("Using %1 — %2").arg(m_providers->displayName(m_providers->activeId()), m_fallbackReason);
     return {};
 }
 
@@ -308,7 +308,7 @@ void ShellController::onClosed()
     m_pairing->close();
     if (hadCard)
         m_conversation->addNotice(
-            u"Lost the connection to Jarvis. Open approval cards come back when it reconnects; an unanswered card counts as Deny."_s);
+            tr("Lost the connection to Jarvis. Open approval cards come back when it reconnects; an unanswered card counts as Deny."));
 }
 
 void ShellController::onPush(const QString& channel, const QJsonValue& payload)
@@ -390,14 +390,14 @@ void ShellController::onAgentEvent(const QJsonObject& event)
         if (m_chatCardIds.remove(cardId)) {
             const QString decision = event.value("decision").toString();
             if (decision == u"approved") {
-                m_conversation->addNotice(u"Approved."_s);
+                m_conversation->addNotice(tr("Approved."));
                 m_undoAvailable = true; // agent:undo can now restore it (M3 contracts §2)
                 emit undoChanged();
             }
             else if (decision == u"timeout")
-                m_conversation->addNotice(u"No answer in 5 minutes. Nothing was changed."_s);
+                m_conversation->addNotice(tr("No answer in 5 minutes. Nothing was changed."));
             else
-                m_conversation->addNotice(u"Denied. Nothing was changed."_s);
+                m_conversation->addNotice(tr("Denied. Nothing was changed."));
         }
         m_audit->refresh();
         return;
@@ -411,7 +411,7 @@ void ShellController::maybeLeaveDoctor()
 {
     if (m_view == u"doctor" && m_doctor->done() == u"fixed" && m_providerReachable && m_connection == u"open") {
         setView(u"chat"_s);
-        m_conversation->addNotice(u"Network doctor fixed the connection."_s);
+        m_conversation->addNotice(tr("Network doctor fixed the connection."));
     }
 }
 
@@ -421,12 +421,12 @@ bool ShellController::sendPrompt(const QString& text)
     if (prompt.isEmpty())
         return false;
     if (prompt.size() > kMaxPromptLength) {
-        m_conversation->addNotice(u"That message is too long (8000 characters at most)."_s);
+        m_conversation->addNotice(tr("That message is too long (8000 characters at most)."));
         return false;
     }
     request(u"agent:prompt"_s, QJsonArray{QJsonObject{{"text", prompt}}}, [this](const ControlResult& r) {
         if (!r.ok)
-            m_conversation->addNotice(u"Jarvis couldn't take that message: %1"_s.arg(r.text));
+            m_conversation->addNotice(tr("Jarvis couldn't take that message: %1").arg(r.text));
     });
     return true;
 }
@@ -470,7 +470,7 @@ void ShellController::decide(CardModel* card, bool approve)
         return; // already answered: a double click sends nothing
     if (m_locked) {
         // M3 contracts §2: jarvisd refuses agent:confirm while locked. Keep the card.
-        m_conversation->addNotice(u"The screen is locked. Unlock it to answer this card."_s);
+        m_conversation->addNotice(tr("The screen is locked. Unlock it to answer this card."));
         return;
     }
     const QJsonObject source = card->source();
@@ -481,11 +481,11 @@ void ShellController::decide(CardModel* card, bool approve)
         if (r.ok)
             return;
         if (r.code == u"locked" && target && !target->active() && target->load(source)) {
-            m_conversation->addNotice(u"The screen is locked. Unlock it to answer this card."_s);
+            m_conversation->addNotice(tr("The screen is locked. Unlock it to answer this card."));
             return;
         }
         m_conversation->addNotice(
-            u"Couldn't send your answer to Jarvis (%1). An unanswered card counts as Deny."_s.arg(r.text));
+            tr("Couldn't send your answer to Jarvis (%1). An unanswered card counts as Deny.").arg(r.text));
     });
 }
 
@@ -498,12 +498,12 @@ void ShellController::undo()
     request(u"agent:undo"_s, QJsonArray{}, [this](const ControlResult& r) {
         m_undoing = false;
         if (!r.ok) {
-            m_conversation->addNotice(u"Couldn't undo: %1"_s.arg(r.text));
+            m_conversation->addNotice(tr("Couldn't undo: %1").arg(r.text));
         } else if (const QString title = r.value.toObject().value("undone").toString(); title.isEmpty()) {
             m_undoAvailable = false;
-            m_conversation->addNotice(u"Nothing left to undo."_s);
+            m_conversation->addNotice(tr("Nothing left to undo."));
         } else {
-            m_conversation->addNotice(u"Undid: %1"_s.arg(title.left(200)));
+            m_conversation->addNotice(tr("Undid: %1").arg(title.left(200)));
         }
         emit undoChanged();
     });
@@ -518,12 +518,12 @@ void ShellController::answerPairing(const QString& requestId, bool approve)
 {
     // M3 contracts §5 #9: pairing:answer [{requestId, approve}], requestId from the pairing:pending push.
     if (approve && m_locked) {
-        m_conversation->addNotice(u"The screen is locked. Unlock it to allow a new phone."_s);
+        m_conversation->addNotice(tr("The screen is locked. Unlock it to allow a new phone."));
         return;
     }
     request(u"pairing:answer"_s, QJsonArray{QJsonObject{{"requestId", requestId}, {"approve", approve}}}, [this](const ControlResult& r) {
         if (!r.ok)
-            m_conversation->addNotice(u"Couldn't send the pairing answer (%1)."_s.arg(r.text));
+            m_conversation->addNotice(tr("Couldn't send the pairing answer (%1).").arg(r.text));
     });
 }
 
@@ -564,7 +564,7 @@ void ShellController::openDoctor()
 void ShellController::openTerminal()
 {
     if (!m_launcher || !m_launcher(u"foot"_s)) {
-        m_conversation->addNotice(u"Couldn't open a terminal: foot is not installed."_s);
+        m_conversation->addNotice(tr("Couldn't open a terminal: foot is not installed."));
         return;
     }
     emit dismissRequested();
@@ -579,7 +579,8 @@ void ShellController::askForUpdates()
 {
     // Spec §8: "update my computer" -> jarvisd runs updates.list and shows one batch card.
     showView(u"chat"_s);
-    sendPrompt(u"Update my computer"_s);
+    // Model-only prompts stay English (contracts §6.11).
+    sendPrompt(u"Update my computer"_s); // i18n: ignore
 }
 
 void ShellController::checkForUpdates()
@@ -595,12 +596,12 @@ void ShellController::checkForUpdates()
         if (r.ok) {
             const QJsonObject v = r.value.toObject();
             m_system->applyUpdateCounts(v.value("count").toInt(), v.value("security").toInt());
-            m_updatesNote = v.value("count").toInt() > 0 ? QString() : u"Everything is up to date."_s;
+            m_updatesNote = v.value("count").toInt() > 0 ? QString() : tr("Everything is up to date.");
         } else if (!r.text.isEmpty()) {
             m_updatesNote = r.text;
         } else {
-            m_updatesNote = r.code == u"unsupported" ? u"This system can't check for updates yet."_s
-                                                    : u"Couldn't check for updates."_s;
+            m_updatesNote = r.code == u"unsupported" ? tr("This system can't check for updates yet.")
+                                                    : tr("Couldn't check for updates.");
         }
         emit updatesChanged();
     });
@@ -610,7 +611,7 @@ void ShellController::askJarvis(const QString& text)
 {
     setView(u"chat"_s);
     if (m_conversation->busy()) {
-        m_conversation->addNotice(u"Jarvis is busy. Try again when the reply finishes."_s);
+        m_conversation->addNotice(tr("Jarvis is busy. Try again when the reply finishes."));
         return;
     }
     sendPrompt(text);
@@ -619,9 +620,9 @@ void ShellController::askJarvis(const QString& text)
 void ShellController::updateVoiceBlock()
 {
     if (m_locked)
-        m_voice->setBlocked(true, u"Voice is off while the screen is locked."_s);
+        m_voice->setBlocked(true, tr("Voice is off while the screen is locked."));
     else if (m_connection != u"open")
-        m_voice->setBlocked(true, u"Voice needs the connection to Jarvis."_s);
+        m_voice->setBlocked(true, tr("Voice needs the connection to Jarvis."));
     else
         m_voice->setBlocked(false);
 }
@@ -658,7 +659,7 @@ void ShellController::onUtterance(const QByteArray& wav)
     sendUtterance(wav, header, [this, sentCardId](const ControlResult& r) {
         m_voice->resultArrived();
         if (!r.ok) {
-            m_conversation->addNotice(u"Voice didn't work: %1"_s.arg(r.text));
+            m_conversation->addNotice(tr("Voice didn't work: %1").arg(r.text));
             return;
         }
         applyVoiceResult(r.value.toObject(), sentCardId);
@@ -673,17 +674,17 @@ void ShellController::applyVoiceResult(const QJsonObject& result, const QString&
         CardModel* card = voiceCard();
         // The very card we sent must still be open, visible and answerable.
         if (sentCardId.isEmpty() || !card || card->cardId() != sentCardId) {
-            m_conversation->addNotice(u"Jarvis heard \u201c%1\u201d, but that card is gone. Nothing was changed."_s.arg(heard));
+            m_conversation->addNotice(tr("Jarvis heard “%1”, but that card is gone. Nothing was changed.").arg(heard));
             return;
         }
         const bool approve = action == u"approve";
-        m_conversation->addNotice(approve ? u"You said yes."_s : u"You said no."_s);
+        m_conversation->addNotice(approve ? tr("You said yes.") : tr("You said no."));
         decide(card, approve);
         return;
     }
     if (action == u"ignored") {
-        m_conversation->addNotice(heard.isEmpty() ? u"Jarvis didn't hear anything. Try again."_s
-                                                  : u"Jarvis didn't catch that. Try again."_s);
+        m_conversation->addNotice(heard.isEmpty() ? tr("Jarvis didn't hear anything. Try again.")
+                                                  : tr("Jarvis didn't catch that. Try again."));
         return;
     }
     // "prompt" (ruling R1): jarvisd already started the turn; its turn-start

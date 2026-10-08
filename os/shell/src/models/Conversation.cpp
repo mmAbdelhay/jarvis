@@ -79,7 +79,7 @@ void Conversation::markInterrupted()
 {
     if (!busy())
         return;
-    addNotice(u"Lost the connection to Jarvis during this answer."_s);
+    addNotice(tr("Lost the connection to Jarvis during this answer."));
     setActiveTurn({});
 }
 
@@ -120,12 +120,12 @@ void Conversation::applyEvent(const QJsonObject& event)
     } else if (type == u"turn-end") {
         const QString reason = event.value("reason").toString();
         if (reason == u"stopped") {
-            addNotice(u"Stopped."_s);
+            addNotice(tr("Stopped."));
         } else if (reason == u"step-limit") {
-            addNotice(u"Stopped after 20 steps. The messages above say what was done and what is left."_s);
+            addNotice(tr("Stopped after 20 steps. The messages above say what was done and what is left."));
         } else if (reason == u"error") {
             const QString error = event.value("error").toString();
-            addNotice(error.isEmpty() ? u"Something went wrong."_s : u"Something went wrong: %1"_s.arg(error));
+            addNotice(error.isEmpty() ? tr("Something went wrong.") : tr("Something went wrong: %1").arg(error));
         }
         if (turnId == m_activeTurnId)
             setActiveTurn({});

@@ -95,9 +95,9 @@ QString ProviderModel::providerLabel(const QString& kind, const QString& url)
 {
     const QString mode = modeFor(kind, url);
     if (mode == u"local")
-        return u"On this computer"_s;
+        return tr("On this computer");
     if (mode == u"lan")
-        return u"On your network"_s;
+        return tr("On your network");
     if (kind == u"anthropic")
         return u"Anthropic"_s;
     if (kind == u"gemini")
@@ -199,9 +199,9 @@ void ProviderModel::setApiKey(const QString& key)
 QString ProviderModel::privacyText() const
 {
     if (m_mode == u"cloud")
-        return u"When diagnosing problems, Jarvis sends short excerpts of system logs to %1. Passwords, keys and tokens are removed first."_s
+        return tr("When diagnosing problems, Jarvis sends short excerpts of system logs to %1. Passwords, keys and tokens are removed first.")
             .arg(displayName());
-    return u"Diagnosis logs stay on your own machines."_s;
+    return tr("Diagnosis logs stay on your own machines.");
 }
 
 QString ProviderModel::displayName() const
@@ -210,27 +210,27 @@ QString ProviderModel::displayName() const
     if (m_mode == u"local")
         return u"Ollama"_s;
     if (m_mode == u"lan")
-        return host.isEmpty() ? u"the server"_s : host;
+        return host.isEmpty() ? tr("the server") : host;
     if (m_preset == u"Custom URL")
-        return host.isEmpty() ? u"your provider"_s : host;
+        return host.isEmpty() ? tr("your provider") : host;
     return m_preset;
 }
 
 QString ProviderModel::statusText() const
 {
     if (m_probeState == u"probing")
-        return u"Checking %1…"_s.arg(displayName());
+        return tr("Checking %1…").arg(displayName());
     if (m_probeState == u"saving")
-        return u"Saving…"_s;
+        return tr("Saving…");
     if (m_probeState == u"ok")
-        return u"Connected to %1. Tool calling works, so Jarvis can control this computer."_s.arg(displayName());
+        return tr("Connected to %1. Tool calling works, so Jarvis can control this computer.").arg(displayName());
     if (m_probeState == u"warn" && m_model.isEmpty())
-        return u"Connected to %1, but no models are available. Pull or enter a model first."_s.arg(displayName());
+        return tr("Connected to %1, but no models are available. Pull or enter a model first.").arg(displayName());
     if (m_probeState == u"warn")
-        return u"Connected to %1, but %2 can't call tools: Jarvis can chat but can't control the OS."_s
+        return tr("Connected to %1, but %2 can't call tools: Jarvis can chat but can't control the OS.")
             .arg(displayName(), m_model);
     if (m_probeState == u"error")
-        return m_error.isEmpty() ? u"Couldn't connect to %1."_s.arg(displayName()) : m_error;
+        return m_error.isEmpty() ? tr("Couldn't connect to %1.").arg(displayName()) : m_error;
     return {};
 }
 
@@ -352,7 +352,7 @@ void ProviderModel::loadDraft(const QJsonObject& config)
         m_preset = preset ? preset->name.toString()
                  : kind == u"anthropic" ? u"Anthropic"_s
                  : kind == u"gemini" ? u"Gemini"_s
-                 : u"Custom URL"_s;
+                 : u"Custom URL"_s; // i18n: ignore
     }
     m_kind = kind;
     m_baseUrl = baseUrl;
@@ -365,9 +365,9 @@ void ProviderModel::loadDraft(const QJsonObject& config)
 void ProviderModel::probe()
 {
     if (m_baseUrl.trimmed().isEmpty())
-        return fail(u"Enter the server address first."_s);
+        return fail(tr("Enter the server address first."));
     if (needsKey() && m_apiKey.isEmpty() && !keepsSavedKey())
-        return fail(u"Enter your API key first."_s);
+        return fail(tr("Enter your API key first."));
     m_probeState = u"probing"_s;
     m_error.clear();
     emit probeChanged();
@@ -416,7 +416,7 @@ void ProviderModel::applySaveResult(const QJsonObject& result)
         return;
     if (!result.value("ok").toBool()) {
         const QString error = result.value("error").toString();
-        return fail(error.isEmpty() ? u"Couldn't save the provider."_s : error);
+        return fail(error.isEmpty() ? tr("Couldn't save the provider.") : error);
     }
     wipeKey();
     m_supportsTools = result.value("supportsTools").toBool();

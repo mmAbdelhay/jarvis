@@ -189,7 +189,7 @@ private slots:
         QVERIFY(model.known());
         QVERIFY(model.online());
         QCOMPARE(model.networkText(), u"Online"_s);
-        QCOMPARE(model.networkDetail(), u"Wi-Fi Home-5G · full"_s);
+        QCOMPARE(model.networkDetail(), u"Wi-Fi Home-5G · online"_s);
         QCOMPARE(model.memoryText(), u"3.1 / 16 GB"_s);
         QCOMPARE(model.diskText(), u"71 / 186 GB"_s);
         QVERIFY(qAbs(model.diskFraction() - 71.0 / 186.0) < 1e-6);
@@ -205,7 +205,7 @@ private slots:
                              {"model", QJsonValue::Null}});
         QVERIFY(!model.online());
         QCOMPARE(model.networkText(), u"Offline"_s);
-        QCOMPARE(model.networkDetail(), u"connectivity: none"_s);
+        QCOMPARE(model.networkDetail(), u"connectivity: no internet"_s);
         QCOMPARE(model.memoryFraction(), 0.0);
         QVERIFY(!model.hasModel());
         model.reset();

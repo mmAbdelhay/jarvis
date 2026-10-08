@@ -104,17 +104,17 @@ void PhoneModel::applyOwnerPasswordResult(const QJsonObject& result)
 {
     if (result.value("ok").toBool(false)) {
         m_error.clear();
-        m_note = u"Owner password saved."_s;
+        m_note = tr("Owner password saved.");
         m_hasOwnerPassword = true;
     } else {
         m_note.clear();
         const QString code = result.value("code").toString();
         if (code == u"current-wrong")
-            m_error = u"The current owner password is wrong."_s;
+            m_error = tr("The current owner password is wrong.");
         else if (code == u"current-required")
-            m_error = u"Enter the current owner password first."_s;
+            m_error = tr("Enter the current owner password first.");
         else
-            m_error = u"Couldn't save the owner password."_s;
+            m_error = tr("Couldn't save the owner password.");
     }
     emit changed();
 }
@@ -122,6 +122,6 @@ void PhoneModel::applyOwnerPasswordResult(const QJsonObject& result)
 void PhoneModel::applyError(const QString& text)
 {
     m_note.clear();
-    m_error = text.isEmpty() ? u"Something went wrong. Try again."_s : text;
+    m_error = text.isEmpty() ? tr("Something went wrong. Try again.") : text;
     emit changed();
 }

@@ -1,5 +1,6 @@
 #include "models/SystemModel.h"
 
+#include <QCoreApplication>
 #include <QJsonArray>
 #include <QLocale>
 #include <algorithm>
@@ -16,7 +17,7 @@ QString voicePart(const QJsonValue& value)
 {
     if (value.isString())
         return value.toString().left(80);
-    return value.toBool(false) ? u"ready"_s : QString();
+    return value.toBool(false) ? QCoreApplication::translate("SystemModel", "ready") : QString();
 }
 } // namespace
 
@@ -33,26 +34,35 @@ QString SystemModel::formatGb(double bytes)
 
 QString SystemModel::networkText() const
 {
-    return m_online ? u"Online"_s : u"Offline"_s;
+    return m_online ? tr("Online") : tr("Offline");
+}
+
+QString SystemModel::connectivityLabel(const QString& connectivity)
+{
+    if (connectivity == u"full") return tr("online");
+    if (connectivity == u"limited") return tr("limited");
+    if (connectivity == u"portal") return tr("sign-in needed");
+    if (connectivity == u"none") return tr("no internet");
+    return tr("unknown");
 }
 
 QString SystemModel::networkDetail() const
 {
     if (!m_wifiSsid.isEmpty())
-        return u"Wi-Fi %1 · %2"_s.arg(m_wifiSsid, m_connectivity);
-    return u"connectivity: %1"_s.arg(m_connectivity.isEmpty() ? u"unknown"_s : m_connectivity);
+        return tr("Wi-Fi %1 · %2").arg(m_wifiSsid, connectivityLabel(m_connectivity));
+    return tr("connectivity: %1").arg(connectivityLabel(m_connectivity));
 }
 
 QString SystemModel::memoryText() const
 {
-    return u"%1 / %2 GB"_s.arg(formatGb(m_memUsed), formatGb(m_memTotal));
+    return tr("%1 / %2 GB").arg(formatGb(m_memUsed), formatGb(m_memTotal));
 }
 
 double SystemModel::memoryFraction() const { return fraction(m_memUsed, m_memTotal); }
 
 QString SystemModel::diskText() const
 {
-    return u"%1 / %2 GB"_s.arg(formatGb(m_diskUsed), formatGb(m_diskSize));
+    return tr("%1 / %2 GB").arg(formatGb(m_diskUsed), formatGb(m_diskSize));
 }
 
 double SystemModel::diskFraction() const { return fraction(m_diskUsed, m_diskSize); }
@@ -61,8 +71,8 @@ QString SystemModel::modelDetail() const
 {
     if (!hasModel())
         return {};
-    return u"%1 · %2"_s.arg(m_modelLocal ? u"On your machines"_s : u"In the cloud"_s,
-                            m_modelTools ? u"can control the OS"_s : u"can chat, can't control the OS"_s);
+    return u"%1 · %2"_s.arg(m_modelLocal ? tr("On your machines") : tr("In the cloud"),
+                            m_modelTools ? tr("can control the OS") : tr("can chat, can't control the OS"));
 }
 
 void SystemModel::setUpdateCounts(int count, int security)
@@ -81,20 +91,20 @@ QString SystemModel::updatesText() const
 {
     if (m_updatesCount == 0)
         return {};
-    QString text = m_updatesCount == 1 ? u"1 update"_s : u"%1 updates"_s.arg(m_updatesCount);
+    QString text = m_updatesCount == 1 ? tr("1 update") : tr("%n updates", nullptr, m_updatesCount);
     if (m_updatesSecurity > 0)
-        text += u" · %1 security"_s.arg(m_updatesSecurity);
+        text += tr(" · %n security", nullptr, m_updatesSecurity);
     return text;
 }
 
 QString SystemModel::modelDownloadText() const
 {
     if (m_downloadState == u"downloading")
-        return u"Downloading · %1%"_s.arg(m_downloadPercent);
+        return tr("Downloading · %1%").arg(m_downloadPercent);
     if (m_downloadState == u"pending")
-        return u"Waiting for the network to download"_s;
+        return tr("Waiting for the network to download");
     if (m_downloadState == u"failed")
-        return u"Download failed. It will try again."_s;
+        return tr("Download failed. It will try again.");
     return {};
 }
 

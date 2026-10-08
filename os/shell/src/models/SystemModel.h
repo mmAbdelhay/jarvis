@@ -76,6 +76,7 @@ signals:
     void changed();
 
 private:
+    static QString connectivityLabel(const QString& connectivity);
     bool m_known = false;
     bool m_online = true;
     QString m_connectivity;

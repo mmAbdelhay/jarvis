@@ -31,11 +31,11 @@ QString VoiceModel::statusText() const
 {
     const QString s = state();
     if (s == u"listening")
-        return u"Listening… press Super+Space or the mic again to send (%1 s left)"_s.arg(m_secondsLeft);
+        return tr("Listening… press Super+Space or the mic again to send (%1 s left)").arg(m_secondsLeft);
     if (s == u"transcribing")
-        return u"Working out what you said…"_s;
+        return tr("Working out what you said…");
     if (s == u"speaking")
-        return u"Speaking. Press Esc or the mic to stop."_s;
+        return tr("Speaking. Press Esc or the mic to stop.");
     return {};
 }
 
@@ -86,7 +86,7 @@ void VoiceModel::setBlocked(bool blocked, const QString& reason)
     m_blockedReason = reason;
     if (blocked && recording()) {
         cancel();
-        m_hint = reason.isEmpty() ? u"Voice is paused."_s : reason;
+        m_hint = reason.isEmpty() ? tr("Voice is paused.") : reason;
     }
     emit changed();
 }
@@ -105,16 +105,16 @@ bool VoiceModel::start()
     if (recording() || m_awaiting)
         return false;
     if (!m_available) {
-        setHint(u"Voice isn't available on this computer yet."_s);
+        setHint(tr("Voice isn't available on this computer yet."));
         return false;
     }
     if (m_blocked) {
-        setHint(m_blockedReason.isEmpty() ? u"Voice is paused."_s : m_blockedReason);
+        setHint(m_blockedReason.isEmpty() ? tr("Voice is paused.") : m_blockedReason);
         return false;
     }
     Recorder* recorder = m_factory ? m_factory(this) : nullptr;
     if (!recorder) {
-        setHint(u"No audio recorder is installed."_s);
+        setHint(tr("No audio recorder is installed."));
         return false;
     }
     connect(recorder, &Recorder::finished, this, &VoiceModel::onFinished);
@@ -176,12 +176,12 @@ void VoiceModel::onFinished(const QByteArray& pcm)
     if (m_blocked)
         return emit changed();
     if (pcm.size() < jarvis::voice::kMinPcmBytes) {
-        setHint(u"That was too short. Press Super+Space, speak, then press it again."_s);
+        setHint(tr("That was too short. Press Super+Space, speak, then press it again."));
         return;
     }
     const QByteArray wav = jarvis::voice::wavFromPcm16(pcm);
     if (wav.isEmpty()) {
-        setHint(u"That recording was too long to send."_s);
+        setHint(tr("That recording was too long to send."));
         return;
     }
     m_awaiting = true;
@@ -197,7 +197,7 @@ void VoiceModel::onFailed(const QString& message)
         return;
     takeRecorder();
     recorder->deleteLater();
-    setHint(message.isEmpty() ? u"The microphone stopped."_s : message);
+    setHint(message.isEmpty() ? tr("The microphone stopped.") : message);
 }
 
 void VoiceModel::resultArrived()

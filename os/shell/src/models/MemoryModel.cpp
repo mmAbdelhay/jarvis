@@ -25,7 +25,7 @@ QVariant MemoryModel::data(const QModelIndex& index, int role) const
     switch (role) {
     case IdRole: return item.id;
     case KindRole: return item.kind;
-    case KindLabelRole: return item.kind == u"summary" ? u"Conversation summary"_s : u"Fact"_s;
+    case KindLabelRole: return item.kind == u"summary" ? tr("Conversation summary") : tr("Fact");
     case TextRole: return item.text;
     case CreatedAtRole: return item.createdAt;
     case TimeTextRole: return AuditModel::formatTime(qint64(item.createdAt), QDateTime::currentDateTime());
@@ -112,6 +112,6 @@ void MemoryModel::applyError(const QString& text)
 {
     m_known = true;
     m_loading = false;
-    m_error = text.isEmpty() ? u"Jarvis couldn't reach its memory."_s : text;
+    m_error = text.isEmpty() ? tr("Jarvis couldn't reach its memory.") : text;
     emit changed();
 }

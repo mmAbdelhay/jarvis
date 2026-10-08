@@ -115,7 +115,7 @@ void ProviderListModel::remove(int row)
     if (row < 0 || row >= m_rows.size() || m_saving)
         return;
     if (m_rows.size() == 1) {
-        m_status = u"Jarvis needs at least one provider."_s;
+        m_status = tr("Jarvis needs at least one provider.");
         emit changed();
         return;
     }
@@ -159,7 +159,7 @@ void ProviderListModel::save()
     if (!m_dirty || m_saving)
         return;
     m_saving = true;
-    m_status = u"Saving…"_s;
+    m_status = tr("Saving…");
     emit changed();
     emit saveRequested(payload());
 }
@@ -172,7 +172,7 @@ void ProviderListModel::applySaveResult(const QJsonObject& result)
     for (Row& row : m_rows) {
         const QJsonObject probe = results.value(row.id).toObject();
         row.error = probe.isEmpty() || probe.value("ok").toBool() ? QString()
-                                                                  : probe.value("error").toString(u"Couldn't connect."_s);
+                                                                  : probe.value("error").toString(tr("Couldn't connect."));
         if (!row.error.isEmpty())
             failed.append(row.id);
     }
@@ -180,20 +180,20 @@ void ProviderListModel::applySaveResult(const QJsonObject& result)
         emit dataChanged(index(0), index(int(m_rows.size()) - 1), {ErrorRole});
     if (result.value("ok").toBool()) {
         m_dirty = false;
-        m_status = u"Saved."_s;
+        m_status = tr("Saved.");
         emit changed();
         emit saved();
         return;
     }
-    m_status = failed.isEmpty() ? u"Nothing was saved."_s
-                                : u"Nothing was saved: %1 didn't pass the check."_s.arg(failed.join(u", "_s));
+    m_status = failed.isEmpty() ? tr("Nothing was saved.")
+                                : tr("Nothing was saved: %1 didn't pass the check.").arg(failed.join(u", "_s));
     emit changed();
 }
 
 void ProviderListModel::applyRequestError(const QString& text)
 {
     m_saving = false;
-    m_status = u"Couldn't save: %1"_s.arg(text);
+    m_status = tr("Couldn't save: %1").arg(text);
     emit changed();
 }
 
@@ -259,12 +259,12 @@ QJsonObject ProviderListModel::resultFor(const QJsonObject& saveResult, const QS
         for (auto it = results.constBegin(); it != results.constEnd(); ++it) {
             const QJsonObject other = it.value().toObject();
             if (it.key() != id && !other.value("ok").toBool(true)) {
-                out.insert("error", u"Not saved: %1 didn't pass the check (%2)."_s.arg(it.key(), other.value("error").toString()));
+                out.insert("error", tr("Not saved: %1 didn't pass the check (%2).").arg(it.key(), other.value("error").toString()));
                 break;
             }
         }
         if (out.value("error").toString().isEmpty())
-            out.insert("error", u"Couldn't save the provider."_s);
+            out.insert("error", tr("Couldn't save the provider."));
     }
     return out;
 }

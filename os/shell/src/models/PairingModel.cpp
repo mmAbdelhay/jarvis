@@ -32,7 +32,7 @@ QString PairingModel::cleanName(const QString& name)
         out.append(c);
     }
     if (out.isEmpty())
-        return u"Unnamed device"_s;
+        return tr("Unnamed device");
     if (out.size() > kMaxNameLength) {
         qsizetype cut = kMaxNameLength - 1;
         if (out.at(cut - 1).isHighSurrogate())

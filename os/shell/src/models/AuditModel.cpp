@@ -1,7 +1,7 @@
 #include "models/AuditModel.h"
 
 #include <QJsonObject>
-#include <QLocale>
+#include "Language.h"
 #include <cmath>
 
 using namespace Qt::StringLiterals;
@@ -19,28 +19,27 @@ int AuditModel::rowCount(const QModelIndex& parent) const
 QString AuditModel::decisionLabel(const Row& row)
 {
     if (row.decision == u"approved")
-        return u"Approved"_s;
+        return tr("Approved");
     if (row.decision == u"denied")
-        return u"Denied"_s;
-    return u"Timed out"_s;
+        return tr("Denied");
+    return tr("Timed out");
 }
 
 QString AuditModel::resultLabel(const Row& row)
 {
     if (row.result == u"ok")
-        return u"Done"_s;
+        return tr("Done");
     if (row.result == u"failed")
-        return row.message.isEmpty() ? u"Failed"_s : u"Failed: %1"_s.arg(row.message);
-    return row.decision == u"approved" ? u"Skipped"_s : u"Nothing changed"_s;
+        return row.message.isEmpty() ? tr("Failed") : tr("Failed: %1").arg(row.message);
+    return row.decision == u"approved" ? tr("Skipped") : tr("Nothing changed");
 }
 
 QString AuditModel::formatTime(qint64 ts, const QDateTime& now)
 {
     const QDateTime when = QDateTime::fromMSecsSinceEpoch(ts).toLocalTime();
-    const QLocale c = QLocale::c();
     if (when.date() == now.toLocalTime().date())
-        return c.toString(when, u"HH:mm"_s);
-    return c.toString(when, u"d MMM HH:mm"_s);
+        return jarvis::ui::formatDateTime(when, u"HH:mm"_s);
+    return jarvis::ui::formatDateTime(when, u"d MMM HH:mm"_s);
 }
 
 QVariant AuditModel::data(const QModelIndex& index, int role) const
@@ -54,7 +53,7 @@ QVariant AuditModel::data(const QModelIndex& index, int role) const
     case Qt::DisplayRole:
     case TitleRole: return row.title;
     case ToolRole: return row.tool;
-    case ViaRole: return row.via == u"doctor" ? u"Doctor"_s : u"Desktop"_s;
+    case ViaRole: return row.via == u"doctor" ? tr("Doctor") : tr("Desktop");
     case DecisionRole: return row.decision;
     case DecisionLabelRole: return decisionLabel(row);
     case ResultLabelRole: return resultLabel(row);
@@ -108,11 +107,11 @@ QVariantList AuditModel::recent() const
         const Row& row = m_all.at(i);
         QString text = row.title;
         if (row.decision == u"denied")
-            text = u"Denied: %1"_s.arg(row.title);
+            text = tr("Denied: %1").arg(row.title);
         else if (row.decision == u"timeout")
-            text = u"Timed out: %1"_s.arg(row.title);
+            text = tr("Timed out: %1").arg(row.title);
         else if (row.result == u"failed")
-            text = u"Failed: %1"_s.arg(row.title);
+            text = tr("Failed: %1").arg(row.title);
         out.append(QVariantMap{{u"text"_s, text}, {u"timeText"_s, formatTime(qint64(row.ts), now)}});
     }
     return out;

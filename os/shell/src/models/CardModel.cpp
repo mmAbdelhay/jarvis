@@ -2,6 +2,7 @@
 #include "models/SettingChange.h"
 
 #include <QDateTime>
+#include <QCoreApplication>
 #include <QJsonArray>
 #include <QSet>
 #include <algorithm>
@@ -15,9 +16,9 @@ const QSet<QString> kSources{u"debian"_s, u"flathub"_s, u"system"_s, u"network"_
 QString labelForSource(const QString& source)
 {
     if (source == u"debian")
-        return u"Debian"_s;
+        return QCoreApplication::translate("CardModel", "Debian");
     if (source == u"flathub")
-        return u"Flathub"_s;
+        return QCoreApplication::translate("CardModel", "Flathub");
     return source;
 }
 } // namespace
@@ -82,10 +83,10 @@ QString CardModel::headline() const
     if (m_items.isEmpty())
         return {};
     if (m_exclusive)
-        return u"Connect to a network"_s;
+        return tr("Connect to a network");
     if (m_items.size() == 1)
-        return u"Jarvis needs your approval"_s;
-    return u"Jarvis wants to do %1 things"_s.arg(m_items.size());
+        return tr("Jarvis needs your approval");
+    return tr("Jarvis wants to do %n things", nullptr, int(m_items.size()));
 }
 
 QString CardModel::approveLabel() const
@@ -93,12 +94,12 @@ QString CardModel::approveLabel() const
     const int count = itemCount();
     const int ticked = tickedCount();
     if (m_exclusive)
-        return u"Connect"_s;
+        return tr("Connect");
     if (count <= 1)
-        return u"Approve"_s;
+        return tr("Approve");
     if (ticked == count)
-        return u"Approve all %1"_s.arg(count);
-    return u"Approve %1 of %2"_s.arg(ticked).arg(count);
+        return tr("Approve all %1").arg(count);
+    return tr("Approve %1 of %2").arg(ticked).arg(count);
 }
 
 bool CardModel::canApprove() const
@@ -130,8 +131,8 @@ QString CardModel::countdownText() const
     if (!active() || m_secondsLeft < 0)
         return {};
     if (expired())
-        return u"Timed out"_s;
-    return u"Auto-deny in %1:%2"_s.arg(m_secondsLeft / 60).arg(m_secondsLeft % 60, 2, 10, QChar(u'0'));
+        return tr("Timed out");
+    return tr("Auto-deny in %1:%2").arg(m_secondsLeft / 60).arg(m_secondsLeft % 60, 2, 10, QChar(u'0'));
 }
 
 bool CardModel::load(const QJsonObject& card)

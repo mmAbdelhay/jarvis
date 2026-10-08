@@ -1,5 +1,6 @@
 #include "models/voice/Recorder.h"
 
+#include <QCoreApplication>
 #include <QStandardPaths>
 #include <QTimer>
 #include <algorithm>
@@ -48,11 +49,11 @@ bool ProcessRecorder::start()
     if (m_phase == Phase::Recording || m_phase == Phase::Stopping)
         return false;
     if (m_process.state() != QProcess::NotRunning) {
-        m_error = u"The previous microphone recorder is still stopping."_s;
+        m_error = QCoreApplication::translate("jarvis::voice::ProcessRecorder", "The previous microphone recorder is still stopping.");
         return false;
     }
     if (m_command.isEmpty()) {
-        m_error = u"No audio recorder is installed (pacat or pw-record)."_s;
+        m_error = QCoreApplication::translate("jarvis::voice::ProcessRecorder", "No audio recorder is installed (pacat or pw-record).");
         return false;
     }
     m_pcm.clear();
@@ -61,7 +62,7 @@ bool ProcessRecorder::start()
     m_process.setArguments(m_command.mid(1));
     m_process.start(QIODevice::ReadOnly);
     if (!m_process.waitForStarted(2000)) {
-        m_error = u"The microphone recorder could not start."_s;
+        m_error = QCoreApplication::translate("jarvis::voice::ProcessRecorder", "The microphone recorder could not start.");
         m_phase = Phase::Idle;
         return false;
     }
@@ -114,7 +115,7 @@ void ProcessRecorder::onFinished()
         m_pcm.chop(1);
     QByteArray pcm = std::exchange(m_pcm, {});
     if (pcm.isEmpty()) {
-        emit failed(u"The microphone recorder stopped without any audio."_s);
+        emit failed(QCoreApplication::translate("jarvis::voice::ProcessRecorder", "The microphone recorder stopped without any audio."));
         return;
     }
     emit finished(pcm);

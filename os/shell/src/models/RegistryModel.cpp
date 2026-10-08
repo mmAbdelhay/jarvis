@@ -143,20 +143,20 @@ QVariant RegistryModel::data(const QModelIndex& index, int role) const
     case DescriptionRole: return e->description;
     case TierRole: return e->tier;
     case TierLabelRole:
-        return e->tier == u"official" ? u"Official"_s : e->tier == u"reviewed" ? u"Reviewed"_s : u"Community"_s;
+        return e->tier == u"official" ? tr("Official") : e->tier == u"reviewed" ? tr("Reviewed") : tr("Community");
     case TierDetailRole:
         if (e->tier == u"official")
-            return u"Built by the Jarvis project and signed with its packages."_s;
+            return tr("Built by the Jarvis project and signed with its packages.");
         if (e->tier == u"reviewed")
-            return u"Checked by a reviewer before it was listed. Jarvis still asks before any change."_s;
-        return u"Not reviewed. Jarvis asks you before every action it takes."_s;
+            return tr("Checked by a reviewer before it was listed. Jarvis still asks before any change.");
+        return tr("Not reviewed. Jarvis asks you before every action it takes.");
     case VersionRole: return e->version;
     case InstalledVersionRole: return e->installedVersion;
     case InstallStateRole: return stateOf(*e);
     case PermissionsTextRole:
-        return u"%1 · %2"_s.arg(e->network ? u"Uses the internet"_s : u"No internet access"_s,
-                                e->paths.isEmpty() ? u"Can't change your files"_s
-                                                   : u"Can change files in %1"_s.arg(e->paths.join(u", "_s)));
+        return u"%1 · %2"_s.arg(e->network ? tr("Uses the internet") : tr("No internet access"),
+                                e->paths.isEmpty() ? tr("Can't change your files")
+                                                   : tr("Can change files in %1").arg(e->paths.join(u", "_s)));
     case ToolsTextRole: return e->tools.join(u", "_s);
     default: return {};
     }
@@ -181,7 +181,7 @@ void RegistryModel::applyError(const QString& text)
 {
     m_known = true;
     m_loading = false;
-    m_error = text.isEmpty() ? u"Couldn't load the tool registry."_s : text;
+    m_error = text.isEmpty() ? tr("Couldn't load the tool registry.") : text;
     emit changed();
 }
 

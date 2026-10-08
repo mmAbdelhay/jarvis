@@ -29,6 +29,10 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../ui ${CMAKE_BINARY_DIR}/jarvis-ui
 include(${CMAKE_CURRENT_SOURCE_DIR}/../ui/cmake/JarvisI18n.cmake)
 
 add_subdirectory(src)
+jarvis_add_translations(jarvis-shell TS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/i18n TARGET jarvis_shell_core
+  SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/app ${CMAKE_CURRENT_SOURCE_DIR}/src/models ${CMAKE_CURRENT_SOURCE_DIR}/src/qml
+  LINT_CPP ${CMAKE_CURRENT_SOURCE_DIR}/src/app ${CMAKE_CURRENT_SOURCE_DIR}/src/models
+  INSTALL TESTS)
 if(BUILD_TESTING)
   find_package(Qt6 6.8 REQUIRED COMPONENTS Test QuickTest)
   add_subdirectory(tests)
