@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { checkThreatModel, parseThreatModel } from "./threat-model-links.js";
+import { checkThreatModel, parseThreatModel, section } from "./threat-model-links.js";
 
 const REPO = fileURLToPath(new URL("../../../../", import.meta.url));
 const DOC = readFileSync(join(REPO, "docs/os/threat-model.md"), "utf8");
@@ -28,5 +28,22 @@ describe("docs/os/threat-model.md (design §3.2, criterion 2)", () => {
 
   it("states plainly that the confirm card is a UI gate, not a security boundary", () => {
     expect(DOC).toContain("The confirm card is a UI gate, not a security boundary");
+  });
+
+  it("covers the M2.5 mitigations (design §3.1, §3.3, §3.5, §3.7, §3.9)", () => {
+    const mitigations = section(DOC, "Mitigations");
+    for (const term of [
+      "SAFETY_RULES",
+      "os.jarvis.Installer1",
+      "index.json.sig",
+      "sha256",
+      "community",
+      "PrivateNetwork",
+      "allowCloudFallback",
+      "memory.sqlite",
+    ]) {
+      expect(mitigations, term).toContain(term);
+    }
+    expect(parseThreatModel(DOC).mitigations.length).toBeGreaterThanOrEqual(24);
   });
 });
