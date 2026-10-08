@@ -19,8 +19,8 @@
 // No electron here (core/no-electron.test.ts); process.platform read once, here.
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { mkdtemp, rm, mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
+import { homedir, tmpdir, totalmem } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type FakeTurn, parseFakeScript, TRUSTED_MCP_SERVERS } from "@jarvis/core";
@@ -59,8 +59,26 @@ import { createEnvKeyStore, takeEnvProviderKeys } from "./provider-keys.js";
 import { createMemoryBackendOpener } from "./memory-backend.js";
 import { connectOsMcpServers } from "./mcp-servers.js";
 import { createModelStateReader } from "./model-state-reader.js";
-import { createOsBinding, createOsRouter } from "./os-binding.js";
+import { audioPlayer, onPath, PiperSpeech, runCommandWithLimits } from "@jarvis/platform/voice";
+import { createBridge } from "@jarvis/remote";
+import { listenTls, loadCertificate, nodeFs, nodeTimers } from "@jarvis/remote/listen";
+import { createLockStore } from "./lock-store.js";
+import { createOsBinding, createOsRouter, type OsRouter } from "./os-binding.js";
+import { createOsRemote } from "./os-remote.js";
+import { readOsRemoteConfig, writeOsRemoteSection } from "./remote-config.js";
 import {
+  createVoiceIo,
+  PIPER_BIN,
+  resolveVoiceModels,
+  type Speaker,
+  VOICE_DIR,
+  WHISPER_BIN,
+} from "./voice-io.js";
+import { createOsVoice } from "./voice-service.js";
+
+import {
+  LOCK_CLIENT_PATH,
+  lockStatePath,
   buildStampCandidates,
   MODEL_STATE_PATH,
   mcpConfigDir,
@@ -230,10 +248,73 @@ async function main(argv: readonly string[]): Promise<void> {
     log: info,
   });
   let push: (channel: string, payload: unknown) => void = () => {};
+  const configIo = {
+    readFile: (path: string) => readFile(path, "utf8"),
+    writeFile: writeAtomically,
+  };
+  // Rafiq M3 §2/§3: the lock state survives a jarvisd restart, never a reboot.
+  const lockPath = lockStatePath(env);
+  if (lockPath === undefined)
+    info("XDG_RUNTIME_DIR is not set: the lock state is kept in memory only");
+  const lockStore =
+    lockPath === undefined
+      ? undefined
+      : createLockStore(lockPath, {
+          readFile: (path) => readFile(path, "utf8"),
+          writeFile: writeAtomically,
+        });
+
+  // Rafiq M3 §2, §4: push-to-talk with Jarvis's whisper and Piper wrappers.
+  const models = resolveVoiceModels({
+    dir: VOICE_DIR,
+    whisperBin: WHISPER_BIN,
+    piperBin: PIPER_BIN,
+    memTotalBytes: totalmem(),
+    exists: existsSync,
+  });
+  const player = audioPlayer("linux", (command) => onPath(command, env));
+  const speakers: Partial<Record<"en" | "ar", Speaker>> = {};
+  for (const lang of ["en", "ar"] as const) {
+    const installed = models.tts[lang];
+    if (installed !== undefined) {
+      speakers[lang] = new PiperSpeech({
+        binary: models.piperBin,
+        model: installed.path,
+        platform: "linux",
+        player,
+      });
+    }
+  }
+  const voiceIo = createVoiceIo({
+    models,
+    // mkdtemp makes a 0700 directory; the runtime dir is per-login tmpfs.
+    makeTempDir: () => mkdtemp(join(env["XDG_RUNTIME_DIR"] ?? tmpdir(), "jarvis-voice-")),
+    writeFile: (path, bytes) => writeFile(path, bytes, { mode: 0o600 }),
+    removeDir: (path) => rm(path, { recursive: true, force: true }),
+    run: async (command, args) => {
+      const ran = await runCommandWithLimits(
+        command,
+        args,
+        { timeoutMs: 60_000, maxOutputBytes: 1_048_576 },
+        env,
+      );
+      // A timeout or a cut-off stream is a failure, never a short transcript.
+      const code = ran.timedOut || ran.truncated ? ran.code || 1 : ran.code;
+      return { code, stdout: ran.stdout, stderr: ran.stderr };
+    },
+    speakers,
+  });
+  info(
+    `voice: ${models.stt?.id ?? "no speech-to-text model"}; voices: ${Object.keys(speakers).join(", ") || "none"}`,
+  );
+
+  let voice: ReturnType<typeof createOsVoice> | undefined;
   const agent = createOsAgent({
     push: (channel, payload) => push(channel, payload),
     configPath: osConfigPath(home),
-    configIo: { readFile: (path) => readFile(path, "utf8"), writeFile: writeAtomically },
+    configIo,
+    ...(lockStore === undefined ? {} : { lockStore }),
+    voiceAvailability: () => voice?.availability() ?? voiceIo.availability(),
     secrets: readonlyProfile
       ? createEnvKeyStore(new Map())
       : createSecretToolStore(nodeSecretToolExec(env)),
@@ -275,8 +356,54 @@ async function main(argv: readonly string[]): Promise<void> {
     log: info,
   });
 
+  voice = createOsVoice({
+    io: voiceIo,
+    agent,
+    push: (channel, payload) => push(channel, payload),
+    log: info,
+  });
+  const remoteDir = join(home, ".config", "jarvis", "remote");
+  let router: OsRouter | undefined;
+  const remote = createOsRemote({
+    createBridge,
+    io: {
+      dir: remoteDir,
+      fs: nodeFs,
+      random: randomBytes,
+      now: Date.now,
+      timers: nodeTimers,
+      listen: listenTls,
+      loadCertificate: (config) =>
+        loadCertificate(config, {
+          fs: nodeFs,
+          dir: remoteDir,
+          random: randomBytes,
+          now: Date.now,
+          enforceFileModes: true,
+        }),
+      // No sidecar proxy on Rafiq.
+      createProxy: () => undefined,
+      enforceFileModes: true,
+      log: info,
+    },
+    router: () => {
+      if (router === undefined) throw new Error("router not ready");
+      return router;
+    },
+    readConfig: () => readOsRemoteConfig(osConfigPath(home), configIo),
+    writeConfig: (patch) => writeOsRemoteSection(osConfigPath(home), patch, configIo),
+    push: (channel, payload) => push(channel, payload),
+    log: info,
+  });
+  router = createOsRouter({
+    agent,
+    voice,
+    remote,
+    // Rafiq M3 §3: the kernel names the peer program; only jarvis-lock may lock or unlock.
+    isLockClient: async (connection) => (await connection.peerExecutable?.()) === LOCK_CLIENT_PATH,
+  });
   let requestStop: (reason: string) => void = () => {};
-  const handlers = createOsBinding(createOsRouter({ agent }), {
+  const handlers = createOsBinding(router, {
     requestStop: () => requestStop("stop intent"),
     defer: (callback) => setImmediate(callback),
   });
@@ -293,11 +420,23 @@ async function main(argv: readonly string[]): Promise<void> {
     process.exit(supervisor === undefined ? DAEMON_EXIT.busy : DAEMON_EXIT.ok);
   }
   const server = started.server;
-  push = (channel, payload) => server.push(channel, payload);
-  server.onConnect(() => agent.resync());
+  push = (channel, payload) => {
+    server.push(channel, payload);
+    // Only agent:events and sys:snapshot ever reach a phone (phone-policy.ts).
+    remote.forward(channel, payload);
+  };
+  server.onConnect(() => {
+    agent.resync();
+    voice?.resync();
+    remote.resync();
+  });
 
   const shutdown = createShutdown({
     stopCore: async () => {
+      await remote
+        .stop()
+        .catch((thrown: unknown) => error(`phone bridge stop: ${describe(thrown)}`));
+      voice?.stop();
       await agent.shutdown();
       vectorCache?.close();
     },
@@ -314,8 +453,14 @@ async function main(argv: readonly string[]): Promise<void> {
     process.on(signal, () => requestStop(signal));
   }
 
-  info(`jarvisd (Jarvis OS) starting: pid ${process.pid}, build ${build}, MCP dir ${mcpDir}`);
+  info(`jarvisd (Rafiq) starting: pid ${process.pid}, build ${build}, MCP dir ${mcpDir}`);
   await agent.start();
+  try {
+    await remote.start();
+  } catch (thrown) {
+    error(`phone bridge did not start: ${describe(thrown)}`);
+  }
+
   info(`jarvisd running on ${server.endpoint}`);
 }
 

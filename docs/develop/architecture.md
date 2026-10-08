@@ -310,6 +310,10 @@ and the local model's download state (`model-state-reader.ts`,
 module or the Agent SDK (`daemon/os/os-bundle-graph.test.ts`). The desktop
 app's `daemon-main.ts` and its orchestrator are untouched by it.
 
+**Rafiq M3 (brain).** jarvisd routes every control request through one router that knows whether the computer (a control connection) or a paired phone (the `@jarvis/remote` bridge, started inside jarvisd from `remote:` in jarvis.yaml) is asking; phones get only `agent:prompt/stop/confirm/undo`, `audit:list`, `memory:list`, the `voice:utterance` blob and the `agent:events`/`sys:snapshot` pushes, never approve password-tier items, and are audited `phone:<name>`. Approved setters and file operations leave an `undo` call (last 20, same host server and family only). Push-to-talk (`voice:utterance`) uses Jarvis's `stt.ts`/`piper.ts` through `@jarvis/platform/voice`; a short yes/no classifies approval or denial of the visible card only while unlocked; the shell sends `agent:confirm` with its ticks. `sys:setLocked` is accepted only from `/usr/bin/jarvis-lock` (peer program read from the kernel via `ss` and `/proc/<pid>/exe`); while locked no card is answered by anyone, and the state survives a jarvisd restart in `$XDG_RUNTIME_DIR/jarvis/lock-state.json`.
+
+Password-tier cards carry the secret `adminPassword`, verified by the helper for the calling user with PAM (`jarvis-admin`); passwords never reach the model, logs or audit. Voice engines live under `/usr/lib/jarvis/voice/bin/`, and models under `/usr/share/jarvis/voice/`.
+
 See [Background daemon](../guide/background-daemon.md) for the user side.
 
 ## Remote security layers

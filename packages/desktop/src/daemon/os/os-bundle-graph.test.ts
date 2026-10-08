@@ -48,6 +48,8 @@ describe("the Jarvis OS daemon bundle graph", () => {
   it("imports only core, wire, platform/model, yaml and node built-ins", () => {
     const { files, bare } = walk(resolve(HERE, "os-daemon-main.ts"));
     expect(files.size).toBeGreaterThan(5);
+    expect(bare).toContain("@jarvis/remote");
+    expect(bare).toContain("@jarvis/remote/listen");
     const outside = [...bare].filter(
       (spec) =>
         !spec.startsWith("node:") &&
@@ -57,6 +59,8 @@ describe("the Jarvis OS daemon bundle graph", () => {
           "@jarvis/platform/model",
           "@jarvis/platform/store",
           "@jarvis/platform/voice",
+          "@jarvis/remote",
+          "@jarvis/remote/listen",
           "yaml",
         ].includes(spec),
     );
@@ -68,6 +72,7 @@ describe("the Jarvis OS daemon bundle graph", () => {
       "src/dispatch.ts",
       "daemon/binding.ts",
       "src/main.ts",
+      "src/remote-access.ts",
     ]) {
       expect(names).not.toContain(forbidden);
     }

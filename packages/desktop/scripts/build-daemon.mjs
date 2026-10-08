@@ -17,6 +17,7 @@ await build({
   entryPoints: [fileURLToPath(new URL("dist/src/daemon/os/os-daemon-main.js", pkg))],
   outfile: fileURLToPath(new URL("jarvisd.mjs", out)),
   bundle: true,
+  external: ["bufferutil", "utf-8-validate"],
   platform: "node",
   format: "esm",
   target: "node24",

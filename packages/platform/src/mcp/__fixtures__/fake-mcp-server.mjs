@@ -47,6 +47,20 @@ const TOOLS = [
   },
 ];
 
+// Started as "jarvis-settings" it serves a setter that returns an undo
+// (Rafiq M3 contracts §1) instead of the package tools.
+const SETTINGS_TOOLS = [
+  {
+    name: "settings.brightness",
+    description: "Set the screen brightness",
+    inputSchema: object({ percent: { type: "number" } }, ["percent"]),
+    _meta: meta("confirm"),
+  },
+  TOOLS.find((tool) => tool.name === "jarvis.describe"),
+];
+const LIST = serverName === "jarvis-settings" ? SETTINGS_TOOLS : TOOLS;
+let brightness = 40;
+
 const send = (message) =>
   process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", ...message })}\n`);
 const result = (data) => ({
@@ -83,10 +97,22 @@ function call(name, args) {
         upgraded: (args.items ?? []).map((i) => ({ ...i, version: "2.0" })),
         failed: [],
       });
+    case "settings.brightness": {
+      const previous = brightness;
+      brightness = args.percent;
+      return result({
+        previous,
+        current: brightness,
+        undo: { tool: "settings.brightness", input: { percent: previous } },
+      });
+    }
     case "jarvis.describe":
       return result({
         title: `${args.tool} on ${serverName}`,
-        detail: JSON.stringify(args.input),
+        detail:
+          args.tool === "settings.brightness"
+            ? `${brightness} → ${args.input.percent}`
+            : JSON.stringify(args.input),
         source: args.input?.items?.[0]?.source === "flatpak" ? "flathub" : "debian",
       });
     case "test.crash":
@@ -119,8 +145,8 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       break;
     case "tools/list":
       if (message.params?.cursor === "p2")
-        send({ id: message.id, result: { tools: TOOLS.slice(2) } });
-      else send({ id: message.id, result: { tools: TOOLS.slice(0, 2), nextCursor: "p2" } });
+        send({ id: message.id, result: { tools: LIST.slice(2) } });
+      else send({ id: message.id, result: { tools: LIST.slice(0, 2), nextCursor: "p2" } });
       break;
     case "tools/call":
       send({ id: message.id, result: call(message.params.name, message.params.arguments ?? {}) });
