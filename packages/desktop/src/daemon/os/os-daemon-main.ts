@@ -138,9 +138,13 @@ async function main(argv: readonly string[]): Promise<void> {
   }
 
   const home = homedir();
+  // Rafiq's jarvisd keeps the fixed ~/.config/jarvis tree (os-paths.ts) that
+  // jarvis-shell, the lock and the classic panel dial: JARVIS_CONFIG_DIR is
+  // Jarvis Workspace's (M4 contracts §6.16), never the OS daemon's.
+  const fixedConfigDir = {};
   const here = dirname(fileURLToPath(import.meta.url));
   const fileLog = createDaemonLog({
-    path: daemonLogPath(home),
+    path: daemonLogPath(home, fixedConfigDir),
     now: Date.now,
     fallback: (line) => process.stderr.write(line),
   });
@@ -468,7 +472,7 @@ async function main(argv: readonly string[]): Promise<void> {
   });
   const started = await createControlServer({
     platform,
-    runDirectory: runDirectoryFor({ platform, home }),
+    runDirectory: runDirectoryFor({ platform, home, env: fixedConfigDir }),
     build,
     handlers,
     deps: nodeControlDeps(),

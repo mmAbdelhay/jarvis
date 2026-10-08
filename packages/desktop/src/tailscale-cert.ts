@@ -7,6 +7,7 @@
 // tests below never spawn a real `tailscale` binary or touch a real
 // ~/.config/jarvis — see tailscale-cert.test.ts.
 import { join } from "node:path";
+import { jarvisConfigDir } from "./daemon/control/config-dir.js";
 import { errorMessage } from "./messages.js";
 
 /** No shell, bounded — main.ts wires this to @jarvis/platform's
@@ -107,9 +108,9 @@ export async function tailnetName(
   return dnsName.endsWith(".") ? dnsName.slice(0, -1) : dnsName;
 }
 
-/** `~/.config/jarvis/tls` — where a certificate this module issues lives. */
+/** `~/.config/jarvis/tls` (or `$JARVIS_CONFIG_DIR/tls`) — where a certificate this module issues lives. */
 export function defaultCertDir(deps: Pick<TailscaleCertDeps, "homedir">): string {
-  return join(deps.homedir(), ".config/jarvis/tls");
+  return join(jarvisConfigDir({ home: deps.homedir() }), "tls");
 }
 
 /** The text's own last non-empty line — never the whole output, which can

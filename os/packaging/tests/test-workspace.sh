@@ -24,7 +24,7 @@ check "musl runtimes removed (no Debian library provides libc.musl)" bash -c '! 
 check "glibc agent runtime kept" grep -q 'claude-agent-sdk-linux-x64/claude' <<<"$list"
 check "launcher is an executable wrapper (contracts §6.16)" test "$(deb_mode "$deb" usr/bin/jarvis-workspace)" = -rwxr-xr-x
 wrap=$(dpkg-deb --fsys-tarfile "$deb" | tar -xO ./usr/bin/jarvis-workspace)
-check "wrapper sets its own JARVIS_CONFIG_DIR" grep -q 'jarvis-workspace}$' <<<"$wrap"
+check "wrapper sets its own JARVIS_CONFIG_DIR" grep -q 'jarvis-workspace$' <<<"$wrap"
 check "wrapper execs the app" grep -qx 'exec /opt/jarvis-workspace/jarvis "\$@"' <<<"$wrap"
 check "icon" deb_has "$deb" usr/share/icons/hicolor/512x512/apps/jarvis-workspace.png
 desk=$(dpkg-deb --fsys-tarfile "$deb" | tar -xO ./usr/share/applications/jarvis-workspace.desktop)
