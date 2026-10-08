@@ -11,6 +11,8 @@ qml6-module-qtquick-controls
 # Shared controls (os/ui, contracts M2 §7):
 jarvis-ui
 # Platform and session:
+# Push-to-talk capture (pacat; PipeWire's pulse server answers it):
+pulseaudio-utils
 qt6-wayland
 layer-shell-qt
 fonts-inter
