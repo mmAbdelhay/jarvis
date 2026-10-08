@@ -100,7 +100,7 @@ func TestPlanAlongsideNewESPExact(t *testing.T) {
 		t.Fatal(err)
 	}
 	l := pl.Layout
-	if l.Shrink.Part.Path != "/dev/loop1p3" || l.Shrink.NewBytes != 27523034624 || l.Shrink.NewEnd != 53997567 || l.Shrink.Part.Start != 239616 {
+	if l.Shrink.Part.Path != "/dev/loop1p3" || l.Shrink.NewBytes != 27524071424 || l.Shrink.NewEnd != 53997567 || l.Shrink.Part.Start != 239616 {
 		t.Fatalf("shrink = %+v", l.Shrink)
 	}
 	if l.ESP != (Part{Path: "/dev/loop1p5", Number: 5, Create: true, Format: true, Start: 53997568, End: 55046143, Bytes: 536870912}) {
@@ -117,7 +117,7 @@ func TestPlanAlongsideNewESPExact(t *testing.T) {
 		pl.Public.Summary[1] != "Create a new 537 MB boot partition (EFI)." {
 		t.Fatalf("summary = %q", pl.Public.Summary[:2])
 	}
-	want := []DiskAfter{{"EFI boot", 104857600, false}, {"Microsoft reserved partition", 16777216, false}, {"Windows", 27523034624, false},
+	want := []DiskAfter{{"EFI boot", 104857600, false}, {"Microsoft reserved partition", 16777216, false}, {"Windows", 27524071424, false},
 		{"EFI boot", 536870912, false}, {"Rafiq", 39462109184, true}, {"Recovery", 1073724928, false}}
 	if !reflect.DeepEqual(pl.Public.DiskAfter, want) {
 		t.Fatalf("diskAfter\n got %+v\nwant %+v", pl.Public.DiskAfter, want)
@@ -167,8 +167,8 @@ func TestPlanAlongsideNeverMovesWindowsAndNeverOverlaps(t *testing.T) {
 		if l.Shrink.Part.Start != win.Start {
 			t.Fatalf("J=%d: Windows start moved", j)
 		}
-		if (l.Shrink.NewEnd-win.Start+1)*512 < l.Shrink.NewBytes {
-			t.Fatalf("J=%d: partition smaller than the shrunk file system", j)
+		if (l.Shrink.NewEnd-win.Start+1)*512 != l.Shrink.NewBytes {
+			t.Fatalf("J=%d: the shrunk file system does not fill its partition exactly", j)
 		}
 		if l.Shrink.NewBytes < win.NTFS.MinSizeBytes {
 			t.Fatalf("J=%d: Windows below its minimum", j)

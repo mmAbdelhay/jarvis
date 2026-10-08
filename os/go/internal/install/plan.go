@@ -300,6 +300,12 @@ func planAlongside(x tr, d Disk, jarvisBytes int64) (Layout, error) {
 	if newEnd >= win.End || regionEnd <= regionStart || (regionEnd-regionStart+1)*s < need {
 		return Layout{}, tooSmall
 	}
+	// The file system must fill the shrunk partition exactly: ntfsresize
+	// keeps the backup boot sector in the volume's last sector, so a
+	// partition rounded up to the next MiB leaves it "BAD" for ntfsfix and
+	// chkdsk (found by the alongside install test). Windows keeps the
+	// alignment slack, under 1 MiB.
+	newBytes = (newEnd - win.Start + 1) * s
 	lay := Layout{Mode: "alongside", Disk: d.Path, SectorBytes: s, DualBoot: true,
 		Shrink: &Shrink{Part: *win, NewBytes: newBytes, NewEnd: newEnd}}
 	nums := freeNumbers(d, 2)

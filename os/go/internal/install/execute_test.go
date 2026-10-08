@@ -491,8 +491,8 @@ func TestExecuteAlongsidePartitionStep(t *testing.T) {
 	put(t, h.root, "/dev/loop1p5", "")
 	put(t, h.root, "/dev/loop1p6", "")
 	h.run.ok("sgdisk", "--backup=/run/jarvis-installer/gpt-backup.bin", "/dev/loop1").
-		ok("ntfsresize", "--no-action", "--no-progress-bar", "--size", "27523034624", "/dev/loop1p3").
-		ok("ntfsresize", "--no-progress-bar", "--size", "27523034624", "/dev/loop1p3").
+		ok("ntfsresize", "--no-action", "--no-progress-bar", "--size", "27524071424", "/dev/loop1p3").
+		ok("ntfsresize", "--no-progress-bar", "--size", "27524071424", "/dev/loop1p3").
 		ok(append([]string{"sgdisk"}, shrinkArgs(*pl.Layout.Shrink, "/dev/loop1")...)...).
 		ok(append([]string{"sgdisk"}, createArgs(pl.Layout)...)...).
 		ok("partx", "-u", "/dev/loop1").
@@ -568,8 +568,8 @@ func TestDryRunListsTheDiskCommandsWithoutSecrets(t *testing.T) {
 	}
 	want := []string{
 		"sgdisk --backup=/run/jarvis-installer/gpt-backup.bin /dev/loop1",
-		"ntfsresize --no-action --no-progress-bar --size 27523034624 /dev/loop1p3",
-		`ntfsresize --no-progress-bar --size 27523034624 /dev/loop1p3 <<< "y\n"`,
+		"ntfsresize --no-action --no-progress-bar --size 27524071424 /dev/loop1p3",
+		`ntfsresize --no-progress-bar --size 27524071424 /dev/loop1p3 <<< "y\n"`,
 		`sgdisk --delete=3 --new=3:239616:53997567 --typecode=3:EBD0A0A2-B9E5-4433-87C0-68B6B72699C7 --partition-guid=3:A73A742F-A408-4A07-88A7-C7983F8CEEE3 "--change-name=3:Basic data partition" --attributes=3:=:0000000000000000 /dev/loop1`,
 		`sgdisk --new=5:53997568:55046143 --typecode=5:ef00 "--change-name=5:EFI system partition" --new=6:55046144:132120575 --typecode=6:8309 --change-name=6:Rafiq /dev/loop1`,
 		"partx -u /dev/loop1",
