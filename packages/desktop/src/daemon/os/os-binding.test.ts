@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ControlRequestError } from "../control/messages.js";
 import type { ControlConnection } from "../control/server.js";
+import { makeWav } from "./__fixtures__/wav.js";
 import { type OsAgent, OsAgentError } from "./agent-service.js";
 import {
   createOsBinding,
@@ -11,6 +12,7 @@ import {
   PHONE_REQUESTS,
   requireLocal,
 } from "./os-binding.js";
+import type { OsVoice } from "./voice-service.js";
 
 const connection: ControlConnection = { id: 1, onClose: () => {} };
 
@@ -409,5 +411,67 @@ describe("lock and undo channels (Rafiq M3 §2, §3)", () => {
         phone,
       ),
     ).rejects.toMatchObject({ code: "locked" });
+  });
+});
+
+describe("voice channels (Rafiq M3 §2)", () => {
+  function fakeVoice() {
+    const calls: { meta: unknown; bytes: number; origin: unknown }[] = [];
+    const voice: OsVoice = {
+      utterance: async (meta, wav, origin) => {
+        calls.push({ meta, bytes: wav.byteLength, origin });
+        return { text: "yes", lang: "en", action: "approve" };
+      },
+      stop: () => null,
+      state: () => ({ state: "idle" }),
+      resync: () => {},
+    };
+    return { voice, calls };
+  }
+
+  it("routes a local voice:utterance blob with speech on, a phone one with speech off", async () => {
+    const { agent } = fakeAgent();
+    const { voice, calls } = fakeVoice();
+    const router = createOsRouter({ agent, voice });
+    const wav = makeWav(16_000);
+    await router.upload("voice:utterance", [{ cardId: "c1" }], wav, { kind: "local", connection });
+    await router.upload("voice:utterance", [], wav, {
+      kind: "phone",
+      device: { id: "d".repeat(32), name: "Pixel 8" },
+    });
+    expect(calls).toEqual([
+      {
+        meta: { lang: "auto", cardId: "c1" },
+        bytes: wav.byteLength,
+        origin: { from: { via: "desktop", allowPassword: true }, speakReply: true },
+      },
+      {
+        meta: { lang: "auto" },
+        bytes: wav.byteLength,
+        origin: { from: { via: "phone:Pixel 8", allowPassword: false }, speakReply: false },
+      },
+    ]);
+  });
+
+  it("refuses a bad header and answers unsupported without voice", async () => {
+    const { agent } = fakeAgent();
+    const { voice } = fakeVoice();
+    await expect(
+      createOsRouter({ agent, voice }).upload(
+        "voice:utterance",
+        [{ lang: "de" }],
+        makeWav(16_000),
+        { kind: "local", connection },
+      ),
+    ).rejects.toMatchObject({ code: "bad-request" });
+    await expect(
+      createOsRouter({ agent }).upload("voice:utterance", [], makeWav(16_000), {
+        kind: "local",
+        connection,
+      }),
+    ).rejects.toMatchObject({ code: "unsupported" });
+    await expect(
+      createOsRouter({ agent, voice }).invoke("voice:stop", [], { kind: "local", connection }),
+    ).resolves.toBeNull();
   });
 });

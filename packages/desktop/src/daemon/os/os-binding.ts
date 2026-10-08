@@ -7,6 +7,8 @@
 // No electron here (core/no-electron.test.ts).
 import { type AuditVia, CONTROL_TEXT, type ConfirmFrom, LOCAL_CONFIRM } from "@jarvis/core";
 import {
+  MAX_VOICE_BYTES,
+  OS_CONTROL_BLOBS,
   OS_CONTROL_REQUESTS,
   type Parsed,
   parseAgentConfirm,
@@ -21,10 +23,12 @@ import {
   parseProviderDraft,
   parseProviderSave,
   parseSetLocked,
+  parseVoiceUtteranceMeta,
 } from "@jarvis/wire";
 import { ControlRequestError } from "../control/messages.js";
 import type { ControlConnection, ControlHandlers } from "../control/server.js";
 import { type OsAgent, OsAgentError } from "./agent-service.js";
+import type { OsVoice } from "./voice-service.js";
 
 function value<T>(parsed: Parsed<T>): T {
   if (!parsed.ok) throw new ControlRequestError("bad-request", parsed.error);
@@ -40,6 +44,7 @@ export type OsServices = {
   agent: OsAgent;
   /** Rafiq M3 §3: true only for /usr/bin/jarvis-lock (peer-checked). */
   isLockClient?(connection: ControlConnection): Promise<boolean>;
+  voice?: OsVoice;
 };
 
 export type OsRouter = {
@@ -138,6 +143,9 @@ export function createOsRouter(services: OsServices): OsRouter {
         return agent.memoryClear();
       case OS_CONTROL_REQUESTS.memorySetEnabled:
         return agent.memorySetEnabled(value(parseMemorySetEnabled(args)).enabled);
+      case OS_CONTROL_REQUESTS.voiceStop:
+        value(parseNoArgs(args));
+        return services.voice?.stop() ?? null;
       default:
         throw new ControlRequestError("unknown-channel", `No handler for ${channel}`);
     }
@@ -145,11 +153,24 @@ export function createOsRouter(services: OsServices): OsRouter {
 
   async function routeBlob(
     channel: string,
-    _args: unknown[],
-    _bytes: Uint8Array,
-    _origin: OsOrigin,
+    args: unknown[],
+    bytes: Uint8Array,
+    origin: OsOrigin,
   ): Promise<unknown> {
     switch (channel) {
+      case OS_CONTROL_BLOBS.voiceUtterance: {
+        if (bytes.byteLength > MAX_VOICE_BYTES) {
+          throw new ControlRequestError("bad-request", CONTROL_TEXT.badAudio);
+        }
+        const meta = value(parseVoiceUtteranceMeta(args));
+        if (services.voice === undefined) {
+          throw new ControlRequestError("unsupported", CONTROL_TEXT.voiceUnavailable);
+        }
+        return services.voice.utterance(meta, bytes, {
+          from: confirmFrom(origin),
+          speakReply: origin.kind === "local",
+        });
+      }
       default:
         throw new ControlRequestError("unsupported", `No upload channel ${channel} is served here`);
     }
