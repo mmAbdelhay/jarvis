@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/mmAbdelhay/jarvis/os/go/internal/i18n"
 	"github.com/mmAbdelhay/jarvis/os/go/internal/mcp"
 	"github.com/mmAbdelhay/jarvis/os/go/internal/settings"
 )
@@ -48,7 +49,7 @@ func toolErr(what string, err error) error {
 	case errors.As(err, &te):
 		return te
 	case errors.Is(err, settings.ErrUnavailable):
-		return mcp.Errorf(mcp.CodeNotFound, text.Unavailable, what)
+		return mcp.Errorf(mcp.CodeNotFound, errText.Unavailable, what)
 	case errors.As(err, &ce):
 		return mcp.Errorf(mcp.CodeFailed, "%s", ce.Error())
 	default:
@@ -124,7 +125,7 @@ func (d Deps) get(ctx context.Context, raw json.RawMessage) (any, error) {
 			ok = ok || k == known
 		}
 		if !ok {
-			return nil, mcp.Errorf(mcp.CodeInvalid, text.BadKey, k)
+			return nil, mcp.Errorf(mcp.CodeInvalid, errText.BadKey, k)
 		}
 		want[k] = true
 	}
@@ -235,15 +236,17 @@ func (d Deps) brightness(ctx context.Context, raw json.RawMessage) (any, error) 
 }
 
 func (d Deps) describeBrightness(ctx context.Context, raw json.RawMessage) (mcp.Description, error) {
+	l := i18n.FromContext(ctx)
+	t := cardText.Get(l)
 	p, err := decodePercent(raw)
 	if err != nil {
 		return mcp.Description{}, err
 	}
-	now := "unknown"
+	now := t.Unknown
 	if v, err := d.Sys.Brightness(ctx); err == nil {
 		now = fmt.Sprintf("%d%%", v)
 	}
-	return mcp.Description{Title: fmt.Sprintf(text.Brightness, p), Detail: fmt.Sprintf(text.Now, now), Source: mcp.SourceSystem}, nil
+	return mcp.Description{Title: i18n.Sprintf(l, t.Brightness, p), Detail: i18n.Sprintf(l, t.Now, now), Source: mcp.SourceSystem}, nil
 }
 
 // --- volume
@@ -259,7 +262,7 @@ func decodeVolume(raw json.RawMessage) (volumeIn, error) {
 		return in, err
 	}
 	if in.Percent == nil && in.Muted == nil {
-		return in, mcp.Errorf(mcp.CodeInvalid, "%s", text.NeedOne)
+		return in, mcp.Errorf(mcp.CodeInvalid, "%s", errText.NeedOne)
 	}
 	if in.Percent != nil && (*in.Percent < 0 || *in.Percent > 150) {
 		return in, mcp.Errorf(mcp.CodeInvalid, "percent must be 0 to 150")
@@ -290,6 +293,8 @@ func (d Deps) volume(ctx context.Context, raw json.RawMessage) (any, error) {
 }
 
 func (d Deps) describeVolume(ctx context.Context, raw json.RawMessage) (mcp.Description, error) {
+	l := i18n.FromContext(ctx)
+	t := cardText.Get(l)
 	in, err := decodeVolume(raw)
 	if err != nil {
 		return mcp.Description{}, err
@@ -297,22 +302,22 @@ func (d Deps) describeVolume(ctx context.Context, raw json.RawMessage) (mcp.Desc
 	var title string
 	switch {
 	case in.Percent != nil && in.Muted != nil:
-		title = fmt.Sprintf(text.VolumeMute, *in.Percent, map[bool]string{true: "mute", false: "unmute"}[*in.Muted])
+		title = i18n.Sprintf(l, t.VolumeMute, *in.Percent, map[bool]string{true: t.MuteWord, false: t.UnmuteWord}[*in.Muted])
 	case in.Percent != nil:
-		title = fmt.Sprintf(text.Volume, *in.Percent)
+		title = i18n.Sprintf(l, t.Volume, *in.Percent)
 	case *in.Muted:
-		title = text.Mute
+		title = t.Mute
 	default:
-		title = text.Unmute
+		title = t.Unmute
 	}
-	now := "unknown"
+	now := t.Unknown
 	if v, err := d.Sys.Volume(ctx); err == nil {
 		now = fmt.Sprintf("%d%%", v.Percent)
 		if v.Muted {
-			now += ", muted"
+			now = fmt.Sprintf(t.VolumeMuted, v.Percent)
 		}
 	}
-	return mcp.Description{Title: title, Detail: fmt.Sprintf(text.Now, now), Source: mcp.SourceSystem}, nil
+	return mcp.Description{Title: title, Detail: i18n.Sprintf(l, t.Now, now), Source: mcp.SourceSystem}, nil
 }
 
 // --- night light
@@ -355,16 +360,18 @@ func (d Deps) nightLight(ctx context.Context, raw json.RawMessage) (any, error) 
 	return Change{Previous: prev, Current: settings.NightLight{On: *in.On, UntilHour: in.UntilHour}, Undo: undo("settings.night_light", back)}, nil
 }
 
-func (d Deps) describeNightLight(_ context.Context, raw json.RawMessage) (mcp.Description, error) {
+func (d Deps) describeNightLight(ctx context.Context, raw json.RawMessage) (mcp.Description, error) {
+	l := i18n.FromContext(ctx)
+	t := cardText.Get(l)
 	in, err := decodeNight(raw)
 	if err != nil {
 		return mcp.Description{}, err
 	}
-	title := text.NightOff
+	title := t.NightOff
 	if *in.On && in.UntilHour != nil {
-		title = fmt.Sprintf(text.NightOnUntil, *in.UntilHour)
+		title = i18n.Sprintf(l, t.NightOnUntil, *in.UntilHour)
 	} else if *in.On {
-		title = text.NightOn
+		title = t.NightOn
 	}
 	return mcp.Description{Title: title, Source: mcp.SourceSystem}, nil
 }
@@ -419,12 +426,14 @@ func describeRadio(raw json.RawMessage, on, off string) (mcp.Description, error)
 	return mcp.Description{Title: t, Source: mcp.SourceSystem}, nil
 }
 
-func (d Deps) describeWiFi(_ context.Context, raw json.RawMessage) (mcp.Description, error) {
-	return describeRadio(raw, text.WiFiOn, text.WiFiOff)
+func (d Deps) describeWiFi(ctx context.Context, raw json.RawMessage) (mcp.Description, error) {
+	t := cardText.In(ctx)
+	return describeRadio(raw, t.WiFiOn, t.WiFiOff)
 }
 
-func (d Deps) describeBluetooth(_ context.Context, raw json.RawMessage) (mcp.Description, error) {
-	return describeRadio(raw, text.BTOn, text.BTOff)
+func (d Deps) describeBluetooth(ctx context.Context, raw json.RawMessage) (mcp.Description, error) {
+	t := cardText.In(ctx)
+	return describeRadio(raw, t.BTOn, t.BTOff)
 }
 
 // --- Bluetooth pairing
@@ -482,21 +491,25 @@ func (d Deps) unpair(ctx context.Context, raw json.RawMessage) (any, error) {
 }
 
 func (d Deps) describePair(ctx context.Context, raw json.RawMessage) (mcp.Description, error) {
+	l := i18n.FromContext(ctx)
+	t := cardText.Get(l)
 	a, err := decodeAddress(raw)
 	if err != nil {
 		return mcp.Description{}, err
 	}
 	_, name := d.paired(ctx, a)
-	return mcp.Description{Title: fmt.Sprintf(text.Pair, name), Detail: a + " · " + text.PairDetail, Source: mcp.SourceSystem}, nil
+	return mcp.Description{Title: i18n.Sprintf(l, t.Pair, name), Detail: i18n.Iso(l, a) + " · " + t.PairDetail, Source: mcp.SourceSystem}, nil
 }
 
 func (d Deps) describeUnpair(ctx context.Context, raw json.RawMessage) (mcp.Description, error) {
+	l := i18n.FromContext(ctx)
+	t := cardText.Get(l)
 	a, err := decodeAddress(raw)
 	if err != nil {
 		return mcp.Description{}, err
 	}
 	_, name := d.paired(ctx, a)
-	return mcp.Description{Title: fmt.Sprintf(text.Unpair, name), Detail: a + " · " + text.UnpairDetail, Source: mcp.SourceSystem}, nil
+	return mcp.Description{Title: i18n.Sprintf(l, t.Unpair, name), Detail: i18n.Iso(l, a) + " · " + t.UnpairDetail, Source: mcp.SourceSystem}, nil
 }
 
 // --- audio output
@@ -546,12 +559,14 @@ func (d Deps) audioOutput(ctx context.Context, raw json.RawMessage) (any, error)
 }
 
 func (d Deps) describeAudioOutput(ctx context.Context, raw json.RawMessage) (mcp.Description, error) {
+	l := i18n.FromContext(ctx)
+	t := cardText.Get(l)
 	id, err := decodeSink(raw)
 	if err != nil {
 		return mcp.Description{}, err
 	}
 	name, _ := d.sinkName(ctx, id)
-	return mcp.Description{Title: fmt.Sprintf(text.AudioOut, name), Detail: id, Source: mcp.SourceSystem}, nil
+	return mcp.Description{Title: i18n.Sprintf(l, t.AudioOut, name), Detail: i18n.Iso(l, id), Source: mcp.SourceSystem}, nil
 }
 
 // --- power profile
@@ -587,15 +602,26 @@ func (d Deps) powerProfile(ctx context.Context, raw json.RawMessage) (any, error
 }
 
 func (d Deps) describePowerProfile(ctx context.Context, raw json.RawMessage) (mcp.Description, error) {
+	l := i18n.FromContext(ctx)
+	t := cardText.Get(l)
 	p, err := decodeProfile(raw)
 	if err != nil {
 		return mcp.Description{}, err
 	}
 	now, err := d.Sys.PowerProfile(ctx)
 	if err != nil {
-		now = "unknown"
+		now = ""
 	}
-	return mcp.Description{Title: fmt.Sprintf(text.Power, p), Detail: fmt.Sprintf(text.Now, now), Source: mcp.SourceSystem}, nil
+	name := func(id string) string {
+		if id == "" {
+			return t.Unknown
+		}
+		if n := t.Profiles[id]; n != "" {
+			return n
+		}
+		return id
+	}
+	return mcp.Description{Title: i18n.Sprintf(l, t.Power, name(p)), Detail: i18n.Sprintf(l, t.Now, name(now)), Source: mcp.SourceSystem}, nil
 }
 
 // --- display scale
@@ -648,12 +674,14 @@ func (d Deps) scale(ctx context.Context, raw json.RawMessage) (any, error) {
 	return Change{Previous: prev, Current: in.Scale, Undo: u}, nil
 }
 
-func (d Deps) describeScale(_ context.Context, raw json.RawMessage) (mcp.Description, error) {
+func (d Deps) describeScale(ctx context.Context, raw json.RawMessage) (mcp.Description, error) {
+	l := i18n.FromContext(ctx)
+	t := cardText.Get(l)
 	in, err := decodeScale(raw)
 	if err != nil {
 		return mcp.Description{}, err
 	}
-	return mcp.Description{Title: fmt.Sprintf(text.Scale, in.Output, in.Scale), Source: mcp.SourceSystem}, nil
+	return mcp.Description{Title: i18n.Sprintf(l, t.Scale, in.Output, in.Scale), Source: mcp.SourceSystem}, nil
 }
 
 // --- keyboard
@@ -686,41 +714,45 @@ func (d Deps) keyboard(ctx context.Context, raw json.RawMessage) (any, error) {
 	return map[string]any{"previous": prev, "current": kb, "live": live, "undo": undo("settings.keyboard", back)}, nil
 }
 
-func (d Deps) describeKeyboard(_ context.Context, raw json.RawMessage) (mcp.Description, error) {
+func (d Deps) describeKeyboard(ctx context.Context, raw json.RawMessage) (mcp.Description, error) {
+	l := i18n.FromContext(ctx)
+	t := cardText.Get(l)
 	kb, err := decodeKeyboard(raw)
 	if err != nil {
 		return mcp.Description{}, err
 	}
-	title := fmt.Sprintf(text.Keyboard, kb.Layout)
+	title := i18n.Sprintf(l, t.Keyboard, kb.Layout)
 	if kb.Variant != "" {
-		title = fmt.Sprintf(text.KeyboardVariant, kb.Layout, kb.Variant)
+		title = i18n.Sprintf(l, t.KeyboardVariant, kb.Layout, kb.Variant)
 	}
 	prev := d.Sess.Keyboard()
-	return mcp.Description{Title: title, Detail: fmt.Sprintf(text.Now, prev.Layout), Source: mcp.SourceSystem}, nil
+	return mcp.Description{Title: title, Detail: i18n.Sprintf(l, t.Now, prev.Layout), Source: mcp.SourceSystem}, nil
 }
 
 // transitionDescription keeps confirmation cards pure and uses the §5.4 detail.
-func (d Deps) transitionDescription(t tool) func(context.Context, json.RawMessage) (mcp.Description, error) {
+func (d Deps) transitionDescription(tl tool) func(context.Context, json.RawMessage) (mcp.Description, error) {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.Description, error) {
-		desc, err := t.describe(ctx, raw)
+		desc, err := tl.describe(ctx, raw)
 		if err != nil {
 			return desc, err
 		}
-		previous, current := text.Unknown, text.Unknown
+		l := i18n.FromContext(ctx)
+		t := cardText.Get(l)
+		previous, current := t.Unknown, t.Unknown
 		on := func(v bool) string {
 			if v {
-				return text.On
+				return t.On
 			}
-			return text.Off
+			return t.Off
 		}
 		night := func(v settings.NightLight) string {
 			if !v.On {
-				return text.Off
+				return t.Off
 			}
 			if v.UntilHour != nil {
-				return fmt.Sprintf("on until %02d:00", *v.UntilHour)
+				return fmt.Sprintf(t.OnUntil, *v.UntilHour)
 			}
-			return text.On
+			return t.On
 		}
 		keyboard := func(v settings.Keyboard) string {
 			if v.Variant != "" {
@@ -729,13 +761,12 @@ func (d Deps) transitionDescription(t tool) func(context.Context, json.RawMessag
 			return v.Layout
 		}
 		volume := func(v settings.Volume) string {
-			s := fmt.Sprintf("%d%%", v.Percent)
 			if v.Muted {
-				s += ", muted"
+				return fmt.Sprintf(t.VolumeMuted, v.Percent)
 			}
-			return s
+			return fmt.Sprintf("%d%%", v.Percent)
 		}
-		switch t.name {
+		switch tl.name {
 		case "settings.brightness":
 			p, _ := decodePercent(raw)
 			current = fmt.Sprintf("%d%%", p)
@@ -765,7 +796,7 @@ func (d Deps) transitionDescription(t tool) func(context.Context, json.RawMessag
 			current = on(v)
 			var old bool
 			var e error
-			if t.name == "settings.wifi" {
+			if tl.name == "settings.wifi" {
 				old, e = d.Sys.WiFi(ctx)
 			} else {
 				old, e = d.BT.Powered(ctx)
@@ -776,18 +807,31 @@ func (d Deps) transitionDescription(t tool) func(context.Context, json.RawMessag
 		case "settings.bluetooth_pair", "settings.bluetooth_unpair":
 			a, _ := decodeAddress(raw)
 			was, _ := d.paired(ctx, a)
-			previous = fmt.Sprint(was)
-			current = fmt.Sprint(t.name == "settings.bluetooth_pair")
+			yesno := func(v bool) string {
+				if v {
+					return t.Yes
+				}
+				return t.No
+			}
+			previous = yesno(was)
+			current = yesno(tl.name == "settings.bluetooth_pair")
 		case "settings.audio_output":
 			id, _ := decodeSink(raw)
 			current, previous = d.sinkName(ctx, id)
 			if previous == "" {
-				previous = text.Unknown
+				previous = t.Unknown
 			}
 		case "settings.power_profile":
 			current, _ = decodeProfile(raw)
+			name := func(id string) string {
+				if n := t.Profiles[id]; n != "" {
+					return n
+				}
+				return id
+			}
+			current = name(current)
 			if v, e := d.Sys.PowerProfile(ctx); e == nil {
-				previous = v
+				previous = name(v)
 			}
 		case "settings.scale":
 			in, _ := decodeScale(raw)
@@ -806,7 +850,7 @@ func (d Deps) transitionDescription(t tool) func(context.Context, json.RawMessag
 			}
 			previous, current = keyboard(d.Sess.Keyboard()), keyboard(kb)
 		}
-		desc.Detail = fmt.Sprintf(text.Transition, previous, current)
+		desc.Detail = i18n.Sprintf(l, t.Transition, previous, current)
 		return desc, nil
 	}
 }
