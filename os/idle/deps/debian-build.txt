@@ -4,3 +4,9 @@ ninja-build
 g++
 pkgconf
 qt6-base-dev
+libwayland-dev
+libwayland-bin
+wayland-protocols
+# needed only to run the tests
+dbus-daemon
+labwc
