@@ -11,9 +11,16 @@ import {
   ProviderError,
   type SysSnapshot,
 } from "@jarvis/core";
-import { createMemorySecretStore, providerAccount } from "@jarvis/platform/model";
+import {
+  createMemorySecretStore,
+  providerAccount,
+} from "@jarvis/platform/model";
 import { describe, expect, it } from "vitest";
-import { createOsAgent, OsAgentError, type OsAgentDeps } from "./agent-service.js";
+import {
+  createOsAgent,
+  OsAgentError,
+  type OsAgentDeps,
+} from "./agent-service.js";
 import type { ConfigIo } from "./provider-config.js";
 
 const pkgTools: McpTool[] = [
@@ -55,14 +62,29 @@ const updatesTools: McpTool[] = [
   {
     name: "updates.apply",
     description: "Apply updates",
-    inputSchema: { type: "object", properties: { items: { type: "array", maxItems: 200 } } },
+    inputSchema: {
+      type: "object",
+      properties: { items: { type: "array", maxItems: 200 } },
+    },
     meta: { jarvis: { risk: "confirm", batch: "items" } },
   },
 ];
 const UPDATES_LIST = {
   items: [
-    { source: "apt", id: "jarvis-shell", from: "0.1.0", to: "0.2.0", security: false },
-    { source: "apt", id: "openssl", from: "3.5.1-1", to: "3.5.1-1+deb13u1", security: true },
+    {
+      source: "apt",
+      id: "jarvis-shell",
+      from: "0.1.0",
+      to: "0.2.0",
+      security: false,
+    },
+    {
+      source: "apt",
+      id: "openssl",
+      from: "3.5.1-1",
+      to: "3.5.1-1+deb13u1",
+      security: true,
+    },
   ],
   checkedAt: "2026-10-08T09:00:00Z",
 };
@@ -90,7 +112,14 @@ function session(
           structuredContent: {
             nmRunning: true,
             connectivity: "full",
-            devices: [{ name: "eth0", type: "ethernet", state: "connected", connection: "Wired" }],
+            devices: [
+              {
+                name: "eth0",
+                type: "ethernet",
+                state: "connected",
+                connection: "Wired",
+              },
+            ],
             ips: [],
             defaultRoute: "10.0.0.1 dev eth0",
             dnsOk: true,
@@ -110,7 +139,13 @@ function session(
             memTotalBytes: 8_000_000_000,
             memUsedBytes: 500_000_000,
             swapUsedBytes: 0,
-            disks: [{ mount: "/", sizeBytes: 64_000_000_000, usedBytes: 6_000_000_000 }],
+            disks: [
+              {
+                mount: "/",
+                sizeBytes: 64_000_000_000,
+                usedBytes: 6_000_000_000,
+              },
+            ],
             failedUnits: 1,
             bootErrors: 0,
           },
@@ -133,7 +168,11 @@ function session(
           text: "{}",
         };
       }
-      return { isError: false, structuredContent: { ok: true }, text: '{"ok":true}' };
+      return {
+        isError: false,
+        structuredContent: { ok: true },
+        text: '{"ok":true}',
+      };
     },
     close: () => {},
   };
@@ -145,7 +184,8 @@ function harness(overrides: Partial<OsAgentDeps> = {}) {
   const configIo: ConfigIo = {
     readFile: async (path) => {
       const text = files.get(path);
-      if (text === undefined) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+      if (text === undefined)
+        throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
       return text;
     },
     writeFile: async (path, text) => {
@@ -187,7 +227,8 @@ function harness(overrides: Partial<OsAgentDeps> = {}) {
     timers: {
       // Short waits (the keyring retry) run at once; the 5-minute card
       // timeout and the 30 s provider recheck never fire in these tests.
-      setTimeout: (callback: () => void, ms: number) => (ms <= 5_000 ? setTimeout(callback, 0) : 0),
+      setTimeout: (callback: () => void, ms: number) =>
+        ms <= 5_000 ? setTimeout(callback, 0) : 0,
       clearTimeout: () => {},
       setInterval: () => 0,
       clearInterval: () => {},
@@ -196,7 +237,9 @@ function harness(overrides: Partial<OsAgentDeps> = {}) {
     ...overrides,
   });
   const events = () =>
-    pushes.filter((p) => p.channel === "agent:events").map((p) => p.payload as AgentEvent);
+    pushes
+      .filter((p) => p.channel === "agent:events")
+      .map((p) => p.payload as AgentEvent);
   const until = async (check: () => boolean) => {
     // `check` may have side effects (some start a prompt), so call it once per tick.
     for (let i = 0; i < 500; i++) {
@@ -224,7 +267,14 @@ const installScript = parseFakeScript([
   {
     expectPromptContains: "install hello",
     replies: [
-      { toolCalls: [{ name: "pkg.install", input: { items: [{ source: "apt", id: "hello" }] } }] },
+      {
+        toolCalls: [
+          {
+            name: "pkg.install",
+            input: { items: [{ source: "apt", id: "hello" }] },
+          },
+        ],
+      },
       { text: "Installed hello." },
     ],
   },
@@ -240,11 +290,26 @@ describe("createOsAgent", () => {
     const card = h.events().find((e) => e.type === "card");
     if (card?.type !== "card") throw new Error("no card");
     expect(card.card.turnId).toBe(turnId);
-    h.agent.confirm({ cardId: card.card.cardId, approve: true, ticked: ["item-1"], secrets: {} });
+    h.agent.confirm({
+      cardId: card.card.cardId,
+      approve: true,
+      ticked: ["item-1"],
+      secrets: {},
+    });
     await h.until(() => h.events().some((e) => e.type === "turn-end"));
-    expect(h.events().at(-1)).toEqual({ type: "turn-end", turnId, reason: "done" });
-    expect(h.events()).toContainEqual({ type: "text", turnId, delta: "Installed hello." });
-    expect(h.toolCalls.filter((t) => t === "pkg.install")).toEqual(["pkg.install"]);
+    expect(h.events().at(-1)).toEqual({
+      type: "turn-end",
+      turnId,
+      reason: "done",
+    });
+    expect(h.events()).toContainEqual({
+      type: "text",
+      turnId,
+      delta: "Installed hello.",
+    });
+    expect(h.toolCalls.filter((t) => t === "pkg.install")).toEqual([
+      "pkg.install",
+    ]);
     expect(h.audit[0]).toMatchObject({
       tool: "pkg.install",
       decision: "approved",
@@ -252,7 +317,10 @@ describe("createOsAgent", () => {
       via: "desktop",
     });
     // The fake provider works with no provider configured (contracts §6 #11).
-    await expect(h.agent.providerList()).resolves.toMatchObject({ providers: [], activeId: null });
+    await expect(h.agent.providerList()).resolves.toMatchObject({
+      providers: [],
+      activeId: null,
+    });
   });
 
   it("lets the fake provider replace a configured one (contracts §6 #11)", async () => {
@@ -282,22 +350,28 @@ describe("createOsAgent", () => {
     );
     await h.agent.start();
     await h.until(() => h.pushes.some((p) => p.channel === "sys:snapshot"));
-    expect(h.pushes.find((p) => p.channel === "sys:snapshot")?.payload).toEqual({
-      online: true,
-      network: { connectivity: "full", wifiSsid: null },
-      memTotalBytes: 8_000_000_000,
-      memUsedBytes: 500_000_000,
-      disk: { mount: "/", sizeBytes: 64_000_000_000, usedBytes: 6_000_000_000 },
-      failedUnits: ["cups.service"],
-      model: {
-        kind: "ollama",
-        model: "qwen3:8b",
-        local: true,
-        supportsTools: true,
-        download: null,
+    expect(h.pushes.find((p) => p.channel === "sys:snapshot")?.payload).toEqual(
+      {
+        online: true,
+        network: { connectivity: "full", wifiSsid: null },
+        memTotalBytes: 8_000_000_000,
+        memUsedBytes: 500_000_000,
+        disk: {
+          mount: "/",
+          sizeBytes: 64_000_000_000,
+          usedBytes: 6_000_000_000,
+        },
+        failedUnits: ["cups.service"],
+        model: {
+          kind: "ollama",
+          model: "qwen3:8b",
+          local: true,
+          supportsTools: true,
+          download: null,
+        },
+        updates: { count: 0, security: 0, checkedAt: null },
       },
-      updates: { count: 0, security: 0, checkedAt: null },
-    });
+    );
   });
 
   it("reads the key lazily at first use and retries a locked keyring (contracts §6 #12)", async () => {
@@ -310,7 +384,8 @@ describe("createOsAgent", () => {
       ...secrets,
       get: async (account: string) => {
         reads++;
-        if (reads === 1) throw new Error("Cannot get secret of a locked object");
+        if (reads === 1)
+          throw new Error("Cannot get secret of a locked object");
         return secrets.get(account);
       },
     };
@@ -345,7 +420,12 @@ describe("createOsAgent", () => {
     h.agent.prompt("please install hello");
     expect(() => h.agent.prompt("again")).toThrow(OsAgentError);
     expect(() =>
-      h.agent.confirm({ cardId: "nope", approve: true, ticked: [], secrets: {} }),
+      h.agent.confirm({
+        cardId: "nope",
+        approve: true,
+        ticked: [],
+        secrets: {},
+      }),
     ).toThrow(OsAgentError);
   });
 
@@ -357,7 +437,11 @@ describe("createOsAgent", () => {
     expect(h.agent.stop("other")).toBeNull();
     h.agent.stop(turnId);
     await h.until(() => h.events().some((e) => e.type === "turn-end"));
-    expect(h.events().at(-1)).toEqual({ type: "turn-end", turnId, reason: "stopped" });
+    expect(h.events().at(-1)).toEqual({
+      type: "turn-end",
+      turnId,
+      reason: "stopped",
+    });
     expect(h.toolCalls.filter((t) => t === "pkg.install")).toEqual([]);
   });
 
@@ -366,15 +450,23 @@ describe("createOsAgent", () => {
     await h.agent.start();
     h.agent.prompt("hello");
     await h.until(() => h.events().some((e) => e.type === "turn-end"));
-    expect(h.events().at(-1)).toMatchObject({ type: "turn-end", reason: "error" });
-    expect(h.pushes.filter((p) => p.channel === "provider:status").at(-1)?.payload).toMatchObject({
+    expect(h.events().at(-1)).toMatchObject({
+      type: "turn-end",
+      reason: "error",
+    });
+    expect(
+      h.pushes.filter((p) => p.channel === "provider:status").at(-1)?.payload,
+    ).toMatchObject({
       reachable: false,
     });
   });
 
   it("runs the doctor, refuses prompts meanwhile, then hands its summary to the next prompt", async () => {
     const script = parseFakeScript([
-      { expectPromptContains: "network doctor ran", replies: [{ text: "Glad it works." }] },
+      {
+        expectPromptContains: "network doctor ran",
+        replies: [{ text: "Glad it works." }],
+      },
     ]);
     const h = harness({ fakeScript: script });
     await h.agent.start();
@@ -382,9 +474,8 @@ describe("createOsAgent", () => {
     expect(state.active).toBe(true);
     expect(() => h.agent.prompt("hi")).toThrow(OsAgentError);
     await h.until(() => {
-      const last = h.pushes.filter((p) => p.channel === "doctor:state").at(-1)?.payload as
-        | DoctorState
-        | undefined;
+      const last = h.pushes.filter((p) => p.channel === "doctor:state").at(-1)
+        ?.payload as DoctorState | undefined;
       return last?.done !== null && last?.done !== undefined;
     });
     await h.until(() => {
@@ -413,18 +504,28 @@ describe("createOsAgent", () => {
     h.pushes.length = 0;
     h.agent.resync();
     expect(h.pushes.map((p) => p.channel)).toEqual(
-      expect.arrayContaining(["provider:status", "doctor:state", "sys:snapshot", "agent:events"]),
+      expect.arrayContaining([
+        "provider:status",
+        "doctor:state",
+        "sys:snapshot",
+        "agent:events",
+      ]),
     );
     expect(h.events().filter((e) => e.type === "card")).toHaveLength(1);
   });
 
   it("reconnects the MCP servers after one dies", async () => {
     const h = harness({
-      fakeScript: parseFakeScript([{ replies: [{ text: "a" }] }, { replies: [{ text: "b" }] }]),
+      fakeScript: parseFakeScript([
+        { replies: [{ text: "a" }] },
+        { replies: [{ text: "b" }] },
+      ]),
     });
     await h.agent.start();
     h.agent.prompt("one");
-    await h.until(() => h.events().filter((e) => e.type === "turn-end").length === 1);
+    await h.until(
+      () => h.events().filter((e) => e.type === "turn-end").length === 1,
+    );
     const before = h.connects();
     h.alive.value = false;
     await h.until(() => {
@@ -435,7 +536,9 @@ describe("createOsAgent", () => {
         return false;
       }
     });
-    await h.until(() => h.events().filter((e) => e.type === "turn-end").length === 2);
+    await h.until(
+      () => h.events().filter((e) => e.type === "turn-end").length === 2,
+    );
     expect(h.connects()).toBe(before + 1);
   });
 });
@@ -446,14 +549,19 @@ describe("updates and model download (M2 contracts §2, §5)", () => {
     session("jarvis-diag", diagTools, calls),
   ];
   const snapshots = (pushes: { channel: string; payload: unknown }[]) =>
-    pushes.filter((p) => p.channel === "sys:snapshot").map((p) => p.payload as SysSnapshot);
+    pushes
+      .filter((p) => p.channel === "sys:snapshot")
+      .map((p) => p.payload as SysSnapshot);
 
   it("answers updates:check from updates.list and pushes the counts in sys:snapshot", async () => {
     const calls: string[] = [];
     const h = harness({ connectMcp: withUpdates(calls) });
     await h.agent.start();
     await h.until(() => snapshots(h.pushes).length > 0);
-    await expect(h.agent.checkUpdates()).resolves.toEqual({ count: 2, security: 1 });
+    await expect(h.agent.checkUpdates()).resolves.toEqual({
+      count: 2,
+      security: 1,
+    });
     await h.until(() => snapshots(h.pushes).some((s) => s.updates.count === 2));
     expect(snapshots(h.pushes).at(-1)?.updates).toEqual({
       count: 2,
@@ -477,7 +585,10 @@ describe("updates and model download (M2 contracts §2, §5)", () => {
       ...session("jarvis-pkg", [...pkgTools, ...updatesTools], []),
       callTool: async () => ({
         isError: true,
-        structuredContent: { code: "failed", message: "The repository is not signed." },
+        structuredContent: {
+          code: "failed",
+          message: "The repository is not signed.",
+        },
         text: "failed",
       }),
     };
@@ -497,7 +608,10 @@ describe("updates and model download (M2 contracts §2, §5)", () => {
         replies: [
           {
             toolCalls: [
-              { name: "updates.apply", input: { items: [{ source: "apt", id: "openssl" }] } },
+              {
+                name: "updates.apply",
+                input: { items: [{ source: "apt", id: "openssl" }] },
+              },
             ],
           },
           { text: "Updated." },
@@ -584,7 +698,12 @@ describe("provider list and failover (M2.5 contracts §1-§2, design §3.5)", ()
     });
     const result = await h.agent.save({
       providers: [
-        { id: "local", kind: "ollama", baseUrl: "http://127.0.0.1:11434", model: "qwen3:8b" },
+        {
+          id: "local",
+          kind: "ollama",
+          baseUrl: "http://127.0.0.1:11434",
+          model: "qwen3:8b",
+        },
         {
           id: "work",
           kind: "anthropic",
@@ -681,8 +800,18 @@ describe("provider list and failover (M2.5 contracts §1-§2, design §3.5)", ()
     await h.agent.start();
     const result = await h.agent.save({
       providers: [
-        { id: "local", kind: "ollama", baseUrl: "http://127.0.0.1:11434", model: "m" },
-        { id: "lan", kind: "ollama", baseUrl: "http://10.0.0.9:11434", model: "m" },
+        {
+          id: "local",
+          kind: "ollama",
+          baseUrl: "http://127.0.0.1:11434",
+          model: "m",
+        },
+        {
+          id: "lan",
+          kind: "ollama",
+          baseUrl: "http://10.0.0.9:11434",
+          model: "m",
+        },
       ],
       allowCloudFallback: false,
     });
@@ -703,10 +832,86 @@ describe("provider list and failover (M2.5 contracts §1-§2, design §3.5)", ()
     };
     await h.agent.save({ providers: [work], allowCloudFallback: false });
     await h.agent.save({
-      providers: [{ id: "local", kind: "ollama", baseUrl: "http://127.0.0.1:11434", model: "m" }],
+      providers: [
+        {
+          id: "local",
+          kind: "ollama",
+          baseUrl: "http://127.0.0.1:11434",
+          model: "m",
+        },
+      ],
       allowCloudFallback: false,
     });
     await expect(h.providerKeys.get("work")).resolves.toBeUndefined();
+  });
+
+  it("drops the stored key when a keyless save changes kind or base URL", async () => {
+    const h = harness({ makeProvider: () => okProvider() });
+    await h.agent.start();
+    await h.agent.save({
+      providers: [
+        {
+          id: "work",
+          kind: "anthropic",
+          baseUrl: "https://api.anthropic.com",
+          model: "m",
+          apiKey: "sk-1",
+        },
+      ],
+      allowCloudFallback: false,
+    });
+    const saved = await h.agent.save({
+      providers: [
+        {
+          id: "work",
+          kind: "openai-compatible",
+          baseUrl: "http://10.0.0.5:8000",
+          model: "m",
+        },
+      ],
+      allowCloudFallback: false,
+    });
+    expect(saved.ok).toBe(true);
+    await expect(h.providerKeys.get("work")).resolves.toBeUndefined();
+  });
+
+  it("probes only new or changed providers on save", async () => {
+    const probed: string[] = [];
+    const h = harness({
+      makeProvider: (section) => ({
+        ...okProvider(),
+        probe: async () => {
+          probed.push(section.baseUrl);
+          return { ok: true, supportsTools: true, models: ["m"] };
+        },
+      }),
+    });
+    await h.agent.start();
+    const local = {
+      id: "local",
+      kind: "ollama" as const,
+      baseUrl: "http://127.0.0.1:11434",
+      model: "m",
+    };
+    const lan = {
+      id: "lan",
+      kind: "ollama" as const,
+      baseUrl: "http://10.0.0.9:11434",
+      model: "m",
+    };
+    await h.agent.save({ providers: [local, lan], allowCloudFallback: false });
+    probed.length = 0;
+    const result = await h.agent.save({
+      providers: [lan, local],
+      allowCloudFallback: true,
+    });
+    expect(result.ok).toBe(true);
+    expect(probed).toEqual([]);
+    await h.agent.save({
+      providers: [lan, { ...local, model: "m2" }],
+      allowCloudFallback: true,
+    });
+    expect(probed).toEqual(["http://127.0.0.1:11434"]);
   });
 
   it("reuses a stored key only for the same kind and base URL", async () => {
@@ -737,7 +942,11 @@ describe("provider list and failover (M2.5 contracts §1-§2, design §3.5)", ()
       baseUrl: "https://api.anthropic.com",
       model: "p",
     });
-    await h.agent.probe({ kind: "anthropic", baseUrl: "https://api.anthropic.com", model: "p" });
+    await h.agent.probe({
+      kind: "anthropic",
+      baseUrl: "https://api.anthropic.com",
+      model: "p",
+    });
     await h.agent.probe({
       id: "work",
       kind: "anthropic",
@@ -780,7 +989,9 @@ describe("provider list and failover (M2.5 contracts §1-§2, design §3.5)", ()
     const { turnId } = h.agent.prompt("hello");
     await h.until(() => h.events().some((e) => e.type === "turn-end"));
     expect(h.events()).toContainEqual({ type: "text", turnId, delta: "hi" });
-    const statuses = h.pushes.filter((p) => p.channel === "provider:status").map((p) => p.payload);
+    const statuses = h.pushes
+      .filter((p) => p.channel === "provider:status")
+      .map((p) => p.payload);
     expect(statuses).toContainEqual({
       reachable: true,
       activeId: "lan",
@@ -797,7 +1008,10 @@ describe("provider list and failover (M2.5 contracts §1-§2, design §3.5)", ()
               ...okProvider(),
               async *chat() {
                 cloudCalls++;
-                yield { type: "done", usage: { inputTokens: 0, outputTokens: 0 } } as ModelEvent;
+                yield {
+                  type: "done",
+                  usage: { inputTokens: 0, outputTokens: 0 },
+                } as ModelEvent;
               },
             }
           : {
@@ -822,7 +1036,10 @@ describe("provider list and failover (M2.5 contracts §1-§2, design §3.5)", ()
     await h.agent.start();
     h.agent.prompt("hello");
     await h.until(() => h.events().some((e) => e.type === "turn-end"));
-    expect(h.events().at(-1)).toMatchObject({ type: "turn-end", reason: "error" });
+    expect(h.events().at(-1)).toMatchObject({
+      type: "turn-end",
+      reason: "error",
+    });
     expect(cloudCalls).toBe(0);
   });
 
@@ -831,7 +1048,14 @@ describe("provider list and failover (M2.5 contracts §1-§2, design §3.5)", ()
     await h.agent.start();
     await expect(
       h.agent.save({
-        providers: [{ id: "lan", kind: "ollama", baseUrl: "http://10.0.0.2:11434", model: "" }],
+        providers: [
+          {
+            id: "lan",
+            kind: "ollama",
+            baseUrl: "http://10.0.0.2:11434",
+            model: "",
+          },
+        ],
         allowCloudFallback: false,
       }),
     ).rejects.toBeInstanceOf(OsAgentError);
