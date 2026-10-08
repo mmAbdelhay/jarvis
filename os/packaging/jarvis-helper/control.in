@@ -3,11 +3,13 @@ Version: @VERSION@
 Architecture: amd64
 Maintainer: Muhammad AbdElHay <mmAbdelhay@users.noreply.github.com>
 Installed-Size: @INSTALLED_SIZE@
-Depends: dbus, dbus-bin, polkitd, systemd, apt, flatpak
+Depends: dbus, dbus-bin, polkitd, systemd, apt, flatpak, passwd, dosfstools, exfatprogs, e2fsprogs, util-linux, libpam-modules
 Section: admin
 Priority: optional
 Homepage: https://github.com/mmAbdelhay/jarvis
 Description: Jarvis privileged helper (system D-Bus os.jarvis.Helper1)
  Runs a fixed set of validated operations as root for the Jarvis tools:
- APT and Flathub install/remove and restarts of allowlisted services.
- Started on demand by D-Bus activation; guarded by polkit.
+ APT and Flathub install/remove, restarts of allowlisted services, and
+ adding or removing users and formatting removable drives. Admin operations
+ verify the calling user's secret adminPassword through jarvis-admin PAM.
+ Started on demand by D-Bus activation; guarded by polkit and, for admin operations, PAM.
