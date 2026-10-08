@@ -3,6 +3,7 @@ Version: @VERSION@
 Architecture: amd64
 Maintainer: Muhammad AbdElHay <mmAbdelhay@users.noreply.github.com>
 Installed-Size: @INSTALLED_SIZE@
+Depends: jarvis-i18n (= @VERSION@)
 Section: x11
 Priority: optional
 Homepage: @HOME_URL@
