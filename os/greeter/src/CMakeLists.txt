@@ -20,3 +20,8 @@ target_include_directories(jarvis_greeter_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR
 target_link_libraries(jarvis_greeter_core PUBLIC
   Qt6::Core Qt6::Gui Qt6::Network Qt6::Qml Qt6::Quick Qt6::QuickControls2 jarvis_ui_native)
 add_dependencies(jarvis_greeter_core jarvis_ui)
+
+qt_add_executable(jarvis-greeter main.cpp)
+target_link_libraries(jarvis-greeter PRIVATE jarvis_greeter_core jarvis_greeter_coreplugin)
+target_compile_definitions(jarvis-greeter PRIVATE JARVIS_GREETER_VERSION="${PROJECT_VERSION}")
+install(TARGETS jarvis-greeter RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
