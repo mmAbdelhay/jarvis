@@ -17,6 +17,7 @@ Item {
     property bool undoAvailable: false
     signal undoRequested()
     property VoiceModel voice: null
+    property PairingModel pairing: null
     signal micRequested()
 
     function focusComposer() { composer.focusInput() }
@@ -167,6 +168,17 @@ Item {
                     onVisibleChanged: if (visible) list.follow()
                 }
             }
+        }
+
+        Loader {
+            Layout.fillWidth: true
+            Layout.maximumWidth: 760
+            Layout.alignment: Qt.AlignHCenter
+            Layout.leftMargin: 40
+            Layout.rightMargin: 40
+            active: root.pairing !== null
+            visible: active && root.pairing.active
+            sourceComponent: PairingCard { pairing: root.pairing }
         }
 
         Composer {

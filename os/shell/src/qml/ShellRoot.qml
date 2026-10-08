@@ -90,6 +90,7 @@ Rectangle {
                     undoAvailable: root.shell.undoAvailable && !root.shell.undoing
                     onUndoRequested: root.shell.undo()
                     voice: root.shell.voice
+                    pairing: root.shell.pairing
                     onMicRequested: root.shell.pushToTalk()
                     onSubmit: (text) => root.shell.sendPrompt(text)
                     onStopRequested: root.shell.stop()

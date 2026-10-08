@@ -25,6 +25,7 @@ ShellController::ShellController(ControlClient* client, QObject* parent)
     , m_memory(new MemoryModel(this))
     , m_registry(new RegistryModel(this))
     , m_voice(new VoiceModel(this))
+    , m_pairing(new PairingModel(this))
     , m_launcher([](const QString& program) { return QProcess::startDetached(program, {}); })
 {
     connect(client, &ControlClient::opened, this, &ShellController::onOpened);
@@ -164,6 +165,11 @@ ShellController::ShellController(ControlClient* client, QObject* parent)
     connect(this, &ShellController::lockedChanged, this, &ShellController::updateVoiceBlock);
     connect(this, &ShellController::connectionChanged, this, &ShellController::updateVoiceBlock);
     updateVoiceBlock();
+    connect(this, &ShellController::pairingPushed, this, [this](const QJsonObject& pending) {
+        if (m_pairing->load(pending))
+            setView(u"chat"_s);
+    });
+    connect(m_pairing, &PairingModel::answered, this, &ShellController::answerPairing);
 }
 
 void ShellController::request(const QString& channel, const QJsonArray& args,
@@ -250,6 +256,7 @@ void ShellController::onClosed()
     const bool hadCard = m_chatCard->active() || m_doctorCard->active();
     m_chatCard->close();
     m_doctorCard->close();
+    m_pairing->close();
     if (hadCard)
         m_conversation->addNotice(
             u"Lost the connection to Jarvis. Open approval cards come back when it reconnects; an unanswered card counts as Deny."_s);
@@ -391,6 +398,7 @@ void ShellController::applyLockState()
     const bool locked = m_system->locked();
     m_chatCard->setLocked(locked);
     m_doctorCard->setLocked(locked);
+    m_pairing->setLocked(locked);
     if (locked == m_locked)
         return;
     m_locked = locked;
@@ -451,6 +459,10 @@ void ShellController::stopSpeaking()
 void ShellController::answerPairing(const QString& requestId, bool approve)
 {
     // M3 contracts §5 #9: pairing:answer [{requestId, approve}], requestId from the pairing:pending push.
+    if (approve && m_locked) {
+        m_conversation->addNotice(u"The screen is locked. Unlock it to allow a new phone."_s);
+        return;
+    }
     request(u"pairing:answer"_s, QJsonArray{QJsonObject{{"requestId", requestId}, {"approve", approve}}}, [this](const ControlResult& r) {
         if (!r.ok)
             m_conversation->addNotice(u"Couldn't send the pairing answer (%1)."_s.arg(r.text));
