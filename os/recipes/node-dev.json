@@ -8,18 +8,14 @@
   "steps": [
     {
       "tool": "pkg.install",
-      "input": { "items": [
-        { "source": "apt", "id": "nodejs" },
-        { "source": "apt", "id": "npm" }
-      ] },
+      "input": { "items": [{ "source": "apt", "id": "nodejs" }, { "source": "apt", "id": "npm" }] },
       "title": { "en": "Install Node.js and npm", "ar": "تثبيت Node.js وnpm" }
     },
     {
       "tool": "pkg.install",
-      "input": { "items": [
-        { "source": "apt", "id": "git" },
-        { "source": "apt", "id": "build-essential" }
-      ] },
+      "input": {
+        "items": [{ "source": "apt", "id": "git" }, { "source": "apt", "id": "build-essential" }]
+      },
       "title": { "en": "Install Git and build tools", "ar": "تثبيت Git وأدوات البناء" }
     }
   ],

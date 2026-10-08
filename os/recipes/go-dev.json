@@ -13,11 +13,13 @@
     },
     {
       "tool": "pkg.install",
-      "input": { "items": [
-        { "source": "apt", "id": "gopls" },
-        { "source": "apt", "id": "delve" },
-        { "source": "apt", "id": "git" }
-      ] },
+      "input": {
+        "items": [
+          { "source": "apt", "id": "gopls" },
+          { "source": "apt", "id": "delve" },
+          { "source": "apt", "id": "git" }
+        ]
+      },
       "title": { "en": "Install gopls, Delve and Git", "ar": "تثبيت gopls وDelve وGit" }
     }
   ],

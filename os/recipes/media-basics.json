@@ -8,13 +8,18 @@
   "steps": [
     {
       "tool": "pkg.install",
-      "input": { "items": [
-        { "source": "apt", "id": "ffmpeg" },
-        { "source": "apt", "id": "gstreamer1.0-libav" },
-        { "source": "apt", "id": "gstreamer1.0-plugins-good" },
-        { "source": "apt", "id": "gstreamer1.0-plugins-ugly" }
-      ] },
-      "title": { "en": "Install FFmpeg and GStreamer codecs", "ar": "تثبيت FFmpeg وبرامج ترميز GStreamer" }
+      "input": {
+        "items": [
+          { "source": "apt", "id": "ffmpeg" },
+          { "source": "apt", "id": "gstreamer1.0-libav" },
+          { "source": "apt", "id": "gstreamer1.0-plugins-good" },
+          { "source": "apt", "id": "gstreamer1.0-plugins-ugly" }
+        ]
+      },
+      "title": {
+        "en": "Install FFmpeg and GStreamer codecs",
+        "ar": "تثبيت FFmpeg وبرامج ترميز GStreamer"
+      }
     },
     {
       "tool": "pkg.install",

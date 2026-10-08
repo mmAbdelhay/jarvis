@@ -15,6 +15,9 @@
       "!**/*.jsonl",
       "!os/go/**/testdata",
       "!os/models/voice-configs",
+      // Qt Linguist translation sources: XML that shares the .ts extension.
+      "!os/**/i18n/*.ts",
+      "!os/ui/tests/data/i18n/*.ts",
       "!apps/mobile/ios",
       "!apps/mobile/android",
       "!apps/mobile/.expo",

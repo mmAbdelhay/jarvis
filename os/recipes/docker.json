@@ -8,12 +8,17 @@
   "steps": [
     {
       "tool": "pkg.install",
-      "input": { "items": [
-        { "source": "apt", "id": "docker.io" },
-        { "source": "apt", "id": "docker-compose" },
-        { "source": "apt", "id": "docker-buildx" }
-      ] },
-      "title": { "en": "Install Docker Engine, Compose and Buildx", "ar": "تثبيت محرّك دوكر وCompose وBuildx" }
+      "input": {
+        "items": [
+          { "source": "apt", "id": "docker.io" },
+          { "source": "apt", "id": "docker-compose" },
+          { "source": "apt", "id": "docker-buildx" }
+        ]
+      },
+      "title": {
+        "en": "Install Docker Engine, Compose and Buildx",
+        "ar": "تثبيت محرّك دوكر وCompose وBuildx"
+      }
     },
     {
       "tool": "svc.restart",

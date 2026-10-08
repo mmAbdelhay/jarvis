@@ -18,11 +18,16 @@
     },
     {
       "tool": "pkg.install",
-      "input": { "items": [
-        { "source": "apt", "id": "fonts-crosextra-carlito" },
-        { "source": "apt", "id": "fonts-crosextra-caladea" }
-      ] },
-      "title": { "en": "Install fonts compatible with Microsoft Office", "ar": "تثبيت خطوط متوافقة مع مايكروسوفت أوفيس" }
+      "input": {
+        "items": [
+          { "source": "apt", "id": "fonts-crosextra-carlito" },
+          { "source": "apt", "id": "fonts-crosextra-caladea" }
+        ]
+      },
+      "title": {
+        "en": "Install fonts compatible with Microsoft Office",
+        "ar": "تثبيت خطوط متوافقة مع مايكروسوفت أوفيس"
+      }
     }
   ],
   "requires": { "os": "rafiq" }

@@ -8,21 +8,25 @@
   "steps": [
     {
       "tool": "pkg.install",
-      "input": { "items": [
-        { "source": "apt", "id": "python3" },
-        { "source": "apt", "id": "python3-venv" },
-        { "source": "apt", "id": "python3-pip" },
-        { "source": "apt", "id": "python3-dev" }
-      ] },
+      "input": {
+        "items": [
+          { "source": "apt", "id": "python3" },
+          { "source": "apt", "id": "python3-venv" },
+          { "source": "apt", "id": "python3-pip" },
+          { "source": "apt", "id": "python3-dev" }
+        ]
+      },
       "title": { "en": "Install Python 3, venv and pip", "ar": "تثبيت بايثون 3 وvenv وpip" }
     },
     {
       "tool": "pkg.install",
-      "input": { "items": [
-        { "source": "apt", "id": "build-essential" },
-        { "source": "apt", "id": "pipx" },
-        { "source": "apt", "id": "git" }
-      ] },
+      "input": {
+        "items": [
+          { "source": "apt", "id": "build-essential" },
+          { "source": "apt", "id": "pipx" },
+          { "source": "apt", "id": "git" }
+        ]
+      },
       "title": { "en": "Install build tools, pipx and Git", "ar": "تثبيت أدوات البناء وpipx وGit" }
     }
   ],
