@@ -9,9 +9,10 @@ Item {
     id: root
     required property ProviderModel provider
     required property ProviderListModel providers
+    property MemoryModel memory: null
     property bool doctorAvailable: false // sys:snapshot says offline (contracts §6.8)
     property string section: "providers"
-    readonly property var sections: [{ id: "providers", label: "Model providers" }]
+    readonly property var sections: [{ id: "providers", label: "Model providers" }, { id: "memory", label: "Memory" }]
     signal doctorRequested()
 
     Flickable {
@@ -84,6 +85,14 @@ Item {
                 providers: root.providers
                 doctorAvailable: root.doctorAvailable
                 onDoctorRequested: root.doctorRequested()
+            }
+
+            Loader {
+                objectName: "memorySection"
+                Layout.fillWidth: true
+                visible: root.section === "memory"
+                active: root.memory !== null
+                sourceComponent: MemorySection { memory: root.memory }
             }
         }
     }

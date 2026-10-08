@@ -105,6 +105,7 @@ Rectangle {
                 SettingsView {
                     provider: root.shell.provider
                     providers: root.shell.providers
+                    memory: root.shell.memory
                     doctorAvailable: root.shell.system.known && !root.shell.system.online
                     onDoctorRequested: root.shell.openDoctor()
                 }
