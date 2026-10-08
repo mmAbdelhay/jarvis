@@ -15,7 +15,7 @@ EOF
 deb=$("$PACKAGING_DIR/lib/build-deb.sh" --control "$tmp/control.in" --root "$tmp/root" --out "$tmp/out" --version "$OS_VERSION")
 check "short description rendered" test "$(deb_field "$deb" Description | head -n1)" = "Rafiq probe"
 check "long description rendered" grep -qF 'Long text for Rafiq 0.2 (trixie).' <<<"$(deb_field "$deb" Description)"
-for p in jarvis-shell jarvis-pkg jarvis-diag jarvis-helper jarvisd; do
+for p in jarvis-shell; do  # agent packages are brand-neutral (M2.5 §6), see test-agent.sh
   check "$p control.in uses the brand" grep -q '@DISTRO_NAME@' "$PACKAGING_DIR/$p/control.in"
 done
 finish

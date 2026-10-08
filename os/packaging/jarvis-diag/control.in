@@ -7,6 +7,6 @@ Depends: jarvis-helper (= @VERSION@), network-manager, systemd, iproute2, iputil
 Section: admin
 Priority: optional
 Homepage: https://github.com/mmAbdelhay/jarvis
-Description: @DISTRO_NAME@ diagnosis tools (MCP server)
+Description: Jarvis diagnosis tools (MCP server)
  Health, logs, services, network and hardware information for the Jarvis
  agent, with secrets redacted before any text leaves the process.
