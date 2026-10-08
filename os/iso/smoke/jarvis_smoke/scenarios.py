@@ -22,18 +22,18 @@ DOCTOR_RESTARTED_NM = (
 APT_HISTORY_HELLO = "grep -Eq '^Commandline: .*apt-get install .*hello' /var/log/apt/history.log"
 
 
-def as_user(uid: int, command: str) -> str:
+def as_user(uid: int, command: str, user: str = USER) -> str:
     return (
-        f"runuser -u {USER} -- env HOME=/home/{USER} XDG_RUNTIME_DIR=/run/user/{uid} "
+        f"runuser -u {user} -- env HOME=/home/{user} XDG_RUNTIME_DIR=/run/user/{uid} "
         f"DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{uid}/bus {command}"
     )
 
 
-def jarvisctl(uid: int, args: str) -> str:
-    return as_user(uid, f"{NODE} {ASSETS}/jarvisctl.mjs {args}")
+def jarvisctl(uid: int, args: str, user: str = USER) -> str:
+    return as_user(uid, f"{NODE} {ASSETS}/jarvisctl.mjs {args}", user)
 
 
-def use_fake_provider(uid: int, script: str | None) -> str:
+def use_fake_provider(uid: int, script: str | None, user: str = USER) -> str:
     """Sets (or clears) JARVIS_FAKE_PROVIDER in jarvis's user manager only,
     restarts jarvisd and waits for it. Nothing is written to disk."""
     if script is None:
@@ -41,8 +41,8 @@ def use_fake_provider(uid: int, script: str | None) -> str:
     else:
         env = f"systemctl --user set-environment JARVIS_FAKE_PROVIDER={ASSETS}/scripts/{script}"
     return " && ".join(
-        [as_user(uid, env), as_user(uid, "systemctl --user restart jarvisd.service"),
-         jarvisctl(uid, "wait --timeout 90")]
+        [as_user(uid, env, user), as_user(uid, "systemctl --user restart jarvisd.service", user),
+         jarvisctl(uid, "wait --timeout 90", user)]
     )
 
 

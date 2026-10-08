@@ -85,6 +85,14 @@ class FakeProviderScriptsTest(unittest.TestCase):
         calls = [c for r in turns[0]["replies"] for c in r.get("toolCalls", [])]
         self.assertIn({"name": "pkg.install", "input": {"items": [{"source": "apt", "id": "hello"}]}}, calls)
 
+    def test_user_parameter_threads_through(self):
+        from jarvis_smoke import scenarios as sc
+
+        self.assertIn("runuser -u tester", sc.jarvisctl(1000, "wait", user="tester"))
+        line = sc.use_fake_provider(1000, "x.json", user="tester")
+        self.assertNotIn("runuser -u jarvis ", line)
+        self.assertIn("runuser -u jarvis", sc.jarvisctl(1000, "wait"))
+
 
 if __name__ == "__main__":
     unittest.main()

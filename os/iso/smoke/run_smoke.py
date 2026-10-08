@@ -54,7 +54,7 @@ class Run:
         try:
             detail = fn() or ""
             ok = True
-        except (CommandFailed, SerialTimeout, AssertionError, ValueError) as error:
+        except (CommandFailed, SerialTimeout, AssertionError, ValueError, EOFError, OSError, RuntimeError) as error:
             ok, detail = False, str(error)
         seconds = round(time.monotonic() - start, 1)
         self.results.append({"name": name, "ok": ok, "seconds": seconds, "detail": str(detail)[-4000:]})
