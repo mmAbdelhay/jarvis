@@ -42,4 +42,7 @@ class MatrixTest(unittest.TestCase):
         runners = {row["id"]: row["runner"] for row in out["include"]}
         self.assertEqual(runners["qwen3-4b"], "ubuntu-24.04")
         self.assertEqual(runners["qwen3-30b-a3b"], "skip")
+        # Under the size cap but needs 32 GB RAM: not on a 16 GB hosted runner.
+        self.assertEqual(runners["qwen3-14b"], "skip")
+        self.assertEqual(runners["qwen3-8b"], "ubuntu-24.04")
         self.assertEqual(set(out["include"][0]), {"id", "tag", "sizeBytes", "runner"})
