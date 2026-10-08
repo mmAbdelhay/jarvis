@@ -1,7 +1,6 @@
 import type { AgentEvent, Card, ConfirmFrom } from "@jarvis/core";
 import { describe, expect, it } from "vitest";
 import { makeWav } from "./__fixtures__/wav.js";
-import { OsAgentError } from "./agent-service.js";
 import type { VoiceIo } from "./voice-io.js";
 import { createOsVoice } from "./voice-service.js";
 
