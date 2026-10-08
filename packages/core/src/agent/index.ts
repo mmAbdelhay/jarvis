@@ -22,3 +22,4 @@ export * from "./memory.js";
 export * from "./registry-entry.js";
 export * from "./phrases.js";
 export * from "./undo.js";
+export * from "./voice-intent.js";
