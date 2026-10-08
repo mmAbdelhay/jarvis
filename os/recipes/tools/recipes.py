@@ -40,6 +40,7 @@ DESKTOP_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,254}$")
 STEP = {"tool", "input", "title"}
 MAX_STEPS = 10
 TITLE_MAX, DESC_MAX = 80, 400
+NOTE_TITLE_MAX = 120  # recipecheck's step-title limit; a note's title is its instruction
 
 
 def text_problems(where: str, value, limit: int) -> list[str]:
@@ -116,9 +117,10 @@ def apps_set_default(where: str, inp) -> list[str]:
 
 
 def note(where: str, inp) -> list[str]:
-    if not isinstance(inp, dict) or set(inp) != {"text"}:
-        return [f"{where}: note input must be exactly {{text: {{en, ar}}}}"]
-    return text_problems(f"{where}.text", inp["text"], DESC_MAX)
+    # As jarvisd and recipecheck: a note takes no input; its title is the text.
+    if inp != {}:
+        return [f"{where}: a note step takes no input (its title is the instruction)"]
+    return []
 
 
 # The ONLY tools a recipe step may call (security boundary; changes need review).
@@ -162,8 +164,8 @@ def validate(recipe, filename: str | None = None) -> list[str]:
         if not isinstance(s, dict) or set(s) != STEP:
             p.append(f"{sw} must be exactly {sorted(STEP)}")
             continue
-        p += text_problems(f"{sw}.title", s["title"], TITLE_MAX)
         is_note = s["tool"] == NOTE
+        p += text_problems(f"{sw}.title", s["title"], NOTE_TITLE_MAX if is_note else TITLE_MAX)
         check = note if is_note else (RECIPE_TOOLS.get(s["tool"]) if isinstance(s["tool"], str) else None)
         if check is None:
             p.append(f"{sw}: tool {s['tool']!r} is not allowed in recipes (allowed: {sorted(RECIPE_TOOLS)} and {NOTE})")

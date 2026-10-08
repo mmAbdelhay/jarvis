@@ -12,7 +12,7 @@ title: {en, ar}}], requires: {os: "rafiq", minRamGB?}}`; the file is
 Rules (enforced by `tools/recipes.py validate`, run by the package build and CI):
 
 - Steps may only call `pkg.install`, `svc.restart` (system allowlist) and `apps.set_default`,
-  plus the non-executing `note` step `{text: {en, ar}}` (shown on the card, always after
+  plus the non-executing `note` step (`input: {}`; its title is the instruction shown on the card, always after
   the executing steps; contracts §6 #2). `jarvis-workspace` is `available: false` (§6 #15). Widening
   `RECIPE_TOOLS` is a security change: it needs owner review and the same change
   in jarvisd's runtime check.

@@ -115,14 +115,20 @@ class Validator(unittest.TestCase):
             self.assertRefused(lambda r, i=inp: r["steps"].append(step("apps.set_default", i)), why)
 
     def test_note_steps(self):
-        text = {"en": "Sign out and back in.", "ar": "سجّل الخروج ثم الدخول."}
+        # Contracts §6 #2, as jarvisd and recipecheck read it: a note takes no
+        # input; its title is the instruction shown on the card.
+        text = {"en": "To use Docker without sudo, run \"sudo usermod -aG docker $USER\", then sign out and back in.",
+                "ar": "سجّل الخروج ثم الدخول."}
+        def note(inp=None, title=text):
+            return {"tool": "note", "input": {} if inp is None else inp, "title": title}
         r = copy.deepcopy(GOOD)
-        r["steps"].append(step("note", {"text": text}))
+        r["steps"].append(note())
         self.assertEqual(recipes.validate(r, "demo.json"), [])
-        self.assertRefused(lambda r: r["steps"].insert(0, step("note", {"text": text})), "note before a runnable step")
-        self.assertRefused(lambda r: r["steps"].append(step("note", {"text": {"en": "x"}})), "note without ar")
-        self.assertRefused(lambda r: r["steps"].append(step("note", {"text": text, "run": "id"})), "extra key")
-        self.assertRefused(lambda r: r.update(steps=[step("note", {"text": text})]), "only notes")
+        self.assertRefused(lambda r: r["steps"].insert(0, note()), "note before a runnable step")
+        self.assertRefused(lambda r: r["steps"].append(note(title={"en": "x"})), "note without ar")
+        self.assertRefused(lambda r: r["steps"].append(note({"text": text})), "note with input")
+        self.assertRefused(lambda r: r["steps"].append(note(title={"en": "x" * 121, "ar": "س"})), "note title too long")
+        self.assertRefused(lambda r: r.update(steps=[note()]), "only notes")
 
     def test_available_flag(self):
         r = copy.deepcopy(GOOD)

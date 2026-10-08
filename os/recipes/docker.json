@@ -22,11 +22,11 @@
     },
     {
       "tool": "note",
-      "input": { "text": {
-        "en": "To run Docker without sudo, run \"sudo usermod -aG docker $USER\" in a terminal, then sign out and back in.",
-        "ar": "لتشغيل دوكر دون sudo، نفّذ الأمر \"sudo usermod -aG docker $USER\" في الطرفية، ثم سجّل الخروج وأعد تسجيل الدخول."
-      } },
-      "title": { "en": "Use Docker without sudo", "ar": "استخدام دوكر دون sudo" }
+      "input": {},
+      "title": {
+        "en": "To use Docker without sudo, run \"sudo usermod -aG docker $USER\", then sign out and back in.",
+        "ar": "لاستخدام دوكر دون sudo، نفّذ \"sudo usermod -aG docker $USER\" في الطرفية، ثم سجّل الخروج وأعد الدخول."
+      }
     }
   ],
   "requires": { "os": "rafiq", "minRamGB": 4 }
