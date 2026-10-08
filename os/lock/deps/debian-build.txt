@@ -28,3 +28,5 @@ qml6-module-qtquick-shapes
 qml6-module-qtquick-window
 qml6-module-qtqml-workerscript
 labwc
+# the Wayland QPA plugin the session test runs jarvis-lock-testhooks with
+qt6-wayland

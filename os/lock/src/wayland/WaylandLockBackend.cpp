@@ -61,6 +61,10 @@ void WaylandLockBackend::cover(QScreen* screen)
         return;
     QQuickWindow* window = m_factory(screen, screen == QGuiApplication::primaryScreen());
     window->setScreen(screen);
+    // Qt 6.8 re-derives a top-level's screen from its geometry: left at its
+    // default (0,0) every window would land on the output at the origin and
+    // the second get_lock_surface would hit "already created for the output".
+    window->setGeometry(screen->geometry());
     window->create();
     auto* waylandWindow = dynamic_cast<QtWaylandClient::QWaylandWindow*>(window->handle());
     if (!waylandWindow) {

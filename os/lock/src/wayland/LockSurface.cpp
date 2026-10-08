@@ -8,10 +8,20 @@
 LockSurface::LockSurface(SessionLock* lock, QtWaylandClient::QWaylandWindow* window)
     : QtWaylandClient::QWaylandShellSurface(window)
 {
-    QtWaylandClient::QWaylandScreen* screen = window->waylandScreen();
-    ::wl_output* output = screen ? screen->output() : nullptr;
-    if (output)
-        init(lock->get_lock_surface(window->wlSurface(), output));
+    // Qt 6.8's QWaylandWindow::initWindow commits the wl_surface right after
+    // creating the shell surface (xdg-shell needs that empty commit). On a
+    // lock surface a commit before the first configure is a protocol error
+    // (labwc: "committed with a null buffer"), so the role is assigned once
+    // initWindow has returned: the empty commit lands on a role-less surface.
+    QMetaObject::invokeMethod(
+        this,
+        [this, lock, window] {
+            QtWaylandClient::QWaylandScreen* screen = window->waylandScreen();
+            ::wl_output* output = screen ? screen->output() : nullptr;
+            if (output && window->wlSurface())
+                init(lock->get_lock_surface(window->wlSurface(), output));
+        },
+        Qt::QueuedConnection);
 }
 
 LockSurface::~LockSurface()
