@@ -331,7 +331,7 @@ func (s *Service) FormatRemovable(ctx context.Context, sender, adminPassword, de
 	if disk.Tran != nil {
 		tran = *disk.Tran
 	}
-	if disk.Type != "disk" || !bool(disk.RM) || !(tran == "usb" || tran == "mmc" || strings.HasPrefix(disk.Name, "mmcblk")) {
+	if disk.Type != "disk" || !bool(disk.RM) || !(tran == "usb" || tran == "mmc") {
 		return helperapi.Outcome{}, refuse(helperapi.ErrNotAllowed, "%s is not a removable USB or SD drive", device)
 	}
 	if disk.mounted() {

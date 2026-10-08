@@ -3,6 +3,7 @@ package helper
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/mmAbdelhay/jarvis/os/go/internal/execx"
@@ -22,22 +23,31 @@ var ErrBadPassword = errors.New("wrong password")
 // which pam_unix itself runs: it reads the NUL-terminated password on stdin
 // and exits 0 when it matches the shadow entry. Run as root it may check any
 // user. It is used instead of libpam bindings so the helper stays a static,
-// cgo-free binary; "nullok" is not passed, so an empty-password account never
+// cgo-free binary; argv is "<user> nonull" (unix_chkpwd needs exactly 3 args), so an empty-password account never
 // verifies. The password travels only over stdin, never in argv or the
 // environment.
 type PAMVerifier struct{ Run execx.Runner }
 
 // Verify implements PasswordVerifier.
 func (v PAMVerifier) Verify(ctx context.Context, user, password string) error {
-	res, err := v.Run.Run(ctx, execx.Cmd{Name: "unix_chkpwd", Args: []string{user}, Stdin: []byte(password + "\x00"), Timeout: 10 * time.Second})
+	res, err := v.Run.Run(ctx, execx.Cmd{Name: "unix_chkpwd", Args: []string{user, "nonull"}, Stdin: []byte(password + "\x00"), Timeout: 10 * time.Second})
 	if err != nil {
 		return err
 	}
-	if res.ExitCode != 0 {
+	switch res.ExitCode {
+	case 0:
+		return nil
+	case pamAuthErr:
 		return ErrBadPassword
+	default:
+		// PAM_SYSTEM_ERR, PAM_USER_UNKNOWN, ...: the check could not be made.
+		// Not a wrong password, so it does not count toward the lockout.
+		return fmt.Errorf("unix_chkpwd exited %d", res.ExitCode)
 	}
-	return nil
 }
+
+// pamAuthErr is PAM_AUTH_ERR, unix_chkpwd's exit status for a wrong password.
+const pamAuthErr = 7
 
 const (
 	maxFailures = 3

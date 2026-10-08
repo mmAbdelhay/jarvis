@@ -265,15 +265,21 @@ func TestAdminPasswordThrottle(t *testing.T) {
 }
 
 func TestPAMVerifierUsesStdinOnly(t *testing.T) {
-	run := (&execx.Fake{}).On(execx.OK(""), "unix_chkpwd", "sara")
+	run := (&execx.Fake{}).On(execx.OK(""), "unix_chkpwd", "sara", "nonull")
 	if err := (PAMVerifier{Run: run}).Verify(context.Background(), "sara", "pw"); err != nil {
 		t.Fatal(err)
 	}
 	if c := run.CallsTo("unix_chkpwd")[0]; string(c.Stdin) != "pw\x00" {
 		t.Fatalf("stdin %q", c.Stdin)
 	}
-	run = (&execx.Fake{}).On(execx.Exit(7, ""), "unix_chkpwd", "sara")
+	run = (&execx.Fake{}).On(execx.Exit(7, ""), "unix_chkpwd", "sara", "nonull")
 	if err := (PAMVerifier{Run: run}).Verify(context.Background(), "sara", "pw"); !errors.Is(err, ErrBadPassword) {
 		t.Fatalf("%v", err)
+	}
+	for _, code := range []int{4, 10} {
+		run = (&execx.Fake{}).On(execx.Exit(code, ""), "unix_chkpwd", "sara", "nonull")
+		if err := (PAMVerifier{Run: run}).Verify(context.Background(), "sara", "pw"); err == nil || errors.Is(err, ErrBadPassword) {
+			t.Fatalf("exit %d: %v", code, err)
+		}
 	}
 }
