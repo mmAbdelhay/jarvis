@@ -4,6 +4,7 @@
 #include <QVariantMap>
 
 #include "InstallRules.h"
+#include "Language.h"
 #include "InstallerBackend.h"
 #include "LiveKeyboard.h"
 #include "PowerActions.h"
@@ -45,10 +46,11 @@ InstallerModel::InstallerModel(InstallerBackend* backend, PowerActions* power, c
         emit stateChanged();
     });
     connect(m_power, &PowerActions::failed, this, [this](const QString& message) {
-        m_error = u"Couldn't restart: %1"_s.arg(message);
+        m_error = tr("Couldn't restart: %1").arg(message);
         emit stateChanged();
     });
 
+    connect(m_locale, &LocaleChoice::changed, this, &InstallerModel::followLocale);
     connect(m_disk, &DiskChoice::changed, this, [this] {
         m_brain->setTargetBytes(m_disk->targetBytes());
         m_account->setEncrypt(m_disk->encrypt());
@@ -82,9 +84,43 @@ void InstallerModel::applyLiveKeyboard()
         m_locale->setTypingKeyboard(keyboard);
 }
 
+void InstallerModel::setLanguageApplier(LanguageApplier applier)
+{
+    m_languageApplier = std::move(applier);
+    m_uiLanguage.clear(); // force the first apply
+    followLocale();
+}
+
+void InstallerModel::followLocale()
+{
+    const QString code = jarvis::ui::languageForLocale(m_locale->language());
+    if (code == m_uiLanguage || !m_languageApplier)
+        return;
+    if (!m_languageApplier(code)) {
+        if (m_uiLanguage.isEmpty())
+            m_uiLanguage = u"en"_s;
+        return; // Arabic catalogs missing: the screens stay English
+    }
+    m_uiLanguage = code;
+    retranslate();
+}
+
+// C++ text is built with tr() on read; tell QML to read it again.
+void InstallerModel::retranslate()
+{
+    emit languageChanged();
+    emit stateChanged();
+    emit planChanged();
+    emit m_locale->changed();
+    emit m_disk->changed();
+    emit m_account->changed();
+    emit m_brain->changed();
+    emit m_progress->changed();
+}
+
 QStringList InstallerModel::stepLabels() const
 {
-    return {u"Welcome"_s, u"Disk"_s, u"Your account"_s, u"Jarvis's brain"_s, u"Review"_s, u"Installing"_s, u"Done"_s};
+    return {tr("Welcome"), tr("Disk"), tr("Your account"), tr("Jarvis's brain"), tr("Review"), tr("Installing"), tr("Done")};
 }
 
 bool InstallerModel::canContinue() const
@@ -110,7 +146,7 @@ QString InstallerModel::blockText() const
     switch (m_step) {
     case Welcome:
         if (!m_probed)
-            return m_error.isEmpty() ? u"Looking at this computer…"_s : QString();
+            return m_error.isEmpty() ? tr("Looking at this computer…") : QString();
         return m_uefi ? QString() : jarvis::installer::refusalText(u"no-uefi"_s, {}, m_distro);
     case Disk: return m_disk->blockText();
     case Account: return m_account->blockText();
@@ -122,11 +158,11 @@ QString InstallerModel::blockText() const
 QString InstallerModel::nextLabel() const
 {
     switch (m_step) {
-    case Brain: return m_call == Call::Plan ? u"Checking…"_s : u"Continue"_s;
-    case Review: return m_call == Call::Execute ? u"Starting…"_s : u"Install"_s;
-    case Installing: return m_progress->failed() ? u"Restart now"_s : u"Next"_s;
-    case Done: return u"Restart now"_s;
-    default: return u"Continue"_s;
+    case Brain: return m_call == Call::Plan ? tr("Checking…") : tr("Continue");
+    case Review: return m_call == Call::Execute ? tr("Starting…") : tr("Install");
+    case Installing: return m_progress->failed() ? tr("Restart now") : tr("Next");
+    case Done: return tr("Restart now");
+    default: return tr("Continue");
     }
 }
 
@@ -241,7 +277,7 @@ void InstallerModel::onPlanned(const QJsonObject& plan)
     m_call = Call::None;
     m_planId = plan.value("planId").toString();
     if (m_planId.isEmpty()) {
-        m_error = u"The installer's helper answered without a plan. Try again."_s;
+        m_error = tr("The installer's helper answered without a plan. Try again.");
         emit stateChanged();
         return;
     }
@@ -299,12 +335,12 @@ void InstallerModel::onCallFailed(const QString& method, const QString& message)
         return;
     m_call = Call::None;
     if (was == Call::Probe)
-        m_error = u"Couldn't look at this computer's disks: %1"_s.arg(message);
+        m_error = tr("Couldn't look at this computer's disks: %1").arg(message);
     else if (was == Call::Plan)
-        m_error = u"The installer's helper didn't answer (%1). Try again."_s.arg(message);
+        m_error = tr("The installer's helper didn't answer (%1). Try again.").arg(message);
     else {
         m_executeSent = false;
-        m_error = u"The installation didn't start (%1). Try again."_s.arg(message);
+        m_error = tr("The installation didn't start (%1). Try again.").arg(message);
     }
     Q_UNUSED(method)
     emit stateChanged();

@@ -16,4 +16,5 @@ if command -v desktop-file-validate >/dev/null; then
   desktop-file-validate os/installer/build/stage/usr/share/applications/jarvis-installer.desktop
 fi
 test -z "$(find os/installer/build/stage -path '*Jarvis/UI*' -print -quit)" # jarvis-ui ships separately
+test -f os/installer/build/stage/usr/share/jarvis/i18n/jarvis-installer_ar.qm
 echo "jarvis-installer: build, tests and install layout OK"

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QJsonObject>
+#include <functional>
 #include <QObject>
 #include <QStringList>
 #include <QVariantList>
@@ -26,7 +27,8 @@ class InstallerModel : public QObject {
     QML_ELEMENT
     QML_UNCREATABLE("Created by main()")
     Q_PROPERTY(int step READ step NOTIFY stepChanged)
-    Q_PROPERTY(QStringList stepLabels READ stepLabels CONSTANT)
+    Q_PROPERTY(QStringList stepLabels READ stepLabels NOTIFY languageChanged)
+    Q_PROPERTY(QString uiLanguage READ uiLanguage NOTIFY languageChanged)
     Q_PROPERTY(QString distroName READ distroName CONSTANT)
     Q_PROPERTY(bool busy READ busy NOTIFY stateChanged)
     Q_PROPERTY(bool probed READ probed NOTIFY stateChanged)
@@ -81,6 +83,11 @@ public:
     Q_INVOKABLE void back();
     Q_INVOKABLE void goTo(int step);
 
+    using LanguageApplier = std::function<bool(const QString& code)>;
+    // Applies the Welcome language now and on every change (ar_* -> "ar", else "en").
+    void setLanguageApplier(LanguageApplier applier);
+    QString uiLanguage() const { return m_uiLanguage; }
+
     // Optional (live session only): makes the session type with the chosen
     // keyboard now and whenever it changes (contracts §11.5).
     void setLiveKeyboard(LiveKeyboard* live);
@@ -92,10 +99,13 @@ signals:
     void stepChanged();
     void stateChanged();
     void planChanged();
+    void languageChanged();
 
 private:
     enum class Call { None, Probe, Plan, Execute };
 
+    void followLocale();
+    void retranslate();
     void setStep(int step);
     void clearNotices();
     void applyLiveKeyboard();
@@ -114,6 +124,8 @@ private:
     AccountChoice* m_account;
     BrainChoice* m_brain;
     InstallProgress* m_progress;
+    LanguageApplier m_languageApplier;
+    QString m_uiLanguage = QStringLiteral("en");
     LiveKeyboard* m_liveKeyboard = nullptr;
     QString m_liveApplied; // last keyboard handed to m_liveKeyboard
 

@@ -80,7 +80,7 @@ QVariantList DiskChoice::disks() const
         const bool isRemovable = d.value("removable").toBool();
         QString text = u"%1 · %2"_s.arg(d.value("model").toString(), formatSize(d.value("sizeBytes").toInteger()));
         if (isRemovable)
-            text += u" · removable"_s;
+            text += tr(" · removable");
         (isRemovable ? removable : fixed).append(QVariantMap{{u"value"_s, d.value("path").toString()}, {u"text"_s, text}});
     }
     return fixed + removable;
@@ -106,7 +106,7 @@ QString DiskChoice::description() const
         return {};
     QString text = u"%1 · %2"_s.arg(disk.value("model").toString(), formatSize(disk.value("sizeBytes").toInteger()));
     if (m_windows)
-        text += u" · contains Windows on %1 (%2 used)"_s.arg(m_windows->path, formatSize(m_windows->usedBytes));
+        text += tr(" · contains Windows on %1 (%2 used)").arg(m_windows->path, formatSize(m_windows->usedBytes));
     return text;
 }
 
@@ -132,11 +132,11 @@ QVariantList DiskChoice::options() const
     };
     QVariantList out;
     if (m_windows)
-        out.append(make(u"alongside"_s, u"Install alongside Windows"_s,
-                        u"Give %1 %2. Choose which system to start each time you boot."_s.arg(m_distro, formatSize(m_alongside))));
-    out.append(make(u"erase"_s, u"Erase the whole disk"_s,
-                    m_windows ? u"Deletes Windows and every file on this disk."_s : u"Deletes every file on this disk."_s));
-    out.append(make(u"manual"_s, u"Manual partitioning"_s, u"For people who know exactly what they want."_s));
+        out.append(make(u"alongside"_s, tr("Install alongside Windows"),
+                        tr("Give %1 %2. Choose which system to start each time you boot.").arg(m_distro, formatSize(m_alongside))));
+    out.append(make(u"erase"_s, tr("Erase the whole disk"),
+                    m_windows ? tr("Deletes Windows and every file on this disk.") : tr("Deletes every file on this disk.")));
+    out.append(make(u"manual"_s, tr("Manual partitioning"), tr("For people who know exactly what they want.")));
     return out;
 }
 
@@ -179,7 +179,7 @@ QString DiskChoice::alongsideText() const
 {
     if (!m_windows)
         return {};
-    return u"Give %1 %2. Windows keeps %3."_s.arg(m_distro, formatSize(m_alongside),
+    return tr("Give %1 %2. Windows keeps %3.").arg(m_distro, formatSize(m_alongside),
                                                   formatSize(m_windows->sizeBytes - m_alongside));
 }
 
@@ -243,11 +243,11 @@ QString DiskChoice::manualProblem() const
         return refusalText(u"manual-missing-esp"_s, {}, m_distro);
     for (const ManualRow& row : m_manual) {
         if (row.mount == u"/" && !row.format)
-            return u"The system partition must be formatted."_s;
+            return tr("The system partition must be formatted.");
         if (row.mount == u"/boot/efi" && (row.path != currentDisk().value("esp").toString() || row.sizeBytes < 300000000))
-            return u"Choose an existing EFI system partition of at least 300 MB."_s;
+            return tr("Choose an existing EFI system partition of at least 300 MB.");
         if (row.mount == u"swap" && m_encrypt)
-            return u"Encrypted installs use a swapfile instead of a swap partition."_s;
+            return tr("Encrypted installs use a swapfile instead of a swap partition.");
     }
     return {};
 }
@@ -260,10 +260,10 @@ bool DiskChoice::valid() const
 QString DiskChoice::blockText() const
 {
     if (m_diskPath.isEmpty())
-        return u"No disk was found to install %1 on."_s.arg(m_distro);
+        return tr("No disk was found to install %1 on.").arg(m_distro);
     if (m_mode.isEmpty())
-        return m_windows ? u"Choose how to install %1: next to Windows, or on the whole disk."_s.arg(m_distro)
-                         : u"Choose where to install %1."_s.arg(m_distro);
+        return m_windows ? tr("Choose how to install %1: next to Windows, or on the whole disk.").arg(m_distro)
+                         : tr("Choose where to install %1.").arg(m_distro);
     if (const QString reason = optionReason(m_mode); !reason.isEmpty())
         return reason;
     if (m_mode == u"manual")

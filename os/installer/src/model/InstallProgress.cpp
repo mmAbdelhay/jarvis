@@ -86,10 +86,10 @@ void InstallProgress::finish(bool ok, const QString& errorStep, const QString& m
             it = std::find_if(m_rows.begin(), m_rows.end(), [](const Row& r) { return r.state == u"running"; });
         if (it != m_rows.end())
             it->state = u"failed"_s;
-        const QString title = it != m_rows.end() ? it->title : (errorStep.isEmpty() ? u"an unknown step"_s : errorStep);
+        const QString title = it != m_rows.end() ? it->title : (errorStep.isEmpty() ? tr("an unknown step") : errorStep);
         m_failed = true;
-        m_failTitle = u"Installation stopped at: %1"_s.arg(title);
-        m_failMessage = message.isEmpty() ? u"No details were given."_s : message;
+        m_failTitle = tr("Installation stopped at: %1").arg(title);
+        m_failMessage = message.isEmpty() ? tr("No details were given.") : message;
     }
     emit changed();
 }

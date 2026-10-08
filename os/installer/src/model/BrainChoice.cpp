@@ -80,7 +80,7 @@ QVariantList BrainChoice::models() const
         const QJsonObject m = m_fit.at(i).toObject();
         out.append(QVariantMap{{u"id"_s, m.value("id").toString()},
                                {u"title"_s, m.value("displayName").toString()},
-                               {u"detail"_s, u"%1 · %2 download"_s.arg(m.value("recommendedFor").toString(),
+                               {u"detail"_s, tr("%1 · %2 download").arg(m.value("recommendedFor").toString(),
                                                                        formatSize(m.value("sizeBytes").toInteger()))},
                                {u"recommended"_s, i == 0}});
     }
@@ -90,32 +90,32 @@ QVariantList BrainChoice::models() const
 QString BrainChoice::localTitle() const
 {
     const QString name = selectedModelName();
-    return name.isEmpty() ? u"This computer"_s : u"This computer — %1"_s.arg(name);
+    return name.isEmpty() ? tr("This computer") : tr("This computer — %1").arg(name);
 }
 
 QString BrainChoice::localDetail() const
 {
     const QJsonObject m = selected();
     if (m.isEmpty())
-        return u"No tested model fits this computer's memory and disk. Pick Cloud or Network server."_s;
-    return u"%1. Private, works offline. %2 download during install."_s.arg(
+        return tr("No tested model fits this computer's memory and disk. Pick Cloud or Network server.");
+    return tr("%1. Private, works offline. %2 download during install.").arg(
         m.value("recommendedFor").toString(), formatSize(m.value("sizeBytes").toInteger()));
 }
 
 QString BrainChoice::ramText() const
 {
-    return u"%1 GB"_s.arg(qRound64(m_probe.value("ramBytes").toDouble() / double(GiB)));
+    return tr("%1 GB").arg(qRound64(m_probe.value("ramBytes").toDouble() / double(GiB)));
 }
 
 QString BrainChoice::gpuText() const
 {
     const QJsonObject gpu = m_probe.value("gpu").toObject();
     if (gpu.isEmpty())
-        return u"None"_s;
+        return tr("None");
     const QString name = gpu.value("name").toString();
     if (!gpu.value("vramBytes").isDouble())
         return name;
-    return u"%1 · %2 GB"_s.arg(name).arg(qRound64(gpu.value("vramBytes").toDouble() / double(GiB)));
+    return tr("%1 · %2 GB").arg(name).arg(qRound64(gpu.value("vramBytes").toDouble() / double(GiB)));
 }
 
 QString BrainChoice::freeText() const { return formatSize(m_target); }
@@ -141,13 +141,13 @@ QString BrainChoice::selectedModelName() const { return selected().value("displa
 QString BrainChoice::blockText() const
 {
     if (m_kind == u"local" && selected().isEmpty())
-        return u"Pick a model for this computer."_s;
+        return tr("Pick a model for this computer.");
     if (m_kind == u"lan") {
         const QUrl url(m_lanUrl.trimmed());
         if (!url.isValid() || (url.scheme() != u"http" && url.scheme() != u"https") || url.host().isEmpty())
-            return u"Enter the server address, like http://192.168.1.20:11434."_s;
+            return tr("Enter the server address, like http://192.168.1.20:11434.");
         if (m_lanModel.trimmed().isEmpty())
-            return u"Enter the model name, like qwen3:8b."_s;
+            return tr("Enter the model name, like qwen3:8b.");
     }
     return {};
 }
