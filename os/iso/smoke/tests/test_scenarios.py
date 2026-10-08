@@ -10,6 +10,7 @@ CONTRACT_TOOLS = {
     "pkg.search", "pkg.info", "pkg.list_installed", "disk.usage", "pkg.install", "pkg.remove",
     "sys.health", "logs.query", "svc.status", "svc.list_failed", "net.status", "net.wifi_scan",
     "hw.info", "svc.restart", "net.connection_up", "net.wifi_connect", "net.radio_on",
+    "updates.list", "updates.apply",
 }
 
 
@@ -68,7 +69,7 @@ class FakeProviderScriptsTest(unittest.TestCase):
 
     def test_scripts(self):
         files = sorted(SCRIPTS.glob("*.json"))
-        self.assertEqual([f.name for f in files], ["install-hello.json", "net-restart.json"])
+        self.assertEqual([f.name for f in files], ["install-hello.json", "net-restart.json", "update-computer.json"])
         for file in files:
             turns = json.loads(file.read_text())
             self.assertIsInstance(turns, list, file)
