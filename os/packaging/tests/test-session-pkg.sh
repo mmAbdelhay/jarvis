@@ -25,8 +25,13 @@ for t in sys.argv[1:]:
     assert re.search(r"^Comment\[ar\]=.*[؀-ۿ]", t, re.M), t
     assert re.search(r"^Name\[ar\]=رفيق(?: \(الوضع الكلاسيكي\))?$", t, re.M), t
 PY
+check "DesktopNames=labwc;wlroots (full)" grep -qx 'DesktopNames=labwc;wlroots' <<<"$full"
+check "DesktopNames=labwc;wlroots (classic)" grep -qx 'DesktopNames=labwc;wlroots' <<<"$classic"
 if command -v desktop-file-validate >/dev/null; then
-  printf '%s\n' "$full" > "$tmp/full.desktop"; printf '%s\n' "$classic" > "$tmp/classic.desktop"
+  # DesktopNames is the display-manager session key (labwc.desktop has it too); it is
+  # outside the Desktop Entry spec, so desktop-file-validate rejects it. Validate the rest.
+  grep -vx 'DesktopNames=labwc;wlroots' <<<"$full" > "$tmp/full.desktop"
+  grep -vx 'DesktopNames=labwc;wlroots' <<<"$classic" > "$tmp/classic.desktop"
   check "desktop-file-validate (full)" desktop-file-validate "$tmp/full.desktop"
   check "desktop-file-validate (classic)" desktop-file-validate "$tmp/classic.desktop"
 fi
