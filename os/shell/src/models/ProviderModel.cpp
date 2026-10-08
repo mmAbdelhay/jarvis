@@ -252,6 +252,15 @@ QJsonObject ProviderModel::draft() const
     return out;
 }
 
+QJsonObject ProviderModel::probeDraft() const
+{
+    QJsonObject out = draft();
+    // No key typed: tell jarvisd which stored provider's key to reuse (contracts 7.11).
+    if (m_apiKey.isEmpty() && keepsSavedKey() && !m_editingId.isEmpty())
+        out.insert("id", m_editingId);
+    return out;
+}
+
 void ProviderModel::resetProbe()
 {
     m_probeState = u"idle"_s;
@@ -362,7 +371,7 @@ void ProviderModel::probe()
     m_probeState = u"probing"_s;
     m_error.clear();
     emit probeChanged();
-    emit probeRequested(draft());
+    emit probeRequested(probeDraft());
 }
 
 void ProviderModel::applyProbeResult(const QJsonObject& result)
@@ -378,7 +387,7 @@ void ProviderModel::applyProbeResult(const QJsonObject& result)
         m_model = m_models.first();
         emit draftChanged();
         emit probeChanged();
-        emit probeRequested(draft());
+        emit probeRequested(probeDraft());
         return;
     }
     m_supportsTools = result.value("supportsTools").toBool();

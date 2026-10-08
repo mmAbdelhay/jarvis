@@ -283,7 +283,9 @@ private slots:
         QCOMPARE(model.model(), u"claude-a"_s);
         model.probe();
         QCOMPARE(probes.size(), 1);
-        QVERIFY(!probes.first().first().value<QJsonObject>().contains("apiKey"));
+        const QJsonObject sent = probes.first().first().value<QJsonObject>();
+        QVERIFY(!sent.contains("apiKey"));
+        QCOMPARE(sent.value("id").toString(), u"work"_s);
     }
 
     void startNewForgetsTheEditedProvider()

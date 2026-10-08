@@ -84,6 +84,7 @@ public:
     Q_INVOKABLE void applySaveResult(const QJsonObject& result);
     Q_INVOKABLE void applyRequestError(const QString& text);
     QJsonObject draft() const;
+    QJsonObject probeDraft() const;
 
 signals:
     void activeChanged();
