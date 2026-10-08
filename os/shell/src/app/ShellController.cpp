@@ -22,6 +22,8 @@ ShellController::ShellController(ControlClient* client, QObject* parent)
     , m_doctor(new DoctorModel(this))
     , m_audit(new AuditModel(this))
     , m_system(new SystemModel(this))
+    , m_memory(new MemoryModel(this))
+    , m_registry(new RegistryModel(this))
     , m_launcher([](const QString& program) { return QProcess::startDetached(program, {}); })
 {
     connect(client, &ControlClient::opened, this, &ShellController::onOpened);
@@ -90,6 +92,53 @@ ShellController::ShellController(ControlClient* client, QObject* parent)
                 m_audit->applyEntries(r.value.toArray(), append);
             else
                 m_audit->applyError(r.text);
+        });
+    });
+    connect(m_memory, &MemoryModel::listRequested, this, [this](int limit) {
+        request(u"memory:list"_s, QJsonArray{QJsonObject{{"limit", limit}}}, [this](const ControlResult& r) {
+            if (r.ok)
+                m_memory->applyItems(r.value.toArray());
+            else
+                m_memory->applyError(r.text);
+        });
+    });
+    connect(m_memory, &MemoryModel::deleteRequested, this, [this](const QString& id) {
+        request(u"memory:delete"_s, QJsonArray{QJsonObject{{"id", id}}}, [this, id](const ControlResult& r) {
+            if (r.ok)
+                m_memory->applyDeleted(id);
+            else
+                m_memory->applyError(r.text);
+        });
+    });
+    connect(m_memory, &MemoryModel::clearRequested, this, [this] {
+        request(u"memory:clear"_s, QJsonArray{}, [this](const ControlResult& r) {
+            if (r.ok)
+                m_memory->applyCleared();
+            else
+                m_memory->applyError(r.text);
+        });
+    });
+    connect(m_registry, &RegistryModel::listRequested, this, [this] {
+        request(u"registry:list"_s, QJsonArray{}, [this](const ControlResult& r) {
+            if (r.ok)
+                m_registry->applyList(r.value.toObject());
+            else
+                m_registry->applyError(r.text);
+        });
+    });
+    // Contracts §2: install/remove happen through tools and cards, never a channel.
+    connect(m_registry, &RegistryModel::installRequested, this, [this](const QString& id, const QString& version) {
+        askJarvis(u"Install the tool server %1 version %2 from the Jarvis tool registry."_s.arg(id, version));
+    });
+    connect(m_registry, &RegistryModel::removeRequested, this, [this](const QString& id) {
+        askJarvis(u"Remove the installed tool server %1."_s.arg(id));
+    });
+    connect(m_memory, &MemoryModel::setEnabledRequested, this, [this](bool enabled) {
+        request(u"memory:setEnabled"_s, QJsonArray{QJsonObject{{"enabled", enabled}}}, [this](const ControlResult& r) {
+            if (r.ok)
+                m_memory->refresh();
+            else
+                m_memory->applyError(r.text);
         });
     });
 }
@@ -314,6 +363,8 @@ void ShellController::showView(const QString& view)
     if (view == u"settings") {
         m_provider->editActive();
         refreshProviders();
+        m_memory->refresh();
+        m_registry->refresh();
     }
     setView(view);
 }
@@ -367,4 +418,14 @@ void ShellController::checkForUpdates()
         }
         emit updatesChanged();
     });
+}
+
+void ShellController::askJarvis(const QString& text)
+{
+    setView(u"chat"_s);
+    if (m_conversation->busy()) {
+        m_conversation->addNotice(u"Jarvis is busy. Try again when the reply finishes."_s);
+        return;
+    }
+    sendPrompt(text);
 }

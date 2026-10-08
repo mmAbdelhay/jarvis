@@ -13,6 +13,8 @@
 #include "models/ProviderListModel.h"
 #include "models/ProviderModel.h"
 #include "models/SystemModel.h"
+#include "models/MemoryModel.h"
+#include "models/RegistryModel.h"
 
 using namespace Qt::StringLiterals;
 
@@ -65,6 +67,8 @@ QJsonObject card(const QString& cardId, const QJsonValue& turnId)
 }
 
 struct Fixture {
+    QJsonArray memoryItems;
+    QJsonObject registryList{{"installed", QJsonArray{}}, {"available", QJsonArray{}}};
     FakeDaemon daemon;
     QJsonObject providerList{{"active", QJsonValue::Null},
                              {"kinds", QJsonArray{"anthropic", "openai-compatible", "ollama"}}};
@@ -85,6 +89,10 @@ struct Fixture {
                 return {true, QJsonArray{}};
             if (channel == u"agent:prompt")
                 return {true, QJsonObject{{"turnId", "t1"}}};
+            if (channel == u"memory:list")
+                return {true, memoryItems};
+            if (channel == u"registry:list")
+                return {true, registryList};
             return {true, QJsonValue::Null};
         };
         daemon.listen();
@@ -117,6 +125,104 @@ struct Fixture {
 class TestShellController : public QObject {
     Q_OBJECT
 private slots:
+    void settingMemoryEnabledUsesTheContractChannel()
+    {
+        Fixture f;
+        QVERIFY(f.open());
+        f.shell->memory()->setEnabled(true);
+        QTRY_COMPARE(f.daemon.requests(u"memory:setEnabled"_s).size(), 1);
+        QCOMPARE(f.daemon.requests(u"memory:setEnabled"_s).first()["a"].toArray(),
+                 (QJsonArray{QJsonObject{{"enabled", true}}}));
+        QTRY_COMPARE(f.daemon.requests(u"memory:list"_s).size(), 1);
+    }
+    void openingSettingsLoadsProvidersMemoryAndTools()
+    {
+        Fixture f;
+        f.providerList = newShapeList();
+        QVERIFY(f.open());
+        QTRY_COMPARE(f.shell->view(), u"chat"_s);
+        const int lists = f.daemon.requests(u"provider:list"_s).size();
+        f.shell->showView(u"settings"_s);
+        QTRY_COMPARE(f.daemon.requests(u"memory:list"_s).size(), 1);
+        QCOMPARE(f.daemon.requests(u"memory:list"_s).first()["a"].toArray(), (QJsonArray{QJsonObject{{"limit", 500}}}));
+        QTRY_COMPARE(f.daemon.requests(u"registry:list"_s).size(), 1);
+        QCOMPARE(f.daemon.requests(u"registry:list"_s).first()["a"].toArray(), QJsonArray{});
+        QTRY_COMPARE(f.daemon.requests(u"provider:list"_s).size(), lists + 1);
+    }
+
+    void forgettingOneMemorySendsItsId()
+    {
+        Fixture f;
+        f.memoryItems = QJsonArray{QJsonObject{{"id", "m1"}, {"kind", "fact"}, {"text", "prefers Flatpak"}, {"createdAt", 1759900000000.0}}};
+        QVERIFY(f.open());
+        f.shell->showView(u"settings"_s);
+        QTRY_COMPARE(f.shell->memory()->count(), 1);
+        f.shell->memory()->remove(0);
+        QTRY_COMPARE(f.daemon.requests(u"memory:delete"_s).size(), 1);
+        QCOMPARE(f.daemon.requests(u"memory:delete"_s).first()["a"].toArray(), (QJsonArray{QJsonObject{{"id", "m1"}}}));
+        QTRY_COMPARE(f.shell->memory()->count(), 0);
+    }
+
+    void forgettingEverythingClearsTheList()
+    {
+        Fixture f;
+        f.memoryItems = QJsonArray{QJsonObject{{"id", "m1"}, {"kind", "fact"}, {"text", "a"}, {"createdAt", 1.0}}};
+        QVERIFY(f.open());
+        f.shell->showView(u"settings"_s);
+        QTRY_COMPARE(f.shell->memory()->count(), 1);
+        f.shell->memory()->clearAll();
+        QTRY_COMPARE(f.daemon.requests(u"memory:clear"_s).size(), 1);
+        QTRY_COMPARE(f.shell->memory()->count(), 0);
+    }
+
+    void memoryErrorsAreShown()
+    {
+        Fixture f;
+        auto base = f.daemon.handler;
+        f.daemon.handler = [base](const QString& channel, const QJsonArray& a, quint64 id) -> FakeDaemon::Reply {
+            if (channel == u"memory:list")
+                return {false, QJsonValue(), u"unsupported"_s, u"Memory is off: the keyring is locked."_s};
+            return base(channel, a, id);
+        };
+        QVERIFY(f.open());
+        f.shell->showView(u"settings"_s);
+        QTRY_COMPARE(f.shell->memory()->error(), u"Memory is off: the keyring is locked."_s);
+    }
+
+    void installingAToolAsksJarvisInChat()
+    {
+        Fixture f;
+        f.providerList = newShapeList();
+        f.registryList = QJsonObject{{"installed", QJsonArray{}},
+                                     {"available", QJsonArray{QJsonObject{{"id", "jarvis-clock"}, {"name", "Clock"}, {"description", "Time and timers"},
+                                                                          {"tier", "official"}, {"version", "1.0.0"},
+                                                                          {"permissions", QJsonObject{{"network", false}, {"paths", QJsonArray{}}}},
+                                                                          {"tools", QJsonArray{}}}}}};
+        QVERIFY(f.open());
+        f.shell->showView(u"settings"_s);
+        QTRY_COMPARE(f.shell->registry()->count(), 1);
+        f.shell->registry()->install(0);
+        QTRY_COMPARE(f.daemon.requests(u"agent:prompt"_s).size(), 1);
+        QCOMPARE(f.daemon.requests(u"agent:prompt"_s).first()["a"].toArray(),
+                 (QJsonArray{QJsonObject{{"text", "Install the tool server jarvis-clock version 1.0.0 from the Jarvis tool registry."}}}));
+        QCOMPARE(f.shell->view(), u"chat"_s);
+    }
+
+    void removingAToolAsksJarvisInChat()
+    {
+        Fixture f;
+        f.providerList = newShapeList();
+        const QJsonObject clock{{"id", "jarvis-clock"}, {"name", "Clock"}, {"description", ""}, {"tier", "official"}, {"version", "1.0.0"},
+                                {"permissions", QJsonObject{{"network", false}, {"paths", QJsonArray{}}}}, {"tools", QJsonArray{}}};
+        f.registryList = QJsonObject{{"installed", QJsonArray{clock}}, {"available", QJsonArray{clock}}};
+        QVERIFY(f.open());
+        f.shell->showView(u"settings"_s);
+        QTRY_COMPARE(f.shell->registry()->count(), 1);
+        f.shell->registry()->remove(0);
+        QTRY_COMPARE(f.daemon.requests(u"agent:prompt"_s).size(), 1);
+        QCOMPARE(f.daemon.requests(u"agent:prompt"_s).first()["a"].toArray(),
+                 (QJsonArray{QJsonObject{{"text", "Remove the installed tool server jarvis-clock."}}}));
+    }
     void startsConnecting()
     {
         Fixture f;

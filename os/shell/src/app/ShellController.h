@@ -14,6 +14,8 @@
 #include "models/ProviderListModel.h"
 #include "models/ProviderModel.h"
 #include "models/SystemModel.h"
+#include "models/MemoryModel.h"
+#include "models/RegistryModel.h"
 
 class ControlClient;
 struct ControlResult;
@@ -33,6 +35,8 @@ class ShellController : public QObject {
     Q_PROPERTY(DoctorModel* doctor READ doctor CONSTANT)
     Q_PROPERTY(AuditModel* audit READ audit CONSTANT)
     Q_PROPERTY(SystemModel* system READ system CONSTANT)
+    Q_PROPERTY(MemoryModel* memory READ memory CONSTANT)
+    Q_PROPERTY(RegistryModel* registry READ registry CONSTANT)
     Q_PROPERTY(bool offerDoctor READ offerDoctor NOTIFY providerStatusChanged)
     Q_PROPERTY(QString view READ view NOTIFY viewChanged)
     Q_PROPERTY(QString connection READ connection NOTIFY connectionChanged)
@@ -55,6 +59,8 @@ public:
     DoctorModel* doctor() const { return m_doctor; }
     AuditModel* audit() const { return m_audit; }
     SystemModel* system() const { return m_system; }
+    MemoryModel* memory() const { return m_memory; }
+    RegistryModel* registry() const { return m_registry; }
     // Contracts §6.8: only when the provider is unreachable AND the machine is offline.
     bool offerDoctor() const;
     QString view() const { return m_view; }
@@ -94,6 +100,7 @@ private:
     void onPush(const QString& channel, const QJsonValue& payload);
     void onAgentEvent(const QJsonObject& event);
     void refreshProviders();
+    void askJarvis(const QString& text);
     void maybeLeaveDoctor();
     void setView(QString view);
     void setConnection(const QString& connection);
@@ -108,6 +115,8 @@ private:
     DoctorModel* m_doctor;
     AuditModel* m_audit;
     SystemModel* m_system;
+    MemoryModel* m_memory;
+    RegistryModel* m_registry;
     QString m_view = QStringLiteral("loading");
     QString m_connection = QStringLiteral("connecting");
     bool m_providerReachable = true;
