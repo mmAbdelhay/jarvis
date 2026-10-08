@@ -9,7 +9,9 @@ import { fenceToolOutput } from "./fence.js";
 import { DEFAULT_CONTEXT_TOKENS, fitHistory, historyBudget } from "./context-fit.js";
 import { mapLimit } from "./map-limit.js";
 import { type Lang, languageRule } from "./i18n.js";
-import { AGENT_TEXT, SYSTEM_PROMPT, toolActivity, USER_TEXT } from "./messages.js";
+import { AGENT_TEXT, RECIPE_TEXT, SYSTEM_PROMPT, toolActivity, USER_TEXT } from "./messages.js";
+import type { RecipeEngine } from "./recipe-engine.js";
+import { RECIPE_RUN_TOOL } from "./recipes.js";
 import { buildSystemPrompt } from "./safety.js";
 import type { AgentEvent } from "./contract.js";
 import type { GateCall, GateItemStatus, RiskGate } from "./risk-gate.js";
@@ -49,6 +51,8 @@ export type ToolLoopDeps = {
   /** M4 §1: the profile of the provider answering now (the failover's status).
    *  Read at the first event of each reply and after it. Default FULL_PROFILE. */
   profile?(): ToolProfile;
+  /** M4 §4: runs recipes.run itself (one card item per step). Absent: recipes.run is refused. */
+  recipes?: RecipeEngine;
 };
 
 export type TurnRequest = {
@@ -164,6 +168,13 @@ async function runCalls(
   const gated: { call: ModelToolCall; gateCall: GateCall }[] = [];
   const safe: { call: ModelToolCall; tool: RegisteredTool; input: Record<string, unknown> }[] = [];
 
+  const recipeCalls: {
+    call: ModelToolCall;
+    tool: RegisteredTool;
+    input: Record<string, unknown>;
+  }[] = [];
+  const runners = new Map<string, (input: Record<string, unknown>) => Promise<ToolOutcome>>();
+
   const execute = async (callId: string, tool: RegisteredTool, input: Record<string, unknown>) => {
     context.ran.push(tool.name);
     const activity = toolActivity(tool.name, context.lang);
@@ -197,6 +208,11 @@ async function runCalls(
       continue;
     }
     const input = deps.registry.sanitizeInput(tool, call.input);
+    if (tool.name === RECIPE_RUN_TOOL) {
+      // M4 §4: jarvisd runs a recipe itself; recipes.run never reaches its server.
+      recipeCalls.push({ call, tool, input });
+      continue;
+    }
     if (callRisk(tool, input) !== "safe") {
       gated.push({ call, gateCall: { callId: call.id, tool, input } });
       continue;
@@ -214,6 +230,43 @@ async function runCalls(
     results.set(call.id, fenced(call, tool, await execute(call.id, tool, input)));
   });
 
+  for (const { call, tool, input } of recipeCalls) {
+    if (deps.recipes === undefined) {
+      results.set(call.id, note(call, RECIPE_TEXT.unavailable, true));
+      continue;
+    }
+    if (signal.aborted) {
+      results.set(call.id, note(call, AGENT_TEXT.stopped));
+      continue;
+    }
+    try {
+      const prepared = await deps.recipes.prepare(input, {
+        registry: deps.registry,
+        lang: context.lang,
+        callStep: (index, stepTool, stepInput) =>
+          execute(`${call.id}-step${index + 1}`, stepTool, stepInput),
+      });
+      if (!prepared.ok) {
+        results.set(call.id, note(call, prepared.outcome.text, true));
+        continue;
+      }
+      runners.set(call.id, (runInput) => prepared.prepared.run(runInput, signal));
+      gated.push({
+        call,
+        gateCall: { callId: call.id, tool, input, preset: prepared.prepared.preset },
+      });
+    } catch (error) {
+      results.set(
+        call.id,
+        note(
+          call,
+          AGENT_TEXT.gateFailed(error instanceof Error ? error.message : String(error)),
+          true,
+        ),
+      );
+    }
+  }
+
   if (gated.length > 0) {
     if (signal.aborted) {
       for (const { call } of gated) results.set(call.id, note(call, AGENT_TEXT.stopped));
@@ -225,7 +278,8 @@ async function runCalls(
           calls: gated.map((g) => g.gateCall),
           signal,
           lang: context.lang,
-          execute: (gateCall, input) => execute(gateCall.callId, gateCall.tool, input),
+          execute: (gateCall, input) =>
+            runners.get(gateCall.callId)?.(input) ?? execute(gateCall.callId, gateCall.tool, input),
         });
         for (const outcome of outcomes) {
           const entry = gated.find((g) => g.call.id === outcome.callId);

@@ -20,7 +20,21 @@ import {
 import type { CardDescription, RegisteredTool } from "./tool-registry.js";
 import { type ToolOutcome, isRecord } from "./types.js";
 
-export type GateCall = { callId: string; tool: RegisteredTool; input: Record<string, unknown> };
+/** Card items the caller computed (a recipe: one item per step, M4 §4). Like
+ *  a batch tool, the call runs ONCE with `items` = the ticked elements. */
+export type GatePreset = {
+  elements: unknown[];
+  items: { tool: string; description: CardDescription }[];
+  /** The audit result of one element once the call ran. */
+  resultOf(elementIndex: number, outcome: ToolOutcome): "ok" | "failed" | "skipped";
+};
+
+export type GateCall = {
+  callId: string;
+  tool: RegisteredTool;
+  input: Record<string, unknown>;
+  preset?: GatePreset;
+};
 export type GateItemStatus = "ran" | "unticked" | "denied" | "timeout" | "stopped";
 export type GateItemResult = {
   callId: string;
@@ -199,6 +213,17 @@ export function createRiskGate(deps: RiskGateDeps): RiskGate {
       call: GateCall;
     }[] = [];
     for (const [callIndex, call] of request.calls.entries()) {
+      if (call.preset !== undefined) {
+        for (const [elementIndex, element] of call.preset.elements.entries()) {
+          jobs.push({
+            callIndex,
+            elementIndex,
+            describedInput: { ...call.input, items: [element] },
+            call,
+          });
+        }
+        continue;
+      }
       const elements = batchElements(call);
       if (elements === undefined) {
         jobs.push({ callIndex, elementIndex: undefined, describedInput: call.input, call });
@@ -218,9 +243,12 @@ export function createRiskGate(deps: RiskGateDeps): RiskGate {
         });
       }
     }
-    const descriptions = await mapLimit(jobs, DESCRIBE_CONCURRENCY, (job) =>
-      deps.describe(job.call.tool, job.describedInput, request.lang ?? "en"),
-    );
+    const descriptions = await mapLimit(jobs, DESCRIBE_CONCURRENCY, (job) => {
+      const preset = job.call.preset?.items[job.elementIndex ?? -1];
+      return preset !== undefined
+        ? Promise.resolve(preset.description)
+        : deps.describe(job.call.tool, job.describedInput, request.lang ?? "en");
+    });
     const units: Unit[] = jobs.map((job, index) => {
       const description = descriptions[index] as CardDescription;
       return {
@@ -229,7 +257,7 @@ export function createRiskGate(deps: RiskGateDeps): RiskGate {
         describedInput: job.describedInput,
         item: {
           itemId: `item-${index + 1}`,
-          tool: job.call.tool.name,
+          tool: job.call.preset?.items[job.elementIndex ?? -1]?.tool ?? job.call.tool.name,
           title: description.title,
           detail: description.detail,
           source: description.source,
@@ -306,7 +334,7 @@ export function createRiskGate(deps: RiskGateDeps): RiskGate {
         status = "stopped";
       } else {
         status = "ran";
-        const elements = batchElements(call);
+        const elements = call.preset?.elements ?? batchElements(call);
         // A batch tool runs ONCE with only its ticked elements (criterion 8).
         const input =
           elements === undefined
@@ -356,6 +384,14 @@ export function createRiskGate(deps: RiskGateDeps): RiskGate {
       // One audit line per card item.
       for (const unit of mine) {
         const wasTicked = ticked.includes(unit);
+        const result: AuditEntry["result"] =
+          !wasTicked || outcome === undefined
+            ? "skipped"
+            : call.preset !== undefined
+              ? call.preset.resultOf(unit.elementIndex as number, outcome)
+              : outcome.ok
+                ? "ok"
+                : "failed";
         await writeAudit({
           ts: deps.now(),
           tool: call.tool.name,
@@ -371,8 +407,8 @@ export function createRiskGate(deps: RiskGateDeps): RiskGate {
               ? "denied"
               : decision.decision,
           via,
-          result: !wasTicked || outcome === undefined ? "skipped" : outcome.ok ? "ok" : "failed",
-          ...(wasTicked && outcome !== undefined && !outcome.ok
+          result,
+          ...(result === "failed" && outcome !== undefined
             ? { message: outcome.text.slice(0, 500) }
             : {}),
         });
