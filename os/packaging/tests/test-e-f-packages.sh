@@ -90,7 +90,7 @@ check "model-fetch unit" deb_has "$m" usr/lib/systemd/system/jarvis-model-fetch.
 check "model-fetch does not block boot (contracts §11)" grep -qx Type=exec <<<"$(dpkg-deb --fsys-tarfile "$m" | tar -xO ./usr/lib/systemd/system/jarvis-model-fetch.service)"
 check "model-fetch postinst enables the unit" grep -q 'systemctl enable jarvis-model-fetch.service' <<<"$(deb_script "$m" postinst)"
 check "shell now depends on jarvis-ui" grep -q 'jarvis-ui (= @VERSION@)' "$PACKAGING_DIR/jarvis-shell/control.in"
-check "version line is M2" grep -q "0.2.0~m2" "$PACKAGING_DIR/version.sh"
+check "version line is M2.5" grep -q "0.2.5~m25" "$PACKAGING_DIR/version.sh"
 check "tag prefix stripped" test "$(OS_VERSION=os-v0.2.1 "$PACKAGING_DIR/version.sh")" = 0.2.1
 # Real maintainer-script lifecycle, opt-in only in a disposable trixie container.
 # Unattended: no prompt answers, stdin closed, as an image build runs dpkg.

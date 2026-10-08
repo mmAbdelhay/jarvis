@@ -11,6 +11,7 @@ on:
       - "packages/core/**"
       - "packages/platform/**"
       - "packages/wire/**"
+      - "packages/cli/**"
       - "packages/desktop/src/daemon/**"
       - "packages/desktop/package.json"
       - "packages/desktop/scripts/**"
@@ -24,6 +25,7 @@ on:
       - "packages/core/**"
       - "packages/platform/**"
       - "packages/wire/**"
+      - "packages/cli/**"
       - "packages/desktop/src/daemon/**"
       - "packages/desktop/package.json"
       - "packages/desktop/scripts/**"
@@ -41,7 +43,7 @@ permissions:
 env:
   # One version for every .deb and the ISO of this run (packages depend on
   # each other with (= version)); a tag os-vX.Y.Z builds X.Y.Z.
-  OS_VERSION: ${{ startsWith(github.ref, 'refs/tags/os-v') && github.ref_name || format('0.2.0~ci{0}', github.run_number) }}
+  OS_VERSION: ${{ startsWith(github.ref, 'refs/tags/os-v') && github.ref_name || format('0.2.5~ci{0}', github.run_number) }}
 
 jobs:
   checks:
@@ -52,7 +54,7 @@ jobs:
       - run: |
           apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
             git ca-certificates dpkg-dev shellcheck xorriso python3 python3-yaml gpg gpg-agent gpgv reprepro apt \
-            librsvg2-bin grub-common fonts-inter cmake gcc libc6-dev zstd file sbsigntool curl ntfs-3g
+            librsvg2-bin grub-common fonts-inter cmake gcc libc6-dev zstd file sbsigntool curl ntfs-3g busybox-static
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
@@ -62,6 +64,9 @@ jobs:
       - run: os/branding/tests/run.sh
       - run: os/packaging/tests/run.sh
       - run: os/repo/tests/run.sh
+      - run: os/registry/tests/run.sh
+      - run: python3 -m unittest discover -s os/registry/tests -v
+      - run: python3 os/models/tools/voice.py validate
       - run: os/iso/tests/run.sh
       - run: python3 -m unittest discover -s os/models/tests -v
       - run: python3 -m unittest discover -s os/models/tools/tests -v
@@ -71,7 +76,7 @@ jobs:
         run: |
           {
             # tests/fixtures hold name-lint input data, not scripts.
-            git ls-files os/packaging os/iso os/branding os/repo | grep -v '/tests/fixtures/' | while read -r f; do
+            git ls-files os/packaging os/iso os/branding os/repo os/registry os/models | grep -v '/tests/fixtures/' | while read -r f; do
               head -n1 "$f" | grep -qE '^#!.*(/|env )(ba)?sh' && echo "$f"
             done
           } | xargs shellcheck -x -S warning
@@ -88,6 +93,25 @@ jobs:
       - run: make -C os/go check test
       - run: make -C os/go dist
       - run: os/packaging/build.sh --out out/debs jarvis-pkg jarvis-diag jarvis-helper jarvis-installer-backend jarvis-model-fetch
+      - run: sudo apt-get install -y -qq --no-install-recommends file gpg gpgv
+      # Official MCP servers (Plan J's os/go/dist-registry) as registry artifacts.
+      - run: os/registry/package-official.sh --out out/registry
+      # The whole sign/verify chain on every run, with a throwaway key.
+      - name: Registry dry run (throwaway key, NOT FOR RELEASE)
+        run: |
+          fpr=$(os/repo/test-key.sh "$RUNNER_TEMP/regkey")
+          python3 os/registry/build_index.py --servers os/registry/servers --artifacts out/registry \
+            --out "$RUNNER_TEMP/regsite" --channel testing
+          os/registry/sign-index.sh --site "$RUNNER_TEMP/regsite" --channel testing \
+            --gnupghome "$RUNNER_TEMP/regkey" --sign-with "$fpr"
+          gpg --homedir "$RUNNER_TEMP/regkey" --export "$fpr" > "$RUNNER_TEMP/regkey.gpg"
+          os/registry/verify-index.sh --keyring "$RUNNER_TEMP/regkey.gpg" --site "$RUNNER_TEMP/regsite" --channel testing
+          rm -rf "$RUNNER_TEMP/regkey"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: registry-artifacts
+          path: out/registry/*.tar.gz
+          if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
           name: debs-go
@@ -135,11 +159,12 @@ jobs:
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - run: pnpm bootstrap --pty-only
       - run: pnpm --filter @jarvis/desktop build:daemon
+      - run: pnpm --filter @jarvis/cli build
       - uses: actions/cache@v4
         with:
           path: ~/.cache/jarvis-build
           key: node-${{ hashFiles('os/packaging/jarvisd/node.env') }}
-      - run: os/packaging/build.sh --out out/debs jarvisd
+      - run: os/packaging/build.sh --out out/debs jarvisd jarvis-cli
       - uses: actions/upload-artifact@v4
         with:
           name: debs-daemon
@@ -212,7 +237,7 @@ jobs:
             echo "keyring=throwaway" >> "$GITHUB_OUTPUT"
             echo "Archive keyring: throwaway CI key $fpr (NOT FOR RELEASE)" >> "$GITHUB_STEP_SUMMARY"
           fi
-      - run: os/packaging/build.sh --out out/debs jarvis-branding jarvis-models-catalog jarvis-archive-keyring jarvis-ollama
+      - run: os/packaging/build.sh --out out/debs jarvis-branding jarvis-models-catalog jarvis-archive-keyring jarvis-ollama jarvis-agent
       - uses: actions/upload-artifact@v4
         with:
           name: debs-distro
@@ -250,6 +275,9 @@ jobs:
           path: ${{ runner.temp }}/lb-cache
           key: lb-trixie-${{ hashFiles('os/iso/config/package-lists/**', 'os/iso/auto/config') }}-${{ steps.week.outputs.week }}
           restore-keys: lb-trixie-
+      # M2.5 design §3.6: no shipped voice model may be non-redistributable.
+      - name: Voice-model license gate (.debs)
+        run: python3 os/models/tools/voice.py scan-debs "$RUNNER_TEMP/iso/debs"
       - name: Build the ISO (privileged debian:trixie)
         env:
           JARVIS_RELEASE: ${{ startsWith(github.ref, 'refs/tags/os-v') && '1' || '0' }}
@@ -391,9 +419,75 @@ jobs:
           path: ${{ runner.temp }}/install/
           if-no-files-found: warn
 
+  agent-install:
+    needs: [build-go, build-daemon, build-distro]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["debian:trixie", "ubuntu:24.04"]
+    name: agent-install (${{ matrix.image }})
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: debs-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/debs
+      # M2.5 criterion 10: apt install on stock Debian 13 / Ubuntu 24.04,
+      # chat + safe tool + terminal card with the fake provider, then purge.
+      - run: os/packaging/agent/install-test.sh --debs "$RUNNER_TEMP/debs" --image "${{ matrix.image }}" --level chat
+
+  docker-image:
+    needs: [build-go, build-daemon]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: debs-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/debs
+      - run: os/packaging/docker/build-image.sh --debs "$RUNNER_TEMP/debs" --tag jarvis-agent:ci
+      - run: os/packaging/docker/test-image.sh jarvis-agent:ci os/packaging/docker/fake-health.json
+      # The tested image is the one a tag publishes (docker-publish loads it).
+      - run: docker save jarvis-agent:ci | zstd -T0 -10 > "$RUNNER_TEMP/jarvis-agent-image.tar.zst"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: docker-image
+          path: ${{ runner.temp }}/jarvis-agent-image.tar.zst
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  docker-publish:
+    if: startsWith(github.ref, 'refs/tags/os-v')
+    needs: [docker-image, agent-install, smoke-test, install-test]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: docker-image
+          path: ${{ runner.temp }}
+      - run: zstd -dc "$RUNNER_TEMP/jarvis-agent-image.tar.zst" | docker load
+      - name: Push ghcr.io/mmabdelhay/jarvis-agent:${{ env.OS_VERSION }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker tag jarvis-agent:ci "ghcr.io/mmabdelhay/jarvis-agent:$OS_VERSION"
+          docker push "ghcr.io/mmabdelhay/jarvis-agent:$OS_VERSION"
+          docker logout ghcr.io
+          echo "Pushed ghcr.io/mmabdelhay/jarvis-agent:$OS_VERSION" >> "$GITHUB_STEP_SUMMARY"
+
   repo:
     if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/os-v'))
-    needs: [smoke-test, install-test, loop-tests, build-distro]
+    needs: [smoke-test, install-test, loop-tests, build-distro, agent-install, docker-image]
     runs-on: ubuntu-24.04
     container: debian:trixie
     steps:
@@ -422,8 +516,14 @@ jobs:
           merge-multiple: true
           path: ${{ runner.temp }}/debs
       - if: steps.gate.outputs.go == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: registry-artifacts
+          path: ${{ runner.temp }}/registry
+      - if: steps.gate.outputs.go == 'true'
         name: Build and publish
         env:
+          JARVIS_RELEASE: ${{ startsWith(github.ref, 'refs/tags/os-v') && '1' || '0' }}
           JARVIS_APT_SIGNING_KEY: ${{ secrets.JARVIS_APT_SIGNING_KEY }}
           DEPLOY_KEY: ${{ secrets.JARVIS_APT_DEPLOY_KEY }}
         run: |
@@ -443,6 +543,20 @@ jobs:
           fi
           os/repo/build-repo.sh --suite "$suite" --debs "$RUNNER_TEMP/debs" --out "$RUNNER_TEMP/site" \
             --gnupghome "$RUNNER_TEMP/gnupg" --sign-with "$fpr" --previous "$RUNNER_TEMP/previous"
+          # Tool registry (M2.5 contracts §3) next to the APT repo, same key.
+          channel=testing; regdir=registry-testing
+          if [ "$suite" = trixie ]; then channel=stable; regdir=registry; fi
+          gpg --homedir "$RUNNER_TEMP/gnupg" --dearmor < os/repo/keys/jarvis-archive-keyring.asc > "$RUNNER_TEMP/archive.gpg"
+          if [ -f "$RUNNER_TEMP/previous/$regdir/index.json" ]; then
+            # Never carry over (and re-sign) artifacts from an index we cannot verify.
+            os/registry/verify-index.sh --keyring "$RUNNER_TEMP/archive.gpg" --site "$RUNNER_TEMP/previous" --channel "$channel"
+          fi
+          python3 os/registry/build_index.py --servers os/registry/servers --artifacts "$RUNNER_TEMP/registry" \
+            --out "$RUNNER_TEMP/site" --channel "$channel" --previous "$RUNNER_TEMP/previous" --verify-remote
+          os/registry/sign-index.sh --site "$RUNNER_TEMP/site" --channel "$channel" \
+            --gnupghome "$RUNNER_TEMP/gnupg" --sign-with "$fpr"
+          os/registry/verify-index.sh --keyring "$RUNNER_TEMP/archive.gpg" --site "$RUNNER_TEMP/site" --channel "$channel"
+          echo "Registry **$channel** signed by $fpr" >> "$GITHUB_STEP_SUMMARY"
           os/repo/publish.sh --site "$RUNNER_TEMP/site" --remote git@github.com:mmAbdelhay/jarvis-apt.git \
             --message "$suite from ${GITHUB_SHA::12} (run $GITHUB_RUN_ID)"
           rm -rf "$RUNNER_TEMP/gnupg" "$RUNNER_TEMP/deploy"
@@ -450,7 +564,7 @@ jobs:
 
   release:
     if: startsWith(github.ref, 'refs/tags/os-v')
-    needs: [smoke-test, install-test, loop-tests, repo]
+    needs: [smoke-test, install-test, loop-tests, repo, agent-install, docker-publish]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -471,5 +585,5 @@ jobs:
           . os/branding/brand.env
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft \
             --title "$DISTRO_NAME ${GITHUB_REF_NAME#os-v}" \
-            --notes "Live/installer ISO built, smoke- and install-tested (Secure Boot) by run ${{ github.run_id }}." \
+            --notes "Live/installer ISO built, smoke- and install-tested (Secure Boot) by run ${{ github.run_id }}. Agent image: ghcr.io/mmabdelhay/jarvis-agent:${GITHUB_REF_NAME#os-v}." \
             iso/*.iso iso/*.iso.sha256
