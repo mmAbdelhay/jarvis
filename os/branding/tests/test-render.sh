@@ -16,7 +16,7 @@ check "wordmark has no placeholder" bash -c "! grep -q '@DISTRO' '$r/usr/share/p
 check "wallpaper 4k" test "$(png_size "$r/usr/share/backgrounds/jarvis/wallpaper-3840x2160.png")" = "3840x2160"
 check "wallpaper 1080p" test "$(png_size "$r/usr/share/backgrounds/jarvis/wallpaper-1920x1080.png")" = "1920x1080"
 check "logo is the ring (two circles, no text)" bash -c "[ \$(grep -c '<circle' '$BRANDING_DIR/logo/jarvis-ring.svg') -ge 2 ] && ! grep -q '<text' '$BRANDING_DIR/logo/jarvis-ring.svg'"
-printf '%s\n' 'DISTRO_NAME="Nova Linux"' 'DISTRO_ID="nova"' 'DISTRO_VERSION="1.0"' 'ISO_VOLUME="Nova"' 'HOME_URL="https://example.org"' > "$tmp/alt.env"
+printf '%s\n' 'DISTRO_NAME="Nova Linux"' 'DISTRO_NAME_AR="نوفا"' 'DISTRO_ID="nova"' 'DISTRO_VERSION="1.0"' 'ISO_VOLUME="Nova"' 'HOME_URL="https://example.org"' > "$tmp/alt.env"
 BRAND_ENV=$tmp/alt.env "$BRANDING_DIR/render.sh" "$tmp/alt" >/dev/null
 check "another brand flows into the wordmark" grep -q '>Nova Linux<' "$tmp/alt/usr/share/pixmaps/jarvis-wordmark.svg"
 check "render twice is identical (reproducible)" bash -c "'$BRANDING_DIR/render.sh' '$tmp/again' >/dev/null && diff -r '$r' '$tmp/again' >/dev/null"
