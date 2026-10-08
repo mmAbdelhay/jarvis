@@ -138,3 +138,15 @@ export const DOCTOR_TEXT = {
       .filter((part) => part !== "")
       .join("\n\n"),
 } as const;
+
+/** Why jarvisd moved to the next provider (design §3.5). The shell shows
+ *  "Using <activeId> — <fallbackReason>"; a reason starts with the id that failed. */
+export const FAILOVER_TEXT = {
+  unreachable: (detail: string) => `did not answer (${detail.slice(0, 200)})`,
+  rateLimited: "is rate-limited (429)",
+  overloaded: "is overloaded",
+  serverError: (status: number) => `returned an error (${status})`,
+  slow: "did not start answering within 30 seconds",
+  reason: (id: string, why: string) => `${id} ${why}`,
+  noneLeft: "No model provider is left to try.",
+} as const;
