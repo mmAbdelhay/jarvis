@@ -148,6 +148,10 @@ func TestNightLight(t *testing.T) {
 	if err := s.SetNightLight(ctx, true, &until); err != nil {
 		t.Fatal(err)
 	}
+	data, err := os.ReadFile(s.sessionFile())
+	if err != nil || !strings.Contains(string(data), `"endTime":"2026-10-09T22:00:00Z"`) {
+		t.Fatalf("deadline not persisted: %s %v", data, err)
+	}
 	n, err := s.NightLight(ctx)
 	if err != nil || !n.On || n.UntilHour == nil || *n.UntilHour != 22 {
 		t.Fatalf("state %+v %v", n, err)
@@ -171,9 +175,9 @@ func TestNightLight(t *testing.T) {
 
 func TestRestoreNightLightAndPreserveSession(t *testing.T) {
 	run := (&execx.Fake{}).On(execx.OK(""), "systemctl", "--user", "stop", nightUnit).
-		On(execx.OK(""), "systemd-run", "--user", "--quiet", "--collect", "--unit="+nightUnit, "--setenv=WAYLAND_DISPLAY=wayland-0", "--property=RuntimeMaxSec=5400", "--", "/usr/bin/wlsunset", "-t", "3500", "-T", "3501", "-S", "06:00", "-s", "18:00")
+		On(execx.OK(""), "systemd-run", "--user", "--quiet", "--collect", "--unit="+nightUnit, "--setenv=WAYLAND_DISPLAY=wayland-0", "--property=RuntimeMaxSec=1800", "--", "/usr/bin/wlsunset", "-t", "3500", "-T", "3501", "-S", "06:00", "-s", "18:00")
 	s := session(t, run)
-	if err := writeAtomic(s.sessionFile(), []byte(`{"scales":{},"nightLight":{"on":true,"untilHour":22},"future":{"value":1}}`), 0600); err != nil {
+	if err := writeAtomic(s.sessionFile(), []byte(`{"scales":{},"nightLight":{"on":true,"untilHour":22,"endTime":"2026-10-09T21:00:00Z"},"future":{"value":1}}`), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.RestoreScales(ctx); err != nil {
@@ -215,5 +219,44 @@ func TestKeyboardPreservesBlankLines(t *testing.T) {
 	data, _ := os.ReadFile(path)
 	if string(data) != "# user settings\n\nXCURSOR_THEME=Adwaita\nXKB_DEFAULT_LAYOUT=us\n" {
 		t.Fatalf("lost original lines: %s", data)
+	}
+}
+
+func TestRestoreExpiredNightLight(t *testing.T) {
+	for _, end := range []string{"2026-10-09T22:00:00Z", "2026-10-10T08:00:00Z", ""} {
+		t.Run(end, func(t *testing.T) {
+			run := &execx.Fake{}
+			s := session(t, run)
+			s.Now = func() time.Time { return time.Date(2026, 10, 10, 8, 0, 0, 0, time.UTC) }
+			data := `{"scales":{},"nightLight":{"on":true,"untilHour":22,"endTime":"` + end + `"},"future":{"value":1}}`
+			if err := writeAtomic(s.sessionFile(), []byte(data), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.RestoreScales(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if len(run.CallsTo("systemd-run")) != 0 || len(run.CallsTo("systemctl")) != 0 {
+				t.Fatal("expired night light must not restart")
+			}
+			dataBytes, err := os.ReadFile(s.sessionFile())
+			if err != nil || strings.Contains(string(dataBytes), `"nightLight"`) || !strings.Contains(string(dataBytes), `"future":{"value":1}`) {
+				t.Fatalf("expired state not cleared safely: %s %v", dataBytes, err)
+			}
+		})
+	}
+}
+
+func TestRestoreUntimedNightLight(t *testing.T) {
+	run := (&execx.Fake{}).On(execx.OK(""), "systemctl", "--user", "stop", nightUnit).
+		On(execx.OK(""), "systemd-run", "--user", "--quiet", "--collect", "--unit="+nightUnit, "--setenv=WAYLAND_DISPLAY=wayland-0", "--", "/usr/bin/wlsunset", "-t", "3500", "-T", "3501", "-S", "06:00", "-s", "18:00")
+	s := session(t, run)
+	if err := writeAtomic(s.sessionFile(), []byte(`{"nightLight":{"on":true,"untilHour":null}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RestoreScales(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(run.CallsTo("systemd-run")) != 1 {
+		t.Fatal("untimed night light not restored")
 	}
 }

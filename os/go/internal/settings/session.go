@@ -442,6 +442,11 @@ type NightLight struct {
 	UntilHour *int `json:"untilHour"`
 }
 
+type savedNightLight struct {
+	NightLight
+	EndTime string `json:"endTime,omitempty"`
+}
+
 const nightUnit = "jarvis-night-light.service"
 
 func (s *Session) restoreNightLight(ctx context.Context) error {
@@ -450,12 +455,26 @@ func (s *Session) restoreNightLight(ctx context.Context) error {
 		return err
 	}
 	if data, ok := m["nightLight"]; ok {
-		var n NightLight
+		var n savedNightLight
 		if err := json.Unmarshal(data, &n); err != nil {
 			return err
 		}
 		if n.On {
-			return s.SetNightLight(ctx, true, n.UntilHour)
+			if n.UntilHour == nil {
+				return s.SetNightLight(ctx, true, nil)
+			}
+			// Legacy timed settings have no reliable deadline; do not extend them.
+			if n.EndTime == "" {
+				return s.saveField("nightLight", nil)
+			}
+			end, err := time.Parse(time.RFC3339, n.EndTime)
+			if err != nil {
+				return err
+			}
+			if !end.After(s.now()) {
+				return s.saveField("nightLight", nil)
+			}
+			return s.setNightLight(ctx, true, n.UntilHour, &end)
 		}
 	}
 	return nil
@@ -486,6 +505,10 @@ func (s *Session) NightLight(ctx context.Context) (NightLight, error) {
 // local time, via RuntimeMaxSec) or off. wlsunset with -t 3500 -T 3501
 // keeps the screen at ~3500 K whatever the time of day.
 func (s *Session) SetNightLight(ctx context.Context, on bool, untilHour *int) error {
+	return s.setNightLight(ctx, on, untilHour, nil)
+}
+
+func (s *Session) setNightLight(ctx context.Context, on bool, untilHour *int, end *time.Time) error {
 	if untilHour != nil && (*untilHour < 0 || *untilHour > 23) {
 		return fmt.Errorf("untilHour must be 0 to 23")
 	}
@@ -509,9 +532,15 @@ func (s *Session) SetNightLight(ctx context.Context, on bool, untilHour *int) er
 	args := []string{"--user", "--quiet", "--collect", "--unit=" + nightUnit, "--setenv=WAYLAND_DISPLAY=" + disp}
 	if untilHour != nil {
 		now := s.now()
-		end := time.Date(now.Year(), now.Month(), now.Day(), *untilHour, 0, 0, 0, now.Location())
+		if end == nil {
+			deadline := time.Date(now.Year(), now.Month(), now.Day(), *untilHour, 0, 0, 0, now.Location())
+			if !deadline.After(now) {
+				deadline = deadline.AddDate(0, 0, 1)
+			}
+			end = &deadline
+		}
 		if !end.After(now) {
-			end = end.AddDate(0, 0, 1)
+			return s.saveField("nightLight", nil)
 		}
 		args = append(args, fmt.Sprintf("--property=RuntimeMaxSec=%d", int(end.Sub(now).Seconds())))
 	}
@@ -520,5 +549,9 @@ func (s *Session) SetNightLight(ctx context.Context, on bool, untilHour *int) er
 	if _, err := sys.out(ctx, "systemd-run", args...); err != nil {
 		return err
 	}
-	return s.saveField("nightLight", NightLight{On: true, UntilHour: untilHour})
+	saved := savedNightLight{NightLight: NightLight{On: true, UntilHour: untilHour}}
+	if end != nil {
+		saved.EndTime = end.UTC().Format(time.RFC3339)
+	}
+	return s.saveField("nightLight", saved)
 }
