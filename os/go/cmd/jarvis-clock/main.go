@@ -8,7 +8,6 @@ import (
 	_ "time/tzdata" // works in a sandbox without /usr/share/zoneinfo
 
 	"github.com/mmAbdelhay/jarvis/os/go/internal/clocktools"
-	"github.com/mmAbdelhay/jarvis/os/go/internal/execx"
 	"github.com/mmAbdelhay/jarvis/os/go/internal/official"
 )
 
@@ -16,7 +15,6 @@ var version = "dev"
 
 func main() {
 	deps := clocktools.Deps{
-		Run:   &execx.OSRunner{Env: execx.UserEnv(os.Getenv)},
 		Local: clocktools.LocalZone(os.Getenv, os.Readlink),
 	}
 	official.Serve(clocktools.Manifest, version, clocktools.Tools(deps))

@@ -9,13 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mmAbdelhay/jarvis/os/go/internal/execx"
 	"github.com/mmAbdelhay/jarvis/os/go/internal/mcp"
 )
 
-func deps(run execx.Runner) Deps {
+func deps() Deps {
 	return Deps{
-		Run:         run,
 		Now:         func() time.Time { return time.Date(2026, 10, 9, 8, 0, 0, 0, time.UTC) },
 		Local:       time.UTC,
 		NewID:       func() string { return "abcd1234" },
@@ -67,7 +65,7 @@ func TestToolsMatchContract(t *testing.T) {
 }
 
 func TestNow(t *testing.T) {
-	got, err := call(t, deps(nil), "clock.now", `{"timezone":"Asia/Tokyo"}`)
+	got, err := call(t, deps(), "clock.now", `{"timezone":"Asia/Tokyo"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +73,7 @@ func TestNow(t *testing.T) {
 	if s := asJSON(t, got); s != want {
 		t.Fatalf("got  %s\nwant %s", s, want)
 	}
-	got, _ = call(t, deps(nil), "clock.now", `{}`)
+	got, _ = call(t, deps(), "clock.now", `{}`)
 	if s := asJSON(t, got); !strings.Contains(s, `"timezone":"UTC"`) || !strings.Contains(s, `"local":"2026-10-09T08:00:00Z"`) {
 		t.Fatalf("default zone: %s", s)
 	}
@@ -87,18 +85,16 @@ func TestNowRefusals(t *testing.T) {
 		`{"timezone":"Mars/Olympus"}`:     mcp.CodeNotFound,
 		`{"tz":"UTC"}`:                    mcp.CodeInvalid,
 	} {
-		if _, err := call(t, deps(nil), "clock.now", args); codeOf(err) != want {
+		if _, err := call(t, deps(), "clock.now", args); codeOf(err) != want {
 			t.Errorf("%s: %v, want %s", args, err, want)
 		}
 	}
 }
 
-var timerArgs = []string{"--user", "--quiet", "--collect", "--unit=jarvis-timer-abcd1234", "--on-active=300s",
-	"--timer-property=AccuracySec=1s", "--", "/usr/bin/notify-send", "--app-name=Jarvis", "--", "Jarvis timer", "Tea is ready"}
-
-func TestTimerStartsATransientUserTimer(t *testing.T) {
-	run := (&execx.Fake{}).On(execx.OK(""), "systemd-run", timerArgs...)
-	got, err := call(t, deps(run), "clock.timer", `{"seconds":300,"label":"  Tea is ready "}`)
+func TestTimerReturnsTheValidatedRequest(t *testing.T) {
+	// jarvisd starts the user timer from this result (the sandbox hides the
+	// user manager); the server itself runs nothing.
+	got, err := call(t, deps(), "clock.timer", `{"seconds":300,"label":"  Tea is ready "}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,32 +104,20 @@ func TestTimerStartsATransientUserTimer(t *testing.T) {
 	}
 }
 
-func TestTimerDefaultLabelAndFailures(t *testing.T) {
-	args := append([]string(nil), timerArgs...)
-	args[4] = "--on-active=60s"
-	args[len(args)-1] = text.DefaultLabel
-	run := (&execx.Fake{}).On(execx.OK(""), "systemd-run", args...)
-	if _, err := call(t, deps(run), "clock.timer", `{"seconds":60}`); err != nil {
-		t.Fatalf("default label: %v", err)
+func TestTimerDefaultLabelAndRefusals(t *testing.T) {
+	got, err := call(t, deps(), "clock.timer", `{"seconds":60}`)
+	if err != nil || !strings.Contains(asJSON(t, got), `"label":"`+text.DefaultLabel+`"`) {
+		t.Fatalf("default label: %v %v", got, err)
 	}
 	for _, bad := range []string{`{"seconds":0}`, `{"seconds":86401}`, `{"seconds":5,"label":"\u001b[2J"}`, `{"seconds":5,"label":"a\u202eb"}`, `{"seconds":5,"label":"` + strings.Repeat("x", 101) + `"}`, `{}`} {
-		if _, err := call(t, deps(&execx.Fake{}), "clock.timer", bad); codeOf(err) != mcp.CodeInvalid {
+		if _, err := call(t, deps(), "clock.timer", bad); codeOf(err) != mcp.CodeInvalid {
 			t.Errorf("%s: %v", bad, err)
 		}
-	}
-	busFail := (&execx.Fake{}).On(execx.Exit(1, "Failed to connect to bus: No medium found\n"), "systemd-run", args...)
-	_, err := call(t, deps(busFail), "clock.timer", `{"seconds":60}`)
-	if codeOf(err) != mcp.CodeFailed || !strings.Contains(err.Error(), "Failed to connect to bus") {
-		t.Fatalf("bus failure: %v", err)
-	}
-	gone := (&execx.Fake{}).OnErr(errors.New("systemd-run not found"), "systemd-run", args...)
-	if _, err := call(t, deps(gone), "clock.timer", `{"seconds":60}`); codeOf(err) != mcp.CodeFailed {
-		t.Fatalf("no systemd-run: %v", err)
 	}
 }
 
 func TestTimerUnsupportedWithoutNotifier(t *testing.T) {
-	d := deps(&execx.Fake{})
+	d := deps()
 	d.HasNotifier = func() bool { return false }
 	_, err := call(t, d, "clock.timer", `{"seconds":60}`)
 	if codeOf(err) != mcp.CodeUnsupported {

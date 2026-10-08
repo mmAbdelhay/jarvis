@@ -13,7 +13,9 @@ import {
   ProviderError,
   SAFETY_RULES,
   type SysSnapshot,
+  type TextEmbedder,
 } from "@jarvis/core";
+import { readFileSync } from "node:fs";
 import { createMemorySecretStore, providerAccount } from "@jarvis/platform/model";
 import { describe, expect, it } from "vitest";
 import { createOsAgent, OsAgentError, type OsAgentDeps } from "./agent-service.js";
@@ -1156,7 +1158,7 @@ describe("registry servers in jarvisd (contracts §3, §7)", () => {
       tool === "registry.list"
         ? {
             isError: false,
-            structuredContent: { results: [entry] },
+            structuredContent: { installed: [], available: [entry] },
             text: "{}",
           }
         : { isError: false, structuredContent: {}, text: "{}" };
@@ -1202,6 +1204,93 @@ describe("registry servers in jarvisd (contracts §3, §7)", () => {
       permissions: { network: true, paths: ["~/Old"] },
       tools: [],
     });
+  });
+});
+
+describe("registry:list against jarvis-pkg's real output (contracts §7 #8)", () => {
+  it("fills available and installed from the Go registry.list golden", async () => {
+    const golden: unknown = JSON.parse(
+      readFileSync(
+        new URL(
+          "../../../../../os/go/internal/pkgtools/testdata/registry-list.json",
+          import.meta.url,
+        ),
+        "utf8",
+      ),
+    );
+    const pkg = session(
+      "jarvis-pkg",
+      [
+        {
+          name: "registry.list",
+          description: "List the registry",
+          inputSchema: { type: "object", properties: {} },
+          meta: { jarvis: { risk: "safe", hidden: true } },
+        },
+      ],
+      [],
+    );
+    pkg.callTool = async () => ({ isError: false, structuredContent: golden, text: "{}" });
+    const h = harness({
+      connectMcp: async () => [pkg],
+      registryServers: {
+        load: async () => ({
+          ...EMPTY_REGISTRY,
+          installed: [
+            {
+              id: "old-py",
+              version: "0.1",
+              tier: "community",
+              runtime: "python",
+              command: [],
+              permissions: { network: true, paths: ["~/Old"] },
+              writablePaths: [],
+              tools: [],
+            },
+          ],
+        }),
+      },
+    });
+    await h.agent.start();
+    const listed = await h.agent.registryList();
+    expect(listed.available.map((e) => e.id)).toEqual(["weather", "jarvis-clock"]);
+    expect(listed.installed.map((e) => [e.id, e.name])).toEqual([
+      ["old-py", "old-py"],
+      ["notes", "Notes"],
+    ]);
+  });
+});
+
+describe("read-only tool profile (contracts §7 #14)", () => {
+  it("offers and runs only safe tools: no card, no confirm tool reaches the model", async () => {
+    const requests: string[][] = [];
+    const provider: ModelProvider = {
+      async *chat(request) {
+        requests.push(request.tools.map((t) => t.name));
+        yield { type: "text", delta: "ok" };
+        yield { type: "done", usage: { inputTokens: 0, outputTokens: 0 } };
+      },
+      probe: async () => ({ ok: true, supportsTools: true, models: [] }),
+      listModels: async () => [],
+      reachable: async () => ({ ok: true }),
+    };
+    const h = harness({ toolProfile: "readonly", makeProvider: () => provider });
+    h.files.set(
+      YAML,
+      "os:\n  providers:\n    - { id: local, kind: ollama, baseUrl: http://127.0.0.1:11434, model: m }\n",
+    );
+    await h.agent.start();
+    h.agent.prompt("install hello");
+    await h.until(() => h.events().some((e) => e.type === "turn-end"));
+    expect(requests[0]).toContain("net_status");
+    expect(requests[0]).not.toContain("pkg_install");
+
+    const fake = harness({ toolProfile: "readonly", fakeScript: installScript });
+    await fake.agent.start();
+    fake.agent.prompt("please install hello");
+    await fake.until(() => fake.events().some((e) => e.type === "turn-end"));
+    expect(fake.events().some((e) => e.type === "card")).toBe(false);
+    expect(fake.toolCalls).not.toContain("pkg.install");
   });
 });
 
@@ -1353,6 +1442,49 @@ describe("memory and tool search in jarvisd (design §3.8, §3.9)", () => {
     expect(requests).toHaveLength(2);
     expect(requests[1]?.system.endsWith(SAFETY_RULES)).toBe(true);
     expect(memory.rows.map((r) => r.text)).toEqual(["talked"]);
+  });
+
+  it("never gives memory text to the cached tool-search embedder (design §3.9)", async () => {
+    const toolTexts: string[] = [];
+    const memoryTexts: string[] = [];
+    const recorder = (into: string[]): TextEmbedder => ({
+      model: "m",
+      embed: async (texts) => {
+        into.push(...texts);
+        return texts.map(() => new Float32Array([1, 0]));
+      },
+    });
+    const memory = memoryOpener();
+    const h = harness({
+      makeProvider: () => recording([]),
+      memory,
+      embedder: recorder(toolTexts),
+      memoryEmbedder: recorder(memoryTexts),
+    });
+    h.files.set(YAML, LOCAL_YAML);
+    await h.agent.start();
+    h.agent.prompt("remember my bank pin hint");
+    await h.until(() => h.events().some((e) => e.type === "turn-end"));
+    await h.agent.shutdown();
+    expect(memory.rows.map((r) => r.text)).toEqual(["talked"]);
+    expect(memoryTexts).toContain("talked");
+    expect(toolTexts).not.toContain("talked");
+
+    // Without a memory embedder, memory never borrows the tool one.
+    const shared: string[] = [];
+    const noMemoryEmbedder = harness({
+      makeProvider: () => recording([]),
+      memory: memoryOpener(),
+      embedder: recorder(shared),
+    });
+    noMemoryEmbedder.files.set(YAML, LOCAL_YAML);
+    await noMemoryEmbedder.agent.start();
+    noMemoryEmbedder.agent.prompt("hello");
+    await noMemoryEmbedder.until(() =>
+      noMemoryEmbedder.events().some((e) => e.type === "turn-end"),
+    );
+    await noMemoryEmbedder.agent.shutdown();
+    expect(shared).not.toContain("talked");
   });
 
   it("keeps memory off under the fake provider", async () => {

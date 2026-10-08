@@ -171,6 +171,10 @@ export async function loadToolRegistry(
     trusted: ReadonlySet<string>;
     /** Registry servers' tiers (registry-servers.ts); host names win. */
     trustOf?(server: string): ServerTrust;
+    /** M2.5 contracts §7 #14 (JARVIS_TOOL_PROFILE=readonly): register only
+     *  tools whose effective risk is safe; nothing else is offered, carded or
+     *  callable. */
+    safeOnly?: boolean;
     log(line: string): void;
   },
 ): Promise<ToolRegistry> {
@@ -204,6 +208,7 @@ export async function loadToolRegistry(
         continue;
       }
       const parsed = parseJarvisMeta(tool.meta, trust, tool.name);
+      if (options.safeOnly === true && parsed.risk !== "safe") continue;
       const modelName = toModelName(tool.name);
       if (byName.has(tool.name) || byModelName.has(modelName)) {
         options.log(

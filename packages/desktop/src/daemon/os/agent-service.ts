@@ -43,7 +43,7 @@ import {
   PROVIDER_KINDS,
   parseNetStatus,
   parseFailedUnitNames,
-  parseRegistrySearch,
+  parseRegistryList,
   type RegistryEntry,
   type RegistryListResult,
   parseSysHealth,
@@ -109,8 +109,16 @@ export type OsAgentDeps = {
     append(entry: AuditEntry): Promise<void>;
     list(query: AuditQuery): Promise<AuditEntry[]>;
   };
-  /** Local embeddings (loopback Ollama) for tool search and memory; absent → keywords. */
+  /** Local embeddings (loopback Ollama) for tool search; absent → keywords.
+   *  May cache tool descriptions in clear (~/.cache/jarvis/tool-index.sqlite). */
   embedder?: TextEmbedder | null;
+  /** Embeddings for memory: MUST be built without a cache, so memory text and
+   *  its vectors never reach a file in clear (design §3.9). Never falls back
+   *  to `embedder`; absent → memory recall by keywords. */
+  memoryEmbedder?: TextEmbedder | null;
+  /** M2.5 contracts §7 #14: "readonly" (JARVIS_TOOL_PROFILE=readonly, the
+   *  Docker image) offers only effectively-safe tools. Default "full". */
+  toolProfile?: "full" | "readonly";
   /** The encrypted memory store (memory-backend.ts); absent → memory off. */
   memory?: MemoryOpener;
   now(): number;
@@ -191,6 +199,7 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
     return sizes.length === 0 ? DEFAULT_CONTEXT_TOKENS : Math.min(...sizes);
   }
   const embedder = deps.embedder ?? null;
+  const safeOnly = deps.toolProfile === "readonly";
   const memoryOn = () => brain.memoryEnabled && deps.fakeScript === undefined;
   const memory = createMemoryService({
     enabled: memoryOn,
@@ -210,7 +219,7 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
       }
       return text;
     },
-    embedder,
+    embedder: deps.memoryEmbedder ?? null,
     redact: redactSecrets,
     now: deps.now,
     log: deps.log,
@@ -276,6 +285,7 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
       registry = await loadToolRegistry([...hostSessions, ...addOns.sessions], {
         trusted: new Set(TRUSTED_MCP_SERVERS),
         trustOf: (name) => addOns.tiers.get(name) ?? "unknown",
+        safeOnly,
         log: deps.log,
       });
       return registry;
@@ -666,10 +676,16 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
 
     async registryList() {
       const tools = await ensureRegistry();
+      // jarvis-pkg's registry.list is {installed, available} (Go registryList).
       let available: RegistryEntry[] = [];
+      let indexedInstalled: RegistryEntry[] = [];
       if (tools.get("registry.list") !== undefined) {
         const found = await tools.call("registry.list", {});
-        if (found.ok) available = parseRegistrySearch(found.data);
+        if (found.ok) {
+          const listed = parseRegistryList(found.data);
+          available = listed.available;
+          indexedInstalled = listed.installed;
+        }
       }
       const stub = (reg: Registration): RegistryEntry => ({
         id: reg.id,
@@ -684,11 +700,15 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
         },
         tools: reg.tools.map((tool) => ({ ...tool })),
       });
+      const same = (reg: { id: string; version: string }) => (entry: RegistryEntry) =>
+        entry.id === reg.id && entry.version === reg.version;
       const installed = addOns.installed.map(
-        (reg) =>
-          available.find((entry) => entry.id === reg.id && entry.version === reg.version) ??
-          stub(reg),
+        (reg) => indexedInstalled.find(same(reg)) ?? available.find(same(reg)) ?? stub(reg),
       );
+      // Installed per jarvis-pkg but not (yet) loaded by jarvisd.
+      for (const entry of indexedInstalled) {
+        if (!installed.some((known) => known.id === entry.id)) installed.push(entry);
+      }
       return { installed, available };
     },
 

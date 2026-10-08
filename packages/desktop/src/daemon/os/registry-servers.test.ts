@@ -1,15 +1,37 @@
+import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { gzipSync } from "node:zlib";
 import type { McpSession, McpTool, RegistryEntry } from "@jarvis/core";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   bindToIndex,
   BUNDLED_NODE,
   capSession,
   createRegistryServers,
   expandDeclaredPath,
+  maskedHomeEntries,
+  nodeVerifyUnpacked,
   parseRegistration,
+  parseTimerRequest,
+  PROBE_SCRIPT,
   sandboxProbe,
   resolveRuntimeDir,
   sandboxArgv,
+  tarListing,
+  type TimerRequest,
+  timerArgv,
+  withClockTimer,
 } from "./registry-servers.js";
 
 const HOME = "/home/ali";
@@ -62,12 +84,40 @@ describe("parseRegistration (contracts §3, §7)", () => {
           ...files,
           id: "py",
           tier: "community",
-          command: ["/usr/bin/python3", `${dir("py", "0.1")}/server.py`],
+          // What jarvis-pkg's registry.Command writes (os/go/internal/registry/store.go).
+          command: ["/usr/bin/python3", "-I", `${dir("py", "0.1")}/server.py`],
           version: "0.1",
         },
         "py",
       ),
     ).toMatchObject({ ok: true, value: { runtime: "python" } });
+  });
+
+  it("accepts the python registration jarvis-pkg really writes (Go golden)", () => {
+    const written: unknown = JSON.parse(
+      readFileSync(
+        new URL(
+          "../../../../../os/go/internal/pkgtools/testdata/registration-python.json",
+          import.meta.url,
+        ),
+        "utf8",
+      ),
+    );
+    expect(parse(written, "old-py")).toMatchObject({
+      ok: true,
+      value: {
+        runtime: "python",
+        command: ["/usr/bin/python3", "-I", `${dir("old-py", "0.1")}/server.py`],
+      },
+    });
+  });
+
+  it("refuses python without -I (isolated mode) and any other interpreter flag", () => {
+    const py = (command: string[]) =>
+      parse({ ...files, id: "py", version: "0.1", command }, "py").ok;
+    expect(py(["/usr/bin/python3", `${dir("py", "0.1")}/server.py`])).toBe(false);
+    expect(py(["/usr/bin/python3", "-c", `${dir("py", "0.1")}/server.py`])).toBe(false);
+    expect(py(["/usr/bin/python3", "-I", "-c", `${dir("py", "0.1")}/server.py`])).toBe(false);
   });
 
   it("never believes the file's tier: it is community until the index says otherwise", () => {
@@ -186,9 +236,13 @@ describe("sandboxArgv (contracts §7 #1)", () => {
       "-p",
       `ReadWritePaths=${HOME}/Documents/Notes`,
       "-p",
-      "InaccessiblePaths=-/run/user/1000/bus",
+      "InaccessiblePaths=-/run/user/1000",
       "-p",
       "InaccessiblePaths=-/run/dbus/system_bus_socket",
+      "-p",
+      "InaccessiblePaths=-/tmp/.X11-unix",
+      "-p",
+      "InaccessiblePaths=-/tmp/.ICE-unix",
       "-p",
       `InaccessiblePaths=-${HOME}/.ssh`,
       "-p",
@@ -245,6 +299,235 @@ describe("sandboxArgv (contracts §7 #1)", () => {
     expect(SANDBOX_PROBE).toContain("NoNewPrivileges=yes");
     expect(SANDBOX_PROBE).toContain("PrivateNetwork=yes");
   });
+
+  it("hides the whole runtime dir (user manager, agents, wayland) and every masked home entry", () => {
+    const masked = [`${HOME}/.aws`, `${HOME}/.config`, `${HOME}/.my dir`];
+    const parsed = parseRegistration(files, { home: HOME, fileId: "jarvis-files" });
+    if (!parsed.ok) throw new Error(parsed.error);
+    const argv = sandboxArgv(parsed.value, HOME, RUN, masked);
+    expect(argv).toContain(`InaccessiblePaths=-${RUN}`);
+    expect(argv.some((a) => a.startsWith(`InaccessiblePaths=-${RUN}/`))).toBe(false);
+    expect(argv).toContain(`InaccessiblePaths=-${HOME}/.aws`);
+    expect(argv).toContain(`InaccessiblePaths=-${HOME}/.config`);
+    expect(argv).toContain(`InaccessiblePaths="-${HOME}/.my dir"`);
+    const probe = sandboxProbe(HOME, RUN, masked);
+    expect(probe).toContain(`InaccessiblePaths=-${HOME}/.aws`);
+    // The probe checks the runtime dir and every masked path, passed as
+    // arguments (never spliced into the script).
+    expect(probe.slice(probe.indexOf(PROBE_SCRIPT) + 1)).toEqual(["sh", RUN, ...masked]);
+    expect(PROBE_SCRIPT).toContain('test ! -e "$rt/systemd/private"');
+  });
+
+  it("masks every hidden home entry except the way down to the installed servers", async () => {
+    const tree: Record<string, string[]> = {
+      [HOME]: ["Documents", ".aws", ".bashrc", ".local", ".mozilla", ".netrc", ".config", "x\ny"],
+      [`${HOME}/.local`]: ["bin", "share", "state"],
+      [`${HOME}/.local/share`]: ["jarvis", "keyrings", "Trash"],
+      [`${HOME}/.local/share/jarvis`]: ["mcp", "memory.sqlite"],
+      [`${HOME}/.local/share/jarvis/mcp`]: ["jarvis-files"],
+    };
+    const listDir = async (path: string) => {
+      const names = tree[path];
+      if (names === undefined) throw new Error("ENOENT");
+      return names;
+    };
+    expect(await maskedHomeEntries(HOME, listDir)).toEqual([
+      `${HOME}/.aws`,
+      `${HOME}/.bashrc`,
+      `${HOME}/.config`,
+      `${HOME}/.mozilla`,
+      `${HOME}/.netrc`,
+      `${HOME}/.local/bin`,
+      `${HOME}/.local/state`,
+      `${HOME}/.local/share/Trash`,
+      `${HOME}/.local/share/keyrings`,
+      `${HOME}/.local/share/jarvis/memory.sqlite`,
+    ]);
+    await expect(
+      maskedHomeEntries(HOME, async () => {
+        throw new Error("EACCES");
+      }),
+    ).resolves.toBeUndefined();
+  });
+});
+
+describe("clock.timer is started by jarvisd, not by the sandboxed server", () => {
+  const ok = { timerId: "jarvis-timer-abcd1234", seconds: 300, label: "Tea", firesAt: "x" };
+
+  it("parses only a well-formed request", () => {
+    expect(parseTimerRequest(ok)).toEqual({
+      unit: "jarvis-timer-abcd1234",
+      seconds: 300,
+      label: "Tea",
+    });
+    for (const bad of [
+      { ...ok, timerId: "evil.service" },
+      { ...ok, seconds: 0 },
+      { ...ok, seconds: 86_401 },
+      { ...ok, seconds: 1.5 },
+      { ...ok, label: "" },
+      { ...ok, label: "a\u202eb" },
+      { ...ok, label: "\u001b[2J" },
+      { ...ok, label: "x".repeat(101) },
+      null,
+    ]) {
+      expect(parseTimerRequest(bad)).toBeUndefined();
+    }
+    expect(timerArgv({ unit: "jarvis-timer-abcd1234", seconds: 300, label: "-rf" })).toEqual([
+      "systemd-run",
+      "--user",
+      "--quiet",
+      "--collect",
+      "--unit=jarvis-timer-abcd1234",
+      "--on-active=300s",
+      "--timer-property=AccuracySec=1s",
+      "--",
+      "/usr/bin/notify-send",
+      "--app-name=Jarvis",
+      "--",
+      "Jarvis timer",
+      "-rf",
+    ]);
+  });
+
+  it("starts the timer after a successful clock.timer and reports a failed start", async () => {
+    const started: TimerRequest[] = [];
+    const inner: McpSession = {
+      name: "jarvis-clock",
+      alive: true,
+      listTools: async () => [],
+      callTool: async (name) =>
+        name === "clock.timer"
+          ? { isError: false, structuredContent: ok, text: "{}" }
+          : { isError: false, structuredContent: { utc: "now" }, text: "{}" },
+      close: () => {},
+    };
+    const wrapped = withClockTimer(inner, async (timer) => {
+      started.push(timer);
+    });
+    await expect(wrapped.callTool("clock.timer", {}, { timeoutMs: 1 })).resolves.toMatchObject({
+      isError: false,
+    });
+    await wrapped.callTool("clock.now", {}, { timeoutMs: 1 });
+    expect(started).toEqual([{ unit: "jarvis-timer-abcd1234", seconds: 300, label: "Tea" }]);
+    const failing = withClockTimer(inner, async () => {
+      throw new Error("Failed to connect to bus");
+    });
+    await expect(failing.callTool("clock.timer", {}, { timeoutMs: 1 })).resolves.toMatchObject({
+      isError: true,
+      text: expect.stringContaining("Failed to connect to bus"),
+    });
+  });
+});
+
+/** A minimal ustar writer (what jarvis-pkg's Pack produces). */
+function ustar(entries: { name: string; data?: string; dir?: boolean; type?: string }[]): Buffer {
+  const blocks: Buffer[] = [];
+  for (const entry of entries) {
+    const body = Buffer.from(entry.data ?? "");
+    const header = Buffer.alloc(512);
+    header.write(entry.name, 0, 100, "utf8");
+    header.write("0000644\0", 100);
+    header.write("0000000\0", 108);
+    header.write("0000000\0", 116);
+    header.write(`${body.length.toString(8).padStart(11, "0")}\0`, 124);
+    header.write("00000000000\0", 136);
+    header.write("        ", 148);
+    header.write(entry.type ?? (entry.dir === true ? "5" : "0"), 156);
+    header.write("ustar\0", 257);
+    header.write("00", 263);
+    let sum = 0;
+    for (const byte of header) sum += byte;
+    header.write(`${sum.toString(8).padStart(6, "0")}\0 `, 148);
+    blocks.push(header, body, Buffer.alloc((512 - (body.length % 512)) % 512));
+  }
+  blocks.push(Buffer.alloc(1024));
+  return Buffer.concat(blocks);
+}
+
+describe("installed artifact verification (contract gap 10)", () => {
+  const temps: string[] = [];
+  afterEach(() => {
+    for (const t of temps.splice(0)) rmSync(t, { recursive: true, force: true });
+  });
+  const sha = (text: string) => createHash("sha256").update(text).digest("hex");
+
+  it("lists a tarball's files with their hashes and refuses links and escapes", () => {
+    const listing = tarListing(
+      ustar([
+        { name: "./", dir: true },
+        { name: "server.js", data: "a" },
+        { name: "lib/x.js", data: "b" },
+      ]),
+    );
+    expect([...listing.entries()]).toEqual([
+      ["server.js", { kind: "file", sha256: sha("a") }],
+      ["lib/x.js", { kind: "file", sha256: sha("b") }],
+      ["lib", { kind: "dir" }],
+    ]);
+    expect(() => tarListing(ustar([{ name: "../x", data: "a" }]))).toThrow(/unsafe/);
+    expect(() => tarListing(ustar([{ name: "link", type: "2" }]))).toThrow(/not a file/);
+  });
+
+  function installed(): { tarball: string; dir: string } {
+    const root = mkdtempSync(join(tmpdir(), "jarvis-verify-"));
+    temps.push(root);
+    const tarball = join(root, "1.0.tar.gz");
+    writeFileSync(
+      tarball,
+      gzipSync(
+        ustar([
+          { name: "server.py", data: "print(1)" },
+          { name: "pkg/util.py", data: "x=1" },
+        ]),
+      ),
+    );
+    const dir = join(root, "1.0");
+    mkdirSync(join(dir, "pkg"), { recursive: true });
+    writeFileSync(join(dir, "server.py"), "print(1)");
+    writeFileSync(join(dir, "pkg", "util.py"), "x=1");
+    return { tarball, dir };
+  }
+
+  it("accepts an untouched install and refuses changed, extra, missing or linked files", async () => {
+    const good = installed();
+    await expect(nodeVerifyUnpacked(good.tarball, good.dir)).resolves.toBeUndefined();
+
+    const changed = installed();
+    writeFileSync(join(changed.dir, "pkg", "util.py"), "import os");
+    await expect(nodeVerifyUnpacked(changed.tarball, changed.dir)).rejects.toThrow(/changed/);
+
+    const extra = installed();
+    writeFileSync(join(extra.dir, "pkg", "evil.py"), "x");
+    await expect(nodeVerifyUnpacked(extra.tarball, extra.dir)).rejects.toThrow(/not part/);
+
+    const missing = installed();
+    rmSync(join(missing.dir, "pkg", "util.py"));
+    await expect(nodeVerifyUnpacked(missing.tarball, missing.dir)).rejects.toThrow(/missing/);
+
+    const linked = installed();
+    rmSync(join(linked.dir, "server.py"));
+    symlinkSync("/etc/passwd", join(linked.dir, "server.py"));
+    await expect(nodeVerifyUnpacked(linked.tarball, linked.dir)).rejects.toThrow(/regular file/);
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "reads a tarball made by the system tar (pax/ustar) the same way",
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), "jarvis-systar-"));
+      temps.push(root);
+      const src = join(root, "src");
+      mkdirSync(join(src, "lib"), { recursive: true });
+      writeFileSync(join(src, "server"), "bin");
+      chmodSync(join(src, "server"), 0o755);
+      writeFileSync(join(src, "lib", "a.txt"), "a");
+      const tarball = join(root, "a.tar.gz");
+      execFileSync("tar", ["-czf", tarball, "-C", src, "."], {
+        env: { ...process.env, COPYFILE_DISABLE: "1" },
+      });
+      await expect(nodeVerifyUnpacked(tarball, src)).resolves.toBeUndefined();
+    },
+  );
 });
 
 const tool = (name: string, risk: unknown): McpTool => ({
@@ -300,8 +583,9 @@ describe("createRegistryServers", () => {
   function setup(
     fileMap: Record<string, string>,
     probeCode: number,
-    opts: { hash?: string; index?: string } = {},
+    opts: { hash?: string; index?: string; tampered?: boolean } = {},
   ) {
+    const verified: [string, string][] = [];
     const connects: { name: string; argv: readonly string[] }[] = [];
     const probes: (readonly string[])[] = [];
     const logs: string[] = [];
@@ -312,7 +596,12 @@ describe("createRegistryServers", () => {
       dir: `${HOME}/.config/jarvis/mcp.d`,
       indexPath: INDEX_PATH,
       now: () => NOW,
-      listDir: async () => Object.keys(fileMap),
+      listDir: async (path) =>
+        path === HOME
+          ? [".aws", "Documents"]
+          : path === `${HOME}/.config/jarvis/mcp.d`
+            ? Object.keys(fileMap)
+            : [],
       readFile: async (path) => {
         if (path === INDEX_PATH) {
           if (opts.index === "") throw new Error("ENOENT");
@@ -324,6 +613,10 @@ describe("createRegistryServers", () => {
         hashed.push(path);
         return opts.hash ?? "a".repeat(64);
       },
+      verifyUnpacked: async (tarball, installed) => {
+        verified.push([tarball, installed]);
+        if (opts.tampered === true) throw new Error("server.py was changed");
+      },
       runProbe: async (argv) => {
         probes.push(argv);
         return probeCode;
@@ -334,7 +627,7 @@ describe("createRegistryServers", () => {
       },
       log: (line) => logs.push(line),
     });
-    return { registry, connects, probes, logs, hashed };
+    return { registry, connects, probes, logs, hashed, verified };
   }
   const filesJson = { "jarvis-files.json": JSON.stringify(files) };
 
@@ -346,12 +639,12 @@ describe("createRegistryServers", () => {
     expect(first.sessions).toEqual([]);
     expect(first.installed.map((r) => r.id)).toEqual(["jarvis-files"]);
     expect(connects).toEqual([]);
-    expect(probes[0]).toEqual(SANDBOX_PROBE);
+    expect(probes[0]).toEqual(sandboxProbe(HOME, RUN, [`${HOME}/.aws`]));
     expect(logs.filter((l) => l.includes("sandbox"))).toHaveLength(1);
   });
 
   it("launches each valid, verified registration sandboxed and reports the index's tier", async () => {
-    const { registry, connects, logs, hashed } = setup(
+    const { registry, connects, logs, hashed, verified } = setup(
       {
         ...filesJson,
         "broken.json": "{",
@@ -364,7 +657,13 @@ describe("createRegistryServers", () => {
     expect(loaded.sandbox).toBe("ok");
     expect(connects.map((c) => c.name)).toEqual(["jarvis-files"]);
     expect(connects[0]?.argv.slice(0, 3)).toEqual(["systemd-run", "--user", "--pipe"]);
-    expect(hashed).toEqual([`${dir("jarvis-files", "1.0.0")}/server`]);
+    // The index sha256 is the .tar.gz's (contracts §3, §7 #7): jarvisd hashes
+    // the verified tarball jarvis-pkg kept, then the unpacked folder against it.
+    expect(hashed).toEqual([`${HOME}/.local/share/jarvis/mcp/jarvis-files/1.0.0.tar.gz`]);
+    expect(verified).toEqual([
+      [`${HOME}/.local/share/jarvis/mcp/jarvis-files/1.0.0.tar.gz`, dir("jarvis-files", "1.0.0")],
+    ]);
+    expect(connects[0]?.argv).toContain(`InaccessiblePaths=-${HOME}/.aws`);
     expect(loaded.tiers.get("jarvis-files")).toBe("official");
     expect(logs.join("\n")).toContain("broken.json");
     expect(logs.join("\n")).toContain("evil.json");
@@ -408,6 +707,13 @@ describe("createRegistryServers", () => {
     expect(loaded.sessions).toEqual([]);
     expect(loaded.installed.map((r) => r.id)).toEqual(["jarvis-files"]);
     expect(logs.join("\n")).toContain("does not match the verified index");
+  });
+
+  it("does not start a server whose unpacked files differ from the verified tarball", async () => {
+    const { registry, connects, logs } = setup(filesJson, 0, { tampered: true });
+    await registry.load();
+    expect(connects).toEqual([]);
+    expect(logs.join("\n")).toContain("installed files do not match");
   });
 
   it("starts nothing without a usable (present, unexpired) verified index", async () => {

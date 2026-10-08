@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -349,4 +350,70 @@ func TestRegistryListSplitsInstalledAndAvailable(t *testing.T) {
 	if _, err := call(t, d, "registry.list", `{"x":1}`); code(err) != mcp.CodeInvalid {
 		t.Fatalf("extra arg: %v", err)
 	}
+}
+
+// goldenRegistryHome stands in for the temp $HOME in the shared fixtures.
+const goldenRegistryHome = "/home/ali"
+
+var goldenSHA = regexp.MustCompile(`"sha256": "[0-9a-f]{64}"`)
+
+// golden compares v (indented JSON, temp paths and test-server URLs
+// normalised) with testdata/<name>; UPDATE_GOLDEN=1 rewrites it. jarvisd's
+// TS tests read the same files (agent-service.test.ts,
+// registry-servers.test.ts), so the Go and TS sides cannot drift apart.
+func golden(t *testing.T, name string, v any, replace ...string) {
+	t.Helper()
+	b, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := strings.NewReplacer(replace...).Replace(string(b))
+	got = goldenSHA.ReplaceAllString(got, `"sha256": "`+strings.Repeat("0", 64)+`"`) + "\n"
+	path := filepath.Join("testdata", name)
+	if os.Getenv("UPDATE_GOLDEN") == "1" {
+		if err := os.MkdirAll("testdata", 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(got), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(want) != got {
+		t.Fatalf("%s differs (UPDATE_GOLDEN=1 to rewrite):\n%s", name, got)
+	}
+}
+
+// TestRegistryListContract pins the registry.list result and a python
+// registration that jarvisd parses (contracts §3, §7 #8).
+func TestRegistryListContract(t *testing.T) {
+	fr := newFakeRegistry(t)
+	s := registrytest.NewSigner(t)
+	threeServers(t, fr, s)
+	d, home := registryDeps(t, fr, s)
+	if _, err := call(t, d, "registry.install", `{"id":"notes","version":"2.0.0"}`); err != nil {
+		t.Fatal(err)
+	}
+	// An installed server the index no longer lists (rebuilt from its registration).
+	st := registry.Store{Home: home}
+	old := registry.Registration{ID: "old-py", Version: "0.1", Tier: registry.TierCommunity,
+		Command:     registry.Command(registry.RuntimePython, st.ServerDir("old-py", "0.1")),
+		Permissions: registry.Permissions{Network: true, Paths: []string{"~/Old"}},
+		Tools:       []registry.ToolDecl{{Name: "old.run", Risk: "confirm"}}}
+	b, err := json.MarshalIndent(old, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(st.RegistrationPath("old-py"), b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := call(t, d, "registry.list", `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	golden(t, "registry-list.json", got, fr.srv.URL, "https://registry.test", home, goldenRegistryHome)
+	golden(t, "registration-python.json", old, home, goldenRegistryHome)
 }

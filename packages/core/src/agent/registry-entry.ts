@@ -1,7 +1,12 @@
 // RegistryEntry (contracts M2.5 §3) from jarvis-pkg's registry.list result or
 // the verified index cache, field by field: it is index data from the
 // network, signed but still parsed like any untrusted input. Pure.
-import type { RegistryEntry, RegistryRuntime, RegistryTier } from "./contract.js";
+import type {
+  RegistryEntry,
+  RegistryListResult,
+  RegistryRuntime,
+  RegistryTier,
+} from "./contract.js";
 import { isRecord } from "./types.js";
 
 const TIERS: ReadonlySet<string> = new Set(["official", "reviewed", "community"]);
@@ -58,4 +63,21 @@ export function parseRegistrySearch(data: unknown): RegistryEntry[] {
     const entry = parseRegistryEntry(raw);
     return entry === undefined ? [] : [entry];
   });
+}
+
+const entries = (list: unknown): RegistryEntry[] =>
+  Array.isArray(list)
+    ? list.flatMap((raw) => {
+        const entry = parseRegistryEntry(raw);
+        return entry === undefined ? [] : [entry];
+      })
+    : [];
+
+/** jarvis-pkg's hidden registry.list (contracts §7 #8, Go registryList):
+ *  `{installed: Entry[], available: Entry[]}`. An installed server the index
+ *  no longer lists comes back rebuilt with an empty artifact and is dropped
+ *  here (jarvisd shows its own registration instead). */
+export function parseRegistryList(data: unknown): RegistryListResult {
+  if (!isRecord(data)) return { installed: [], available: [] };
+  return { installed: entries(data["installed"]), available: entries(data["available"]) };
 }

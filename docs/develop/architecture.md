@@ -295,9 +295,13 @@ adapters, MCP stdio client, keyring, audit log) and `@jarvis/platform/store`
 (`node:sqlite` embedding cache, AES-GCM sealed memory store, loopback-only
 Ollama embedder). Providers are an ordered list in `jarvis.yaml`'s `os:`
 section, keys by id in the keyring. Add-on MCP servers registered in
-`~/.config/jarvis/mcp.d/` start through `systemd-run --user --scope` only when
-a sandbox probe proves the sandbox applies (`registry-servers.ts`); their
-tools' risk follows their tier. Its `sys:snapshot` push also carries pending
+`~/.config/jarvis/mcp.d/` start as transient `systemd-run --user` services
+only when a sandbox probe proves the sandbox applies and their kept artifact
+and unpacked files still match the signed index (`registry-servers.ts`); the
+runtime dir and hidden home entries are out of their reach, and their tools'
+risk follows their tier. With `JARVIS_TOOL_PROFILE=readonly` (the Docker
+image) jarvisd offers only safe tools and reads provider keys from
+`JARVIS_PROVIDER_KEY_<ID>`. Its `sys:snapshot` push also carries pending
 updates (`updates-monitor.ts`: `updates.list` 2 min after start, then daily)
 and the local model's download state (`model-state-reader.ts`,
 `/var/lib/jarvis/model-state.json`). It runs on Linux only, is built by

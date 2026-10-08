@@ -47,3 +47,39 @@ export async function hasProviderKey(
     return false;
   }
 }
+
+/** M2.5 contracts §7 #14: in the read-only profile (Docker) keys may come
+ *  from env JARVIS_PROVIDER_KEY_<ID> (id upper-cased, "-" → "_"). */
+export const ENV_PROVIDER_KEY_PREFIX = "JARVIS_PROVIDER_KEY_";
+
+export function envProviderKeyName(id: string): string {
+  return `${ENV_PROVIDER_KEY_PREFIX}${id.toUpperCase().replace(/-/g, "_")}`;
+}
+
+/** Removes every JARVIS_PROVIDER_KEY_* from `env` (so no child process or
+ *  log line ever sees one) and returns them by variable name. */
+export function takeEnvProviderKeys(
+  env: Record<string, string | undefined>,
+): ReadonlyMap<string, string> {
+  const keys = new Map<string, string>();
+  for (const name of Object.keys(env)) {
+    if (!name.startsWith(ENV_PROVIDER_KEY_PREFIX)) continue;
+    const value = env[name];
+    if (value !== undefined && value !== "") keys.set(name, value);
+    delete env[name];
+  }
+  return keys;
+}
+
+/** A read-only key store over the env keys: nothing is written anywhere. */
+export function createEnvKeyStore(keys: ReadonlyMap<string, string>): SecretStore {
+  return {
+    get: async (id) => keys.get(envProviderKeyName(id)),
+    set: async (id) => {
+      throw new Error(
+        `Keys are read from ${envProviderKeyName(id)} in the read-only profile; set that variable instead`,
+      );
+    },
+    remove: async () => {},
+  };
+}

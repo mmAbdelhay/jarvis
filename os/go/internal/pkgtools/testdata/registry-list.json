@@ -1,0 +1,102 @@
+{
+  "available": [
+    {
+      "id": "weather",
+      "name": "Weather",
+      "description": "Forecasts from met.no.",
+      "tier": "community",
+      "version": "1.2.0",
+      "artifact": {
+        "url": "https://registry.test/artifacts/weather-1.2.0.tar.gz",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "runtime": "go-static"
+      },
+      "permissions": {
+        "network": true,
+        "paths": [
+          "~/Documents/Weather"
+        ]
+      },
+      "tools": [
+        {
+          "name": "weather.today",
+          "risk": "safe"
+        }
+      ]
+    },
+    {
+      "id": "jarvis-clock",
+      "name": "Clock",
+      "description": "Current time in any time zone, and desktop timers.",
+      "tier": "official",
+      "version": "0.3.0",
+      "artifact": {
+        "url": "https://registry.test/artifacts/jarvis-clock-0.3.0.tar.gz",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "runtime": "go-static"
+      },
+      "permissions": {
+        "network": false,
+        "paths": []
+      },
+      "tools": [
+        {
+          "name": "clock.now",
+          "risk": "safe"
+        },
+        {
+          "name": "clock.timer",
+          "risk": "safe"
+        }
+      ]
+    }
+  ],
+  "installed": [
+    {
+      "id": "notes",
+      "name": "Notes",
+      "description": "Keep short notes.",
+      "tier": "reviewed",
+      "version": "2.0.0",
+      "artifact": {
+        "url": "https://registry.test/artifacts/notes-2.0.0.tar.gz",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "runtime": "go-static"
+      },
+      "permissions": {
+        "network": false,
+        "paths": []
+      },
+      "tools": [
+        {
+          "name": "notes.add",
+          "risk": "safe"
+        }
+      ]
+    },
+    {
+      "id": "old-py",
+      "name": "old-py",
+      "description": "",
+      "tier": "community",
+      "version": "0.1",
+      "artifact": {
+        "url": "",
+        "sha256": "",
+        "runtime": ""
+      },
+      "permissions": {
+        "network": true,
+        "paths": [
+          "~/Old"
+        ]
+      },
+      "tools": [
+        {
+          "name": "old.run",
+          "risk": "confirm"
+        }
+      ]
+    }
+  ]
+}

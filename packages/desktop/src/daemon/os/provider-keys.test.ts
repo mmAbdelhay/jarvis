@@ -1,6 +1,12 @@
 import { createMemorySecretStore, providerAccount, type SecretStore } from "@jarvis/platform/model";
 import { describe, expect, it } from "vitest";
-import { hasProviderKey, readProviderKey } from "./provider-keys.js";
+import {
+  createEnvKeyStore,
+  envProviderKeyName,
+  hasProviderKey,
+  readProviderKey,
+  takeEnvProviderKeys,
+} from "./provider-keys.js";
 
 const legacyEntry = { id: "default", kind: "anthropic", baseUrl: "https://api.anthropic.com" };
 
@@ -84,5 +90,33 @@ describe("readProviderKey (M2.5 contracts §1)", () => {
     };
     await expect(readProviderKey(legacyEntry, stores)).rejects.toThrow("locked");
     await expect(hasProviderKey(legacyEntry, stores)).resolves.toBe(false);
+  });
+});
+
+describe("env keys in the read-only profile (M2.5 contracts §7 #14)", () => {
+  it("takes JARVIS_PROVIDER_KEY_* out of the env and serves them by provider id", async () => {
+    const env: Record<string, string | undefined> = {
+      PATH: "/usr/bin",
+      JARVIS_PROVIDER_KEY_MY_CLOUD: "sk-cloud",
+      JARVIS_PROVIDER_KEY_EMPTY: "",
+    };
+    const keys = takeEnvProviderKeys(env);
+    expect(env).toEqual({ PATH: "/usr/bin" });
+    expect(envProviderKeyName("my-cloud")).toBe("JARVIS_PROVIDER_KEY_MY_CLOUD");
+    const store = createEnvKeyStore(keys);
+    await expect(store.get("my-cloud")).resolves.toBe("sk-cloud");
+    await expect(store.get("other")).resolves.toBeUndefined();
+    await expect(store.set("my-cloud", "sk-new")).rejects.toThrow(/JARVIS_PROVIDER_KEY_MY_CLOUD/);
+    await expect(
+      hasProviderKey(
+        { id: "my-cloud", kind: "openai", baseUrl: "https://api.openai.com" },
+        {
+          providerKeys: store,
+          legacy: createEnvKeyStore(new Map()),
+          migrateLegacy: false,
+          log: () => {},
+        },
+      ),
+    ).resolves.toBe(true);
   });
 });

@@ -10,7 +10,11 @@
 //
 // Env: JARVIS_MCP_DIR (where jarvis-pkg/jarvis-diag live), JARVIS_FAKE_PROVIDER
 // (a script that replaces the model, contracts §5 — never active otherwise),
-// JARVISD_SUPERVISOR (set by the unit).
+// JARVISD_SUPERVISOR (set by the unit), JARVIS_TOOL_PROFILE=readonly (the
+// Docker image, M2.5 contracts §7 #14: only safe tools, no add-ons, a missing
+// jarvis-pkg tolerated, keys from JARVIS_PROVIDER_KEY_<ID>). Provider keys in
+// the env are removed from it at start whatever the profile, so no child
+// process or log line sees them.
 //
 // No electron here (core/no-electron.test.ts); process.platform read once, here.
 import { randomBytes } from "node:crypto";
@@ -51,6 +55,7 @@ import {
   scrubSecrets,
 } from "../log-file.js";
 import { createOsAgent } from "./agent-service.js";
+import { createEnvKeyStore, takeEnvProviderKeys } from "./provider-keys.js";
 import { createMemoryBackendOpener } from "./memory-backend.js";
 import { connectOsMcpServers } from "./mcp-servers.js";
 import { createModelStateReader } from "./model-state-reader.js";
@@ -72,6 +77,8 @@ import {
   resolveRuntimeDir,
   nodeHashFile,
   nodeRunProbe,
+  nodeStartTimer,
+  nodeVerifyUnpacked,
   nodeWatchDirectory,
 } from "./registry-servers.js";
 
@@ -137,6 +144,13 @@ async function main(argv: readonly string[]): Promise<void> {
     }
   }
 
+  const envKeys = takeEnvProviderKeys(process.env);
+  const readonlyProfile = process.env["JARVIS_TOOL_PROFILE"] === "readonly";
+  if (readonlyProfile) {
+    info(`read-only tool profile: safe tools only; ${envKeys.size} provider key(s) from the env`);
+  } else if (envKeys.size > 0) {
+    info("JARVIS_PROVIDER_KEY_* is ignored outside the read-only tool profile");
+  }
   const env = { ...process.env };
   const mcpDir = mcpDirFrom(env);
   const timers = {
@@ -171,6 +185,8 @@ async function main(argv: readonly string[]): Promise<void> {
     },
     readFile: (path) => readFile(path, "utf8"),
     hashFile: nodeHashFile,
+    verifyUnpacked: nodeVerifyUnpacked,
+    startTimer: nodeStartTimer(env),
     runProbe: nodeRunProbe(env),
     connect: (name, argv) =>
       connectMcpServer({
@@ -190,11 +206,18 @@ async function main(argv: readonly string[]): Promise<void> {
   } catch (thrown) {
     error(`the tool index cache is unavailable: ${describe(thrown)}`);
   }
+  // Tool search may cache tool descriptions in clear; memory gets its own
+  // embedder with NO cache, so memory text never lands in tool-index.sqlite.
   const embedder = createOllamaEmbedder({
     fetch: (url, init) => fetch(url, init),
     now: Date.now,
     log: info,
     ...(vectorCache === undefined ? {} : { cache: vectorCache }),
+  });
+  const memoryEmbedder = createOllamaEmbedder({
+    fetch: (url, init) => fetch(url, init),
+    now: Date.now,
+    log: info,
   });
   const memory = createMemoryBackendOpener({
     path: memoryDbPath(home),
@@ -211,24 +234,33 @@ async function main(argv: readonly string[]): Promise<void> {
     push: (channel, payload) => push(channel, payload),
     configPath: osConfigPath(home),
     configIo: { readFile: (path) => readFile(path, "utf8"), writeFile: writeAtomically },
-    secrets: createSecretToolStore(nodeSecretToolExec(env)),
-    providerKeys: createSecretToolStore(nodeSecretToolExec(env), {
-      attribute: PROVIDER_KEY_ATTRIBUTE,
-    }),
+    secrets: readonlyProfile
+      ? createEnvKeyStore(new Map())
+      : createSecretToolStore(nodeSecretToolExec(env)),
+    providerKeys: readonlyProfile
+      ? createEnvKeyStore(envKeys)
+      : createSecretToolStore(nodeSecretToolExec(env), {
+          attribute: PROVIDER_KEY_ATTRIBUTE,
+        }),
+    ...(readonlyProfile ? { toolProfile: "readonly" as const } : {}),
     makeProvider: (section, apiKey) =>
       buildProvider(section, apiKey, { fetch: (url, init) => fetch(url, init) }),
     ...(fakeScript === undefined ? {} : { fakeScript }),
     connectMcp: () =>
       connectOsMcpServers({
-        servers: TRUSTED_MCP_SERVERS,
+        // The image ships no jarvis-pkg (M2.5 contracts §6, §7 #14).
+        servers: readonlyProfile
+          ? TRUSTED_MCP_SERVERS.filter((name) => existsSync(join(mcpDir, name)))
+          : TRUSTED_MCP_SERVERS,
         commandFor: (name) => ({ command: join(mcpDir, name), args: [] }),
         spawn: nodeMcpSpawn(env, info),
         timers,
         clientVersion: build,
         log: info,
       }),
-    registryServers,
+    ...(readonlyProfile ? {} : { registryServers }),
     embedder,
+    memoryEmbedder,
     memory,
     watchRegistry: (onChange) => nodeWatchDirectory(mcpConfigDir(home), onChange, info),
     readModelState: createModelStateReader({

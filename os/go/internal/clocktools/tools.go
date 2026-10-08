@@ -1,5 +1,10 @@
 // Package clocktools implements jarvis-clock's tools (Rafiq M2.5
 // contracts §3): clock.now and clock.timer, both safe.
+//
+// clock.timer only validates and returns the timer: jarvisd starts the
+// transient user timer itself when the official jarvis-clock answers. The
+// sandbox hides the whole runtime dir, so no add-on (this one included) can
+// reach the user manager with `systemd-run --user`.
 package clocktools
 
 import (
@@ -7,7 +12,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"os"
 	"regexp"
 	"strings"
@@ -15,7 +19,6 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/mmAbdelhay/jarvis/os/go/internal/execx"
 	"github.com/mmAbdelhay/jarvis/os/go/internal/mcp"
 	"github.com/mmAbdelhay/jarvis/os/go/internal/official"
 	"github.com/mmAbdelhay/jarvis/os/go/internal/registry"
@@ -31,7 +34,6 @@ var Manifest = official.Manifest{
 
 // Deps are jarvis-clock's side effects.
 type Deps struct {
-	Run   execx.Runner
 	Now   func() time.Time // nil: time.Now
 	Local *time.Location   // nil: time.Local
 	NewID func() string    // nil: 8 random hex digits
@@ -145,9 +147,10 @@ func printable(s string) bool {
 	return utf8.ValidString(s)
 }
 
-// timer starts a transient user timer (systemd-run --user --on-active)
-// that runs notify-send, so it survives this server being restarted.
-func (d Deps) timer(ctx context.Context, raw json.RawMessage) (any, error) {
+// timer validates a timer and returns it; jarvisd starts the transient
+// user timer (systemd-run --user --on-active … notify-send) from the
+// result, so it survives this server being restarted.
+func (d Deps) timer(_ context.Context, raw json.RawMessage) (any, error) {
 	var in struct {
 		Seconds int    `json:"seconds"`
 		Label   string `json:"label"`
@@ -170,18 +173,6 @@ func (d Deps) timer(ctx context.Context, raw json.RawMessage) (any, error) {
 	}
 	id := "jarvis-timer-" + d.newID()
 	fires := d.clock().Add(time.Duration(in.Seconds) * time.Second)
-	res, err := d.Run.Run(ctx, execx.Cmd{
-		Name: "systemd-run",
-		Args: []string{"--user", "--quiet", "--collect", "--unit=" + id, fmt.Sprintf("--on-active=%ds", in.Seconds),
-			"--timer-property=AccuracySec=1s", "--", "/usr/bin/notify-send", "--app-name=Jarvis", "--", text.Summary, label},
-		Timeout: 10 * time.Second,
-	})
-	if err != nil {
-		return nil, mcp.Errorf(mcp.CodeFailed, "could not start the timer: %v", err)
-	}
-	if res.ExitCode != 0 {
-		return nil, mcp.Errorf(mcp.CodeFailed, "could not start the timer: %s", strings.TrimSpace(string(res.Stderr)))
-	}
 	return Timer{TimerID: id, Seconds: in.Seconds, Label: label, FiresAt: fires.UTC().Format(time.RFC3339)}, nil
 }
 

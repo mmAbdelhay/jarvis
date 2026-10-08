@@ -134,6 +134,26 @@ describe("loadToolRegistry", () => {
     expect(registry.get("files.delete_all")?.risk).toBe("confirm");
   });
 
+  it("registers only effectively-safe tools in the read-only profile (contracts §7 #14)", async () => {
+    const diag = fakeSession("jarvis-diag", [
+      tool("net.status", meta("safe")),
+      tool("svc.restart", meta("safe")), // host-forced confirm
+      tool("net.wifi_connect", meta("confirm")),
+      tool("registry.list", meta("safe", { hidden: true })),
+    ]);
+    const addOn = fakeSession("weather", [tool("weather.now", meta("safe"))]);
+    const registry = await loadToolRegistry([diag.session, addOn.session], {
+      trusted,
+      trustOf: () => "community",
+      safeOnly: true,
+      log: () => {},
+    });
+    expect(registry.modelTools().map((t) => t.name)).toEqual(["net_status"]);
+    expect(registry.get("registry.list")?.risk).toBe("safe");
+    expect(registry.resolve("svc_restart")).toBeUndefined();
+    expect(registry.get("weather.now")).toBeUndefined();
+  });
+
   it("keeps the first of two tools whose names collide, and logs it", async () => {
     const lines: string[] = [];
     const a = fakeSession("jarvis-pkg", [tool("x.y", meta("safe"))]);
