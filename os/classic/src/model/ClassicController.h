@@ -4,6 +4,7 @@
 #include <QtQml/qqmlregistration.h>
 
 #include "AppsModel.h"
+#include "app/ShellController.h"
 
 class Launcher;
 
@@ -19,6 +20,7 @@ class ClassicController : public QObject {
     Q_PROPERTY(bool chatOpen READ chatOpen NOTIFY chatOpenChanged)
     Q_PROPERTY(bool fallback READ fallback CONSTANT)
     Q_PROPERTY(QString notice READ notice NOTIFY noticeChanged)
+    Q_PROPERTY(ShellController* shell READ shell NOTIFY shellChanged)
 
 public:
     ClassicController(AppsModel* apps, Launcher* launcher, bool fallback, QObject* parent = nullptr);
@@ -28,6 +30,8 @@ public:
     bool chatOpen() const { return m_chatOpen; }
     bool fallback() const { return m_fallback; }
     QString notice() const { return m_notice; }
+    ShellController* shell() const { return m_shell; }
+    void setShell(ShellController* shell);
 
     Q_INVOKABLE void openTerminal();
     Q_INVOKABLE void openFiles();
@@ -48,6 +52,7 @@ signals:
     void appsOpenChanged();
     void chatOpenChanged();
     void noticeChanged();
+    void shellChanged();
 
 private:
     void setAppsOpen(bool open);
@@ -60,4 +65,5 @@ private:
     bool m_appsOpen = false;
     bool m_chatOpen = false;
     QString m_notice;
+    ShellController* m_shell = nullptr;
 };

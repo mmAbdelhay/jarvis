@@ -19,3 +19,5 @@ add_dependencies(jarvis_classic_core jarvis_ui)
 target_include_directories(jarvis_classic_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/model)
 target_link_libraries(jarvis_classic_core PUBLIC
   Qt6::Core Qt6::Gui Qt6::Network Qt6::Qml Qt6::Quick Qt6::QuickControls2 jarvis_ui_native)
+target_link_libraries(jarvis_classic_core PUBLIC jarvis_shell_core)
+add_dependencies(jarvis_classic_core jarvis_shell_core)

@@ -30,6 +30,7 @@ if(JARVIS_SHELL_LAYERSHELL)
   target_compile_definitions(jarvis_shell_core PUBLIC JARVIS_HAVE_LAYERSHELL=1)
 endif()
 
+if(NOT JARVIS_SHELL_CORE_ONLY)
 qt_add_executable(jarvis-shell main.cpp)
 target_link_libraries(jarvis-shell PRIVATE jarvis_shell_core jarvis_shell_coreplugin)
 target_compile_definitions(jarvis-shell PRIVATE JARVIS_SHELL_VERSION="${PROJECT_VERSION}")
@@ -40,3 +41,4 @@ install(FILES
   DESTINATION ${CMAKE_INSTALL_DATADIR}/jarvis-shell/labwc)
 install(PROGRAMS ${CMAKE_CURRENT_SOURCE_DIR}/../data/jarvis-shell-loop
   DESTINATION ${CMAKE_INSTALL_DATADIR}/jarvis-shell)
+endif()

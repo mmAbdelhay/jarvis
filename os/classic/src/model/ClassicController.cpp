@@ -91,3 +91,11 @@ bool ClassicController::fallbackActive(const QString& markerPath)
 {
     return QFileInfo::exists(markerPath);
 }
+
+void ClassicController::setShell(ShellController* shell)
+{
+    if (shell == m_shell)
+        return;
+    m_shell = shell;
+    emit shellChanged();
+}
