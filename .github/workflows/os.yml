@@ -85,7 +85,8 @@ jobs:
       - run: python3 os/recipes/tools/check_sources.py
       - run: python3 os/models/tools/backup_model.py check
       - run: python3 -m unittest discover -s os/iso/smoke/tests -t os/iso/smoke -v
-      - run: node --test os/iso/smoke/assets/
+      # Node 24 takes files or globs, not a bare directory ("Cannot find module").
+      - run: node --test os/iso/smoke/assets/*.test.mjs
       - name: shellcheck
         run: |
           {
