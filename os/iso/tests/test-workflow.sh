@@ -46,7 +46,9 @@ assert set(j["docker-publish"]["needs"]) >= {"docker-image", "agent-install", "s
 for name in j:
     if name != "docker-publish":
         assert "docker push" not in d(name) and "docker login" not in d(name), name
-assert "ghcr.io/mmabdelhay/jarvis-agent:$OS_VERSION" in d("docker-publish")
+dp = d("docker-publish")
+assert "ver=${OS_VERSION#os-v}" in dp and "ghcr.io/mmabdelhay/jarvis-agent:$ver" in dp, dp
+assert "jarvis-agent:$OS_VERSION" not in dp, dp
 assert set(j["release"]["needs"]) >= {"agent-install", "docker-publish", "repo"}
 assert set(j["repo"]["needs"]) >= {"agent-install", "docker-image"}
 repo = d("repo")
@@ -54,6 +56,7 @@ for s in ("build_index.py", "sign-index.sh", "verify-index.sh", "--verify-remote
     assert s in repo, s
 assert repo.index("build-repo.sh") < repo.index("build_index.py") < repo.index("sign-index.sh") < repo.rindex("publish.sh")
 assert "JARVIS_RELEASE" in repo
+assert "gpgv" in repo and "gpg-agent" in repo, "repo job must install gpgv and gpg-agent"
 go = d("build-go")
 for s in ("package-official.sh", "test-key.sh", "sign-index.sh", "verify-index.sh", "registry-artifacts"):
     assert s in go, s
