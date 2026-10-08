@@ -16,6 +16,7 @@ repo=$(cd "$(dirname "$0")/../../.." && pwd)
 exec docker run --rm --platform linux/amd64 ${TRIXIE_DOCKER_ARGS:-} \
   -e DEBIAN_FRONTEND=noninteractive -e OS_VERSION \
   -v "$repo:/src" -w /src debian:trixie bash -euo pipefail -c "
+    sed -i 's/^Components: main\$/Components: main contrib/' /etc/apt/sources.list.d/debian.sources  # fonts-ibm-plex
     apt-get update -qq >/dev/null
     apt-get install -y -qq --no-install-recommends \
       dpkg-dev xz-utils curl ca-certificates git python3 file shellcheck ${TRIXIE_PACKAGES:-} >/dev/null
