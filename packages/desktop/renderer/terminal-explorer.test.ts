@@ -37,6 +37,29 @@ function explorer() {
 const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe("the terminal explorer", () => {
+  it("draws nothing from a listing that settles after dispose", async () => {
+    const host = document.createElement("div");
+    document.body.append(host);
+    let answer: (entries: { name: string; directory: boolean }[]) => void = () => {};
+    const list = vi.fn(
+      (_paneKey: string, _path: string) =>
+        new Promise<{ name: string; directory: boolean }[]>((resolve) => {
+          answer = resolve;
+        }),
+    );
+    const view = createTerminalExplorer(host, "", { list, choose: vi.fn() });
+    view.setRoot("tab-1", "/proj");
+    await settle();
+    expect(list).toHaveBeenCalledTimes(1);
+    view.dispose();
+    const made = vi.spyOn(document, "createElement");
+    answer(listing["/proj"] ?? []);
+    await settle();
+    expect(made).not.toHaveBeenCalled();
+    expect(view.element.querySelector(".file-tree-row")).toBeNull();
+    made.mockRestore();
+  });
+
   it("roots at the focused pane's directory", async () => {
     const { view, list } = explorer();
     view.setRoot("tab-1", "/proj");

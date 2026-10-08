@@ -157,7 +157,12 @@ export function createTerminalExplorer(
   const tree = createFileTree({
     list: async (path) => {
       if (disposed || rooted === undefined) return [];
-      return await hooks.list(rooted.paneKey, path);
+      const entries = await hooks.list(rooted.paneKey, path);
+      // A listing that settles after dispose() must draw nothing: the tree
+      // treats a failed list as "leave it", so no row is built for a view
+      // that is gone (or, in tests, after its document is torn down).
+      if (disposed) throw new Error("terminal explorer disposed");
+      return entries;
     },
     choose: (path) => {
       if (disposed || rooted === undefined) return;
