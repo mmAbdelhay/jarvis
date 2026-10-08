@@ -50,6 +50,9 @@ export const OS_CONTROL_REQUESTS = {
   remoteRevoke: "remote:revoke",
   pairingOpen: "pairing:open",
   pairingCancel: "pairing:cancel",
+  /** Rafiq M4 §3: a: [{lang: "en"|"ar"}], v: null. jarvisd writes os.language
+   *  in jarvis.yaml and pushes ui:language to every client. */
+  uiSetLanguage: "ui:setLanguage",
 } as const;
 
 export const OS_CONTROL_PUSHES = {
@@ -63,6 +66,8 @@ export const OS_CONTROL_PUSHES = {
   pairingPending: "pairing:pending",
   /** Additive (plan N gap): OsRemoteStatus on every change and on connect. */
   remoteStatus: "remote:status",
+  /** Rafiq M4 §3: {lang}; on every change and first on every new connection. */
+  uiLanguage: "ui:language",
 } as const;
 
 export const PROVIDER_KINDS = ["anthropic", "openai-compatible", "ollama", "gemini"] as const;
@@ -364,8 +369,11 @@ function parseDraftFields(value: unknown): Parsed<ProviderDraft> {
   return ok(draft);
 }
 
+/** Rafiq M4 §1: ids jarvisd uses for itself; no configured provider may take one. */
+export const RESERVED_PROVIDER_IDS: ReadonlySet<string> = new Set(["backup"]);
+
 const isProviderId = (value: unknown): value is string =>
-  typeof value === "string" && PROVIDER_ID_PATTERN.test(value);
+  typeof value === "string" && PROVIDER_ID_PATTERN.test(value) && !RESERVED_PROVIDER_IDS.has(value);
 
 export function parseProviderDraft(args: readonly unknown[]): Parsed<ProviderProbeDraft> {
   if (args.length !== 1) return fail("expected [{kind, baseUrl, model, apiKey?, id?}]");
@@ -373,7 +381,8 @@ export function parseProviderDraft(args: readonly unknown[]): Parsed<ProviderPro
   if (!parsed.ok) return parsed;
   const id = fields(args[0])?.["id"];
   if (id === undefined) return parsed;
-  if (!isProviderId(id)) return fail("id must be a-z, 0-9 and -, up to 32 characters");
+  if (!isProviderId(id))
+    return fail('id must be a-z, 0-9 and -, up to 32 characters (not "backup")');
   return ok({ ...parsed.value, id });
 }
 
@@ -393,7 +402,8 @@ export function parseProviderSave(args: readonly unknown[]): Parsed<ProviderSave
     const parsed = parseDraftFields(raw);
     if (!parsed.ok) return parsed;
     const id = fields(raw)?.["id"];
-    if (!isProviderId(id)) return fail("each provider needs an id: a-z, 0-9 and -, up to 32");
+    if (!isProviderId(id))
+      return fail('each provider needs an id: a-z, 0-9 and -, up to 32 (not "backup")');
     if (seen.has(id)) return fail("provider ids must be unique");
     if (parsed.value.model === "") return fail("model must not be empty when saving");
     seen.add(id);
@@ -593,3 +603,17 @@ export function parseSetSpeak(args: readonly unknown[]): Parsed<{ on: boolean }>
 }
 
 export type AuditVia = "desktop" | "doctor" | `phone:${string}`;
+
+// ── Rafiq M4 (contracts §3) ─────────────────────────────────────────────
+
+export const UI_LANGUAGES = ["en", "ar"] as const;
+export type UiLanguage = (typeof UI_LANGUAGES)[number];
+export type UiLanguagePush = { lang: UiLanguage };
+
+export function parseUiSetLanguage(args: readonly unknown[]): Parsed<{ lang: UiLanguage }> {
+  const lang = single(args)?.["lang"];
+  if (typeof lang !== "string" || !(UI_LANGUAGES as readonly string[]).includes(lang)) {
+    return fail('expected [{lang: "en" | "ar"}]');
+  }
+  return ok({ lang: lang as UiLanguage });
+}
