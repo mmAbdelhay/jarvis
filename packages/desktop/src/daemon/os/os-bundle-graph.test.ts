@@ -10,6 +10,8 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const PLATFORM_STORE = resolve(HERE, "../../../../platform/src/store/index.ts");
 const PLATFORM_MODEL = resolve(HERE, "../../../../platform/src/model/index.ts");
 
+const PLATFORM_VOICE = resolve(HERE, "../../../../platform/src/voice/index.ts");
+
 function specifiers(source: string): string[] {
   const code = source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
   const found: string[] = [];
@@ -54,6 +56,7 @@ describe("the Jarvis OS daemon bundle graph", () => {
           "@jarvis/wire",
           "@jarvis/platform/model",
           "@jarvis/platform/store",
+          "@jarvis/platform/voice",
           "yaml",
         ].includes(spec),
     );
@@ -96,5 +99,15 @@ describe("the Jarvis OS daemon bundle graph", () => {
     for (const file of [...files, ...platformModel]) {
       expect(readFileSync(file, "utf8")).not.toMatch(/Installer1/);
     }
+  });
+  it("keeps @jarvis/platform/voice free of the Agent SDK, node-pty and sqlite", () => {
+    const { files, bare } = walk(PLATFORM_VOICE);
+    expect(
+      [...bare].filter((spec) => !spec.startsWith("node:") && spec !== "@jarvis/core"),
+    ).toEqual([]);
+    expect([...bare]).not.toContain("node:sqlite");
+    expect([...files].some((file) => /brain\.ts$|pty\.ts$|session-store\.ts$/.test(file))).toBe(
+      false,
+    );
   });
 });

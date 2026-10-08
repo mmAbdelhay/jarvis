@@ -122,3 +122,21 @@ describe.skipIf(!installed)("transcribe (integration)", () => {
     expect(result.text).toContain("سعودي");
   }, 60_000);
 });
+
+describe("transcribe language (Rafiq M3 voice:utterance lang)", () => {
+  it("passes -l auto by default and the asked language otherwise", async () => {
+    const seen: string[][] = [];
+    const run = async (_command: string, args: string[]) => {
+      seen.push(args);
+      return { code: 0, stdout: "مرحبا\n", stderr: "auto-detected language: ar" };
+    };
+    const config = { binaryPath: "/usr/lib/jarvis/voice/bin/whisper-cli", modelPath: "/m.bin" };
+    await expect(transcribe("/t/a.wav", config, run)).resolves.toEqual({
+      text: "مرحبا",
+      language: "ar",
+    });
+    await transcribe("/t/a.wav", config, run, "en");
+    expect(seen[0]?.slice(2, 4)).toEqual(["-l", "auto"]);
+    expect(seen[1]?.slice(2, 4)).toEqual(["-l", "en"]);
+  });
+});

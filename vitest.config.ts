@@ -11,6 +11,9 @@ export default defineConfig({
       "@jarvis/platform/store": fileURLToPath(
         new URL("./packages/platform/src/store/index.ts", import.meta.url),
       ),
+      "@jarvis/platform/voice": fileURLToPath(
+        new URL("./packages/platform/src/voice/index.ts", import.meta.url),
+      ),
       "@jarvis/platform": fileURLToPath(
         new URL("./packages/platform/src/index.ts", import.meta.url),
       ),
