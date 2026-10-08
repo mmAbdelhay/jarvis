@@ -29,6 +29,7 @@ class ShellController : public QObject {
     QML_UNCREATABLE("Created by main()")
     Q_PROPERTY(Conversation* conversation READ conversation CONSTANT)
     Q_PROPERTY(CardModel* chatCard READ chatCard CONSTANT)
+    Q_PROPERTY(bool locked READ locked NOTIFY lockedChanged)
     Q_PROPERTY(CardModel* doctorCard READ doctorCard CONSTANT)
     Q_PROPERTY(ProviderModel* provider READ provider CONSTANT)
     Q_PROPERTY(ProviderListModel* providers READ providers CONSTANT)
@@ -53,6 +54,7 @@ public:
 
     Conversation* conversation() const { return m_conversation; }
     CardModel* chatCard() const { return m_chatCard; }
+    bool locked() const { return m_locked; }
     CardModel* doctorCard() const { return m_doctorCard; }
     ProviderModel* provider() const { return m_provider; }
     ProviderListModel* providers() const { return m_providers; }
@@ -92,10 +94,12 @@ signals:
     void dismissRequested();
     void composerFocusRequested();
     void updatesChanged();
+    void lockedChanged();
 
 private:
     void request(const QString& channel, const QJsonArray& args, std::function<void(const ControlResult&)> done = {});
     void onOpened();
+    void applyLockState();
     void onClosed();
     void onPush(const QString& channel, const QJsonValue& payload);
     void onAgentEvent(const QJsonObject& event);
@@ -108,6 +112,7 @@ private:
     ControlClient* m_client;
     Conversation* m_conversation;
     CardModel* m_chatCard;
+    bool m_locked = false;
     CardModel* m_doctorCard;
     ProviderModel* m_provider;
     ProviderListModel* m_providers;

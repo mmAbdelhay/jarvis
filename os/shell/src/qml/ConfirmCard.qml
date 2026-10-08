@@ -240,8 +240,10 @@ Rectangle {
             Layout.bottomMargin: 14
             spacing: 12
             Text {
+                objectName: "cardHint"
                 Layout.fillWidth: true
-                text: root.card.exclusive ? "Pick one network." : "Untick anything you don't want. No answer in 5 minutes counts as Deny."
+                text: root.card.locked ? "The screen is locked. Unlock it to answer."
+                    : root.card.exclusive ? "Pick one network." : "Untick anything you don't want. No answer in 5 minutes counts as Deny."
                 color: Theme.approvalMuted
                 font.pixelSize: Theme.fontSmall
                 wrapMode: Text.Wrap
@@ -251,7 +253,7 @@ Rectangle {
                 objectName: "denyButton"
                 variant: "quiet"
                 text: root.card.exclusive ? "Cancel" : "Deny"
-                enabled: root.card.active
+                enabled: root.card.active && !root.card.locked
                 onClicked: root.decided(false)
             }
             ActionButton {

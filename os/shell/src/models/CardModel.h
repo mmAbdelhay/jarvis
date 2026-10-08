@@ -26,6 +26,8 @@ class CardModel : public QAbstractListModel {
     Q_PROPERTY(int secondsLeft READ secondsLeft NOTIFY changed)
     Q_PROPERTY(bool expired READ expired NOTIFY changed)
     Q_PROPERTY(QString countdownText READ countdownText NOTIFY changed)
+    Q_PROPERTY(bool locked READ locked WRITE setLocked NOTIFY changed)
+    Q_PROPERTY(bool voiceAnswerable READ voiceAnswerable NOTIFY changed)
 
 public:
     enum Role {
@@ -54,6 +56,10 @@ public:
     int secondsLeft() const { return m_secondsLeft; }
     bool expired() const { return active() && m_secondsLeft == 0; }
     QString countdownText() const;
+    bool locked() const { return m_locked; }
+    void setLocked(bool locked);
+    bool voiceAnswerable() const;
+    QJsonObject source() const { return m_source; }
 
     Q_INVOKABLE bool load(const QJsonObject& card);
     Q_INVOKABLE void setTicked(int row, bool ticked);
@@ -84,6 +90,8 @@ private:
     qint64 m_expiresAt = 0;
     int m_secondsLeft = -1;
     bool m_exclusive = false;
+    bool m_locked = false;
+    QJsonObject m_source;
     QTimer m_timer;
     std::function<qint64()> m_now;
 };
