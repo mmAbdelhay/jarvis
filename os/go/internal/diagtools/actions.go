@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
 	"github.com/mmAbdelhay/jarvis/os/go/internal/execx"
 	"github.com/mmAbdelhay/jarvis/os/go/internal/helperapi"
+	"github.com/mmAbdelhay/jarvis/os/go/internal/i18n"
 	"github.com/mmAbdelhay/jarvis/os/go/internal/mcp"
 	"github.com/mmAbdelhay/jarvis/os/go/internal/parse"
 	"github.com/mmAbdelhay/jarvis/os/go/internal/validate"
@@ -112,19 +112,21 @@ func (d Deps) isActive(ctx context.Context, scope, unit string) string {
 	return "unknown"
 }
 
-func (d Deps) describeRestart(_ context.Context, raw json.RawMessage) (mcp.Description, error) {
+func (d Deps) describeRestart(ctx context.Context, raw json.RawMessage) (mcp.Description, error) {
 	in, err := decodeUnit(raw)
 	if err != nil {
 		return mcp.Description{}, err
 	}
+	l := i18n.FromContext(ctx)
+	t := cardText.Get(l)
 	bare := strings.TrimSuffix(in.Unit, ".service")
-	detail := cardText.RestartEffect[bare]
+	detail := t.RestartEffect[bare]
 	if detail == "" || in.Scope == "user" {
-		detail = cardText.RestartDefault
+		detail = t.RestartDefault
 	}
-	title := fmt.Sprintf(cardText.RestartTitle, bare)
+	title := i18n.Sprintf(l, t.RestartTitle, bare)
 	if in.Scope == "user" {
-		title = fmt.Sprintf(cardText.RestartUserTitle, bare)
+		title = i18n.Sprintf(l, t.RestartUserTitle, bare)
 	}
 	return mcp.Description{Title: title, Detail: detail, Source: mcp.SourceSystem}, nil
 }
@@ -163,12 +165,14 @@ func (d Deps) connectionState(ctx context.Context, id string) string {
 	return "unknown"
 }
 
-func (d Deps) describeConnectionUp(_ context.Context, raw json.RawMessage) (mcp.Description, error) {
+func (d Deps) describeConnectionUp(ctx context.Context, raw json.RawMessage) (mcp.Description, error) {
 	id, err := decodeConnection(raw)
 	if err != nil {
 		return mcp.Description{}, err
 	}
-	return mcp.Description{Title: fmt.Sprintf(cardText.ConnectTitle, id), Detail: fmt.Sprintf(cardText.ConnectDetail, id), Source: mcp.SourceNetwork}, nil
+	l := i18n.FromContext(ctx)
+	t := cardText.Get(l)
+	return mcp.Description{Title: i18n.Sprintf(l, t.ConnectTitle, id), Detail: i18n.Sprintf(l, t.ConnectDetail, id), Source: mcp.SourceNetwork}, nil
 }
 
 type wifiArgs struct {
@@ -215,14 +219,16 @@ func (d Deps) wifiConnect(ctx context.Context, raw json.RawMessage) (any, error)
 	return map[string]any{"ssid": in.SSID, "state": "activated"}, nil
 }
 
-func (d Deps) describeWifiConnect(_ context.Context, raw json.RawMessage) (mcp.Description, error) {
+func (d Deps) describeWifiConnect(ctx context.Context, raw json.RawMessage) (mcp.Description, error) {
 	in, err := decodeWifi(raw)
 	if err != nil {
 		return mcp.Description{}, err
 	}
+	l := i18n.FromContext(ctx)
+	t := cardText.Get(l)
 	return mcp.Description{
-		Title:  fmt.Sprintf(cardText.WifiTitle, in.SSID),
-		Detail: cardText.WifiDetail,
+		Title:  i18n.Sprintf(l, t.WifiTitle, in.SSID),
+		Detail: t.WifiDetail,
 		Source: mcp.SourceNetwork,
 	}, nil
 }
@@ -243,9 +249,10 @@ func (d Deps) radioOn(ctx context.Context, raw json.RawMessage) (any, error) {
 	return map[string]any{"wifiSoftBlocked": false}, nil
 }
 
-func (d Deps) describeRadioOn(_ context.Context, raw json.RawMessage) (mcp.Description, error) {
+func (d Deps) describeRadioOn(ctx context.Context, raw json.RawMessage) (mcp.Description, error) {
 	if err := mcp.DecodeArgs(raw, &struct{}{}); err != nil {
 		return mcp.Description{}, err
 	}
-	return mcp.Description{Title: cardText.RadioTitle, Detail: cardText.RadioDetail, Source: mcp.SourceNetwork}, nil
+	t := cardText.In(ctx)
+	return mcp.Description{Title: t.RadioTitle, Detail: t.RadioDetail, Source: mcp.SourceNetwork}, nil
 }

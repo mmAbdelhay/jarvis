@@ -293,15 +293,6 @@ func TestDescribeRegistryRemove(t *testing.T) {
 	}
 }
 
-func TestRegistryTextHasNoEmptyStrings(t *testing.T) {
-	v := reflect.ValueOf(registryText)
-	for i := 0; i < v.NumField(); i++ {
-		if v.Field(i).String() == "" {
-			t.Errorf("registryText.%s is empty", v.Type().Field(i).Name)
-		}
-	}
-}
-
 func TestRegistryListSplitsInstalledAndAvailable(t *testing.T) {
 	fr := newFakeRegistry(t)
 	s := registrytest.NewSigner(t)

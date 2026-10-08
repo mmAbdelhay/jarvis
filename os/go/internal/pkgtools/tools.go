@@ -8,6 +8,7 @@ import (
 	"github.com/mmAbdelhay/jarvis/os/go/internal/execx"
 	"github.com/mmAbdelhay/jarvis/os/go/internal/helperapi"
 	"github.com/mmAbdelhay/jarvis/os/go/internal/mcp"
+	"github.com/mmAbdelhay/jarvis/os/go/internal/recipes"
 	"github.com/mmAbdelhay/jarvis/os/go/internal/registry"
 )
 
@@ -24,6 +25,9 @@ type Deps struct {
 	// Registry installs and removes tool servers from the signed registry
 	// (Rafiq M2.5 contracts §3); nil makes the registry tools fail cleanly.
 	Registry *registry.Store
+	// Recipes reads setup recipes (Rafiq M4 contracts §4, §6.1); nil makes
+	// recipes.list empty.
+	Recipes *recipes.Store
 }
 
 func (d Deps) now() time.Time {
@@ -42,7 +46,8 @@ func Tools(d Deps) []mcp.Tool {
 	}
 	tools := append(d.readTools(), d.changeTools()...)
 	tools = append(tools, d.updateTools()...)
-	return append(tools, d.registryTools()...)
+	tools = append(tools, d.registryTools()...)
+	return append(tools, d.recipeTools()...)
 }
 
 func (d Deps) readTools() []mcp.Tool {

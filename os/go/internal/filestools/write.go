@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -12,6 +11,7 @@ import (
 
 	"github.com/mmAbdelhay/jarvis/os/go/internal/fileops"
 	"github.com/mmAbdelhay/jarvis/os/go/internal/homepath"
+	"github.com/mmAbdelhay/jarvis/os/go/internal/i18n"
 	"github.com/mmAbdelhay/jarvis/os/go/internal/mcp"
 )
 
@@ -49,7 +49,9 @@ func WriteTools(w WriteDeps) []mcp.Tool {
 			Risk:        mcp.RiskConfirm,
 			Batch:       "items",
 			Call:        func(ctx context.Context, raw json.RawMessage) (any, error) { return w.run(kind, raw) },
-			Describe:    func(ctx context.Context, raw json.RawMessage) (mcp.Description, error) { return w.describe(kind, raw) },
+			Describe: func(ctx context.Context, raw json.RawMessage) (mcp.Description, error) {
+				return w.describe(i18n.FromContext(ctx), kind, raw)
+			},
 		}
 	}
 	return []mcp.Tool{
@@ -98,7 +100,7 @@ func (w WriteDeps) trashList(_ context.Context, raw json.RawMessage) (any, error
 		in.Limit = 30
 	}
 	if in.Limit < 1 || in.Limit > 100 || len(in.Query) > 100 {
-		return nil, mcp.Errorf(mcp.CodeInvalid, "%s", writeText.BadTrashList)
+		return nil, mcp.Errorf(mcp.CodeInvalid, "%s", writeErr.BadTrashList)
 	}
 	all, err := w.Ops.Trash.List()
 	if err != nil {
@@ -145,11 +147,11 @@ func decodeItems(raw json.RawMessage) ([]fileops.Item, error) {
 		return nil, err
 	}
 	if len(in.Items) < 1 || len(in.Items) > MaxItems {
-		return nil, mcp.Errorf(mcp.CodeInvalid, "%s", writeText.BadItems)
+		return nil, mcp.Errorf(mcp.CodeInvalid, "%s", writeErr.BadItems)
 	}
 	for _, it := range in.Items {
 		if it.From == "" || len(it.From) > homepath.MaxPath || len(it.To) > homepath.MaxPath {
-			return nil, mcp.Errorf(mcp.CodeInvalid, "%s", writeText.BadItem)
+			return nil, mcp.Errorf(mcp.CodeInvalid, "%s", writeErr.BadItem)
 		}
 	}
 	return in.Items, nil
@@ -176,11 +178,11 @@ func (w WriteDeps) undo(_ context.Context, raw json.RawMessage) (any, error) {
 		return nil, err
 	}
 	if !fileops.ValidID(in.JournalID) {
-		return nil, mcp.Errorf(mcp.CodeInvalid, "%s", writeText.BadJournal)
+		return nil, mcp.Errorf(mcp.CodeInvalid, "%s", writeErr.BadJournal)
 	}
 	res, err := w.Ops.Undo(in.JournalID)
 	if errors.Is(err, fileops.ErrNoJournal) {
-		return nil, mcp.Errorf(mcp.CodeNotFound, "%s", writeText.UnknownJournal)
+		return nil, mcp.Errorf(mcp.CodeNotFound, "%s", writeErr.UnknownJournal)
 	}
 	if err != nil {
 		return nil, mcp.Errorf(mcp.CodeFailed, "%v", err)
@@ -199,12 +201,13 @@ func base(p string) string {
 
 // describe builds one card item for one element (jarvisd sends
 // {items:[element]}, M1 contracts §6.1). It only reads the disk.
-func (w WriteDeps) describe(kind fileops.Kind, raw json.RawMessage) (mcp.Description, error) {
+func (w WriteDeps) describe(l i18n.Lang, kind fileops.Kind, raw json.RawMessage) (mcp.Description, error) {
 	items, err := decodeItems(raw)
 	if err != nil {
 		return mcp.Description{}, err
 	}
 	it := items[0]
+	t := writeCardText.Get(l)
 	paths := w.Ops.Paths
 	d := mcp.Description{Source: mcp.SourceSystem}
 	from, ferr := paths.Existing(it.From)
@@ -214,9 +217,9 @@ func (w WriteDeps) describe(kind fileops.Kind, raw json.RawMessage) (mcp.Descrip
 	}
 	switch kind {
 	case fileops.Move, fileops.Copy:
-		title := writeText.MoveTitle
+		title := t.MoveTitle
 		if kind == fileops.Copy {
-			title = writeText.CopyTitle
+			title = t.CopyTitle
 		}
 		to := it.To
 		if dst, err := paths.New(it.To); err == nil {
@@ -224,11 +227,11 @@ func (w WriteDeps) describe(kind fileops.Kind, raw json.RawMessage) (mcp.Descrip
 		} else if ferr == nil {
 			ferr = err
 		}
-		d.Title = fmt.Sprintf(title, base(fromShown), to)
-		d.Detail = fromShown + " → " + to
+		d.Title = i18n.Sprintf(l, title, base(fromShown), to)
+		d.Detail = i18n.Sprintf(l, t.PathChange, fromShown, to)
 	case fileops.Rename:
-		d.Title = fmt.Sprintf(writeText.RenameTitle, base(fromShown), it.To)
-		d.Detail = fromShown + " → " + filepath.ToSlash(filepath.Join(filepath.Dir(fromShown), it.To))
+		d.Title = i18n.Sprintf(l, t.RenameTitle, base(fromShown), it.To)
+		d.Detail = i18n.Sprintf(l, t.PathChange, fromShown, filepath.ToSlash(filepath.Join(filepath.Dir(fromShown), it.To)))
 		if ferr == nil {
 			ferr = homepath.ValidName(it.To)
 		}
@@ -238,26 +241,28 @@ func (w WriteDeps) describe(kind fileops.Kind, raw json.RawMessage) (mcp.Descrip
 		if err == nil {
 			shown = p.Display
 		}
-		d.Title, d.Detail, ferr = fmt.Sprintf(writeText.MkdirTitle, shown), shown, err
+		d.Title, d.Detail, ferr = i18n.Sprintf(l, t.MkdirTitle, shown), i18n.Iso(l, shown), err
 	case fileops.Trash:
-		d.Title = fmt.Sprintf(writeText.TrashTitle, base(fromShown))
-		d.Detail = fmt.Sprintf(writeText.TrashDetail, fromShown)
+		d.Title = i18n.Sprintf(l, t.TrashTitle, base(fromShown))
+		d.Detail = i18n.Sprintf(l, t.TrashDetail, fromShown)
 	case fileops.Restore:
 		ferr = nil
-		d.Title = fmt.Sprintf(writeText.RestoreTitle, base(strings.TrimPrefix(it.From, fileops.TrashPrefix)))
+		d.Title = i18n.Sprintf(l, t.RestoreTitle, base(strings.TrimPrefix(it.From, fileops.TrashPrefix)))
 		place := it.To
 		if place == "" {
 			place = it.From
 		}
-		d.Detail = fmt.Sprintf(writeText.RestoreDetail, place)
+		d.Detail = i18n.Sprintf(l, t.RestoreDetail, place)
 	}
 	if ferr != nil {
-		d.Detail += " · " + fmt.Sprintf(writeText.Cannot, mcp.AsToolError(ferr).Message)
+		d.Detail += " · " + i18n.Sprintf(l, t.Cannot, mcp.AsToolError(ferr).Message)
 	}
 	return d, nil
 }
 
-func (w WriteDeps) describeUndo(_ context.Context, raw json.RawMessage) (mcp.Description, error) {
+func (w WriteDeps) describeUndo(ctx context.Context, raw json.RawMessage) (mcp.Description, error) {
+	l := i18n.FromContext(ctx)
+	t := writeCardText.Get(l)
 	var in struct {
 		JournalID string `json:"journalId"`
 	}
@@ -266,7 +271,7 @@ func (w WriteDeps) describeUndo(_ context.Context, raw json.RawMessage) (mcp.Des
 	}
 	e, err := w.Ops.Journal.Load(in.JournalID)
 	if err != nil {
-		return mcp.Description{}, mcp.Errorf(mcp.CodeNotFound, "%s", writeText.UnknownJournal)
+		return mcp.Description{}, mcp.Errorf(mcp.CodeNotFound, "%s", writeErr.UnknownJournal)
 	}
-	return mcp.Description{Title: writeText.UndoTitle, Detail: fmt.Sprintf(writeText.UndoDetail, len(e.Steps)), Source: mcp.SourceSystem}, nil
+	return mcp.Description{Title: t.UndoTitle, Detail: i18n.Sprintf(l, t.UndoDetail, len(e.Steps)), Source: mcp.SourceSystem}, nil
 }

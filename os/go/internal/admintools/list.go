@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/mmAbdelhay/jarvis/os/go/internal/execx"
+	"github.com/mmAbdelhay/jarvis/os/go/internal/i18n"
 	"github.com/mmAbdelhay/jarvis/os/go/internal/mcp"
 )
 
@@ -142,7 +143,7 @@ func (d Deps) listDisks(ctx context.Context, raw json.RawMessage) (any, error) {
 		}
 		name := str(b.Model)
 		if name == "" {
-			name = text.UnknownDrive
+			name = cardText.Get(i18n.EN).UnknownDrive
 		}
 		di := DiskInfo{Device: b.Path, Name: name, SizeBytes: b.Size, Partitions: []PartInfo{}}
 		for _, c := range b.Children {

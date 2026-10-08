@@ -16,6 +16,7 @@ import (
 	"github.com/mmAbdelhay/jarvis/os/go/internal/helperclient"
 	"github.com/mmAbdelhay/jarvis/os/go/internal/mcp"
 	"github.com/mmAbdelhay/jarvis/os/go/internal/pkgtools"
+	"github.com/mmAbdelhay/jarvis/os/go/internal/recipes"
 	"github.com/mmAbdelhay/jarvis/os/go/internal/redact"
 	"github.com/mmAbdelhay/jarvis/os/go/internal/registry"
 )
@@ -34,6 +35,7 @@ func main() {
 		FS:       os.DirFS("/"),
 		Home:     home,
 		Registry: newRegistry(home),
+		Recipes:  &recipes.Store{FS: os.DirFS("/"), Dir: recipes.DefaultDir},
 	}
 	srv := &mcp.Server{Name: "jarvis-pkg", Version: version, Tools: pkgtools.Tools(deps), Redact: redact.String}
 	if err := srv.Serve(ctx, os.Stdin, os.Stdout); err != nil {

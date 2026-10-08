@@ -1,17 +1,17 @@
 package pkgtools
 
 import (
-	"reflect"
 	"testing"
+
+	"github.com/mmAbdelhay/jarvis/os/go/internal/i18n"
 )
 
-// Guards the translation table: a field left empty would put a blank line
-// on a card, and the M4 Arabic pass needs every string in one place.
-func TestCardTextHasNoEmptyStrings(t *testing.T) {
-	v := reflect.ValueOf(cardText)
-	for i := 0; i < v.NumField(); i++ {
-		if v.Field(i).String() == "" {
-			t.Errorf("cardText.%s is empty", v.Type().Field(i).Name)
-		}
+// Both card tables are complete in both languages (Rafiq M4 contracts §3).
+func TestCardTablesAreComplete(t *testing.T) {
+	for _, p := range i18n.Check(cardText.Get(i18n.EN), cardText.Get(i18n.AR)) {
+		t.Errorf("cardText.%s", p)
+	}
+	for _, p := range i18n.Check(registryText.Get(i18n.EN), registryText.Get(i18n.AR)) {
+		t.Errorf("registryText.%s", p)
 	}
 }
