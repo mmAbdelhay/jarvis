@@ -96,7 +96,7 @@ scenarios:
 |---|---|
 | `erase` | Erase + encrypt install: Secure Boot stays enabled, root is on the unlocked LUKS device, os-release is the brand, live-only packages are gone, the greeter (not autologin) runs, ollama listens on 127.0.0.1:11434 only, the APT source and archive keyring are installed, secrets never reach the installer log, and a wrong passphrase does not give a shell. With `--update-repo` it also checks updates from a local signed test repo. |
 | `alongside` | Install next to a Windows (NTFS) disk: Windows partitions only shrink (their start never moves), both systems stay bootable, GRUB shows its 3 s menu because another OS is found. |
-| `refusals` | The backend refuses unsafe requests (too-small disk, bad layouts) and leaves the disk untouched. |
+| `refusals` | Criterion 4: the backend refuses an alongside install (exit status 3) on a hibernated Windows disk (`ntfs-hibernated`) and on a BitLocker disk (`ntfs-bitlocker`). Criterion 5: an erase Plan on the same disk is only a plan. Neither disk image changes (digests compared). |
 
 ```bash
 sudo apt-get install qemu-system-x86 ovmf xorriso gdisk ntfs-3g dosfstools mtools
