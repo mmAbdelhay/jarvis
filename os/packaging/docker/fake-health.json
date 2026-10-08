@@ -1,0 +1,9 @@
+[
+  {
+    "expectPromptContains": "check health",
+    "replies": [
+      { "toolCalls": [{ "name": "sys.health", "input": {} }] },
+      { "text": "agent-test-health-done" }
+    ]
+  }
+]
