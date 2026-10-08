@@ -5,9 +5,10 @@ GOOS    ?= linux
 GOARCH  ?= amd64
 VERSION ?= $(shell git describe --tags --match 'os-v*' --always 2>/dev/null || echo dev)
 DIST    := dist
+RECIPES ?= ../recipes
 BUILD   := CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) $(GO) build -trimpath -ldflags '-s -w -X main.version=$(VERSION)'
 
-.PHONY: all check test dist registry clean
+.PHONY: all check test dist registry clean recipes-check
 
 all: check test
 
@@ -15,9 +16,14 @@ check:
 	@out="$$(gofmt -l .)"; if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi
 	$(GO) vet ./...
 	GOOS=linux $(GO) vet ./...
+	@if [ -d "$(RECIPES)" ]; then $(GO) run ./tools/recipecheck "$(RECIPES)"; fi
 
 test:
 	$(GO) test -race ./...
+
+# Rafiq M4 contracts §4, §6: Plan T validates its recipe files with this.
+recipes-check:
+	$(GO) run ./tools/recipecheck "$(RECIPES)"
 
 # dist/ mirrors the target filesystem (M1 contracts §2, §4; M2 contracts §7);
 # the packaging plan splits it into packages by path.

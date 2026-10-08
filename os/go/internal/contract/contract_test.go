@@ -40,6 +40,8 @@ var pkgContract = map[string]want{
 	"registry.install": {"confirm", nil, []string{"id", "version"}, []string{"id", "version"}},
 	"registry.remove":  {"confirm", nil, []string{"id"}, []string{"id"}},
 	"registry.list":    {"safe", nil, nil, nil}, // hidden, contracts §7.8
+	// Rafiq M4 contracts §6.1: jarvisd executes recipes itself.
+	"recipes.list": {"safe", nil, nil, nil},
 }
 
 // hiddenTools are the contract tools that must declare _meta.jarvis.hidden.
@@ -182,4 +184,13 @@ func TestUpdatesApplyContractBounds(t *testing.T) {
 		return
 	}
 	t.Fatal("missing updates.apply")
+}
+
+// Rafiq M4 contracts §6.1 assigns recipe execution to jarvisd.
+func TestRecipesRunIsNotExposed(t *testing.T) {
+	for _, tool := range list(t, &mcp.Server{Name: "jarvis-pkg", Tools: pkgtools.Tools(pkgtools.Deps{})}) {
+		if tool.Name == "recipes.run" {
+			t.Fatal("jarvis-pkg must not expose recipes.run")
+		}
+	}
 }
