@@ -98,6 +98,7 @@ func TestParseIndexRefusesTheWholeDocument(t *testing.T) {
 	for name, doc := range map[string]string{
 		"not an object": `[]`,
 		"format 2":      `{"version":2,"generatedAt":"2026-10-09T08:00:00Z","validUntil":"2026-10-16T08:00:00Z","entries":[]}`,
+		"no validUntil": `{"version":1,"generatedAt":"2026-10-09T08:00:00Z","entries":[]}`,
 		"bad date":      `{"version":1,"generatedAt":"yesterday","entries":[]}`,
 		"too large":     `{"version":1,"generatedAt":"2026-10-09T08:00:00Z","validUntil":"2026-10-16T08:00:00Z","entries":[]}` + strings.Repeat(" ", MaxIndexBytes),
 	} {
