@@ -46,7 +46,10 @@ beforeEach(() => {
   mkdirSync(userData);
 });
 afterEach(() => {
-  rmSync(root, { recursive: true, force: true });
+  // A check's download can still be flushing into root when the test ends;
+  // fs.rm's retries are its documented answer to the ENOTEMPTY race seen on
+  // macOS CI (as in remote-file-upload.integration.test.ts).
+  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 function release(opts: { tag?: string; names?: string[]; sums?: boolean } = {}) {
