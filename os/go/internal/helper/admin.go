@@ -287,9 +287,54 @@ func partitionPath(disk string) string {
 	return disk + "1"
 }
 
-// FormatRemovable erases a removable USB/SD drive and makes one partition
-// with a fresh filesystem. It refuses anything that is not a removable
-// whole disk on USB or MMC, and any drive with something mounted.
+// udisksRemovable reports udisks2's Block.HintSystem=false for a whole disk
+// (contracts §5.6): udisks marks USB/SD/FireWire drives, including external
+// SSDs whose RM flag is 0, as non-system. Any error counts as a system disk.
+func (s *Service) udisksRemovable(ctx context.Context, name string) bool {
+	res, err := s.Run.Run(ctx, execx.Cmd{Name: "busctl", Args: []string{"get-property", "org.freedesktop.UDisks2", "/org/freedesktop/UDisks2/block_devices/" + name, "org.freedesktop.UDisks2.Block", "HintSystem"}, Timeout: queryTimeout})
+	return err == nil && res.ExitCode == 0 && strings.TrimSpace(string(res.Stdout)) == "b false"
+}
+
+// devices lists d and every device stacked on it (partitions, crypt, LVM).
+func (d blockDev) devices() []string {
+	out := []string{d.Path}
+	for _, c := range d.Children {
+		out = append(out, c.devices()...)
+	}
+	return out
+}
+
+// notSystemDisk refuses a disk that hosts / or /boot (contracts §5.6),
+// checked from the mount table rather than lsblk's mountpoints. "/" must be
+// resolvable; a missing separate /boot is fine.
+func (s *Service) notSystemDisk(ctx context.Context, disk blockDev) error {
+	for _, target := range []string{"/", "/boot"} {
+		res, err := s.Run.Run(ctx, execx.Cmd{Name: "findmnt", Args: []string{"--noheadings", "--output", "SOURCE", "--mountpoint", target}, Timeout: queryTimeout})
+		if err != nil || (res.ExitCode != 0 && target == "/") {
+			return refuse(helperapi.ErrNotAllowed, "cannot tell which drive holds the system")
+		}
+		if res.ExitCode != 0 {
+			continue
+		}
+		for _, src := range strings.Split(string(res.Stdout), "\n") {
+			if i := strings.IndexByte(src, '['); i >= 0 { // btrfs "dev[/subvol]"
+				src = src[:i]
+			}
+			src = strings.TrimSpace(src)
+			for _, dev := range disk.devices() {
+				if src != "" && src == dev {
+					return refuse(helperapi.ErrNotAllowed, "%s holds the system (%s)", disk.Path, target)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// FormatRemovable erases a removable drive and makes one partition with a
+// fresh filesystem. It refuses anything that is not a whole disk udisks
+// calls non-system (HintSystem=false), a disk hosting / or /boot, and any
+// drive with something mounted.
 func (s *Service) FormatRemovable(ctx context.Context, sender, adminPassword, device, fsType, label string) (helperapi.Outcome, error) {
 	defer s.begin()()
 	if err := validate.WholeDisk(device); err != nil {
@@ -327,12 +372,11 @@ func (s *Service) FormatRemovable(ctx context.Context, sender, adminPassword, de
 	if disk == nil {
 		return helperapi.Outcome{}, refuse(helperapi.ErrNotFound, "%s is not connected", device)
 	}
-	tran := ""
-	if disk.Tran != nil {
-		tran = *disk.Tran
+	if disk.Type != "disk" || !s.udisksRemovable(ctx, disk.Name) {
+		return helperapi.Outcome{}, refuse(helperapi.ErrNotAllowed, "%s is not a removable drive", device)
 	}
-	if disk.Type != "disk" || !bool(disk.RM) || !(tran == "usb" || tran == "mmc" || strings.HasPrefix(disk.Name, "mmcblk")) {
-		return helperapi.Outcome{}, refuse(helperapi.ErrNotAllowed, "%s is not a removable USB or SD drive", device)
+	if err := s.notSystemDisk(ctx, *disk); err != nil {
+		return helperapi.Outcome{}, err
 	}
 	if disk.mounted() {
 		return helperapi.Outcome{}, refuse(helperapi.ErrNotAllowed, "%s is in use; unmount it first", device)

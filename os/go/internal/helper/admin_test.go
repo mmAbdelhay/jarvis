@@ -122,12 +122,42 @@ const lsblkJSON = `{"blockdevices":[
   "children":[{"name":"sdb1","path":"/dev/sdb1","type":"part","rm":true,"tran":null,"mountpoints":[null]}]},
  {"name":"sdc","path":"/dev/sdc","type":"disk","rm":"1","tran":"usb","mountpoints":[null],
   "children":[{"name":"sdc1","path":"/dev/sdc1","type":"part","rm":"1","tran":null,"mountpoints":["/media/sara/USB"]}]},
- {"name":"mmcblk0","path":"/dev/mmcblk0","type":"disk","rm":true,"tran":null,"mountpoints":[null]}
+ {"name":"mmcblk0","path":"/dev/mmcblk0","type":"disk","rm":true,"tran":null,"mountpoints":[null]},
+ {"name":"sde","path":"/dev/sde","type":"disk","rm":false,"tran":"usb","mountpoints":[null]},
+ {"name":"sdf","path":"/dev/sdf","type":"disk","rm":false,"tran":"usb","mountpoints":[null],
+  "children":[{"name":"sdf1","path":"/dev/sdf1","type":"part","rm":false,"tran":null,"mountpoints":[null],
+               "children":[{"name":"boot-crypt","path":"/dev/mapper/boot-crypt","type":"crypt","rm":false,"tran":null,"mountpoints":[null]}]}]}
 ]}`
 
+// hintSystem registers udisks2's Block.HintSystem answer for a disk name.
+func hintSystem(f *execx.Fake, name string, system bool) *execx.Fake {
+	v := "b false\n"
+	if system {
+		v = "b true\n"
+	}
+	return f.On(execx.OK(v), "busctl", "get-property", "org.freedesktop.UDisks2", "/org/freedesktop/UDisks2/block_devices/"+name, "org.freedesktop.UDisks2.Block", "HintSystem")
+}
+
+func findmntArgs(target string) []string {
+	return []string{"--noheadings", "--output", "SOURCE", "--mountpoint", target}
+}
+
 func formatRun() *execx.Fake {
-	return (&execx.Fake{}).
+	f := &execx.Fake{}
+	for _, d := range []string{"sdb", "sdc", "mmcblk0", "sde", "sdf"} {
+		hintSystem(f, d, false)
+	}
+	hintSystem(f, "sda", true)
+	return f.
 		On(execx.OK(lsblkJSON), "lsblk", strings.Fields(lsblkArgs)...).
+		// "/" is a btrfs subvolume; /boot sits on an encrypted partition of
+		// sdf that lsblk (in the helper's mount namespace) shows unmounted.
+		On(execx.OK("/dev/nvme0n1p2[/@rootfs]\n"), "findmnt", findmntArgs("/")...).
+		On(execx.OK("/dev/mapper/boot-crypt\n"), "findmnt", findmntArgs("/boot")...).
+		On(execx.OK(""), "wipefs", "--all", "--force", "--", "/dev/sde").
+		On(execx.OK(""), "sfdisk", "--quiet", "--wipe", "always", "--wipe-partitions", "always", "--", "/dev/sde").
+		On(execx.OK(""), "mkfs.exfat", "--", "/dev/sde1").
+		On(execx.OK(""), "mkfs.exfat", "--", "/dev/sdb1").
 		On(execx.OK(""), "wipefs", "--all", "--force", "--", "/dev/sdb").
 		On(execx.OK(""), "sfdisk", "--quiet", "--wipe", "always", "--wipe-partitions", "always", "--", "/dev/sdb").
 		On(execx.OK(""), "udevadm", "settle", "--timeout=15").
@@ -142,7 +172,7 @@ func formatRun() *execx.Fake {
 func TestFormatRemovable(t *testing.T) {
 	run := formatRun()
 	s := adminService(run, &fakeAuth{}, 1000)
-	for _, c := range []struct{ dev, fs, label string }{{"/dev/sdb", "exfat", "My USB"}, {"/dev/sdb", "vfat", "photos"}, {"/dev/sdb", "ext4", ""}, {"/dev/mmcblk0", "exfat", ""}} {
+	for _, c := range []struct{ dev, fs, label string }{{"/dev/sdb", "exfat", "My USB"}, {"/dev/sdb", "vfat", "photos"}, {"/dev/sdb", "ext4", ""}, {"/dev/mmcblk0", "exfat", ""}, {"/dev/sde", "exfat", ""}} {
 		out, err := s.FormatRemovable(context.Background(), sender, "right", c.dev, c.fs, c.label)
 		if err != nil || !out.OK {
 			t.Fatalf("%v: %+v %v", c, out, err)
@@ -160,7 +190,8 @@ func TestFormatRemovable(t *testing.T) {
 
 func TestFormatRemovableRefusals(t *testing.T) {
 	for _, c := range []struct{ dev, code, why string }{
-		{"/dev/sda", helperapi.ErrNotAllowed, "internal SATA disk"},
+		{"/dev/sda", helperapi.ErrNotAllowed, "internal SATA disk (udisks HintSystem=true)"},
+		{"/dev/sdf", helperapi.ErrNotAllowed, "hosts /boot"},
 		{"/dev/sdc", helperapi.ErrNotAllowed, "a partition is mounted"},
 		{"/dev/sdd", helperapi.ErrNotFound, "not connected"},
 		{"/dev/nvme0n1", helperapi.ErrInvalid, "system NVMe disk"},
@@ -175,7 +206,21 @@ func TestFormatRemovableRefusals(t *testing.T) {
 			t.Errorf("%s: wipefs ran", c.why)
 		}
 	}
-	run := formatRun().On(execx.Exit(1, "sfdisk: cannot open /dev/sdb: Device or resource busy\n"), "sfdisk", "--quiet", "--wipe", "always", "--wipe-partitions", "always", "--", "/dev/sdb")
+	for _, broken := range []*execx.Fake{
+		formatRun().On(execx.Exit(1, ""), "findmnt", findmntArgs("/")...),
+		formatRun().On(execx.Exit(1, "Failed to get property HintSystem\n"), "busctl", "get-property", "org.freedesktop.UDisks2", "/org/freedesktop/UDisks2/block_devices/sdb", "org.freedesktop.UDisks2.Block", "HintSystem"),
+	} {
+		_, err := adminService(broken, &fakeAuth{}, 1000).FormatRemovable(context.Background(), sender, "right", "/dev/sdb", "exfat", "")
+		if err == nil || len(broken.CallsTo("wipefs")) != 0 {
+			t.Fatalf("an unverifiable drive is refused: %v", err)
+		}
+	}
+	// No separate /boot is fine.
+	run := formatRun().On(execx.Exit(1, ""), "findmnt", findmntArgs("/boot")...)
+	if out, err := adminService(run, &fakeAuth{}, 1000).FormatRemovable(context.Background(), sender, "right", "/dev/sdb", "exfat", ""); err != nil || !out.OK {
+		t.Fatalf("no /boot mount: %+v %v", out, err)
+	}
+	run = formatRun().On(execx.Exit(1, "sfdisk: cannot open /dev/sdb: Device or resource busy\n"), "sfdisk", "--quiet", "--wipe", "always", "--wipe-partitions", "always", "--", "/dev/sdb")
 	out, err := adminService(run, &fakeAuth{}, 1000).FormatRemovable(context.Background(), sender, "right", "/dev/sdb", "exfat", "")
 	if err != nil || out.OK || !strings.Contains(out.StderrTail, "busy") || len(run.CallsTo("mkfs.exfat")) != 0 {
 		t.Fatalf("a failed step stops the format: %+v %v", out, err)
