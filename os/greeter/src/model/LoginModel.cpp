@@ -1,8 +1,11 @@
 #include "LoginModel.h"
 
 #include <QJsonArray>
+#include <QCoreApplication>
 
 #include "GreetdClient.h"
+#include "DesktopEntry.h"
+#include "Language.h"
 #include "PowerActions.h"
 
 using namespace Qt::StringLiterals;
@@ -16,7 +19,7 @@ LoginModel::LoginModel(GreetdClient* client, PowerActions* power, QList<UserEntr
     connect(m_client, &GreetdClient::response, this, &LoginModel::onResponse);
     connect(m_client, &GreetdClient::failed, this, &LoginModel::onFailed);
     connect(m_power, &PowerActions::failed, this, [this](const QString& message) {
-        m_errorText = u"Couldn't do that: %1"_s.arg(message);
+        m_errorText = translatedError(QT_TR_NOOP("Couldn't do that: %1"), message);
         emit stateChanged();
     });
     if (m_users.isEmpty())
@@ -41,7 +44,7 @@ void LoginModel::setUsername(const QString& name)
 QString LoginModel::displayName() const
 {
     if (m_otherUser)
-        return m_username.isEmpty() ? u"Other user"_s : m_username;
+        return m_username.isEmpty() ? tr("Other user") : m_username;
     for (const UserEntry& user : m_users)
         if (user.username == m_username)
             return user.displayName;
@@ -79,7 +82,7 @@ void LoginModel::useOtherUser()
         return;
     m_otherUser = true;
     m_username.clear();
-    m_errorText.clear();
+    clearError();
     emit userChanged();
     emit stateChanged();
 }
@@ -90,7 +93,7 @@ void LoginModel::useDefaultUser()
         return;
     m_otherUser = false;
     m_username = m_users.first().username;
-    m_errorText.clear();
+    clearError();
     emit userChanged();
     emit stateChanged();
 }
@@ -100,20 +103,25 @@ void LoginModel::submit(const QString& secret)
     if (m_state == u"busy" || m_state == u"starting")
         return;
     if (m_state == u"prompt") {
-        m_errorText.clear();
+        clearError();
         m_phase = Phase::Answering;
         setState(u"busy"_s);
         m_client->send({{"type", "post_auth_message_response"}, {"response", secret}});
         return;
     }
     if (m_username.trimmed().isEmpty()) {
-        m_errorText = u"Type your username."_s;
+        m_errorText = translatedError(QT_TR_NOOP("Type your username."));
+        emit stateChanged();
+        return;
+    }
+    if (m_sessionCommand.isEmpty()) {
+        m_errorText = translatedError(QT_TR_NOOP("The selected session is unavailable."));
         emit stateChanged();
         return;
     }
     if (secret.isEmpty())
         return;
-    m_errorText.clear();
+    clearError();
     m_infoText.clear();
     m_pending = secret;
     m_hasPending = true;
@@ -137,7 +145,8 @@ void LoginModel::onResponse(const QJsonObject& response)
         wipePending();
         m_phase = Phase::Starting;
         setState(u"starting"_s);
-        m_client->send({{"type", "start_session"}, {"cmd", QJsonArray{u"labwc"_s}}, {"env", QJsonArray{}}});
+        m_client->send({{"type", "start_session"}, {"cmd", QJsonArray::fromStringList(m_sessionCommand)},
+                        {"env", QJsonArray{jarvis::ui::currentLanguage() == u"ar" ? u"LANG=ar_EG.UTF-8"_s : u"LANG=en_US.UTF-8"_s}}});
         return;
     }
     if (type == u"auth_message") {
@@ -151,10 +160,11 @@ void LoginModel::onResponse(const QJsonObject& response)
                 m_client->send(answer);
                 return;
             }
-            m_promptText = text.isEmpty() ? u"Password"_s : text;
+            m_promptText = text;
             m_promptSecret = kind == u"secret";
             return setState(u"prompt"_s);
         }
+        if (kind == u"error") clearError();
         (kind == u"error" ? m_errorText : m_infoText) = text;
         emit stateChanged();
         m_client->send({{"type", "post_auth_message_response"}}); // acknowledge info/error
@@ -163,12 +173,12 @@ void LoginModel::onResponse(const QJsonObject& response)
     if (type == u"error") {
         const QString description = response.value("description").toString();
         if (m_phase == Phase::Starting)
-            return fail(u"Couldn't start the session: %1"_s.arg(description));
+            return fail(translatedError(QT_TR_NOOP("Couldn't start the session: %1"), description));
         if (response.value("error_type").toString() == u"auth_error")
-            return fail(u"That password didn't work. Try again."_s);
-        return fail(u"Couldn't log in: %1"_s.arg(description));
+            return fail(translatedError(QT_TR_NOOP("That password didn't work. Try again.")));
+        return fail(translatedError(QT_TR_NOOP("Couldn't log in: %1"), description));
     }
-    fail(u"The login service sent something unexpected."_s);
+    fail(translatedError(QT_TR_NOOP("The login service sent something unexpected.")));
 }
 
 void LoginModel::fail(const QString& message)
@@ -185,10 +195,49 @@ void LoginModel::fail(const QString& message)
 void LoginModel::onFailed(const QString& message)
 {
     wipePending();
+    clearError();
+    for (const char* source : {"The login service isn't running.", "Lost the connection to the login service.", "The login service sent something unreadable."}) {
+        if (message == QCoreApplication::translate("GreetdClient", source)) {
+            m_errorSource = source;
+            m_errorContext = "GreetdClient";
+            break;
+        }
+    }
     m_errorText = message;
     m_phase = Phase::None;
     ++m_failures;
     emit failuresChanged();
     m_client->reset();
     setState(u"idle"_s);
+}
+
+void LoginModel::setSessionExec(const QString& exec)
+{
+    m_sessionCommand = jarvis::ui::splitExec(exec).value_or(QStringList{});
+}
+
+void LoginModel::retranslate()
+{
+    if (m_errorSource) {
+        m_errorText = QCoreApplication::translate(m_errorContext, m_errorSource);
+        if (m_errorText.contains(u"%1")) m_errorText = m_errorText.arg(m_errorArgument);
+    }
+    emit userChanged();
+    emit stateChanged();
+}
+
+QString LoginModel::translatedError(const char* source, const QString& argument)
+{
+    m_errorSource = source;
+    m_errorContext = "LoginModel";
+    m_errorArgument = argument;
+    const QString text = tr(source);
+    return text.contains(u"%1") ? text.arg(argument) : text;
+}
+
+void LoginModel::clearError()
+{
+    m_errorSource = nullptr;
+    m_errorArgument.clear();
+    m_errorText.clear();
 }

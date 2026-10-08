@@ -4,6 +4,7 @@ import Jarvis.UI
 // cage shows exactly one full-screen window: this one.
 Window {
     id: window
+    property GreeterLanguage language: null
     required property LoginModel login
     required property ModelStatus modelStatus
     required property string keyboardCode
@@ -17,6 +18,7 @@ Window {
 
     LoginScreen {
         anchors.fill: parent
+        language: window.language
         login: window.login
         modelStatus: window.modelStatus
         keyboardCode: window.keyboardCode

@@ -14,13 +14,19 @@ class Setup : public QObject {
 public slots:
     void applicationAvailable()
     {
+        qputenv("JARVIS_I18N_DIR", JARVIS_TEST_I18N_DIR);
         QQuickStyle::setStyle(QStringLiteral("Basic"));
         jarvis::ui::applyJarvisFont();
     }
     void qmlEngineAvailable(QQmlEngine* engine)
     {
         engine->addImportPath(QStringLiteral(JARVIS_QML_DIR));
-        engine->rootContext()->setContextProperty(QStringLiteral("harness"), new GreeterHarness(engine));
+        auto* manager = new jarvis::ui::LanguageManager({QStringLiteral("jarvis-ui"), QStringLiteral("jarvis-greeter")}, engine);
+        QObject::connect(manager, &jarvis::ui::LanguageManager::languageChanged, engine, &QQmlEngine::retranslate);
+        auto* harness = new GreeterHarness(engine);
+        harness->setLanguageManager(manager);
+        engine->rootContext()->setContextProperty(QStringLiteral("harness"), harness);
+        engine->rootContext()->setContextProperty(QStringLiteral("testLanguage"), manager);
     }
 };
 

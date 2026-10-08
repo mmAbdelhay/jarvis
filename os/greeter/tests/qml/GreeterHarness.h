@@ -1,6 +1,8 @@
 #pragma once
 
 #include <QObject>
+#include "GreeterLanguage.h"
+#include "Language.h"
 #include <QStringList>
 #include <QTemporaryDir>
 #include <QVariantMap>
@@ -18,6 +20,9 @@ public:
     explicit GreeterHarness(QObject* parent = nullptr);
     ~GreeterHarness() override;
 
+    void setLanguageManager(jarvis::ui::LanguageManager* manager);
+    Q_INVOKABLE GreeterLanguage* language() const { return m_language; }
+    Q_INVOKABLE QVariantMap startRequest() const;
     Q_INVOKABLE LoginModel* fresh(const QVariantMap& options = {});
     Q_INVOKABLE ModelStatus* status(const QString& stateJson);
     Q_INVOKABLE QStringList requestTypes() const;
@@ -26,6 +31,7 @@ public:
     QString screenshotDir() const { return qEnvironmentVariable("JARVIS_SCREENSHOT_DIR"); }
 
 private:
+    GreeterLanguage* m_language = nullptr;
     QTemporaryDir m_dir;
     FakeGreetd* m_greetd = nullptr;
     FakePower* m_power = nullptr;

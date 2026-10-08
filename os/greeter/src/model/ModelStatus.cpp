@@ -73,11 +73,11 @@ void ModelStatus::reload()
             shown = true;
             if (state == u"ready") {
                 ready = true;
-                text = u"Jarvis is ready · %1 loaded"_s.arg(name);
+                text = tr("Jarvis is ready · %1 loaded").arg(name);
             } else if (state == u"downloading" || state == u"pending") {
-                text = u"Preparing %1 · %2%"_s.arg(name).arg(percent);
+                text = tr("Preparing %1 · %2%").arg(name).arg(percent);
             } else if (state == u"failed") {
-                text = u"Jarvis couldn't download %1 yet. It will try again."_s.arg(name);
+                text = tr("Jarvis couldn't download %1 yet. It will try again.").arg(name);
             } else {
                 shown = false;
             }
@@ -88,5 +88,11 @@ void ModelStatus::reload()
     m_shown = shown;
     m_ready = ready;
     m_text = text;
+    emit changed();
+}
+
+void ModelStatus::retranslate()
+{
+    reload();
     emit changed();
 }

@@ -1,6 +1,7 @@
 #include "KeyboardLabel.h"
 
 #include <QFile>
+#include <QCoreApplication>
 
 using namespace Qt::StringLiterals;
 
@@ -36,11 +37,11 @@ QString keyboardCode(const QString& path)
 QString keyboardName(const QString& path)
 {
     const QString layout = firstLayout(path);
-    if (layout == u"us") return u"English (US)"_s;
-    if (layout == u"gb") return u"English (UK)"_s;
-    if (layout == u"ara") return u"Arabic"_s;
-    if (layout == u"fr") return u"French"_s;
-    if (layout == u"de") return u"German"_s;
-    if (layout == u"es") return u"Spanish"_s;
+    if (layout == u"us") return QCoreApplication::translate("KeyboardLabel", "English (US)");
+    if (layout == u"gb") return QCoreApplication::translate("KeyboardLabel", "English (UK)");
+    if (layout == u"ara") return QCoreApplication::translate("KeyboardLabel", "Arabic");
+    if (layout == u"fr") return QCoreApplication::translate("KeyboardLabel", "French");
+    if (layout == u"de") return QCoreApplication::translate("KeyboardLabel", "German");
+    if (layout == u"es") return QCoreApplication::translate("KeyboardLabel", "Spanish");
     return layout;
 }

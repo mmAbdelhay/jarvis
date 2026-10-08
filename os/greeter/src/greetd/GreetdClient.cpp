@@ -14,9 +14,9 @@ GreetdClient::GreetdClient(QString socketPath, QObject* parent)
     connect(m_socket, &QLocalSocket::readyRead, this, &GreetdClient::onReadyRead);
     connect(m_socket, &QLocalSocket::errorOccurred, this, [this](QLocalSocket::LocalSocketError error) {
         const bool notRunning = error == QLocalSocket::ServerNotFoundError || error == QLocalSocket::ConnectionRefusedError;
-        fail(notRunning ? u"The login service isn't running."_s : u"Lost the connection to the login service."_s);
+        fail(notRunning ? tr("The login service isn't running.") : tr("Lost the connection to the login service."));
     });
-    connect(m_socket, &QLocalSocket::disconnected, this, [this] { fail(u"Lost the connection to the login service."_s); });
+    connect(m_socket, &QLocalSocket::disconnected, this, [this] { fail(tr("Lost the connection to the login service.")); });
 }
 
 QString GreetdClient::socketPathFromEnvironment()
@@ -28,7 +28,7 @@ void GreetdClient::send(const QJsonObject& request)
 {
     ++m_outstanding;
     if (m_path.isEmpty()) {
-        QTimer::singleShot(0, this, [this] { fail(u"The login service isn't running."_s); });
+        QTimer::singleShot(0, this, [this] { fail(tr("The login service isn't running.")); });
         return;
     }
     m_queue.append(jarvis::greeter::encodeGreetd(request));
@@ -64,7 +64,7 @@ void GreetdClient::onReadyRead()
         emit response(*message);
     }
     if (m_decoder.failed())
-        fail(u"The login service sent something unreadable."_s);
+        fail(tr("The login service sent something unreadable."));
 }
 
 void GreetdClient::fail(const QString& message)

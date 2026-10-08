@@ -16,3 +16,6 @@ qml6-module-qtquick-shapes
 qml6-module-qtquick-window
 qml6-module-qtqml-workerscript
 dbus-daemon
+qt6-tools-dev
+qt6-l10n-tools
+python3

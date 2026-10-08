@@ -11,6 +11,9 @@
 #include "JarvisFont.h"
 #include "KeyboardLabel.h"
 #include "LoginModel.h"
+#include "GreeterLanguage.h"
+#include "Language.h"
+#include "DesktopEntry.h"
 #include "ModelStatus.h"
 #include "UserList.h"
 #ifdef JARVIS_HAVE_DBUS
@@ -34,11 +37,17 @@ int main(int argc, char* argv[])
     const QCommandLineOption windowed(u"windowed"_s, u"Run in a window (development)."_s);
     const QCommandLineOption socket(u"socket"_s, u"greetd socket (default: $GREETD_SOCK)."_s, u"path"_s);
     const QCommandLineOption quitAfter(u"quit-after"_s, u"Quit after this many milliseconds (smoke tests)."_s, u"ms"_s);
-    parser.addOptions({windowed, socket, quitAfter});
+    const QCommandLineOption session(u"session"_s, u"Chosen session desktop file (default: Rafiq session)."_s, u"path"_s,
+                                     u"/usr/share/wayland-sessions/rafiq.desktop"_s);
+    parser.addOptions({windowed, socket, quitAfter, session});
     parser.process(app);
 
     QQuickStyle::setStyle(u"Basic"_s);
     jarvis::ui::applyJarvisFont();
+    jarvis::ui::LanguageManager languageManager({u"jarvis-ui"_s, u"jarvis-greeter"_s});
+    languageManager.setLanguage(GreeterLanguage::systemLanguage());
+    auto* language = new GreeterLanguage([&languageManager](const QString& code) { return languageManager.setLanguage(code); },
+                                         languageManager.language(), &app);
 
     auto* client = new GreetdClient(parser.isSet(socket) ? parser.value(socket) : GreetdClient::socketPathFromEnvironment(), &app);
 #ifdef JARVIS_HAVE_DBUS
@@ -47,12 +56,15 @@ int main(int argc, char* argv[])
     PowerActions* power = new FakePower(&app);
 #endif
     auto* login = new LoginModel(client, power, readUsers(), &app);
+    if (const auto entry = jarvis::ui::parseDesktopEntry(parser.value(session)))
+        login->setSessionExec(entry->exec);
     auto* status = new ModelStatus(ModelStatus::defaultStatePath(), ModelStatus::defaultCatalogPath(), &app);
     // greetd starts the session once the greeter exits after start_session succeeded.
     QObject::connect(login, &LoginModel::sessionStarted, &app, [] { QCoreApplication::exit(0); });
 
     QQmlApplicationEngine engine;
-    engine.setInitialProperties({{u"login"_s, QVariant::fromValue(login)},
+    engine.setInitialProperties({{u"language"_s, QVariant::fromValue(language)},
+                                 {u"login"_s, QVariant::fromValue(login)},
                                  {u"modelStatus"_s, QVariant::fromValue(status)},
                                  {u"keyboardCode"_s, keyboardCode()},
                                  {u"keyboardName"_s, keyboardName()}});
@@ -60,6 +72,12 @@ int main(int argc, char* argv[])
     auto* window = engine.rootObjects().isEmpty() ? nullptr : qobject_cast<QQuickWindow*>(engine.rootObjects().constFirst());
     if (!window)
         return 1;
+    QObject::connect(&languageManager, &jarvis::ui::LanguageManager::languageChanged, &app, [&engine, window, login, status] {
+        engine.retranslate();
+        login->retranslate();
+        status->retranslate();
+        window->setProperty("keyboardName", keyboardName());
+    });
     if (parser.isSet(windowed))
         window->show();
     else

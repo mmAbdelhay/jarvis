@@ -22,6 +22,7 @@ struct Fixture {
             qFatal("fake greetd cannot listen");
         client = std::make_unique<GreetdClient>(greetd.socketPath());
         login = std::make_unique<LoginModel>(client.get(), &power, users);
+        login->setSessionExec(u"labwc"_s);
     }
     QStringList types() const
     {
@@ -58,7 +59,7 @@ private slots:
         QCOMPARE(f.greetd.received.at(0).value("username").toString(), u"mohamed"_s);
         QCOMPARE(f.greetd.received.at(1).value("response").toString(), u"right horse"_s);
         QCOMPARE(f.greetd.received.at(2).value("cmd").toArray(), QJsonArray{u"labwc"_s});
-        QCOMPARE(f.greetd.received.at(2).value("env").toArray(), QJsonArray{});
+        QCOMPARE(f.greetd.received.at(2).value("env").toArray(), QJsonArray{u"LANG=en_US.UTF-8"_s});
         QCOMPARE(f.login->state(), u"starting"_s);
     }
 
