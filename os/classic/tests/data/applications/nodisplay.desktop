@@ -1,0 +1,5 @@
+[Desktop Entry]
+Type=Application
+Name=Hidden helper
+Exec=x
+NoDisplay=true

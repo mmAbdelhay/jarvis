@@ -1,0 +1,5 @@
+[Desktop Entry]
+Type=Application
+Name=Missing
+Exec=x
+TryExec=/nonexistent/x

@@ -1,0 +1,4 @@
+[Desktop Entry]
+Type=Application
+Name=Broken
+Exec=x; reboot

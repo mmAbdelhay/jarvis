@@ -1,0 +1,4 @@
+[Desktop Entry]
+Type=Application
+Name=Shell thing
+Exec=sh -c "echo a; echo b"

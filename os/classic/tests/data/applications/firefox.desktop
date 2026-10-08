@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Firefox ESR
+Name[ar]=فايرفوكس
+Comment=Browse the web
+Exec=firefox-esr %u
