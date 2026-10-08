@@ -20,6 +20,16 @@ export const OS_CONTROL_REQUESTS = {
   auditList: "audit:list",
   /** M2 contracts §2: run updates.list now. a: [], v: UpdatesCheckResult. */
   updatesCheck: "updates:check",
+  /** M2.5 §2: MemoryItem[] newest first; a: [{limit: 1-500}]. */
+  memoryList: "memory:list",
+  /** M2.5 §2: a: [{id}], v: null. */
+  memoryDelete: "memory:delete",
+  /** M2.5 §2: a: [], v: null. */
+  memoryClear: "memory:clear",
+  /** M2.5 §7 #9: a: [{enabled: boolean}], v: null. */
+  memorySetEnabled: "memory:setEnabled",
+  /** M2.5 §2: a: [], v: {installed, available}. */
+  registryList: "registry:list",
 } as const;
 
 export const OS_CONTROL_PUSHES = {
@@ -41,8 +51,46 @@ export type ProviderConfig = {
 };
 export type ProviderDraft = { kind: ProviderKind; baseUrl: string; model: string; apiKey?: string };
 export type ProbeResult = { ok: boolean; supportsTools: boolean; models: string[]; error?: string };
-export type ProviderListResult = { active: ProviderConfig | null; kinds: ProviderKind[] };
-export type ProviderStatusPush = { reachable: boolean; error?: string };
+/** M2.5 contracts §1: lower-case letters, digits and "-", up to 32. */
+export const PROVIDER_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,31}$/;
+export const MAX_PROVIDERS = 8;
+export type ProviderListEntry = ProviderConfig & { id: string };
+export type ProviderDraftEntry = ProviderDraft & { id: string };
+/** provider:probe's draft; `id` lets a probe without apiKey use that provider's stored key. */
+export type ProviderProbeDraft = ProviderDraft & { id?: string };
+export type ProviderListResult = {
+  providers: ProviderListEntry[];
+  activeId: string | null;
+  allowCloudFallback: boolean;
+  kinds: ProviderKind[];
+};
+export type ProviderSaveRequest = { providers: ProviderDraftEntry[]; allowCloudFallback: boolean };
+export type ProviderSaveResult = { ok: boolean; results: Record<string, ProbeResult> };
+export type ProviderStatusPush = {
+  reachable: boolean;
+  error?: string;
+  /** The provider answering now (M2.5 §2); null with none configured or the fake provider. */
+  activeId: string | null;
+  /** Why activeId is not the first provider, e.g. "work returned an error (503)". */
+  fallbackReason: string | null;
+};
+
+export type MemoryKind = "summary" | "fact";
+export type MemoryItem = { id: string; kind: MemoryKind; text: string; createdAt: number };
+
+export type RegistryTier = "official" | "reviewed" | "community";
+export type RegistryRuntime = "go-static" | "node" | "python";
+export type RegistryEntry = {
+  id: string;
+  name: string;
+  description: string;
+  tier: RegistryTier;
+  version: string;
+  artifact: { url: string; sha256: string; runtime: RegistryRuntime };
+  permissions: { network: boolean; paths: string[] };
+  tools: { name: string; risk: "safe" | "confirm" }[];
+};
+export type RegistryListResult = { installed: RegistryEntry[]; available: RegistryEntry[] };
 
 /** M2 contracts §2: pending updates as of checkedAt (epoch ms, null before the first check). */
 export type UpdatesSummary = { count: number; security: number; checkedAt: number | null };
@@ -258,9 +306,9 @@ export function parseBaseUrl(value: unknown): string | undefined {
   return `${url.origin}${url.pathname.replace(/\/+$/, "")}`;
 }
 
-export function parseProviderDraft(args: readonly unknown[]): Parsed<ProviderDraft> {
-  const a = single(args);
-  if (a === undefined) return fail("expected [{kind, baseUrl, model, apiKey?}]");
+function parseDraftFields(value: unknown): Parsed<ProviderDraft> {
+  const a = fields(value);
+  if (a === undefined) return fail("expected {kind, baseUrl, model, apiKey?}");
   const { kind, model, apiKey } = a;
   if (typeof kind !== "string" || !(PROVIDER_KINDS as readonly string[]).includes(kind)) {
     return fail(`kind must be one of ${PROVIDER_KINDS.join(", ")}`);
@@ -268,7 +316,7 @@ export function parseProviderDraft(args: readonly unknown[]): Parsed<ProviderDra
   const baseUrl = parseBaseUrl(a["baseUrl"]);
   if (baseUrl === undefined) return fail("baseUrl must be an http(s) URL without credentials");
   // "" is allowed: provider:probe with an empty model lists models only
-  // (contracts §6 #10). provider:save refuses it (daemon/os/os-binding.ts).
+  // (contracts §6 #10). provider:save refuses it (parseProviderSave).
   if (typeof model !== "string" || model.length > MAX_MODEL_CHARS || CONTROL_CHARS.test(model)) {
     return fail("model must be at most 200 printable characters");
   }
@@ -286,6 +334,64 @@ export function parseProviderDraft(args: readonly unknown[]): Parsed<ProviderDra
     draft.apiKey = apiKey;
   }
   return ok(draft);
+}
+
+const isProviderId = (value: unknown): value is string =>
+  typeof value === "string" && PROVIDER_ID_PATTERN.test(value);
+
+export function parseProviderDraft(args: readonly unknown[]): Parsed<ProviderProbeDraft> {
+  if (args.length !== 1) return fail("expected [{kind, baseUrl, model, apiKey?, id?}]");
+  const parsed = parseDraftFields(args[0]);
+  if (!parsed.ok) return parsed;
+  const id = fields(args[0])?.["id"];
+  if (id === undefined) return parsed;
+  if (!isProviderId(id)) return fail("id must be a-z, 0-9 and -, up to 32 characters");
+  return ok({ ...parsed.value, id });
+}
+
+export function parseProviderSave(args: readonly unknown[]): Parsed<ProviderSaveRequest> {
+  const a = single(args);
+  if (a === undefined) return fail("expected [{providers, allowCloudFallback}]");
+  const { providers, allowCloudFallback } = a;
+  if (typeof allowCloudFallback !== "boolean") {
+    return fail("allowCloudFallback must be true or false");
+  }
+  if (!Array.isArray(providers) || providers.length > MAX_PROVIDERS) {
+    return fail(`providers must be a list of at most ${MAX_PROVIDERS}`);
+  }
+  const seen = new Set<string>();
+  const out: ProviderDraftEntry[] = [];
+  for (const raw of providers) {
+    const parsed = parseDraftFields(raw);
+    if (!parsed.ok) return parsed;
+    const id = fields(raw)?.["id"];
+    if (!isProviderId(id)) return fail("each provider needs an id: a-z, 0-9 and -, up to 32");
+    if (seen.has(id)) return fail("provider ids must be unique");
+    if (parsed.value.model === "") return fail("model must not be empty when saving");
+    seen.add(id);
+    out.push({ id, ...parsed.value });
+  }
+  return ok({ providers: out, allowCloudFallback });
+}
+
+export function parseMemoryList(args: readonly unknown[]): Parsed<{ limit: number }> {
+  const limit = single(args)?.["limit"];
+  if (typeof limit !== "number" || !Number.isInteger(limit) || limit < 1 || limit > 500) {
+    return fail("expected [{limit}] with an integer from 1 to 500");
+  }
+  return ok({ limit });
+}
+
+export function parseMemoryDelete(args: readonly unknown[]): Parsed<{ id: string }> {
+  const id = single(args)?.["id"];
+  if (!isId(id)) return fail("expected [{id}]");
+  return ok({ id });
+}
+
+export function parseMemorySetEnabled(args: readonly unknown[]): Parsed<{ enabled: boolean }> {
+  const enabled = single(args)?.["enabled"];
+  if (typeof enabled !== "boolean") return fail("expected [{enabled}] with true or false");
+  return ok({ enabled });
 }
 
 export function parseDoctorSkip(args: readonly unknown[]): Parsed<{ stepId: DoctorStepId }> {

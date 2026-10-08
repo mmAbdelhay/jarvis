@@ -56,6 +56,7 @@ describe.skipIf(WINDOWS)("jarvisd OS mode over the real control socket", () => {
         writeFile: async () => {},
       },
       secrets: createMemorySecretStore(),
+      providerKeys: createMemorySecretStore(),
       readModelState: async () => null,
       makeProvider: () => {
         throw new Error("the fake provider is active");
@@ -136,7 +137,9 @@ describe.skipIf(WINDOWS)("jarvisd OS mode over the real control socket", () => {
     });
 
     await expect(client.invoke("provider:list", [])).resolves.toEqual({
-      active: null,
+      providers: [],
+      activeId: null,
+      allowCloudFallback: false,
       kinds: ["anthropic", "openai-compatible", "ollama", "gemini"],
     });
     await expect(client.invoke("agent:prompt", [{}])).rejects.toMatchObject({
@@ -171,6 +174,17 @@ describe.skipIf(WINDOWS)("jarvisd OS mode over the real control socket", () => {
       decision: "approved",
       via: "desktop",
       result: "ok",
+    });
+    // M2.5 §2: the new channels over the real socket. The fake provider keeps memory
+    // off, so memory:list is "unsupported" (contracts §7 #9); clear still answers null.
+    await expect(client.invoke("memory:list", [{ limit: 10 }])).rejects.toMatchObject({
+      code: "unsupported",
+      message: "Memory is off",
+    });
+    await expect(client.invoke("memory:clear", [])).resolves.toBeNull();
+    await expect(client.invoke("registry:list", [])).resolves.toEqual({
+      installed: [],
+      available: [],
     });
     // Contracts §6 #23: audit ts on the socket is epoch ms, a number.
     expect(typeof audit[0]?.ts).toBe("number");

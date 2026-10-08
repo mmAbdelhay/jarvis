@@ -22,19 +22,27 @@ function fakeAgent() {
     confirm: record("confirm", null) as OsAgent["confirm"],
     providerList: record(
       "providerList",
-      Promise.resolve({ active: null, kinds: [] }),
+      Promise.resolve({ providers: [], activeId: null, allowCloudFallback: false, kinds: [] }),
     ) as OsAgent["providerList"],
     probe: record(
       "probe",
       Promise.resolve({ ok: true, supportsTools: true, models: [] }),
     ) as OsAgent["probe"],
-    save: record(
-      "save",
-      Promise.resolve({ ok: true, supportsTools: true, models: [] }),
-    ) as OsAgent["save"],
+    save: record("save", Promise.resolve({ ok: true, results: {} })) as OsAgent["save"],
     doctorStart: record("doctorStart", idle) as OsAgent["doctorStart"],
     doctorSkip: record("doctorSkip", idle) as OsAgent["doctorSkip"],
     auditList: record("auditList", Promise.resolve([])) as OsAgent["auditList"],
+    registryList: record(
+      "registryList",
+      Promise.resolve({ installed: [], available: [] }),
+    ) as OsAgent["registryList"],
+    memoryList: record("memoryList", Promise.resolve([])) as OsAgent["memoryList"],
+    memoryDelete: record("memoryDelete", Promise.resolve(null)) as OsAgent["memoryDelete"],
+    memoryClear: record("memoryClear", Promise.resolve(null)) as OsAgent["memoryClear"],
+    memorySetEnabled: record(
+      "memorySetEnabled",
+      Promise.resolve(null),
+    ) as OsAgent["memorySetEnabled"],
     checkUpdates: record(
       "checkUpdates",
       Promise.resolve({ count: 2, security: 1 }),
@@ -66,12 +74,24 @@ describe("createOsBinding", () => {
     );
     await handlers.invoke(
       "provider:save",
-      [{ kind: "ollama", baseUrl: "http://localhost:11434", model: "qwen3:8b" }],
+      [
+        {
+          providers: [
+            { id: "local", kind: "ollama", baseUrl: "http://localhost:11434", model: "qwen3:8b" },
+          ],
+          allowCloudFallback: false,
+        },
+      ],
       connection,
     );
     await handlers.invoke("doctor:start", [], connection);
     await handlers.invoke("doctor:skip", [{ stepId: "wifi" }], connection);
     await handlers.invoke("audit:list", [{ limit: 20 }], connection);
+    await handlers.invoke("registry:list", [], connection);
+    await handlers.invoke("memory:list", [{ limit: 50 }], connection);
+    await handlers.invoke("memory:delete", [{ id: "m1" }], connection);
+    await handlers.invoke("memory:clear", [], connection);
+    await handlers.invoke("memory:setEnabled", [{ enabled: false }], connection);
     await expect(handlers.invoke("updates:check", [], connection)).resolves.toEqual({
       count: 2,
       security: 1,
@@ -86,9 +106,17 @@ describe("createOsBinding", () => {
       "doctorStart",
       "doctorSkip",
       "auditList",
+      "registryList",
+      "memoryList",
+      "memoryDelete",
+      "memoryClear",
+      "memorySetEnabled",
       "checkUpdates",
     ]);
     expect(calls[0]?.args).toEqual(["install vlc"]);
+    expect(calls.find((c) => c.method === "memoryList")?.args).toEqual([50]);
+    expect(calls.find((c) => c.method === "memoryDelete")?.args).toEqual(["m1"]);
+    expect(calls.find((c) => c.method === "memorySetEnabled")?.args).toEqual([false]);
   });
 
   it("answers bad arguments with bad-request and unknown channels with unknown-channel", async () => {
@@ -103,7 +131,7 @@ describe("createOsBinding", () => {
     await expect(
       handlers.invoke(
         "provider:save",
-        [{ kind: "ollama", baseUrl: "http://localhost:11434", model: "" }],
+        [{ kind: "ollama", baseUrl: "http://localhost:11434", model: "m" }],
         connection,
       ),
     ).rejects.toMatchObject({ code: "bad-request" });
@@ -116,6 +144,21 @@ describe("createOsBinding", () => {
     await expect(handlers.invoke("updates:check", ["now"], connection)).rejects.toMatchObject({
       code: "bad-request",
     });
+    await expect(handlers.invoke("registry:list", [1], connection)).rejects.toMatchObject({
+      code: "bad-request",
+    });
+    await expect(handlers.invoke("memory:list", [{ limit: 0 }], connection)).rejects.toMatchObject({
+      code: "bad-request",
+    });
+    await expect(handlers.invoke("memory:delete", [{}], connection)).rejects.toMatchObject({
+      code: "bad-request",
+    });
+    await expect(handlers.invoke("memory:clear", [1], connection)).rejects.toMatchObject({
+      code: "bad-request",
+    });
+    await expect(
+      handlers.invoke("memory:setEnabled", [{ enabled: "yes" }], connection),
+    ).rejects.toMatchObject({ code: "bad-request" });
     expect(calls).toEqual([]);
   });
 

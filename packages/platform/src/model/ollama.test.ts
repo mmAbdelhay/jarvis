@@ -16,6 +16,15 @@ async function collect(iterable: AsyncIterable<ModelEvent>): Promise<ModelEvent[
 const signal = () => new AbortController().signal;
 
 describe("createOllamaProvider.chat", () => {
+  it("asks Ollama for an 8k context so it never cuts the front of the prompt", async () => {
+    const { fetch, calls } = recordingFetch([
+      streamResponse('{"message":{"content":"hi"},"done":true}\n'),
+    ]);
+    const provider = createOllamaProvider({ baseUrl: "http://localhost:11434", model: "m", fetch });
+    await collect(provider.chat({ system: "s", messages: [], tools: [], signal: signal() }));
+    expect(JSON.parse(calls[0]?.init.body ?? "{}").options).toEqual({ num_ctx: 8192 });
+  });
+
   it("scrubs proxy keys from in-stream errors", async () => {
     const { fetch } = recordingFetch([streamResponse('{"error":"rejected proxy-secret"}\n')]);
     const provider = createOllamaProvider({

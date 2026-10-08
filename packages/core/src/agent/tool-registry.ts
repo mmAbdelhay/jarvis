@@ -13,6 +13,64 @@ import {
 } from "./types.js";
 
 export const TRUSTED_MCP_SERVERS = ["jarvis-pkg", "jarvis-diag"] as const;
+
+/** Who vouches for a server's declared risks (contracts M2.5 §3). */
+export type ServerTrust = "host" | "official" | "reviewed" | "community" | "unknown";
+
+/** Design §3.3: tools that reach the root helper or install software. No
+ *  manifest — not even an allowlisted server's — puts them below this. */
+export const HOST_FORCED_RISK: Readonly<Record<string, ToolRisk>> = {
+  "pkg.install": "confirm",
+  "pkg.remove": "confirm",
+  "updates.apply": "confirm",
+  "svc.restart": "confirm",
+  "net.connection_up": "confirm",
+  "net.wifi_connect": "confirm",
+  "net.radio_on": "confirm",
+  "registry.install": "confirm",
+  "registry.remove": "confirm",
+};
+
+/** Name spaces only jarvisd's own servers (jarvis-pkg, jarvis-diag) may use. */
+export const HOST_TOOL_PREFIXES: readonly string[] = [
+  "pkg.",
+  "updates.",
+  "disk.",
+  "sys.",
+  "logs.",
+  "svc.",
+  "net.",
+  "hw.",
+  "registry.",
+  "jarvis.",
+];
+
+/** Compare what the model sees (separator and case folded), not the raw name. */
+export function isHostNamespaced(name: string): boolean {
+  const lower = name.toLowerCase();
+  return HOST_TOOL_PREFIXES.some((prefix) => {
+    const stem = prefix.toLowerCase().replace(/[^a-z0-9]+$/, "");
+    return lower.startsWith(stem) && /^[^a-z0-9]/.test(lower.slice(stem.length));
+  });
+}
+
+const RISK_ORDER: Readonly<Record<ToolRisk, number>> = { safe: 0, confirm: 1, password: 2 };
+
+export function raiseRisk(a: ToolRisk, b: ToolRisk): ToolRisk {
+  return RISK_ORDER[a] >= RISK_ORDER[b] ? a : b;
+}
+
+export function effectiveRisk(tool: string, declared: unknown, trust: ServerTrust): ToolRisk {
+  const parsed: ToolRisk | undefined =
+    declared === "safe" || declared === "confirm" || declared === "password" ? declared : undefined;
+  const vouched = trust === "host" || trust === "official" || trust === "reviewed";
+  const risk: ToolRisk = vouched
+    ? (parsed ?? "confirm")
+    : parsed === "password"
+      ? "password"
+      : "confirm";
+  return raiseRisk(risk, HOST_FORCED_RISK[tool] ?? "safe");
+}
 export const DESCRIBE_TOOL = "jarvis.describe";
 export const SAFE_TOOL_TIMEOUT_MS = 60_000;
 /** Installs and restarts may take minutes; they are never cut short. Kept
@@ -53,23 +111,17 @@ export interface ToolRegistry {
 
 export function parseJarvisMeta(
   meta: unknown,
-  trusted: boolean,
+  trust: ServerTrust | boolean,
+  tool = "",
 ): { risk: ToolRisk; hidden: boolean; secrets: string[]; batchItems: boolean } {
   const jarvis = isRecord(meta) && isRecord(meta["jarvis"]) ? meta["jarvis"] : {};
-  const declared = jarvis["risk"];
-  let risk: ToolRisk;
-  if (!trusted) risk = declared === "password" ? "password" : "confirm";
-  else
-    risk =
-      declared === "safe" || declared === "confirm" || declared === "password"
-        ? declared
-        : "confirm";
+  const level: ServerTrust = trust === true ? "host" : trust === false ? "unknown" : trust;
   const rawSecrets = Array.isArray(jarvis["secrets"]) ? jarvis["secrets"] : [];
   const secrets = [
     ...new Set(rawSecrets.filter((s): s is string => typeof s === "string" && SECRET_NAME.test(s))),
   ].slice(0, 8);
   return {
-    risk,
+    risk: effectiveRisk(tool, jarvis["risk"], level),
     hidden: jarvis["hidden"] === true,
     secrets,
     batchItems: jarvis["batch"] === "items",
@@ -115,7 +167,12 @@ function parseDescription(data: unknown): CardDescription | undefined {
 
 export async function loadToolRegistry(
   sessions: readonly McpSession[],
-  options: { trusted: ReadonlySet<string>; log(line: string): void },
+  options: {
+    trusted: ReadonlySet<string>;
+    /** Registry servers' tiers (registry-servers.ts); host names win. */
+    trustOf?(server: string): ServerTrust;
+    log(line: string): void;
+  },
 ): Promise<ToolRegistry> {
   const byName = new Map<string, RegisteredTool>();
   const byModelName = new Map<string, RegisteredTool>();
@@ -133,13 +190,20 @@ export async function loadToolRegistry(
       continue;
     }
     bySession.set(session.name, session);
-    const trusted = options.trusted.has(session.name);
+    const trust: ServerTrust = options.trusted.has(session.name)
+      ? "host"
+      : (options.trustOf?.(session.name) ?? "unknown");
     for (const tool of tools) {
       if (tool.name === DESCRIBE_TOOL) {
-        describable.add(session.name);
+        // Card text from an add-on is untrusted: only host servers describe.
+        if (trust === "host") describable.add(session.name);
         continue;
       }
-      const parsed = parseJarvisMeta(tool.meta, trusted);
+      if (trust !== "host" && isHostNamespaced(tool.name)) {
+        options.log(`[tools] ${session.name}: ${tool.name} uses a host name space; skipped`);
+        continue;
+      }
+      const parsed = parseJarvisMeta(tool.meta, trust, tool.name);
       const modelName = toModelName(tool.name);
       if (byName.has(tool.name) || byModelName.has(modelName)) {
         options.log(

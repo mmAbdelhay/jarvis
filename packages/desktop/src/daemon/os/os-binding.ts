@@ -1,4 +1,4 @@
-// The contract §3.1 channels (+ M2 §2 updates:check) as ControlHandlers for the existing control
+// The contract §3.1 channels (+ M2 §2 updates:check, M2.5 §2 memory:* and registry:list) as ControlHandlers for the existing control
 // server (frames, handshake, lock and run dir unchanged). Every argument is
 // parsed by @jarvis/wire's field-by-field parsers before the agent sees it;
 // a parse failure or an OsAgentError is a typed refusal, never "internal".
@@ -13,8 +13,12 @@ import {
   parseAgentStop,
   parseAuditList,
   parseDoctorSkip,
+  parseMemoryDelete,
+  parseMemoryList,
+  parseMemorySetEnabled,
   parseNoArgs,
   parseProviderDraft,
+  parseProviderSave,
 } from "@jarvis/wire";
 import { ControlRequestError } from "../control/messages.js";
 import type { ControlHandlers } from "../control/server.js";
@@ -42,13 +46,8 @@ export function createOsBinding(
         return agent.providerList();
       case OS_CONTROL_REQUESTS.providerProbe:
         return agent.probe(value(parseProviderDraft(args)));
-      case OS_CONTROL_REQUESTS.providerSave: {
-        const draft = value(parseProviderDraft(args));
-        // "" is only for provider:probe's list-models mode (contracts §6 #10).
-        if (draft.model === "")
-          throw new ControlRequestError("bad-request", "model must not be empty when saving");
-        return agent.save(draft);
-      }
+      case OS_CONTROL_REQUESTS.providerSave:
+        return agent.save(value(parseProviderSave(args)));
       case OS_CONTROL_REQUESTS.doctorStart:
         value(parseNoArgs(args));
         return agent.doctorStart();
@@ -59,6 +58,18 @@ export function createOsBinding(
       case OS_CONTROL_REQUESTS.updatesCheck:
         value(parseNoArgs(args));
         return agent.checkUpdates();
+      case OS_CONTROL_REQUESTS.registryList:
+        value(parseNoArgs(args));
+        return agent.registryList();
+      case OS_CONTROL_REQUESTS.memoryList:
+        return agent.memoryList(value(parseMemoryList(args)).limit);
+      case OS_CONTROL_REQUESTS.memoryDelete:
+        return agent.memoryDelete(value(parseMemoryDelete(args)).id);
+      case OS_CONTROL_REQUESTS.memoryClear:
+        value(parseNoArgs(args));
+        return agent.memoryClear();
+      case OS_CONTROL_REQUESTS.memorySetEnabled:
+        return agent.memorySetEnabled(value(parseMemorySetEnabled(args)).enabled);
       default:
         throw new ControlRequestError("unknown-channel", `No handler for ${channel}`);
     }

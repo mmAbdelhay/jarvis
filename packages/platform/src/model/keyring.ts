@@ -25,6 +25,12 @@ export class KeyringUnavailableError extends Error {
 const SERVICE = "jarvis";
 const LABEL = "Jarvis model provider key";
 
+/** M2.5 contracts §1: provider keys are stored under provider=<id>. */
+export const PROVIDER_KEY_ATTRIBUTE = "provider";
+/** The memory store's key (design §3.9), under the default account attribute. */
+export const MEMORY_KEY_ACCOUNT = "memory-key";
+export const MEMORY_KEY_LABEL = "Jarvis memory key";
+
 export function providerAccount(kind: string, baseUrl: string): string {
   return `${kind} ${baseUrl}`;
 }
@@ -45,10 +51,15 @@ async function run(exec: KeyringExec, args: readonly string[], stdin?: string) {
   }
 }
 
-export function createSecretToolStore(exec: KeyringExec): SecretStore {
+export function createSecretToolStore(
+  exec: KeyringExec,
+  options: { attribute?: string; label?: string } = {},
+): SecretStore {
+  const attribute = options.attribute ?? "account";
+  const label = options.label ?? LABEL;
   return {
     async get(account) {
-      const result = await run(exec, ["lookup", "service", SERVICE, "account", account]);
+      const result = await run(exec, ["lookup", "service", SERVICE, attribute, account]);
       // Exit 1 with no output is "no such item".
       if (result.code !== 0 || result.stdout === "") return undefined;
       return result.stdout;
@@ -56,7 +67,7 @@ export function createSecretToolStore(exec: KeyringExec): SecretStore {
     async set(account, secret) {
       const result = await run(
         exec,
-        ["store", `--label=${LABEL}`, "service", SERVICE, "account", account],
+        ["store", `--label=${label}`, "service", SERVICE, attribute, account],
         secret,
       );
       if (result.code !== 0) {
@@ -66,7 +77,7 @@ export function createSecretToolStore(exec: KeyringExec): SecretStore {
       }
     },
     async remove(account) {
-      const result = await run(exec, ["clear", "service", SERVICE, "account", account]);
+      const result = await run(exec, ["clear", "service", SERVICE, attribute, account]);
       if (result.code !== 0 && result.stderr.trim() !== "") {
         throw new Error(
           `The system keyring could not remove the key: ${result.stderr.trim().slice(0, 200)}`,

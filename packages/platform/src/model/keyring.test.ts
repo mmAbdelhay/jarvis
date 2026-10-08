@@ -4,6 +4,8 @@ import {
   createSecretToolStore,
   type KeyringExec,
   KeyringUnavailableError,
+  MEMORY_KEY_LABEL,
+  PROVIDER_KEY_ATTRIBUTE,
   providerAccount,
 } from "./keyring.js";
 
@@ -92,5 +94,53 @@ describe("createMemorySecretStore", () => {
     await expect(store.get("a")).resolves.toBe("1");
     await store.remove("a");
     await expect(store.get("a")).resolves.toBeUndefined();
+  });
+});
+
+describe("attribute-keyed stores (M2.5 contracts §1: provider=<id>)", () => {
+  function recorder(stdout = "k-1") {
+    const calls: { args: readonly string[]; stdin?: string }[] = [];
+    const exec: KeyringExec = async (args, stdin) => {
+      calls.push({ args, ...(stdin === undefined ? {} : { stdin }) });
+      return { code: 0, stdout: args[0] === "lookup" ? stdout : "", stderr: "" };
+    };
+    return { calls, exec };
+  }
+
+  it("looks up, stores and clears by provider=<id>, key on stdin only", async () => {
+    const { calls, exec } = recorder();
+    const store = createSecretToolStore(exec, { attribute: PROVIDER_KEY_ATTRIBUTE });
+    await expect(store.get("work")).resolves.toBe("k-1");
+    await store.set("work", "sk-secret");
+    await store.remove("work");
+    expect(calls).toEqual([
+      { args: ["lookup", "service", "jarvis", "provider", "work"] },
+      {
+        args: [
+          "store",
+          "--label=Jarvis model provider key",
+          "service",
+          "jarvis",
+          "provider",
+          "work",
+        ],
+        stdin: "sk-secret",
+      },
+      { args: ["clear", "service", "jarvis", "provider", "work"] },
+    ]);
+  });
+
+  it("keeps the M1 account attribute by default and takes a label", async () => {
+    const { calls, exec } = recorder();
+    await createSecretToolStore(exec).get("anthropic https://api.anthropic.com");
+    await createSecretToolStore(exec, { label: MEMORY_KEY_LABEL }).set("memory-key", "ab");
+    expect(calls[0]?.args).toEqual([
+      "lookup",
+      "service",
+      "jarvis",
+      "account",
+      "anthropic https://api.anthropic.com",
+    ]);
+    expect(calls[1]?.args[1]).toBe("--label=Jarvis memory key");
   });
 });

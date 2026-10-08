@@ -15,7 +15,7 @@
 // No electron here (core/no-electron.test.ts); process.platform read once, here.
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,9 +25,18 @@ import {
   createAuditLog,
   createSecretToolStore,
   nodeAuditFs,
+  connectMcpServer,
   nodeMcpSpawn,
   nodeSecretToolExec,
+  MEMORY_KEY_LABEL,
+  PROVIDER_KEY_ATTRIBUTE,
 } from "@jarvis/platform/model";
+import {
+  createOllamaEmbedder,
+  openVectorCache,
+  removeMemoryFile,
+  type VectorCache,
+} from "@jarvis/platform/store";
 import { DAEMON_EXIT, DAEMON_USAGE, parseDaemonArgs } from "../args.js";
 import { nodeControlDeps } from "../control/deps.js";
 import { runDirectoryFor } from "../control/endpoint.js";
@@ -42,17 +51,29 @@ import {
   scrubSecrets,
 } from "../log-file.js";
 import { createOsAgent } from "./agent-service.js";
+import { createMemoryBackendOpener } from "./memory-backend.js";
 import { connectOsMcpServers } from "./mcp-servers.js";
 import { createModelStateReader } from "./model-state-reader.js";
 import { createOsBinding } from "./os-binding.js";
 import {
   buildStampCandidates,
   MODEL_STATE_PATH,
+  mcpConfigDir,
   mcpDirFrom,
+  memoryDbPath,
   osConfigPath,
   readOsBuildId,
+  registryIndexPath,
+  toolIndexPath,
 } from "./os-paths.js";
 import { buildProvider } from "./provider-factory.js";
+import {
+  createRegistryServers,
+  resolveRuntimeDir,
+  nodeHashFile,
+  nodeRunProbe,
+  nodeWatchDirectory,
+} from "./registry-servers.js";
 
 const describe = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
@@ -132,12 +153,68 @@ async function main(argv: readonly string[]): Promise<void> {
     },
     clearInterval: (handle: unknown) => clearInterval(handle as NodeJS.Timeout),
   };
+  const runtimeDir =
+    resolveRuntimeDir(env, process.getuid?.()) ?? `/run/user/${process.getuid?.() ?? 0}`;
+  const registryServers = createRegistryServers({
+    home,
+    runtimeDir,
+    dir: mcpConfigDir(home),
+    indexPath: registryIndexPath(home),
+    now: Date.now,
+    listDir: async (dir) => {
+      try {
+        return await readdir(dir);
+      } catch (thrown) {
+        if ((thrown as { code?: unknown }).code === "ENOENT") return [];
+        throw thrown;
+      }
+    },
+    readFile: (path) => readFile(path, "utf8"),
+    hashFile: nodeHashFile,
+    runProbe: nodeRunProbe(env),
+    connect: (name, argv) =>
+      connectMcpServer({
+        name,
+        command: argv[0] ?? "systemd-run",
+        args: argv.slice(1),
+        spawn: nodeMcpSpawn(env, info),
+        timers,
+        clientVersion: build,
+        log: info,
+      }),
+    log: info,
+  });
+  let vectorCache: VectorCache | undefined;
+  try {
+    vectorCache = openVectorCache({ path: toolIndexPath(home), now: Date.now });
+  } catch (thrown) {
+    error(`the tool index cache is unavailable: ${describe(thrown)}`);
+  }
+  const embedder = createOllamaEmbedder({
+    fetch: (url, init) => fetch(url, init),
+    now: Date.now,
+    log: info,
+    ...(vectorCache === undefined ? {} : { cache: vectorCache }),
+  });
+  const memory = createMemoryBackendOpener({
+    path: memoryDbPath(home),
+    secrets: createSecretToolStore(nodeSecretToolExec(env), { label: MEMORY_KEY_LABEL }),
+    fileExists: existsSync,
+    removeFile: removeMemoryFile,
+    randomKey: () => randomBytes(32),
+    newId: () => randomBytes(8).toString("hex"),
+    now: Date.now,
+    log: info,
+  });
   let push: (channel: string, payload: unknown) => void = () => {};
   const agent = createOsAgent({
     push: (channel, payload) => push(channel, payload),
     configPath: osConfigPath(home),
     configIo: { readFile: (path) => readFile(path, "utf8"), writeFile: writeAtomically },
     secrets: createSecretToolStore(nodeSecretToolExec(env)),
+    providerKeys: createSecretToolStore(nodeSecretToolExec(env), {
+      attribute: PROVIDER_KEY_ATTRIBUTE,
+    }),
     makeProvider: (section, apiKey) =>
       buildProvider(section, apiKey, { fetch: (url, init) => fetch(url, init) }),
     ...(fakeScript === undefined ? {} : { fakeScript }),
@@ -150,6 +227,10 @@ async function main(argv: readonly string[]): Promise<void> {
         clientVersion: build,
         log: info,
       }),
+    registryServers,
+    embedder,
+    memory,
+    watchRegistry: (onChange) => nodeWatchDirectory(mcpConfigDir(home), onChange, info),
     readModelState: createModelStateReader({
       path: MODEL_STATE_PATH,
       readFile: (path) => readFile(path, "utf8"),
@@ -184,7 +265,10 @@ async function main(argv: readonly string[]): Promise<void> {
   server.onConnect(() => agent.resync());
 
   const shutdown = createShutdown({
-    stopCore: () => agent.shutdown(),
+    stopCore: async () => {
+      await agent.shutdown();
+      vectorCache?.close();
+    },
     closeControl: () => server.close(),
     exit: (code) => {
       restoreConsole();

@@ -12,7 +12,12 @@
     "doctor:start",
     "doctor:skip",
     "audit:list",
-    "updates:check"
+    "updates:check",
+    "memory:list",
+    "memory:delete",
+    "memory:clear",
+    "memory:setEnabled",
+    "registry:list"
   ],
   "pushes": ["agent:events", "provider:status", "doctor:state", "sys:snapshot"]
 }

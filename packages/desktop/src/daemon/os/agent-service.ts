@@ -7,6 +7,22 @@
 // No electron here (core/no-electron.test.ts).
 import {
   AGENT_TEXT,
+  CORE_TOOLS,
+  createMemoryService,
+  type MemoryItem,
+  redactSecrets,
+  selectTools,
+  SESSION_IDLE_MS,
+  type TextEmbedder,
+  toModelName,
+  CONTEXT_TOKENS,
+  DEFAULT_CONTEXT_TOKENS,
+  createFailoverProvider,
+  type FailoverProvider,
+  isLocalBaseUrl,
+  type ProviderListResult,
+  type ProviderSaveRequest,
+  type ProviderSaveResult,
   type AgentEvent,
   type AuditEntry,
   type AuditQuery,
@@ -27,28 +43,35 @@ import {
   PROVIDER_KINDS,
   parseNetStatus,
   parseFailedUnitNames,
+  parseRegistrySearch,
+  type RegistryEntry,
+  type RegistryListResult,
   parseSysHealth,
   buildSysSnapshot,
   type SysSnapshot,
   type ProbeResult,
-  type ProviderConfig,
   type ProviderDraft,
-  type ProviderKind,
   runTurn,
   type ToolRegistry,
   TRUSTED_MCP_SERVERS,
   trimHistory,
   type UpdatesCheckResult,
 } from "@jarvis/core";
-import { providerAccount, type SecretStore } from "@jarvis/platform/model";
+import type { SecretStore } from "@jarvis/platform/model";
 import { OS_CONTROL_PUSHES } from "@jarvis/wire";
-import {
-  type ConfigIo,
-  type ProviderSection,
-  readProviderSection,
-  writeProviderSection,
-} from "./provider-config.js";
+import type { MemoryOpener } from "./memory-backend.js";
+import type { ConfigIo, ProviderSection } from "./provider-config.js";
+import { EMPTY_REGISTRY, type LoadedRegistry, type Registration } from "./registry-servers.js";
 import { createLazyKeyProvider, unavailableProvider } from "./provider-factory.js";
+import { hasProviderKey, type ProviderKeyStores, readProviderKey } from "./provider-keys.js";
+import {
+  emptyBrain,
+  type OsBrainConfig,
+  type ProviderEntry,
+  readOsBrainConfig,
+  writeOsMemoryEnabled,
+  writeOsProviders,
+} from "./provider-list-config.js";
 import { createProviderMonitor } from "./provider-monitor.js";
 import { createSysMonitor } from "./sys-monitor.js";
 import { createUpdatesMonitor, UpdatesCheckError } from "./updates-monitor.js";
@@ -68,10 +91,17 @@ export type OsAgentDeps = {
   configPath: string;
   configIo: ConfigIo;
   secrets: SecretStore;
+  /** Provider keys by id (M2.5 contracts §1: attribute provider=<id>). `secrets`
+   *  stays the account-keyed store (M1 keys, read once for migration). */
+  providerKeys: SecretStore;
   makeProvider(section: ProviderSection, apiKey: string | undefined): ModelProvider;
   /** Set only from JARVIS_FAKE_PROVIDER (contracts §5). */
   fakeScript?: readonly FakeTurn[];
   connectMcp(): Promise<McpSession[]>;
+  /** Add-on servers from mcp.d (registry-servers.ts); none when absent. */
+  registryServers?: { load(): Promise<LoadedRegistry> };
+  /** Calls onChange when mcp.d changes; returns a stop function. */
+  watchRegistry?(onChange: () => void): () => void;
   /** /var/lib/jarvis/model-state.json (M2 contracts §5); null when absent or
    *  unreadable. Never throws (model-state-reader.ts). */
   readModelState(): Promise<ModelState | null>;
@@ -79,6 +109,10 @@ export type OsAgentDeps = {
     append(entry: AuditEntry): Promise<void>;
     list(query: AuditQuery): Promise<AuditEntry[]>;
   };
+  /** Local embeddings (loopback Ollama) for tool search and memory; absent → keywords. */
+  embedder?: TextEmbedder | null;
+  /** The encrypted memory store (memory-backend.ts); absent → memory off. */
+  memory?: MemoryOpener;
   now(): number;
   newId(): string;
   timers: {
@@ -95,12 +129,19 @@ export interface OsAgent {
   prompt(text: string): { turnId: string };
   stop(turnId: string): null;
   confirm(answer: ConfirmAnswer): null;
-  providerList(): Promise<{ active: ProviderConfig | null; kinds: ProviderKind[] }>;
-  probe(draft: ProviderDraft): Promise<ProbeResult>;
-  save(draft: ProviderDraft): Promise<ProbeResult>;
+  providerList(): Promise<ProviderListResult>;
+  probe(draft: ProviderDraft & { id?: string }): Promise<ProbeResult>;
+  save(request: ProviderSaveRequest): Promise<ProviderSaveResult>;
   doctorStart(): DoctorState;
   doctorSkip(stepId: DoctorStepId): DoctorState;
   auditList(query: AuditQuery): Promise<AuditEntry[]>;
+  /** registry:list (M2.5 contracts §2). */
+  registryList(): Promise<RegistryListResult>;
+  memoryList(limit: number): Promise<MemoryItem[]>;
+  memoryDelete(id: string): Promise<null>;
+  memoryClear(): Promise<null>;
+  /** memory:setEnabled (M2.5 contracts §7 #9); persisted in jarvis.yaml. */
+  memorySetEnabled(enabled: boolean): Promise<null>;
   /** updates:check (M2 contracts §2). */
   checkUpdates(): Promise<UpdatesCheckResult>;
   /** A shell (re)connected: re-push what a broadcast it missed would have said. */
@@ -113,6 +154,14 @@ const describeError = (error: unknown) => (error instanceof Error ? error.messag
 export function createOsAgent(deps: OsAgentDeps): OsAgent {
   const emit = (event: AgentEvent) => {
     deps.push(OS_CONTROL_PUSHES.agentEvents, event);
+    // A finished install or removal changes mcp.d: reload add-ons before the next turn.
+    if (
+      event.type === "tool" &&
+      (event.name === "registry.install" || event.name === "registry.remove") &&
+      event.status !== "running"
+    ) {
+      addOnsDirty = true;
+    }
     // An upgrade changes what is pending: refresh the badge (M2 contracts §2).
     if (event.type === "tool" && event.name === "updates.apply" && event.status !== "running") {
       updates.check().catch((error: unknown) => {
@@ -121,29 +170,112 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
     }
   };
   let provider: ModelProvider = unavailableProvider(AGENT_TEXT.noProvider);
-  let section: ProviderSection | null = null;
-  let sessions: McpSession[] = [];
+  let brain: OsBrainConfig = emptyBrain();
+  let failover: FailoverProvider | undefined;
+  const keyStores = (): ProviderKeyStores => ({
+    providerKeys: deps.providerKeys,
+    legacy: deps.secrets,
+    migrateLegacy: brain.migratedFromLegacy,
+    log: deps.log,
+  });
+  /** The provider answering now; the first one before any answer. */
+  function activeEntry(): ProviderEntry | null {
+    const id = failover?.status().activeId;
+    return brain.providers.find((entry) => entry.id === id) ?? brain.providers[0] ?? null;
+  }
+  /** The smallest context in the list: a failover mid-turn must still fit. */
+  function contextTokens(): number {
+    const sizes = brain.providers.map(
+      (entry) => CONTEXT_TOKENS[entry.kind] ?? DEFAULT_CONTEXT_TOKENS,
+    );
+    return sizes.length === 0 ? DEFAULT_CONTEXT_TOKENS : Math.min(...sizes);
+  }
+  const embedder = deps.embedder ?? null;
+  const memoryOn = () => brain.memoryEnabled && deps.fakeScript === undefined;
+  const memory = createMemoryService({
+    enabled: memoryOn,
+    backend: () => deps.memory?.open() ?? Promise.resolve(null),
+    reset: () => deps.memory?.reset() ?? Promise.resolve(),
+    // The user's own model writes the summary; the request ends with SAFETY_RULES.
+    summarize: async (system, transcript, signal) => {
+      let text = "";
+      for await (const event of provider.chat({
+        system,
+        messages: [{ role: "user", text: transcript }],
+        tools: [],
+        signal,
+      })) {
+        if (event.type === "text") text += event.delta;
+        else if (event.type === "done") break;
+      }
+      return text;
+    },
+    embedder,
+    redact: redactSecrets,
+    now: deps.now,
+    log: deps.log,
+  });
+  let idleTimer: unknown;
+  const touchSession = () => {
+    if (idleTimer !== undefined) deps.timers.clearTimeout(idleTimer);
+    idleTimer = deps.timers.setTimeout(() => {
+      idleTimer = undefined;
+      void memory.endSession();
+    }, SESSION_IDLE_MS);
+  };
+  const coreToolNames = new Set(CORE_TOOLS.map(toModelName));
+  let lastSearchNote = "";
+  const logSearchOnce = (line: string) => {
+    if (line === lastSearchNote) return;
+    lastSearchNote = line;
+    deps.log(line);
+  };
+  let hostSessions: McpSession[] = [];
+  let addOns: LoadedRegistry = EMPTY_REGISTRY;
+  let addOnsDirty = true;
+  let stopWatching: () => void = () => {};
   let registry: ToolRegistry | undefined;
   let loading: Promise<ToolRegistry> | undefined;
   let history: ModelMessage[] = [];
   let turn: { turnId: string; controller: AbortController } | undefined;
   let doctorNote: string | undefined;
 
-  function ensureRegistry(): Promise<ToolRegistry> {
-    if (registry !== undefined && sessions.length > 0 && sessions.every((s) => s.alive)) {
+  /** Host servers reconnect when one died; add-ons reload only when asked
+   *  (before a turn) and something changed, never under a running turn. */
+  function ensureRegistry(options: { reloadAddOns?: boolean } = {}): Promise<ToolRegistry> {
+    const hostOk = hostSessions.length > 0 && hostSessions.every((s) => s.alive);
+    const reloadAddOns =
+      deps.registryServers !== undefined &&
+      addOnsDirty &&
+      (registry === undefined || options.reloadAddOns === true);
+    if (registry !== undefined && hostOk && !reloadAddOns) {
       return Promise.resolve(registry);
     }
     if (loading !== undefined) return loading;
     loading = (async () => {
-      for (const old of sessions) old.close();
-      try {
-        sessions = await deps.connectMcp();
-      } catch (error) {
-        deps.log(`[agent] the MCP servers did not start: ${describeError(error)}`);
-        sessions = [];
+      if (!hostOk) {
+        for (const old of hostSessions) old.close();
+        try {
+          hostSessions = await deps.connectMcp();
+        } catch (error) {
+          deps.log(`[agent] the MCP servers did not start: ${describeError(error)}`);
+          hostSessions = [];
+        }
       }
-      registry = await loadToolRegistry(sessions, {
+      if (reloadAddOns && deps.registryServers !== undefined) {
+        for (const old of addOns.sessions) old.close();
+        addOnsDirty = false;
+        try {
+          addOns = await deps.registryServers.load();
+        } catch (error) {
+          deps.log(`[registry] loading add-on servers failed: ${describeError(error)}`);
+          addOns = EMPTY_REGISTRY;
+        }
+      }
+      // Host servers first: on a name collision the host tool wins.
+      registry = await loadToolRegistry([...hostSessions, ...addOns.sessions], {
         trusted: new Set(TRUSTED_MCP_SERVERS),
+        trustOf: (name) => addOns.tiers.get(name) ?? "unknown",
         log: deps.log,
       });
       return registry;
@@ -156,7 +288,10 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
   const gate = createRiskGate({
     emit,
     describe: async (tool, input) => (await ensureRegistry()).describe(tool, input),
-    audit: (entry) => deps.audit.append(entry),
+    audit: async (entry) => {
+      await deps.audit.append(entry);
+      memory.recordAudit(entry);
+    },
     now: deps.now,
     newId: deps.newId,
     timers: deps.timers,
@@ -165,6 +300,7 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
 
   const monitor = createProviderMonitor({
     check: () => provider.reachable(),
+    active: () => failover?.status() ?? { activeId: null, fallbackReason: null },
     push: (status) => deps.push(OS_CONTROL_PUSHES.providerStatus, status),
     timers: deps.timers,
   });
@@ -205,16 +341,18 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
       ...(parsedHealth === undefined ? {} : { health: parsedHealth }),
       ...(parsedNet === undefined ? {} : { net: parsedNet }),
       failedUnits,
-      model:
-        section === null
+      model: (() => {
+        const active = activeEntry();
+        return active === null
           ? null
           : {
-              kind: section.kind,
-              model: section.model,
-              baseUrl: section.baseUrl,
-              supportsTools: section.supportsTools,
-              download: modelDownloadFor(section, modelState),
-            },
+              kind: active.kind,
+              model: active.model,
+              baseUrl: active.baseUrl,
+              supportsTools: active.supportsTools,
+              download: modelDownloadFor(active, modelState),
+            };
+      })(),
       updates: updates.current(),
     });
   }
@@ -240,11 +378,10 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
       deps.timers.setTimeout(resolve, ms);
     });
 
-  /** The key is read at first use and retried (contracts §6 #12): the
-   *  keyring unlocks with the session, possibly after jarvisd started. */
-  function keyedProvider(target: ProviderSection): ModelProvider {
+  /** The key is read at first use and retried (contracts §6 #12). */
+  function keyedProvider(target: ProviderSection, keyOf: ProviderEntry): ModelProvider {
     return createLazyKeyProvider({
-      readKey: () => deps.secrets.get(providerAccount(target.kind, target.baseUrl)),
+      readKey: () => readProviderKey(keyOf, keyStores()),
       build: (key) => deps.makeProvider(target, key),
       sleep,
     });
@@ -252,22 +389,41 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
 
   async function loadProvider(): Promise<void> {
     try {
-      section = await readProviderSection(deps.configPath, deps.configIo);
+      brain = await readOsBrainConfig(deps.configPath, deps.configIo);
     } catch (error) {
       deps.log(`[agent] ${describeError(error)}`);
-      section = null;
+      brain = emptyBrain();
     }
-    // JARVIS_FAKE_PROVIDER replaces the configured provider entirely, and
-    // works with none configured (contracts §6 #11).
+    failover = undefined;
+    // JARVIS_FAKE_PROVIDER replaces the configured providers entirely (contracts §6 #11).
     if (deps.fakeScript !== undefined) {
       provider = createFakeProvider(deps.fakeScript);
       return;
     }
-    provider =
-      section === null ? unavailableProvider(AGENT_TEXT.noProvider) : keyedProvider(section);
+    if (brain.providers.length === 0) {
+      provider = unavailableProvider(AGENT_TEXT.noProvider);
+      return;
+    }
+    failover = createFailoverProvider({
+      entries: brain.providers.map((entry) => ({
+        id: entry.id,
+        locality: isLocalBaseUrl(entry.baseUrl) ? ("local" as const) : ("cloud" as const),
+        provider: keyedProvider(entry, entry),
+      })),
+      allowCloudFallback: brain.allowCloudFallback,
+      timers: deps.timers,
+      onSwitch: (change) => {
+        deps.log(`[provider] ${change.fromId} -> ${change.toId}: ${change.reason}`);
+        monitor.noteActive();
+      },
+    });
+    provider = failover;
   }
 
-  function draftProvider(draft: ProviderDraft): ModelProvider {
+  /** A stored key is reused only from a saved entry with the same kind and
+   *  base URL (and the same id when one is given): a changed URL never
+   *  receives the old key. */
+  function draftProvider(draft: ProviderDraft & { id?: string }): ModelProvider {
     const target: ProviderSection = {
       kind: draft.kind,
       baseUrl: draft.baseUrl,
@@ -275,10 +431,16 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
       auth: "api-key",
       supportsTools: true,
     };
-    // No apiKey in the draft: use the stored one (contracts §6 #10).
-    return draft.apiKey === undefined
-      ? keyedProvider(target)
-      : deps.makeProvider(target, draft.apiKey);
+    if (draft.apiKey !== undefined) return deps.makeProvider(target, draft.apiKey);
+    const saved = brain.providers.find(
+      (entry) =>
+        (draft.id === undefined || entry.id === draft.id) &&
+        entry.kind === draft.kind &&
+        entry.baseUrl === draft.baseUrl,
+    );
+    return saved === undefined
+      ? deps.makeProvider(target, undefined)
+      : keyedProvider(target, saved);
   }
 
   return {
@@ -286,6 +448,10 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
       await loadProvider();
       monitor.start();
       void ensureRegistry();
+      stopWatching =
+        deps.watchRegistry?.(() => {
+          addOnsDirty = true;
+        }) ?? (() => {});
       sys.start();
       updates.start();
     },
@@ -300,15 +466,25 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
       doctorNote = undefined;
       void (async () => {
         try {
-          const tools = await ensureRegistry();
+          const tools = await ensureRegistry({ reloadAddOns: true });
+          const notes = await memory.recall(text).catch(() => []);
+          const before = history.length;
+          failover?.beginTurn();
           const result = await runTurn(
             {
               provider,
               registry: tools,
               gate,
-              toolsEnabled: deps.fakeScript !== undefined || section?.supportsTools !== false,
+              contextTokens: contextTokens(),
+              toolsEnabled: deps.fakeScript !== undefined || activeEntry()?.supportsTools !== false,
               emit,
               newId: deps.newId,
+              selectTools: (query, all) =>
+                selectTools(all, query, {
+                  coreModelNames: coreToolNames,
+                  embedder,
+                  log: logSearchOnce,
+                }),
             },
             {
               turnId,
@@ -316,15 +492,23 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
               text,
               signal: controller.signal,
               ...(context === undefined ? {} : { context }),
+              ...(notes.length === 0 ? {} : { notes }),
             },
           );
+          memory.afterTurn(result.messages.slice(before));
+          touchSession();
           history = trimHistory(result.messages);
           if (result.reason !== "error") monitor.reportOk();
           else if (result.errorKind === "network" || result.errorKind === "auth") {
             monitor.reportFailure(result.error ?? "unreachable");
           }
         } catch (error) {
-          emit({ type: "turn-end", turnId, reason: "error", error: describeError(error) });
+          emit({
+            type: "turn-end",
+            turnId,
+            reason: "error",
+            error: describeError(error),
+          });
         } finally {
           if (turn?.turnId === turnId) turn = undefined;
         }
@@ -348,18 +532,20 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
     },
 
     async providerList() {
-      const kinds = [...PROVIDER_KINDS];
-      if (section === null) return { active: null, kinds };
-      let hasKey = false;
-      try {
-        hasKey =
-          (await deps.secrets.get(providerAccount(section.kind, section.baseUrl))) !== undefined;
-      } catch {
-        hasKey = false;
-      }
+      const providers = await Promise.all(
+        brain.providers.map(async (entry) => ({
+          id: entry.id,
+          kind: entry.kind,
+          baseUrl: entry.baseUrl,
+          model: entry.model,
+          hasKey: await hasProviderKey(entry, keyStores()),
+        })),
+      );
       return {
-        active: { kind: section.kind, baseUrl: section.baseUrl, model: section.model, hasKey },
-        kinds,
+        providers,
+        activeId: failover?.status().activeId ?? null,
+        allowCloudFallback: brain.allowCloudFallback,
+        kinds: [...PROVIDER_KINDS],
       };
     },
 
@@ -368,40 +554,101 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
       if (draft.model === "") {
         // Contracts §6 #10: an empty model lists models without the tool test.
         try {
-          return { ok: true, supportsTools: false, models: await candidate.listModels() };
+          return {
+            ok: true,
+            supportsTools: false,
+            models: await candidate.listModels(),
+          };
         } catch (error) {
-          return { ok: false, supportsTools: false, models: [], error: describeError(error) };
+          return {
+            ok: false,
+            supportsTools: false,
+            models: [],
+            error: describeError(error),
+          };
         }
       }
       return candidate.probe();
     },
 
-    async save(draft) {
-      if (draft.model === "") throw new OsAgentError("bad-request", "Pick a model before saving");
-      const result = await draftProvider(draft).probe();
-      if (!result.ok) return result;
+    async save(request) {
+      if (request.providers.some((draft) => draft.model === "")) {
+        throw new OsAgentError("bad-request", "Pick a model before saving");
+      }
+      // Contracts §7 #11: probe only new or changed providers (or ones that
+      // carry a key); an unchanged saved entry keeps its saved supportsTools.
+      const savedById = new Map(brain.providers.map((entry) => [entry.id, entry]));
+      const probed = await Promise.all(
+        request.providers.map(async (draft): Promise<readonly [string, ProbeResult]> => {
+          const saved = savedById.get(draft.id);
+          const unchanged =
+            saved !== undefined &&
+            draft.apiKey === undefined &&
+            saved.kind === draft.kind &&
+            saved.baseUrl === draft.baseUrl &&
+            saved.model === draft.model;
+          if (unchanged) {
+            return [draft.id, { ok: true, supportsTools: saved.supportsTools, models: [] }];
+          }
+          return [draft.id, await draftProvider(draft).probe()];
+        }),
+      );
+      const results: Record<string, ProbeResult> = Object.fromEntries(probed);
+      if (!probed.every(([, result]) => result.ok)) return { ok: false, results };
+      const previous = brain.providers;
       try {
-        if (draft.apiKey !== undefined) {
-          await deps.secrets.set(providerAccount(draft.kind, draft.baseUrl), draft.apiKey);
+        for (const draft of request.providers) {
+          if (draft.apiKey !== undefined) await deps.providerKeys.set(draft.id, draft.apiKey);
         }
-        await writeProviderSection(
+        await writeOsProviders(
           deps.configPath,
           {
-            kind: draft.kind,
-            baseUrl: draft.baseUrl,
-            model: draft.model,
-            auth: "api-key",
-            supportsTools: result.supportsTools,
+            providers: request.providers.map((draft) => ({
+              id: draft.id,
+              kind: draft.kind,
+              baseUrl: draft.baseUrl,
+              model: draft.model,
+              auth: "api-key" as const,
+              supportsTools: results[draft.id]?.supportsTools ?? true,
+            })),
+            allowCloudFallback: request.allowCloudFallback,
           },
           deps.configIo,
         );
       } catch (error) {
-        return { ...result, ok: false, error: describeError(error) };
+        const message = describeError(error);
+        return {
+          ok: false,
+          results: Object.fromEntries(
+            probed.map(([id, result]) => [id, { ...result, ok: false, error: message }]),
+          ),
+        };
+      }
+      // A keyless draft whose kind or base URL changed must not inherit the
+      // old key: the runtime reads keys by id alone.
+      for (const draft of request.providers) {
+        const old = previous.find((entry) => entry.id === draft.id);
+        if (
+          draft.apiKey === undefined &&
+          old !== undefined &&
+          (old.kind !== draft.kind || old.baseUrl !== draft.baseUrl)
+        ) {
+          await deps.providerKeys.remove(draft.id).catch((error: unknown) => {
+            deps.log(`[keys] could not remove the key of ${draft.id}: ${describeError(error)}`);
+          });
+        }
+      }
+      const kept = new Set(request.providers.map((draft) => draft.id));
+      for (const old of previous) {
+        if (kept.has(old.id)) continue;
+        await deps.providerKeys.remove(old.id).catch((error: unknown) => {
+          deps.log(`[keys] could not remove the key of ${old.id}: ${describeError(error)}`);
+        });
       }
       await loadProvider();
       void monitor.recheck();
       void sys.refresh();
-      return result;
+      return { ok: true, results };
     },
 
     doctorStart() {
@@ -415,6 +662,72 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
 
     auditList(query) {
       return deps.audit.list(query);
+    },
+
+    async registryList() {
+      const tools = await ensureRegistry();
+      let available: RegistryEntry[] = [];
+      if (tools.get("registry.list") !== undefined) {
+        const found = await tools.call("registry.list", {});
+        if (found.ok) available = parseRegistrySearch(found.data);
+      }
+      const stub = (reg: Registration): RegistryEntry => ({
+        id: reg.id,
+        name: reg.id,
+        description: "",
+        tier: reg.tier,
+        version: reg.version,
+        artifact: { url: "", sha256: "", runtime: reg.runtime },
+        permissions: {
+          network: reg.permissions.network,
+          paths: [...reg.permissions.paths],
+        },
+        tools: reg.tools.map((tool) => ({ ...tool })),
+      });
+      const installed = addOns.installed.map(
+        (reg) =>
+          available.find((entry) => entry.id === reg.id && entry.version === reg.version) ??
+          stub(reg),
+      );
+      return { installed, available };
+    },
+
+    async memoryList(limit) {
+      if (!memoryOn() || deps.memory === undefined) {
+        throw new OsAgentError("unsupported", AGENT_TEXT.memoryOff);
+      }
+      // No keyring (or locked) → open() yields null → memory is off (§7 #9).
+      if ((await deps.memory?.open()) == null) {
+        throw new OsAgentError("unsupported", AGENT_TEXT.memoryOff);
+      }
+      return memory.list(limit);
+    },
+
+    async memoryDelete(id) {
+      // Memory off: never open (and so never create) the store.
+      if (!memoryOn()) return null;
+      await memory.delete(id);
+      return null;
+    },
+
+    async memoryClear() {
+      if (!memoryOn()) {
+        // Off: only wipe what exists (file + key); never open a new store.
+        await deps.memory?.reset();
+        return null;
+      }
+      await memory.clear();
+      return null;
+    },
+
+    async memorySetEnabled(enabled) {
+      try {
+        await writeOsMemoryEnabled(deps.configPath, enabled, deps.configIo);
+      } catch (error) {
+        throw new OsAgentError("internal", describeError(error));
+      }
+      brain = { ...brain, memoryEnabled: enabled };
+      return null;
     },
 
     async checkUpdates() {
@@ -445,10 +758,15 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
       turn?.controller.abort();
       doctor.cancel();
       gate.closeAll();
+      if (idleTimer !== undefined) deps.timers.clearTimeout(idleTimer);
+      // Session end (design §3.9), bounded so a dead provider cannot hold the stop.
+      await Promise.race([memory.endSession(), sleep(20_000)]);
+      deps.memory?.close();
       monitor.stop();
       sys.stop();
       updates.stop();
-      for (const open of sessions) open.close();
+      stopWatching();
+      for (const open of [...hostSessions, ...addOns.sessions]) open.close();
     },
   };
 }

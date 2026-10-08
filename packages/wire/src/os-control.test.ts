@@ -9,8 +9,12 @@ import {
   parseAuditList,
   parseBaseUrl,
   parseDoctorSkip,
+  parseMemoryDelete,
+  parseMemoryList,
+  parseMemorySetEnabled,
   parseNoArgs,
   parseProviderDraft,
+  parseProviderSave,
 } from "./os-control.js";
 
 describe("OS control channel names (contracts §3, M2 §2)", () => {
@@ -23,9 +27,14 @@ describe("OS control channel names (contracts §3, M2 §2)", () => {
         "audit:list",
         "doctor:skip",
         "doctor:start",
+        "memory:clear",
+        "memory:delete",
+        "memory:list",
+        "memory:setEnabled",
         "provider:list",
         "provider:probe",
         "provider:save",
+        "registry:list",
         "updates:check",
       ].sort(),
     );
@@ -227,5 +236,109 @@ describe("parseDoctorSkip and parseAuditList", () => {
     expect(parseAuditList([{ limit: 501 }]).ok).toBe(false);
     expect(parseAuditList([{ limit: 1.5 }]).ok).toBe(false);
     expect(parseAuditList([{ limit: 5, beforeTs: Number.POSITIVE_INFINITY }]).ok).toBe(false);
+  });
+});
+
+describe("parseProviderSave (M2.5 contracts §2)", () => {
+  const entry = {
+    id: "local",
+    kind: "ollama",
+    baseUrl: "http://127.0.0.1:11434/",
+    model: "qwen3:8b",
+  };
+
+  it("parses an ordered list with ids and the cloud-fallback flag", () => {
+    expect(
+      parseProviderSave([
+        {
+          providers: [
+            entry,
+            {
+              id: "work",
+              kind: "anthropic",
+              baseUrl: "https://api.anthropic.com",
+              model: "claude-sonnet-5-5",
+              apiKey: "sk-ant-x",
+            },
+          ],
+          allowCloudFallback: true,
+        },
+      ]),
+    ).toEqual({
+      ok: true,
+      value: {
+        providers: [
+          { id: "local", kind: "ollama", baseUrl: "http://127.0.0.1:11434", model: "qwen3:8b" },
+          {
+            id: "work",
+            kind: "anthropic",
+            baseUrl: "https://api.anthropic.com",
+            model: "claude-sonnet-5-5",
+            apiKey: "sk-ant-x",
+          },
+        ],
+        allowCloudFallback: true,
+      },
+    });
+  });
+
+  it("accepts an empty list (no providers)", () => {
+    expect(parseProviderSave([{ providers: [], allowCloudFallback: false }]).ok).toBe(true);
+  });
+
+  it("refuses bad ids, duplicates, empty models, more than 8, and a missing flag", () => {
+    const bad = (value: unknown) => expect(parseProviderSave([value]).ok).toBe(false);
+    bad({ providers: [{ ...entry, id: "Local" }], allowCloudFallback: false });
+    bad({ providers: [{ ...entry, id: "-x" }], allowCloudFallback: false });
+    bad({ providers: [{ ...entry, id: "a".repeat(33) }], allowCloudFallback: false });
+    bad({ providers: [{ ...entry, id: undefined }], allowCloudFallback: false });
+    bad({ providers: [entry, entry], allowCloudFallback: false });
+    bad({ providers: [{ ...entry, model: "" }], allowCloudFallback: false });
+    bad({
+      providers: Array.from({ length: 9 }, (_, i) => ({ ...entry, id: `p${i}` })),
+      allowCloudFallback: false,
+    });
+    bad({ providers: [entry] });
+    bad({ providers: [{ ...entry, kind: "mistral" }], allowCloudFallback: false });
+  });
+});
+
+describe("parseProviderDraft with an id (probe with a stored key)", () => {
+  it("keeps a valid id and refuses a bad one", () => {
+    const draft = { kind: "ollama", baseUrl: "http://10.0.0.2:11434", model: "" };
+    expect(parseProviderDraft([{ ...draft, id: "lan" }])).toEqual({
+      ok: true,
+      value: { ...draft, id: "lan" },
+    });
+    expect(parseProviderDraft([draft])).toEqual({ ok: true, value: draft });
+    expect(parseProviderDraft([{ ...draft, id: "LAN!" }]).ok).toBe(false);
+  });
+});
+
+describe("memory channels", () => {
+  it("parses memory:list limits 1-500", () => {
+    expect(parseMemoryList([{ limit: 50 }])).toEqual({ ok: true, value: { limit: 50 } });
+    expect(parseMemoryList([{ limit: 0 }]).ok).toBe(false);
+    expect(parseMemoryList([{ limit: 501 }]).ok).toBe(false);
+    expect(parseMemoryList([{ limit: 1.5 }]).ok).toBe(false);
+    expect(parseMemoryList([]).ok).toBe(false);
+  });
+
+  it("parses memory:delete ids", () => {
+    expect(parseMemoryDelete([{ id: "0a1b2c3d4e5f6789" }])).toEqual({
+      ok: true,
+      value: { id: "0a1b2c3d4e5f6789" },
+    });
+    expect(parseMemoryDelete([{ id: "../x" }]).ok).toBe(false);
+    expect(parseMemoryDelete([{}]).ok).toBe(false);
+  });
+
+  it("parses memory:setEnabled (contracts §7 #9)", () => {
+    expect(parseMemorySetEnabled([{ enabled: false }])).toEqual({
+      ok: true,
+      value: { enabled: false },
+    });
+    expect(parseMemorySetEnabled([{ enabled: "yes" }]).ok).toBe(false);
+    expect(parseMemorySetEnabled([]).ok).toBe(false);
   });
 });

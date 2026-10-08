@@ -13,7 +13,39 @@ export type ProviderConfig = {
 export type ProviderDraft = { kind: ProviderKind; baseUrl: string; model: string; apiKey?: string };
 export type ProbeResult = { ok: boolean; supportsTools: boolean; models: string[]; error?: string };
 /** The provider:status push. Not "ProviderStatus": core already exports one. */
-export type ProviderReachability = { reachable: boolean; error?: string };
+export type ProviderListEntry = ProviderConfig & { id: string };
+export type ProviderDraftEntry = ProviderDraft & { id: string };
+export type ProviderListResult = {
+  providers: ProviderListEntry[];
+  activeId: string | null;
+  allowCloudFallback: boolean;
+  kinds: ProviderKind[];
+};
+export type ProviderSaveRequest = { providers: ProviderDraftEntry[]; allowCloudFallback: boolean };
+export type ProviderSaveResult = { ok: boolean; results: Record<string, ProbeResult> };
+export type ProviderReachability = {
+  reachable: boolean;
+  error?: string;
+  activeId: string | null;
+  fallbackReason: string | null;
+};
+
+export type MemoryKind = "summary" | "fact";
+export type MemoryItem = { id: string; kind: MemoryKind; text: string; createdAt: number };
+
+export type RegistryTier = "official" | "reviewed" | "community";
+export type RegistryRuntime = "go-static" | "node" | "python";
+export type RegistryEntry = {
+  id: string;
+  name: string;
+  description: string;
+  tier: RegistryTier;
+  version: string;
+  artifact: { url: string; sha256: string; runtime: RegistryRuntime };
+  permissions: { network: boolean; paths: string[] };
+  tools: { name: string; risk: "safe" | "confirm" }[];
+};
+export type RegistryListResult = { installed: RegistryEntry[]; available: RegistryEntry[] };
 
 /** M2 contracts §2: pending updates as of checkedAt (epoch ms, null before the first check). */
 export type UpdatesSummary = { count: number; security: number; checkedAt: number | null };

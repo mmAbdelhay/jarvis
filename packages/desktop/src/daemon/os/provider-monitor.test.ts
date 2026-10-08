@@ -41,14 +41,16 @@ describe("createProviderMonitor", () => {
       timers: clock.timers,
     });
     await monitor.recheck();
-    expect(pushed).toEqual([{ reachable: false, error: "Cannot reach 10.0.0.2" }]);
+    expect(pushed).toEqual([
+      { reachable: false, error: "Cannot reach 10.0.0.2", activeId: null, fallbackReason: null },
+    ]);
     expect([...clock.pending.values()].map((p) => p.ms)).toEqual([UNREACHABLE_RECHECK_MS]);
     clock.fire();
     await Promise.resolve();
     await monitor.recheck();
     expect(pushed).toEqual([
-      { reachable: false, error: "Cannot reach 10.0.0.2" },
-      { reachable: true },
+      { reachable: false, error: "Cannot reach 10.0.0.2", activeId: null, fallbackReason: null },
+      { reachable: true, activeId: null, fallbackReason: null },
     ]);
     expect(clock.pending.size).toBe(0);
   });
@@ -64,12 +66,36 @@ describe("createProviderMonitor", () => {
     monitor.reportFailure("401 invalid x-api-key");
     monitor.reportOk();
     expect(pushed).toEqual([
-      { reachable: false, error: "401 invalid x-api-key" },
-      { reachable: true },
+      { reachable: false, error: "401 invalid x-api-key", activeId: null, fallbackReason: null },
+      { reachable: true, activeId: null, fallbackReason: null },
     ]);
     monitor.reportFailure("down");
     monitor.stop();
     expect(clock.pending.size).toBe(0);
-    expect(monitor.current()).toEqual({ reachable: false, error: "down" });
+    expect(monitor.current()).toEqual({
+      reachable: false,
+      error: "down",
+      activeId: null,
+      fallbackReason: null,
+    });
+  });
+
+  it("carries the active provider and the fallback reason, and re-pushes when they change", async () => {
+    const pushed: unknown[] = [];
+    let active = { activeId: "cloud" as string | null, fallbackReason: null as string | null };
+    const monitor = createProviderMonitor({
+      check: async () => ({ ok: true }),
+      active: () => active,
+      push: (status) => pushed.push(status),
+      timers: { setTimeout: () => 0, clearTimeout: () => {} },
+    });
+    await monitor.recheck();
+    active = { activeId: "lan", fallbackReason: "cloud returned an error (503)" };
+    monitor.noteActive();
+    monitor.noteActive();
+    expect(pushed).toEqual([
+      { reachable: true, activeId: "cloud", fallbackReason: null },
+      { reachable: true, activeId: "lan", fallbackReason: "cloud returned an error (503)" },
+    ]);
   });
 });

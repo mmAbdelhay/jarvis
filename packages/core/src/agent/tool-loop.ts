@@ -1,11 +1,14 @@
 // One prompt, start to finish (spec §5): model -> tool calls -> results ->
 // model, until the model answers, the user stops, or 20 steps pass. Safe
-// calls run at once; the step's confirm/password calls go on ONE card. Every
+// calls run together, four at a time; the step's confirm/password calls go on ONE card. Every
 // result — data, error, denial, timeout, stop — goes back to the model as a
 // tool result, fenced when it carries tool output. A running tool is never
 // interrupted: Stop takes effect between calls. Never throws.
 import { fenceToolOutput } from "./fence.js";
+import { DEFAULT_CONTEXT_TOKENS, fitHistory, historyBudget } from "./context-fit.js";
+import { mapLimit } from "./map-limit.js";
 import { AGENT_TEXT, SYSTEM_PROMPT, toolActivity } from "./messages.js";
+import { buildSystemPrompt } from "./safety.js";
 import type { AgentEvent } from "./contract.js";
 import type { GateCall, GateItemStatus, RiskGate } from "./risk-gate.js";
 import type { RegisteredTool, ToolRegistry } from "./tool-registry.js";
@@ -22,6 +25,9 @@ import {
 
 export const MAX_STEPS = 20;
 export const MAX_HISTORY_MESSAGES = 60;
+
+/** Design §3.4: a step's safe calls run at most this many at once. */
+export const SAFE_CALL_CONCURRENCY = 4;
 const CALL_ID = /^[A-Za-z0-9_-]{1,64}$/;
 
 export type ToolLoopDeps = {
@@ -31,6 +37,10 @@ export type ToolLoopDeps = {
   toolsEnabled: boolean;
   emit(event: AgentEvent): void;
   newId(): string;
+  /** The provider's context size in tokens (context-fit.ts CONTEXT_TOKENS). */
+  contextTokens?: number;
+  /** Design §3.8: picks this turn's tools from all of them (tool-search.ts). */
+  selectTools?(text: string, tools: ModelToolSpec[]): Promise<ModelToolSpec[]>;
 };
 
 export type TurnRequest = {
@@ -39,6 +49,8 @@ export type TurnRequest = {
   text: string;
   /** Prepended to the model's copy of the prompt only (the doctor's note). */
   context?: string;
+  /** Fenced memory notes (memory.ts); placed before the safety rules. */
+  notes?: readonly string[];
   signal: AbortSignal;
 };
 
@@ -127,6 +139,7 @@ async function runCalls(
   const { turnId, signal } = context;
   const results = new Map<string, ModelToolResult>();
   const gated: { call: ModelToolCall; gateCall: GateCall }[] = [];
+  const safe: { call: ModelToolCall; tool: RegisteredTool; input: Record<string, unknown> }[] = [];
 
   const execute = async (callId: string, tool: RegisteredTool, input: Record<string, unknown>) => {
     context.ran.push(tool.name);
@@ -163,12 +176,18 @@ async function runCalls(
       gated.push({ call, gateCall: { callId: call.id, tool, input } });
       continue;
     }
+    safe.push({ call, tool, input });
+  }
+
+  // Safe calls run together (at most SAFE_CALL_CONCURRENCY); Stop takes effect
+  // before a call starts, never during one. The card comes after all of them.
+  await mapLimit(safe, SAFE_CALL_CONCURRENCY, async ({ call, tool, input }) => {
     if (signal.aborted) {
       results.set(call.id, note(call, AGENT_TEXT.stopped));
-      continue;
+      return;
     }
     results.set(call.id, fenced(call, tool, await execute(call.id, tool, input)));
-  }
+  });
 
   if (gated.length > 0) {
     if (signal.aborted) {
@@ -219,6 +238,7 @@ async function reportStepLimit(
     signal: AbortSignal;
     turnId: string;
     ran: string[];
+    budget: number;
   },
 ): Promise<void> {
   context.messages.push({ role: "user", text: AGENT_TEXT.stepLimitNote(MAX_STEPS) });
@@ -228,7 +248,7 @@ async function reportStepLimit(
       deps,
       {
         system: context.system,
-        messages: [...context.messages],
+        messages: fitHistory(context.messages, context.budget),
         tools: [],
         signal: context.signal,
       },
@@ -250,10 +270,13 @@ export async function runTurn(deps: ToolLoopDeps, request: TurnRequest): Promise
   const prompt =
     request.context === undefined ? request.text : `${request.context}\n\n${request.text}`;
   const messages: ModelMessage[] = [...request.history, { role: "user", text: prompt }];
-  const tools = deps.toolsEnabled ? deps.registry.modelTools() : [];
-  const system = deps.toolsEnabled
-    ? SYSTEM_PROMPT
-    : `${SYSTEM_PROMPT}\n\n${AGENT_TEXT.noToolsNote}`;
+  const allTools = deps.toolsEnabled ? deps.registry.modelTools() : [];
+  let tools = allTools;
+  const base = deps.toolsEnabled ? SYSTEM_PROMPT : `${SYSTEM_PROMPT}\n\n${AGENT_TEXT.noToolsNote}`;
+  // Design 3.1: the safety rules close EVERY request's system text; only the
+  // history is cut to fit the context, never the rules.
+  const system = buildSystemPrompt(base, request.notes ?? []);
+  let budget = historyBudget(deps.contextTokens ?? DEFAULT_CONTEXT_TOKENS, system, tools);
   const ran: string[] = [];
 
   const finish = (reason: TurnEndReason, failure?: unknown): TurnResult => {
@@ -274,15 +297,24 @@ export async function runTurn(deps: ToolLoopDeps, request: TurnRequest): Promise
 
   deps.emit({ type: "turn-start", turnId, text: request.text });
   try {
+    if (deps.selectTools !== undefined && allTools.length > 0) {
+      try {
+        const picked = await deps.selectTools(request.text, allTools);
+        if (picked.length > 0) tools = picked;
+      } catch {
+        tools = allTools;
+      }
+      budget = historyBudget(deps.contextTokens ?? DEFAULT_CONTEXT_TOKENS, system, tools);
+    }
     for (let step = 0; ; step++) {
       if (signal.aborted) return finish("stopped");
       if (step === MAX_STEPS) {
-        await reportStepLimit(deps, { system, messages, signal, turnId, ran });
+        await reportStepLimit(deps, { system, messages, signal, turnId, ran, budget });
         return finish("step-limit");
       }
       const reply = await streamReply(
         deps,
-        { system, messages: [...messages], tools, signal },
+        { system, messages: fitHistory(messages, budget), tools, signal },
         turnId,
       );
       const calls = withUsableIds(reply.calls, deps.newId);

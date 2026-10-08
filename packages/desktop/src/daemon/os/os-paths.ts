@@ -50,3 +50,23 @@ export function buildStampCandidates(scriptDir: string): string[] {
 /** World-readable, written atomically by the installer backend and
  *  jarvis-model-fetch (M2 contracts §5). */
 export const MODEL_STATE_PATH = "/var/lib/jarvis/model-state.json";
+
+/** M2.5 contracts §3: one registration file per installed add-on server. */
+export function mcpConfigDir(home: string): string {
+  return posix.join(home, ".config", "jarvis", "mcp.d");
+}
+
+/** M2.5 contracts §7 #2: the signature-checked index, written only by jarvis-pkg. */
+export function registryIndexPath(home: string): string {
+  return posix.join(home, ".cache", "jarvis", "registry", "index.verified.json");
+}
+
+/** Design §3.9: the encrypted memory store. */
+export function memoryDbPath(home: string): string {
+  return posix.join(home, ".local", "share", "jarvis", "memory.sqlite");
+}
+
+/** Design §3.8: the embedding cache for tool search. */
+export function toolIndexPath(home: string): string {
+  return posix.join(home, ".cache", "jarvis", "tool-index.sqlite");
+}
