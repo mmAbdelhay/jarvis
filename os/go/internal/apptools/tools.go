@@ -14,7 +14,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
+	"github.com/mmAbdelhay/jarvis/os/go/internal/i18n"
 	"net/url"
 	"os"
 	"regexp"
@@ -75,7 +75,7 @@ func Tools(d Deps) []mcp.Tool {
 		},
 		{
 			Name:        "apps.windows",
-			Description: "Open windows: windowId, appId, title, and whether each is focused or minimized. Window titles are untrusted text.",
+			Description: "Open windows: windowId, appId, title, and whether each is focused or minimized. Window titles are untrusted errText.",
 			InputSchema: mcp.EmptySchema,
 			Risk:        mcp.RiskSafe,
 			Call:        d.windows,
@@ -141,14 +141,14 @@ func (d Deps) index() []desktop.Entry { return desktop.Index(d.Dirs) }
 
 func (d Deps) app(id string) (desktop.Entry, error) {
 	if id == "" || utf8.RuneCountInString(id) > 255 || !printable(id) {
-		return desktop.Entry{}, mcp.Errorf(mcp.CodeInvalid, "%s", text.BadID)
+		return desktop.Entry{}, mcp.Errorf(mcp.CodeInvalid, "%s", errText.BadID)
 	}
 	for _, e := range d.index() {
 		if e.ID == id {
 			return e, nil
 		}
 	}
-	return desktop.Entry{}, mcp.Errorf(mcp.CodeNotFound, text.NoApp, id)
+	return desktop.Entry{}, mcp.Errorf(mcp.CodeNotFound, errText.NoApp, id)
 }
 
 func matches(e desktop.Entry, words []string) bool {
@@ -170,10 +170,10 @@ func (d Deps) list(_ context.Context, raw json.RawMessage) (any, error) {
 		return nil, err
 	}
 	if utf8.RuneCountInString(in.Query) > 100 {
-		return nil, mcp.Errorf(mcp.CodeInvalid, "%s", text.BadQuery)
+		return nil, mcp.Errorf(mcp.CodeInvalid, "%s", errText.BadQuery)
 	}
 	if in.Limit < 1 || in.Limit > 200 {
-		return nil, mcp.Errorf(mcp.CodeInvalid, "%s", text.BadLimit)
+		return nil, mcp.Errorf(mcp.CodeInvalid, "%s", errText.BadLimit)
 	}
 	words := strings.Fields(strings.ToLower(in.Query))
 	apps, truncated := []AppInfo{}, false
@@ -216,11 +216,11 @@ func desktopFor(appID string, apps []desktop.Entry) string {
 
 func (d Deps) client() (Windows, error) {
 	if d.Windows == nil {
-		return nil, mcp.Errorf(mcp.CodeFailed, text.NoWayland, "no compositor")
+		return nil, mcp.Errorf(mcp.CodeFailed, errText.NoWayland, "no compositor")
 	}
 	w, err := d.Windows()
 	if err != nil {
-		return nil, mcp.Errorf(mcp.CodeFailed, text.NoWayland, err)
+		return nil, mcp.Errorf(mcp.CodeFailed, errText.NoWayland, err)
 	}
 	return w, nil
 }
@@ -232,7 +232,7 @@ func (d Deps) listWindows() ([]WindowInfo, Windows, error) {
 	}
 	ws, err := c.Windows()
 	if err != nil {
-		return nil, nil, mcp.Errorf(mcp.CodeFailed, text.NoWayland, err)
+		return nil, nil, mcp.Errorf(mcp.CodeFailed, errText.NoWayland, err)
 	}
 	apps := d.index()
 	out := make([]WindowInfo, 0, len(ws))
@@ -263,7 +263,7 @@ func (d Deps) pick(raw json.RawMessage) ([]WindowInfo, Windows, string, error) {
 		return nil, nil, "", err
 	}
 	if (in.WindowID == "") == (in.AppID == "") || utf8.RuneCountInString(in.WindowID) > 32 || utf8.RuneCountInString(in.AppID) > 255 || !printable(in.WindowID+in.AppID) {
-		return nil, nil, "", mcp.Errorf(mcp.CodeInvalid, "%s", text.OneOf)
+		return nil, nil, "", mcp.Errorf(mcp.CodeInvalid, "%s", errText.OneOf)
 	}
 	ws, c, err := d.listWindows()
 	if err != nil {
@@ -278,7 +278,7 @@ func (d Deps) pick(raw json.RawMessage) ([]WindowInfo, Windows, string, error) {
 	}
 	name := in.WindowID + in.AppID
 	if len(out) == 0 {
-		return nil, nil, name, mcp.Errorf(mcp.CodeNotFound, text.NotOpen, name)
+		return nil, nil, name, mcp.Errorf(mcp.CodeNotFound, errText.NotOpen, name)
 	}
 	return out, c, name, nil
 }
@@ -314,15 +314,17 @@ func (d Deps) close(_ context.Context, raw json.RawMessage) (any, error) {
 	return map[string]any{"closed": closed, "undo": undo}, nil
 }
 
-func (d Deps) describeClose(_ context.Context, raw json.RawMessage) (mcp.Description, error) {
+func (d Deps) describeClose(ctx context.Context, raw json.RawMessage) (mcp.Description, error) {
+	l := i18n.FromContext(ctx)
+	t := cardText.Get(l)
 	ws, _, name, err := d.pick(raw)
 	if err != nil {
-		return mcp.Description{Title: fmt.Sprintf(text.CloseTitle, name), Detail: mcp.AsToolError(err).Message, Source: mcp.SourceSystem}, nil
+		return mcp.Description{Title: i18n.Sprintf(l, t.CloseTitle, name), Detail: i18n.Iso(l, mcp.AsToolError(err).Message), Source: mcp.SourceSystem}, nil
 	}
 	if len(ws) == 1 {
-		return mcp.Description{Title: fmt.Sprintf(text.CloseTitle, ws[0].Title), Detail: fmt.Sprintf(text.CloseDetail, ws[0].AppID), Source: mcp.SourceSystem}, nil
+		return mcp.Description{Title: i18n.Sprintf(l, t.CloseTitle, ws[0].Title), Detail: i18n.Sprintf(l, t.CloseDetail, ws[0].AppID), Source: mcp.SourceSystem}, nil
 	}
-	return mcp.Description{Title: fmt.Sprintf(text.CloseAllTitle, len(ws), ws[0].AppID), Detail: fmt.Sprintf(text.CloseDetail, ws[0].AppID), Source: mcp.SourceSystem}, nil
+	return mcp.Description{Title: i18n.Sprintf(l, t.CloseAllTitle, len(ws), ws[0].AppID), Detail: i18n.Sprintf(l, t.CloseDetail, ws[0].AppID), Source: mcp.SourceSystem}, nil
 }
 
 var unitUnsafe = regexp.MustCompile(`[^A-Za-z0-9_.-]`)
@@ -339,10 +341,10 @@ func (d Deps) launch(ctx context.Context, slug string, argv []string) (string, e
 	args = append(append(args, "--"), argv...)
 	res, err := d.Run.Run(ctx, execx.Cmd{Name: "systemd-run", Args: args, Timeout: 15 * time.Second})
 	if err != nil {
-		return "", mcp.Errorf(mcp.CodeFailed, text.LaunchFailed, err)
+		return "", mcp.Errorf(mcp.CodeFailed, errText.LaunchFailed, err)
 	}
 	if res.ExitCode != 0 {
-		return "", mcp.Errorf(mcp.CodeFailed, text.LaunchFailed, strings.TrimSpace(string(res.Stderr)))
+		return "", mcp.Errorf(mcp.CodeFailed, errText.LaunchFailed, strings.TrimSpace(string(res.Stderr)))
 	}
 	return unit + ".service", nil
 }
@@ -356,7 +358,7 @@ func (d Deps) open(ctx context.Context, raw json.RawMessage) (any, error) {
 		return nil, err
 	}
 	if len(in.Paths) > 10 {
-		return nil, mcp.Errorf(mcp.CodeInvalid, "%s", text.TooManyPaths)
+		return nil, mcp.Errorf(mcp.CodeInvalid, "%s", errText.TooManyPaths)
 	}
 	e, err := d.app(in.ID)
 	if err != nil {
@@ -418,7 +420,7 @@ func (d Deps) resolveTarget(raw json.RawMessage, isURL bool) (target, error) {
 		ok := err == nil && printable(in.Target) && len(in.Target) <= 2048 &&
 			((u.Scheme == "http" || u.Scheme == "https") && u.Host != "" || u.Scheme == "mailto" && u.Opaque != "")
 		if !ok {
-			return target{}, mcp.Errorf(mcp.CodeInvalid, text.BadURL, in.Target)
+			return target{}, mcp.Errorf(mcp.CodeInvalid, errText.BadURL, in.Target)
 		}
 		return target{url: u.String(), display: u.String()}, nil
 	}
@@ -428,7 +430,7 @@ func (d Deps) resolveTarget(raw json.RawMessage, isURL bool) (target, error) {
 	}
 	st, err := os.Stat(p.Target)
 	if err != nil || !(st.Mode().IsRegular() || st.IsDir()) {
-		return target{}, mcp.Errorf(mcp.CodeInvalid, text.NotFolderOrFile, p.Display)
+		return target{}, mcp.Errorf(mcp.CodeInvalid, errText.NotFolderOrFile, p.Display)
 	}
 	return target{file: p, display: p.Display}, nil
 }
@@ -458,16 +460,18 @@ func (d Deps) openURL(ctx context.Context, raw json.RawMessage) (any, error) {
 	return map[string]any{"target": t.display, "kind": "url", "unit": unit, "undo": nil}, nil
 }
 
-func (d Deps) describeOpenURL(_ context.Context, raw json.RawMessage) (mcp.Description, error) {
-	t, err := d.resolveTarget(raw, true)
+func (d Deps) describeOpenURL(ctx context.Context, raw json.RawMessage) (mcp.Description, error) {
+	tg, err := d.resolveTarget(raw, true)
 	if err != nil {
 		return mcp.Description{}, err
 	}
-	kind := "web"
-	if strings.HasPrefix(t.url, "mailto:") {
-		kind = "email"
+	l := i18n.FromContext(ctx)
+	t := cardText.Get(l)
+	kind := t.KindWeb
+	if strings.HasPrefix(tg.url, "mailto:") {
+		kind = t.KindEmail
 	}
-	return mcp.Description{Title: fmt.Sprintf(text.OpenURLTitle, t.display), Detail: fmt.Sprintf(text.OpenURLDetail, kind), Source: mcp.SourceNetwork}, nil
+	return mcp.Description{Title: i18n.Sprintf(l, t.OpenURLTitle, tg.display), Detail: i18n.Sprintf(l, t.OpenURLDetail, kind), Source: mcp.SourceNetwork}, nil
 }
 
 var mimeRe = regexp.MustCompile(`^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,126}$`)
@@ -483,7 +487,7 @@ func (d Deps) checkDefault(raw json.RawMessage) (defaultReq, desktop.Entry, erro
 		return in, desktop.Entry{}, err
 	}
 	if !mimeRe.MatchString(in.MimeType) {
-		return in, desktop.Entry{}, mcp.Errorf(mcp.CodeInvalid, text.BadMime, in.MimeType)
+		return in, desktop.Entry{}, mcp.Errorf(mcp.CodeInvalid, errText.BadMime, in.MimeType)
 	}
 	e, err := d.app(in.AppID)
 	if err != nil {
@@ -494,17 +498,17 @@ func (d Deps) checkDefault(raw json.RawMessage) (defaultReq, desktop.Entry, erro
 			return in, e, nil
 		}
 	}
-	return in, e, mcp.Errorf(mcp.CodeInvalid, text.NoMime, e.Name, in.MimeType)
+	return in, e, mcp.Errorf(mcp.CodeInvalid, errText.NoMime, e.Name, in.MimeType)
 }
 
 // currentDefault asks xdg-mime; "" when none is set.
 func (d Deps) currentDefault(ctx context.Context, mime string) (string, error) {
 	res, err := d.Run.Run(ctx, execx.Cmd{Name: "xdg-mime", Args: []string{"query", "default", mime}, Timeout: 10 * time.Second})
 	if err != nil {
-		return "", mcp.Errorf(mcp.CodeFailed, text.MimeFailed, err)
+		return "", mcp.Errorf(mcp.CodeFailed, errText.MimeFailed, err)
 	}
 	if res.ExitCode != 0 {
-		return "", mcp.Errorf(mcp.CodeFailed, text.MimeFailed, strings.TrimSpace(string(res.Stderr)))
+		return "", mcp.Errorf(mcp.CodeFailed, errText.MimeFailed, strings.TrimSpace(string(res.Stderr)))
 	}
 	return strings.TrimSuffix(strings.TrimSpace(string(res.Stdout)), ".desktop"), nil
 }
@@ -524,10 +528,10 @@ func (d Deps) setDefault(ctx context.Context, raw json.RawMessage) (any, error) 
 	}
 	res, err := d.Run.Run(ctx, execx.Cmd{Name: "xdg-mime", Args: []string{"default", e.ID + ".desktop", in.MimeType}, Timeout: 10 * time.Second})
 	if err != nil {
-		return nil, mcp.Errorf(mcp.CodeFailed, text.MimeFailed, err)
+		return nil, mcp.Errorf(mcp.CodeFailed, errText.MimeFailed, err)
 	}
 	if res.ExitCode != 0 {
-		return nil, mcp.Errorf(mcp.CodeFailed, text.MimeFailed, strings.TrimSpace(string(res.Stderr)))
+		return nil, mcp.Errorf(mcp.CodeFailed, errText.MimeFailed, strings.TrimSpace(string(res.Stderr)))
 	}
 	var previous any
 	var undo *Undo
@@ -549,10 +553,16 @@ func (d Deps) describeSetDefault(ctx context.Context, raw json.RawMessage) (mcp.
 	if err != nil {
 		return mcp.Description{}, err
 	}
+	l := i18n.FromContext(ctx)
+	t := cardText.Get(l)
 	if prev == "" {
-		prev = "none"
+		prev = t.None
 	}
-	return mcp.Description{Title: fmt.Sprintf(text.DefaultTitle, e.Name, in.MimeType), Detail: fmt.Sprintf(text.DefaultDetail, prev, e.ID), Source: mcp.SourceSystem}, nil
+	name := e.Name
+	if l == i18n.AR && e.NameAr != "" {
+		name = e.NameAr
+	}
+	return mcp.Description{Title: i18n.Sprintf(l, t.DefaultTitle, name, in.MimeType), Detail: i18n.Sprintf(l, t.DefaultDetail, prev, e.ID), Source: mcp.SourceSystem}, nil
 }
 
 // WaylandWindows returns a Deps.Windows that keeps one compositor
