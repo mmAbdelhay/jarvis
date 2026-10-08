@@ -5,7 +5,10 @@
       { "toolCalls": [{ "name": "updates.list", "input": {} }] },
       {
         "toolCalls": [
-          { "name": "updates.apply", "input": { "items": [{ "source": "apt", "id": "jarvis-shell" }] } }
+          {
+            "name": "updates.apply",
+            "input": { "items": [{ "source": "apt", "id": "jarvis-shell" }] }
+          }
         ]
       },
       { "text": "Updated jarvis-shell." }

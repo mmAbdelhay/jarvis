@@ -87,10 +87,7 @@
       "minVramGB": null,
       "tier": "small",
       "toolCalling": "verified",
-      "languages": [
-        "en",
-        "ar"
-      ],
+      "languages": ["en", "ar"],
       "recommendedFor": "Quick answers on modest laptops",
       "fits": true
     },
@@ -103,10 +100,7 @@
       "minVramGB": null,
       "tier": "medium",
       "toolCalling": "verified",
-      "languages": [
-        "en",
-        "ar"
-      ],
+      "languages": ["en", "ar"],
       "recommendedFor": "Everyday help",
       "fits": true
     },
@@ -119,10 +113,7 @@
       "minVramGB": null,
       "tier": "large",
       "toolCalling": "verified",
-      "languages": [
-        "en",
-        "ar"
-      ],
+      "languages": ["en", "ar"],
       "recommendedFor": "Harder questions",
       "fits": false
     },
@@ -135,9 +126,7 @@
       "minVramGB": 16,
       "tier": "gpu",
       "toolCalling": "verified",
-      "languages": [
-        "en"
-      ],
+      "languages": ["en"],
       "recommendedFor": "Best quality with a big GPU",
       "fits": false
     }
