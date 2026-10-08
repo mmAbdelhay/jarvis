@@ -1,5 +1,7 @@
 #include "app/ShellController.h"
 
+#include "Language.h"
+#include <initializer_list>
 #include <QPointer>
 #include <QProcess>
 
@@ -338,6 +340,13 @@ void ShellController::onPush(const QString& channel, const QJsonValue& payload)
     if (channel == u"doctor:state") {
         m_doctor->applyState(payload.toObject());
         return maybeLeaveDoctor();
+    }
+    if (channel == u"ui:language") {
+        // Rafiq M4 contracts §3. Anything but {lang: "en"|"ar"} is ignored.
+        const QJsonValue lang = payload.toObject().value("lang");
+        if (payload.isObject() && lang.isString())
+            applyLanguage(lang.toString());
+        return;
     }
     if (channel == u"sys:snapshot") {
         const QJsonObject snap = payload.toObject();
@@ -693,4 +702,79 @@ bool ShellController::handleInstanceMessage(const QByteArray& message)
         return true;
     }
     return false;
+}
+
+void ShellController::setLanguageApplier(LanguageApplier applier, const QString& current)
+{
+    m_languageApplier = std::move(applier);
+    m_language = jarvis::ui::isSupportedLanguage(current) ? current : u"en"_s;
+    emit languageChanged();
+}
+
+void ShellController::chooseLanguage(const QString& code)
+{
+    if (!jarvis::ui::isSupportedLanguage(code) || m_languageBusy)
+        return;
+    if (code == m_language && m_languageNote.isEmpty())
+        return;
+    m_languageBusy = true;
+    m_languageNote.clear();
+    emit languageChanged();
+    request(u"ui:setLanguage"_s, QJsonArray{QJsonObject{{"lang", code}}}, [this, code](const ControlResult& r) {
+        m_languageBusy = false;
+        if (r.ok) {
+            applyLanguage(code); // the ui:language push that follows is then a no-op
+            emit languageChanged();
+            return;
+        }
+        m_languageNote = r.code == u"unsupported"
+                             ? tr("This version of Jarvis can't change the language yet.")
+                             : tr("Couldn't change the language: %1").arg(r.text);
+        emit languageChanged();
+    });
+}
+
+void ShellController::applyLanguage(const QString& code)
+{
+    if (!jarvis::ui::isSupportedLanguage(code))
+        return;
+    if (code == m_language && m_languageNote.isEmpty())
+        return;
+    if (m_languageApplier && !m_languageApplier(code)) {
+        m_languageNote = tr("Arabic isn't installed on this computer, so Jarvis stays in English.");
+        emit languageChanged();
+        return;
+    }
+    m_language = code;
+    m_languageNote.clear();
+    refreshTranslatedText();
+    emit languageChanged();
+}
+
+// Text built in C++ with tr() is computed on read, but QML only re-reads a
+// property when its NOTIFY fires: announce every translated property again.
+// Nothing is reloaded or re-sent; cards keep their ticks and timers.
+void ShellController::refreshTranslatedText()
+{
+    for (QAbstractListModel* model : std::initializer_list<QAbstractListModel*>{
+             m_chatCard, m_doctorCard, m_providers, m_registry, m_audit, m_memory, m_doctor}) {
+        if (const int rows = model->rowCount(); rows > 0)
+            emit model->dataChanged(model->index(0), model->index(rows - 1));
+    }
+    emit m_chatCard->changed();
+    emit m_doctorCard->changed();
+    emit m_system->changed();
+    emit m_provider->activeChanged();
+    emit m_provider->draftChanged();
+    emit m_provider->probeChanged();
+    emit m_providers->changed();
+    emit m_registry->changed();
+    emit m_audit->entriesChanged();
+    emit m_memory->changed();
+    emit m_doctor->stateChanged();
+    emit m_voice->changed();   // Plan O Task 7 VoiceModel
+    emit m_pairing->changed(); // Plan O Task 10 PairingModel
+    emit bannerChanged();
+    emit providerStatusChanged();
+    emit updatesChanged();
 }

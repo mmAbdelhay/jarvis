@@ -6,15 +6,18 @@ import Jarvis.UI
 // Settings: model providers in failover order, memory, tool servers, voice and phone.
 Item {
     id: root
+    LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft
+    LayoutMirroring.childrenInherit: true
     required property ProviderModel provider
     required property ProviderListModel providers
+    property ShellController shell: null
     property MemoryModel memory: null
     property RegistryModel registry: null
     property VoiceModel voice: null
     property PhoneModel phone: null
     property bool doctorAvailable: false // sys:snapshot says offline (contracts §6.8)
     property string section: "providers"
-    readonly property var sections: [{ id: "providers", label: "Model providers" }, { id: "memory", label: "Memory" }, { id: "tools", label: "Tools" }, { id: "voice", label: "Voice" }, { id: "phone", label: "Phone" }]
+    readonly property var sections: [{ id: "providers", label: "Model providers" }, { id: "memory", label: "Memory" }, { id: "tools", label: "Tools" }, { id: "voice", label: "Voice" }, { id: "phone", label: "Phone" }, { id: "language", label: qsTr("Language") }]
     signal doctorRequested()
 
     Flickable {
@@ -119,6 +122,13 @@ Item {
                 visible: root.section === "phone"
                 active: root.phone !== null
                 sourceComponent: PhoneSection { phone: root.phone }
+            }
+            Loader {
+                objectName: "languageSection"
+                Layout.fillWidth: true
+                visible: root.section === "language"
+                active: root.shell !== null
+                sourceComponent: LanguageSection { shell: root.shell }
             }
         }
     }

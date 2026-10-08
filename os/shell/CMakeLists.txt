@@ -26,6 +26,8 @@ include(CTest)
 set(QT_QML_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/qml)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../ui ${CMAKE_BINARY_DIR}/jarvis-ui EXCLUDE_FROM_ALL)
 
+include(${CMAKE_CURRENT_SOURCE_DIR}/../ui/cmake/JarvisI18n.cmake)
+
 add_subdirectory(src)
 if(BUILD_TESTING)
   find_package(Qt6 6.8 REQUIRED COMPONENTS Test QuickTest)

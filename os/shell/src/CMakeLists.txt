@@ -24,7 +24,7 @@ add_dependencies(jarvis_shell_core jarvis_ui) # qmlcachegen reads Jarvis.UI's qm
 target_include_directories(jarvis_shell_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
   ${CMAKE_CURRENT_SOURCE_DIR}/models ${CMAKE_CURRENT_SOURCE_DIR}/app)
 target_link_libraries(jarvis_shell_core PUBLIC
-  Qt6::Core Qt6::Gui Qt6::Network Qt6::Qml Qt6::Quick Qt6::QuickControls2)
+  jarvis_ui_native Qt6::Core Qt6::Gui Qt6::Network Qt6::Qml Qt6::Quick Qt6::QuickControls2)
 if(JARVIS_SHELL_LAYERSHELL)
   target_link_libraries(jarvis_shell_core PUBLIC LayerShellQt::Interface)
   target_compile_definitions(jarvis_shell_core PUBLIC JARVIS_HAVE_LAYERSHELL=1)

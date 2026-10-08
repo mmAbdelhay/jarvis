@@ -5,6 +5,7 @@
 #include <QtQml/qqmlextensionplugin.h>
 #include <QtQuickTest>
 
+#include "Language.h"
 #include "app/AppFont.h"
 #include "app/ShellController.h"
 #include "control/ControlClient.h"
@@ -19,6 +20,7 @@ public slots:
         QStandardPaths::setTestModeEnabled(true);
         QQuickStyle::setStyle(QStringLiteral("Basic"));
         applyShellFont();
+        qputenv("JARVIS_I18N_DIR", QByteArrayLiteral(JARVIS_TEST_I18N_DIR));
     }
 
     void qmlEngineAvailable(QQmlEngine* engine)
@@ -32,6 +34,10 @@ public slots:
         auto* client = new ControlClient(options, engine);
         auto* shell = new ShellController(client, engine);
         shell->setLauncher([](const QString&) { return true; });
+        auto* language = new jarvis::ui::LanguageManager({QStringLiteral("jarvis-ui"), QStringLiteral("jarvis-shell")}, engine);
+        QObject::connect(language, &jarvis::ui::LanguageManager::languageChanged, engine, &QQmlEngine::retranslate);
+        shell->setLanguageApplier([language](const QString& code) { return language->setLanguage(code); }, language->language());
+        engine->rootContext()->setContextProperty(QStringLiteral("testLanguage"), language);
         engine->rootContext()->setContextProperty(QStringLiteral("testShell"), shell);
     }
 };

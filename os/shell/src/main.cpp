@@ -5,6 +5,7 @@
 #include <QQuickWindow>
 #include <QtQml/qqmlextensionplugin.h>
 
+#include "Language.h"
 #include "app/AppFont.h"
 #include "app/ShellController.h"
 #include "app/ShellSurface.h"
@@ -43,6 +44,10 @@ int main(int argc, char* argv[])
 
     QQuickStyle::setStyle(u"Basic"_s);
     applyShellFont();
+    // Rafiq M4 contracts §3: start in the session's language; jarvisd's
+    // ui:language push (os.language) takes over once connected.
+    jarvis::ui::LanguageManager language({u"jarvis-ui"_s, u"jarvis-shell"_s});
+    language.setLanguage(jarvis::ui::languageFromEnvironment());
 
     const auto paths = jarvis::protocol::controlPaths(jarvis::protocol::defaultRunDirectory());
     ControlOptions options;
@@ -51,8 +56,12 @@ int main(int argc, char* argv[])
     options.build = jarvis::protocol::readBuildId(jarvis::protocol::defaultBuildStampPath());
     auto* client = new ControlClient(options, &app);
     auto* shell = new ShellController(client, &app);
+    shell->setLanguageApplier([&language](const QString& code) { return language.setLanguage(code); },
+                              language.language());
 
     QQmlApplicationEngine engine;
+    QObject::connect(&language, &jarvis::ui::LanguageManager::languageChanged, &engine, &QQmlEngine::retranslate);
+
     engine.setInitialProperties({{u"shell"_s, QVariant::fromValue(shell)}});
     engine.loadFromModule("Jarvis.Shell", "Main");
     auto* window = engine.rootObjects().isEmpty() ? nullptr : qobject_cast<QQuickWindow*>(engine.rootObjects().constFirst());

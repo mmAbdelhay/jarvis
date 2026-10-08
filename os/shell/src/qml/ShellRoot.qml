@@ -12,6 +12,8 @@ Rectangle {
     readonly property bool framed: shell.view !== "setup" && shell.view !== "doctor"
 
     color: Theme.bg
+    LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft
+    LayoutMirroring.childrenInherit: true
 
     Shortcut {
         sequence: "Esc"
@@ -108,6 +110,7 @@ Rectangle {
                     onBackRequested: root.shell.showView("chat")
                 }
                 SettingsView {
+                    shell: root.shell
                     provider: root.shell.provider
                     providers: root.shell.providers
                     memory: root.shell.memory

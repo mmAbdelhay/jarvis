@@ -55,8 +55,21 @@ class ShellController : public QObject {
     Q_PROPERTY(QString bannerText READ bannerText NOTIFY bannerChanged)
     Q_PROPERTY(bool updatesChecking READ updatesChecking NOTIFY updatesChanged)
     Q_PROPERTY(QString updatesNote READ updatesNote NOTIFY updatesChanged)
+    Q_PROPERTY(QString language READ language NOTIFY languageChanged)
+    Q_PROPERTY(QString languageNote READ languageNote NOTIFY languageChanged)
+    Q_PROPERTY(bool languageBusy READ languageBusy NOTIFY languageChanged)
 
 public:
+    // Applies a UI language in this process (main(): LanguageManager::setLanguage).
+    // Returns false when it cannot (Arabic catalogs missing).
+    using LanguageApplier = std::function<bool(const QString& code)>;
+    void setLanguageApplier(LanguageApplier applier, const QString& current);
+    QString language() const { return m_language; }
+    QString languageNote() const { return m_languageNote; }
+    bool languageBusy() const { return m_languageBusy; }
+    // Settings → Language: ui:setLanguage; jarvisd saves os.language and pushes ui:language.
+    Q_INVOKABLE void chooseLanguage(const QString& code);
+
     using Launcher = std::function<bool(const QString& program)>;
 
     explicit ShellController(ControlClient* client, QObject* parent = nullptr);
@@ -110,6 +123,7 @@ public:
     Q_INVOKABLE void checkForUpdates();
 
 signals:
+    void languageChanged();
     void undoChanged();
     void voiceStatePushed(const QJsonObject& state);
     void pairingPushed(const QJsonObject& pending);
@@ -123,6 +137,13 @@ signals:
     void lockedChanged();
 
 private:
+    void applyLanguage(const QString& code);
+    void refreshTranslatedText();
+    LanguageApplier m_languageApplier;
+    QString m_language = QStringLiteral("en");
+    QString m_languageNote;
+    bool m_languageBusy = false;
+
     void request(const QString& channel, const QJsonArray& args, std::function<void(const ControlResult&)> done = {});
     void onOpened();
     void applyLockState();
