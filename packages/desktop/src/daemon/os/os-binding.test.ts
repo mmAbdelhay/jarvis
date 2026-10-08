@@ -32,6 +32,10 @@ function fakeAgent() {
     doctorStart: record("doctorStart", idle) as OsAgent["doctorStart"],
     doctorSkip: record("doctorSkip", idle) as OsAgent["doctorSkip"],
     auditList: record("auditList", Promise.resolve([])) as OsAgent["auditList"],
+    registryList: record(
+      "registryList",
+      Promise.resolve({ installed: [], available: [] }),
+    ) as OsAgent["registryList"],
     checkUpdates: record(
       "checkUpdates",
       Promise.resolve({ count: 2, security: 1 }),
@@ -76,6 +80,7 @@ describe("createOsBinding", () => {
     await handlers.invoke("doctor:start", [], connection);
     await handlers.invoke("doctor:skip", [{ stepId: "wifi" }], connection);
     await handlers.invoke("audit:list", [{ limit: 20 }], connection);
+    await handlers.invoke("registry:list", [], connection);
     await expect(handlers.invoke("updates:check", [], connection)).resolves.toEqual({
       count: 2,
       security: 1,
@@ -90,6 +95,7 @@ describe("createOsBinding", () => {
       "doctorStart",
       "doctorSkip",
       "auditList",
+      "registryList",
       "checkUpdates",
     ]);
     expect(calls[0]?.args).toEqual(["install vlc"]);
@@ -118,6 +124,9 @@ describe("createOsBinding", () => {
       code: "unknown-channel",
     });
     await expect(handlers.invoke("updates:check", ["now"], connection)).rejects.toMatchObject({
+      code: "bad-request",
+    });
+    await expect(handlers.invoke("registry:list", [1], connection)).rejects.toMatchObject({
       code: "bad-request",
     });
     expect(calls).toEqual([]);

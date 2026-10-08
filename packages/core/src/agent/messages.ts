@@ -48,6 +48,15 @@ export const AGENT_TEXT = {
 } as const;
 
 const TOOL_ACTIVITY: Record<string, string> = {
+  "registry.search": "Searching the tool registry",
+  "registry.list": "Reading the tool registry",
+  "registry.install": "Installing a tool server",
+  "registry.remove": "Removing a tool server",
+  "files.search": "Searching your files",
+  "files.preview": "Reading a file",
+  "web.fetch": "Fetching a web page",
+  "clock.now": "Checking the time",
+  "clock.timer": "Setting a timer",
   "pkg.search": "Searching for apps",
   "pkg.info": "Reading app details",
   "pkg.list_installed": "Listing installed apps",

@@ -15,7 +15,7 @@
 // No electron here (core/no-electron.test.ts); process.platform read once, here.
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,6 +25,7 @@ import {
   createAuditLog,
   createSecretToolStore,
   nodeAuditFs,
+  connectMcpServer,
   nodeMcpSpawn,
   nodeSecretToolExec,
   PROVIDER_KEY_ATTRIBUTE,
@@ -49,11 +50,19 @@ import { createOsBinding } from "./os-binding.js";
 import {
   buildStampCandidates,
   MODEL_STATE_PATH,
+  mcpConfigDir,
   mcpDirFrom,
   osConfigPath,
   readOsBuildId,
+  registryIndexPath,
 } from "./os-paths.js";
 import { buildProvider } from "./provider-factory.js";
+import {
+  createRegistryServers,
+  nodeHashFile,
+  nodeRunProbe,
+  nodeWatchDirectory,
+} from "./registry-servers.js";
 
 const describe = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
@@ -133,6 +142,34 @@ async function main(argv: readonly string[]): Promise<void> {
     },
     clearInterval: (handle: unknown) => clearInterval(handle as NodeJS.Timeout),
   };
+  const registryServers = createRegistryServers({
+    home,
+    dir: mcpConfigDir(home),
+    indexPath: registryIndexPath(home),
+    now: Date.now,
+    listDir: async (dir) => {
+      try {
+        return await readdir(dir);
+      } catch (thrown) {
+        if ((thrown as { code?: unknown }).code === "ENOENT") return [];
+        throw thrown;
+      }
+    },
+    readFile: (path) => readFile(path, "utf8"),
+    hashFile: nodeHashFile,
+    runProbe: nodeRunProbe(env),
+    connect: (name, argv) =>
+      connectMcpServer({
+        name,
+        command: argv[0] ?? "systemd-run",
+        args: argv.slice(1),
+        spawn: nodeMcpSpawn(env, info),
+        timers,
+        clientVersion: build,
+        log: info,
+      }),
+    log: info,
+  });
   let push: (channel: string, payload: unknown) => void = () => {};
   const agent = createOsAgent({
     push: (channel, payload) => push(channel, payload),
@@ -154,6 +191,8 @@ async function main(argv: readonly string[]): Promise<void> {
         clientVersion: build,
         log: info,
       }),
+    registryServers,
+    watchRegistry: (onChange) => nodeWatchDirectory(mcpConfigDir(home), onChange, info),
     readModelState: createModelStateReader({
       path: MODEL_STATE_PATH,
       readFile: (path) => readFile(path, "utf8"),

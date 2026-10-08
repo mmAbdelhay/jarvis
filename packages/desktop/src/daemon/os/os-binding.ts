@@ -55,6 +55,9 @@ export function createOsBinding(
       case OS_CONTROL_REQUESTS.updatesCheck:
         value(parseNoArgs(args));
         return agent.checkUpdates();
+      case OS_CONTROL_REQUESTS.registryList:
+        value(parseNoArgs(args));
+        return agent.registryList();
       default:
         throw new ControlRequestError("unknown-channel", `No handler for ${channel}`);
     }

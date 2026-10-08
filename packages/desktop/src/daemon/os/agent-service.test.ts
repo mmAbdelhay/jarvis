@@ -11,17 +11,11 @@ import {
   ProviderError,
   type SysSnapshot,
 } from "@jarvis/core";
-import {
-  createMemorySecretStore,
-  providerAccount,
-} from "@jarvis/platform/model";
+import { createMemorySecretStore, providerAccount } from "@jarvis/platform/model";
 import { describe, expect, it } from "vitest";
-import {
-  createOsAgent,
-  OsAgentError,
-  type OsAgentDeps,
-} from "./agent-service.js";
+import { createOsAgent, OsAgentError, type OsAgentDeps } from "./agent-service.js";
 import type { ConfigIo } from "./provider-config.js";
+import { EMPTY_REGISTRY, type LoadedRegistry } from "./registry-servers.js";
 
 const pkgTools: McpTool[] = [
   {
@@ -184,8 +178,7 @@ function harness(overrides: Partial<OsAgentDeps> = {}) {
   const configIo: ConfigIo = {
     readFile: async (path) => {
       const text = files.get(path);
-      if (text === undefined)
-        throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+      if (text === undefined) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
       return text;
     },
     writeFile: async (path, text) => {
@@ -227,8 +220,7 @@ function harness(overrides: Partial<OsAgentDeps> = {}) {
     timers: {
       // Short waits (the keyring retry) run at once; the 5-minute card
       // timeout and the 30 s provider recheck never fire in these tests.
-      setTimeout: (callback: () => void, ms: number) =>
-        ms <= 5_000 ? setTimeout(callback, 0) : 0,
+      setTimeout: (callback: () => void, ms: number) => (ms <= 5_000 ? setTimeout(callback, 0) : 0),
       clearTimeout: () => {},
       setInterval: () => 0,
       clearInterval: () => {},
@@ -237,9 +229,7 @@ function harness(overrides: Partial<OsAgentDeps> = {}) {
     ...overrides,
   });
   const events = () =>
-    pushes
-      .filter((p) => p.channel === "agent:events")
-      .map((p) => p.payload as AgentEvent);
+    pushes.filter((p) => p.channel === "agent:events").map((p) => p.payload as AgentEvent);
   const until = async (check: () => boolean) => {
     // `check` may have side effects (some start a prompt), so call it once per tick.
     for (let i = 0; i < 500; i++) {
@@ -307,9 +297,7 @@ describe("createOsAgent", () => {
       turnId,
       delta: "Installed hello.",
     });
-    expect(h.toolCalls.filter((t) => t === "pkg.install")).toEqual([
-      "pkg.install",
-    ]);
+    expect(h.toolCalls.filter((t) => t === "pkg.install")).toEqual(["pkg.install"]);
     expect(h.audit[0]).toMatchObject({
       tool: "pkg.install",
       decision: "approved",
@@ -350,28 +338,26 @@ describe("createOsAgent", () => {
     );
     await h.agent.start();
     await h.until(() => h.pushes.some((p) => p.channel === "sys:snapshot"));
-    expect(h.pushes.find((p) => p.channel === "sys:snapshot")?.payload).toEqual(
-      {
-        online: true,
-        network: { connectivity: "full", wifiSsid: null },
-        memTotalBytes: 8_000_000_000,
-        memUsedBytes: 500_000_000,
-        disk: {
-          mount: "/",
-          sizeBytes: 64_000_000_000,
-          usedBytes: 6_000_000_000,
-        },
-        failedUnits: ["cups.service"],
-        model: {
-          kind: "ollama",
-          model: "qwen3:8b",
-          local: true,
-          supportsTools: true,
-          download: null,
-        },
-        updates: { count: 0, security: 0, checkedAt: null },
+    expect(h.pushes.find((p) => p.channel === "sys:snapshot")?.payload).toEqual({
+      online: true,
+      network: { connectivity: "full", wifiSsid: null },
+      memTotalBytes: 8_000_000_000,
+      memUsedBytes: 500_000_000,
+      disk: {
+        mount: "/",
+        sizeBytes: 64_000_000_000,
+        usedBytes: 6_000_000_000,
       },
-    );
+      failedUnits: ["cups.service"],
+      model: {
+        kind: "ollama",
+        model: "qwen3:8b",
+        local: true,
+        supportsTools: true,
+        download: null,
+      },
+      updates: { count: 0, security: 0, checkedAt: null },
+    });
   });
 
   it("reads the key lazily at first use and retries a locked keyring (contracts §6 #12)", async () => {
@@ -384,8 +370,7 @@ describe("createOsAgent", () => {
       ...secrets,
       get: async (account: string) => {
         reads++;
-        if (reads === 1)
-          throw new Error("Cannot get secret of a locked object");
+        if (reads === 1) throw new Error("Cannot get secret of a locked object");
         return secrets.get(account);
       },
     };
@@ -454,9 +439,7 @@ describe("createOsAgent", () => {
       type: "turn-end",
       reason: "error",
     });
-    expect(
-      h.pushes.filter((p) => p.channel === "provider:status").at(-1)?.payload,
-    ).toMatchObject({
+    expect(h.pushes.filter((p) => p.channel === "provider:status").at(-1)?.payload).toMatchObject({
       reachable: false,
     });
   });
@@ -474,8 +457,9 @@ describe("createOsAgent", () => {
     expect(state.active).toBe(true);
     expect(() => h.agent.prompt("hi")).toThrow(OsAgentError);
     await h.until(() => {
-      const last = h.pushes.filter((p) => p.channel === "doctor:state").at(-1)
-        ?.payload as DoctorState | undefined;
+      const last = h.pushes.filter((p) => p.channel === "doctor:state").at(-1)?.payload as
+        | DoctorState
+        | undefined;
       return last?.done !== null && last?.done !== undefined;
     });
     await h.until(() => {
@@ -504,28 +488,18 @@ describe("createOsAgent", () => {
     h.pushes.length = 0;
     h.agent.resync();
     expect(h.pushes.map((p) => p.channel)).toEqual(
-      expect.arrayContaining([
-        "provider:status",
-        "doctor:state",
-        "sys:snapshot",
-        "agent:events",
-      ]),
+      expect.arrayContaining(["provider:status", "doctor:state", "sys:snapshot", "agent:events"]),
     );
     expect(h.events().filter((e) => e.type === "card")).toHaveLength(1);
   });
 
   it("reconnects the MCP servers after one dies", async () => {
     const h = harness({
-      fakeScript: parseFakeScript([
-        { replies: [{ text: "a" }] },
-        { replies: [{ text: "b" }] },
-      ]),
+      fakeScript: parseFakeScript([{ replies: [{ text: "a" }] }, { replies: [{ text: "b" }] }]),
     });
     await h.agent.start();
     h.agent.prompt("one");
-    await h.until(
-      () => h.events().filter((e) => e.type === "turn-end").length === 1,
-    );
+    await h.until(() => h.events().filter((e) => e.type === "turn-end").length === 1);
     const before = h.connects();
     h.alive.value = false;
     await h.until(() => {
@@ -536,9 +510,7 @@ describe("createOsAgent", () => {
         return false;
       }
     });
-    await h.until(
-      () => h.events().filter((e) => e.type === "turn-end").length === 2,
-    );
+    await h.until(() => h.events().filter((e) => e.type === "turn-end").length === 2);
     expect(h.connects()).toBe(before + 1);
   });
 });
@@ -549,9 +521,7 @@ describe("updates and model download (M2 contracts §2, §5)", () => {
     session("jarvis-diag", diagTools, calls),
   ];
   const snapshots = (pushes: { channel: string; payload: unknown }[]) =>
-    pushes
-      .filter((p) => p.channel === "sys:snapshot")
-      .map((p) => p.payload as SysSnapshot);
+    pushes.filter((p) => p.channel === "sys:snapshot").map((p) => p.payload as SysSnapshot);
 
   it("answers updates:check from updates.list and pushes the counts in sys:snapshot", async () => {
     const calls: string[] = [];
@@ -989,9 +959,7 @@ describe("provider list and failover (M2.5 contracts §1-§2, design §3.5)", ()
     const { turnId } = h.agent.prompt("hello");
     await h.until(() => h.events().some((e) => e.type === "turn-end"));
     expect(h.events()).toContainEqual({ type: "text", turnId, delta: "hi" });
-    const statuses = h.pushes
-      .filter((p) => p.channel === "provider:status")
-      .map((p) => p.payload);
+    const statuses = h.pushes.filter((p) => p.channel === "provider:status").map((p) => p.payload);
     expect(statuses).toContainEqual({
       reachable: true,
       activeId: "lan",
@@ -1059,5 +1027,176 @@ describe("provider list and failover (M2.5 contracts §1-§2, design §3.5)", ()
         allowCloudFallback: false,
       }),
     ).rejects.toBeInstanceOf(OsAgentError);
+  });
+});
+
+describe("registry servers in jarvisd (contracts §3, §7)", () => {
+  const addOnTools = {
+    "jarvis-files": [
+      {
+        name: "files.search",
+        description: "Search files",
+        inputSchema: { type: "object", properties: {} },
+        meta: { jarvis: { risk: "safe" } },
+      },
+    ],
+    weather: [
+      {
+        name: "weather.now",
+        description: "Weather now",
+        inputSchema: { type: "object", properties: {} },
+        meta: { jarvis: { risk: "safe" } },
+      },
+    ],
+  } satisfies Record<string, McpTool[]>;
+
+  function loaded(calls: string[]): LoadedRegistry {
+    return {
+      sessions: [
+        session("jarvis-files", addOnTools["jarvis-files"], calls),
+        session("weather", addOnTools.weather, calls),
+      ],
+      tiers: new Map([
+        ["jarvis-files", "official"],
+        ["weather", "community"],
+      ]),
+      installed: [],
+      sandbox: "ok",
+    };
+  }
+
+  it("runs an official add-on's safe tool directly and puts a community 'safe' tool on a card", async () => {
+    const calls: string[] = [];
+    const script = parseFakeScript([
+      {
+        expectPromptContains: "find",
+        replies: [
+          {
+            toolCalls: [
+              { name: "files.search", input: {} },
+              { name: "weather.now", input: {} },
+            ],
+          },
+          { text: "done" },
+        ],
+      },
+    ]);
+    const h = harness({
+      fakeScript: script,
+      registryServers: { load: async () => loaded(calls) },
+    });
+    await h.agent.start();
+    h.agent.prompt("find my notes");
+    await h.until(() => h.events().some((e) => e.type === "card"));
+    expect(calls).toContain("files.search");
+    expect(calls).not.toContain("weather.now");
+    const card = h.events().find((e) => e.type === "card");
+    expect(card?.type === "card" && card.card.items.map((i) => i.tool)).toEqual(["weather.now"]);
+  });
+
+  it("reloads add-ons before the next turn after mcp.d changes", async () => {
+    let loads = 0;
+    let changed: () => void = () => {};
+    const h = harness({
+      fakeScript: parseFakeScript([{ replies: [{ text: "a" }] }, { replies: [{ text: "b" }] }]),
+      registryServers: {
+        load: async () => {
+          loads++;
+          return loaded([]);
+        },
+      },
+      watchRegistry: (onChange) => {
+        changed = onChange;
+        return () => {};
+      },
+    });
+    await h.agent.start();
+    h.agent.prompt("one");
+    await h.until(() => h.events().filter((e) => e.type === "turn-end").length === 1);
+    const before = loads;
+    changed();
+    h.agent.prompt("two");
+    await h.until(() => h.events().filter((e) => e.type === "turn-end").length === 2);
+    expect(loads).toBe(before + 1);
+  });
+
+  it("lists installed add-ons joined with the registry index (registry.list)", async () => {
+    const entry = {
+      id: "jarvis-files",
+      name: "Files",
+      description: "Search and preview files",
+      tier: "official",
+      version: "1.0.0",
+      artifact: {
+        url: "https://x/f.tar.gz",
+        sha256: "a".repeat(64),
+        runtime: "go-static",
+      },
+      permissions: { network: false, paths: [] },
+      tools: [{ name: "files.search", risk: "safe" }],
+    };
+    const pkgWithRegistry = session(
+      "jarvis-pkg",
+      [
+        ...pkgTools,
+        {
+          name: "registry.list",
+          description: "List the registry",
+          inputSchema: { type: "object", properties: {} },
+          meta: { jarvis: { risk: "safe", hidden: true } },
+        },
+      ],
+      [],
+    );
+    pkgWithRegistry.callTool = async (tool) =>
+      tool === "registry.list"
+        ? {
+            isError: false,
+            structuredContent: { results: [entry] },
+            text: "{}",
+          }
+        : { isError: false, structuredContent: {}, text: "{}" };
+    const h = harness({
+      connectMcp: async () => [pkgWithRegistry],
+      registryServers: {
+        load: async () => ({
+          ...EMPTY_REGISTRY,
+          installed: [
+            {
+              id: "jarvis-files",
+              version: "1.0.0",
+              tier: "official",
+              runtime: "go-static",
+              command: ["/home/jarvis/.local/share/jarvis/mcp/jarvis-files/1.0.0/server"],
+              permissions: { network: false, paths: [] },
+              writablePaths: [],
+              tools: [],
+            },
+            {
+              id: "old",
+              version: "0.1",
+              tier: "community",
+              runtime: "node",
+              command: [],
+              permissions: { network: true, paths: ["~/Old"] },
+              writablePaths: [],
+              tools: [],
+            },
+          ],
+        }),
+      },
+    });
+    await h.agent.start();
+    const listed = await h.agent.registryList();
+    expect(listed.available).toEqual([entry]);
+    expect(listed.installed[0]).toEqual(entry);
+    expect(listed.installed[1]).toMatchObject({
+      id: "old",
+      name: "old",
+      tier: "community",
+      artifact: { runtime: "node" },
+      permissions: { network: true, paths: ["~/Old"] },
+      tools: [],
+    });
   });
 });

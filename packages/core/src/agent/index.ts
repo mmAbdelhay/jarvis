@@ -19,3 +19,4 @@ export * from "./text-index.js";
 export * from "./map-limit.js";
 export * from "./tool-search.js";
 export * from "./memory.js";
+export * from "./registry-entry.js";
