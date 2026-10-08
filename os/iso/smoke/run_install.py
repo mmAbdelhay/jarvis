@@ -91,7 +91,7 @@ def model_checks(user: str) -> list[tuple[str, str]]:
          f"for i in $(seq 360); do grep -q '\"state\":\"ready\"' {state} && ! test -e /var/lib/jarvis/model-pending && exit 0; "
          f"sleep 5; done; cat {state}; systemctl status --no-pager jarvis-model-fetch; exit 1"),
         ("criterion 7: ollama lists the local model",
-         f"ollama list | awk 'NR>1 {{print $1}}' | grep -qx '{flow.LOCAL_MODEL_TAG}'"),
+         f"HOME=/root ollama list | awk 'NR>1 {{print $1}}' | grep -qx '{flow.LOCAL_MODEL_TAG}'"),
         ("contracts §6: the user's jarvis.yaml points at the local ollama model",
          f"[ \"$(stat -c %U:%a {yaml})\" = {user}:600 ] && grep -qx '  kind: ollama' {yaml} "
          f"&& grep -qx '  baseUrl: \"http://127.0.0.1:11434\"' {yaml} && grep -qx '  model: \"{flow.LOCAL_MODEL_TAG}\"' {yaml}"),
