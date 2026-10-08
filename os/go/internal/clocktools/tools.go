@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -34,6 +35,10 @@ type Deps struct {
 	Now   func() time.Time // nil: time.Now
 	Local *time.Location   // nil: time.Local
 	NewID func() string    // nil: 8 random hex digits
+	// HasNotifier reports whether desktop notifications are possible;
+	// nil: /usr/bin/notify-send exists. The server cannot ask the
+	// daemon itself (the session bus is inaccessible in its sandbox).
+	HasNotifier func() bool
 }
 
 func (d Deps) clock() time.Time {
@@ -48,6 +53,14 @@ func (d Deps) local() *time.Location {
 		return time.Local
 	}
 	return d.Local
+}
+
+func (d Deps) hasNotifier() bool {
+	if d.HasNotifier != nil {
+		return d.HasNotifier()
+	}
+	_, err := os.Stat("/usr/bin/notify-send")
+	return err == nil
 }
 
 func (d Deps) newID() string {
@@ -151,6 +164,9 @@ func (d Deps) timer(ctx context.Context, raw json.RawMessage) (any, error) {
 	}
 	if label == "" {
 		label = text.DefaultLabel
+	}
+	if !d.hasNotifier() {
+		return nil, mcp.Errorf(mcp.CodeUnsupported, "this computer has no desktop notifications, so timers are not available")
 	}
 	id := "jarvis-timer-" + d.newID()
 	fires := d.clock().Add(time.Duration(in.Seconds) * time.Second)

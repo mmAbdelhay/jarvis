@@ -15,10 +15,11 @@ import (
 
 func deps(run execx.Runner) Deps {
 	return Deps{
-		Run:   run,
-		Now:   func() time.Time { return time.Date(2026, 10, 9, 8, 0, 0, 0, time.UTC) },
-		Local: time.UTC,
-		NewID: func() string { return "abcd1234" },
+		Run:         run,
+		Now:         func() time.Time { return time.Date(2026, 10, 9, 8, 0, 0, 0, time.UTC) },
+		Local:       time.UTC,
+		NewID:       func() string { return "abcd1234" },
+		HasNotifier: func() bool { return true },
 	}
 }
 
@@ -128,6 +129,15 @@ func TestTimerDefaultLabelAndFailures(t *testing.T) {
 	gone := (&execx.Fake{}).OnErr(errors.New("systemd-run not found"), "systemd-run", args...)
 	if _, err := call(t, deps(gone), "clock.timer", `{"seconds":60}`); codeOf(err) != mcp.CodeFailed {
 		t.Fatalf("no systemd-run: %v", err)
+	}
+}
+
+func TestTimerUnsupportedWithoutNotifier(t *testing.T) {
+	d := deps(&execx.Fake{})
+	d.HasNotifier = func() bool { return false }
+	_, err := call(t, d, "clock.timer", `{"seconds":60}`)
+	if codeOf(err) != mcp.CodeUnsupported {
+		t.Fatalf("got %v", err)
 	}
 }
 
