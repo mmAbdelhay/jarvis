@@ -1,14 +1,18 @@
 """Recipes (M4 contracts §4): format, seeds, and the tool allowlist (Review Focus 4)."""
 from __future__ import annotations
 
+import contextlib
 import copy
+import io
 import json
+import os
 import shutil
 import sys
 import tempfile
 import unittest
 import urllib.error
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import check_sources  # noqa: E402
@@ -176,6 +180,43 @@ class Sources(unittest.TestCase):
             raise urllib.error.HTTPError(req.full_url, 404, "Not Found", {}, None)
         self.assertTrue(check_sources.flathub_exists("org.videolan.VLC", opener=lambda req, timeout: Resp()))
         self.assertFalse(check_sources.flathub_exists("org.example.Nope", opener=missing))
+
+    def test_flathub_unreachable_retries_then_reports_offline(self):
+        calls = []
+        def unreachable(req, timeout):
+            calls.append(req.full_url)
+            raise urllib.error.URLError(OSError(101, "Network is unreachable"))
+        with self.assertRaises(check_sources.NetworkUnavailable):
+            check_sources.flathub_exists("org.videolan.VLC", opener=unreachable, sleep=lambda s: None)
+        self.assertEqual(len(calls), 3)
+
+    def test_flathub_server_error_is_not_offline(self):
+        def broken(req, timeout):
+            raise urllib.error.HTTPError(req.full_url, 500, "Server Error", {}, None)
+        with self.assertRaises(urllib.error.HTTPError):
+            check_sources.flathub_exists("org.videolan.VLC", opener=broken)
+
+    def _main_offline(self, env):
+        sources = [("flatpak", "org.videolan.VLC"), ("flatpak", "org.gimp.GIMP")]
+        def offline(app_id):
+            raise check_sources.NetworkUnavailable("Network is unreachable")
+        with mock.patch.object(check_sources.recipes, "sources", return_value=sources), \
+             mock.patch.object(check_sources, "flathub_exists", side_effect=offline) as lookup, \
+             mock.patch.dict(os.environ, env, clear=False), \
+             contextlib.redirect_stderr(io.StringIO()) as err:
+            code = check_sources.main()
+        return code, err.getvalue(), lookup.call_count
+
+    def test_main_skips_flatpak_checks_offline(self):
+        code, err, lookups = self._main_offline({"JARVIS_REQUIRE_NETWORK": "", "GITHUB_ACTIONS": ""})
+        self.assertEqual(code, 0)
+        self.assertIn("SKIPPED", err)
+        self.assertEqual(lookups, 1)  # no retry storm per app once offline
+
+    def test_main_offline_fails_when_network_required(self):
+        code, err, _ = self._main_offline({"JARVIS_REQUIRE_NETWORK": "1"})
+        self.assertEqual(code, 1)
+        self.assertIn("NOT checked", err)
 
 
 if __name__ == "__main__":
