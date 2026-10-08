@@ -35,7 +35,7 @@ private slots:
         QCOMPARE(model.kind(), u"anthropic"_s);
         QCOMPARE(model.baseUrl(), u"https://api.anthropic.com"_s);
         QVERIFY(model.privacyText().contains(u"Anthropic"_s));
-        QCOMPARE(model.presetNames().size(), 8);
+        QCOMPARE(model.presetNames().size(), 9);
     }
 
     void modesSetTheirDefaults()
@@ -215,6 +215,45 @@ private slots:
         model.probe();
         QCOMPARE(probes.size(), 1);
         QVERIFY(!probes[0][0].toJsonObject().contains("apiKey"));
+    }
+
+    void geminiIsACloudPreset()
+    {
+        ProviderModel model;
+        QCOMPARE(model.presetNames().at(1), u"Gemini"_s);
+        model.setPreset(u"Gemini"_s);
+        QCOMPARE(model.kind(), u"gemini"_s);
+        QCOMPARE(model.baseUrl(), u"https://generativelanguage.googleapis.com"_s);
+        QVERIFY(model.needsKey());
+        QVERIFY(model.privacyText().contains(u"Gemini"_s));
+        model.setApiKey(u"AIza-test"_s);
+        model.probe();
+        QCOMPARE(model.draft().value("kind").toString(), u"gemini"_s);
+    }
+
+    void activeGeminiIsLabelledAndEditable()
+    {
+        ProviderModel model;
+        model.loadList(QJsonObject{{"active", QJsonObject{{"kind", "gemini"}, {"baseUrl", "https://generativelanguage.googleapis.com"},
+                                                          {"model", "gemini-2.5-flash"}, {"hasKey", true}}},
+                                   {"kinds", QJsonArray{"anthropic", "openai-compatible", "ollama", "gemini"}}});
+        QCOMPARE(model.activeLabel(), u"Gemini"_s);
+        model.editActive();
+        QCOMPARE(model.mode(), u"cloud"_s);
+        QCOMPARE(model.preset(), u"Gemini"_s);
+        QCOMPARE(model.kind(), u"gemini"_s);
+    }
+
+    void geminiWithAnOddUrlIsStillGemini()
+    {
+        ProviderModel model;
+        model.loadList(QJsonObject{{"active", QJsonObject{{"kind", "gemini"}, {"baseUrl", "https://proxy.example.com"},
+                                                          {"model", "gemini-2.5-pro"}, {"hasKey", true}}}});
+        QCOMPARE(model.activeLabel(), u"Gemini"_s);
+        model.editActive();
+        QCOMPARE(model.mode(), u"cloud"_s);
+        QCOMPARE(model.preset(), u"Gemini"_s);
+        QCOMPARE(model.baseUrl(), u"https://proxy.example.com"_s);
     }
 };
 
