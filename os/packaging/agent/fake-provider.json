@@ -1,0 +1,17 @@
+[
+  { "expectPromptContains": "say hello", "replies": [{ "text": "agent-test-hello" }] },
+  {
+    "expectPromptContains": "check health",
+    "replies": [
+      { "toolCalls": [{ "name": "sys.health", "input": {} }] },
+      { "text": "agent-test-health-done" }
+    ]
+  },
+  {
+    "expectPromptContains": "restart printing",
+    "replies": [
+      { "toolCalls": [{ "name": "svc.restart", "input": { "unit": "cups" } }] },
+      { "text": "agent-test-after-deny" }
+    ]
+  }
+]
