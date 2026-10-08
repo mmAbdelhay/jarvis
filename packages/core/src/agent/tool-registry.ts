@@ -36,6 +36,7 @@ export const HOST_FORCED_RISK: Readonly<Record<string, ToolRisk>> = {
   "net.wifi_connect": "confirm",
   "net.radio_on": "confirm",
   "registry.install": "confirm",
+  "recipes.run": "confirm",
   "registry.remove": "confirm",
   // Rafiq M3 contracts §1: every setter and file write is a card; users and
   // formatting need the admin password (checked by the helper, §5 #5; threat model M28).
@@ -70,6 +71,7 @@ export const HOST_FORCED_RISK: Readonly<Record<string, ToolRisk>> = {
 /** Name spaces only jarvisd's own servers (jarvis-pkg, jarvis-diag) may use. */
 export const HOST_TOOL_PREFIXES: readonly string[] = [
   "pkg.",
+  "recipes.",
   "updates.",
   "disk.",
   "sys.",
