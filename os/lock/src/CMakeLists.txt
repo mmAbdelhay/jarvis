@@ -44,3 +44,39 @@ endif()
 
 # PAM service (M3 contracts §3). With prefix /usr, GNUInstallDirs puts SYSCONFDIR at /etc.
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/../data/pam/jarvis-lock DESTINATION ${CMAKE_INSTALL_FULL_SYSCONFDIR}/pam.d)
+
+if(JARVIS_LOCK_WAYLAND)
+  find_package(Qt6 6.8 REQUIRED COMPONENTS WaylandClient)
+  if(Qt6_VERSION VERSION_GREATER_EQUAL 6.9)
+    find_package(Qt6 REQUIRED COMPONENTS WaylandClientPrivate GuiPrivate)
+  endif()
+  find_package(PkgConfig REQUIRED)
+  pkg_get_variable(WAYLAND_PROTOCOLS_DIR wayland-protocols pkgdatadir)
+  qt_add_library(jarvis_lock_wayland STATIC
+    wayland/SessionLockIntegration.h wayland/SessionLockIntegration.cpp
+    wayland/SessionLock.h wayland/SessionLock.cpp
+    wayland/LockSurface.h wayland/LockSurface.cpp
+    wayland/WaylandLockBackend.h wayland/WaylandLockBackend.cpp)
+  qt6_generate_wayland_protocol_client_sources(jarvis_lock_wayland
+    FILES ${WAYLAND_PROTOCOLS_DIR}/staging/ext-session-lock/ext-session-lock-v1.xml)
+  target_include_directories(jarvis_lock_wayland PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+  target_link_libraries(jarvis_lock_wayland PUBLIC
+    jarvis_lock_core Qt6::Quick Qt6::WaylandClient Qt6::WaylandClientPrivate Qt6::GuiPrivate)
+endif()
+
+function(jarvis_lock_executable name)
+  qt_add_executable(${name} main.cpp)
+  target_link_libraries(${name} PRIVATE jarvis_lock_core jarvis_lock_coreplugin jarvis_ui_native)
+  target_compile_definitions(${name} PRIVATE JARVIS_LOCK_VERSION="${PROJECT_VERSION}")
+  if(JARVIS_LOCK_WAYLAND)
+    target_link_libraries(${name} PRIVATE jarvis_lock_wayland)
+    target_compile_definitions(${name} PRIVATE JARVIS_HAVE_SESSION_LOCK=1)
+  endif()
+endfunction()
+
+jarvis_lock_executable(jarvis-lock)
+install(TARGETS jarvis-lock RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+# CI only, never installed (ci/test.sh proves it): types passwords from a file.
+jarvis_lock_executable(jarvis-lock-testhooks)
+target_compile_definitions(jarvis-lock-testhooks PRIVATE JARVIS_LOCK_TEST_HOOKS=1)

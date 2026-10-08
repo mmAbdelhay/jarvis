@@ -13,4 +13,11 @@ rm -rf os/lock/build/stage
 DESTDIR="$PWD/os/lock/build/stage" cmake --install os/lock/build
 test -f os/lock/build/stage/etc/pam.d/jarvis-lock
 test -z "$(find os/lock/build/stage -path '*Jarvis/UI*' -print -quit)" # jarvis-ui ships separately
+test -x os/lock/build/stage/usr/bin/jarvis-lock
+test ! -e os/lock/build/stage/usr/bin/jarvis-lock-testhooks
+if grep -a -q -- '--test-password-file' os/lock/build/stage/usr/bin/jarvis-lock; then
+  echo "jarvis-lock: the installed binary contains test hooks" >&2
+  exit 1
+fi
 echo "jarvis-lock: build, tests and install layout OK"
+os/lock/ci/session-test.sh

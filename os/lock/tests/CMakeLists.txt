@@ -57,3 +57,9 @@ add_test(NAME lock_channels_listed
           -DLISTED=${CMAKE_CURRENT_SOURCE_DIR}/../../shell/tests/data/other-clients.txt
           -P ${CMAKE_CURRENT_SOURCE_DIR}/check_lock_channels.cmake)
 set_tests_properties(lock_channels_listed PROPERTIES LABELS unit)
+
+# The real binary shows the lock screen in a window and quits: QML loads cleanly.
+add_test(NAME lock_smoke COMMAND $<TARGET_FILE:jarvis-lock> --windowed --quit-after 1500)
+set_tests_properties(lock_smoke PROPERTIES LABELS smoke TIMEOUT 30
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QML_IMPORT_PATH=${QT_QML_OUTPUT_DIRECTORY}"
+  FAIL_REGULAR_EXPRESSION "is not installed|is not a type|ReferenceError|TypeError")
