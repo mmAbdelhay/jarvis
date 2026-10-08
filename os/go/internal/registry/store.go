@@ -69,6 +69,13 @@ func (s *Store) mcpRoot() string { return filepath.Join(s.Home, ".local", "share
 // ServerDir is ~/.local/share/jarvis/mcp/<id>/<version>.
 func (s *Store) ServerDir(id, version string) string { return filepath.Join(s.mcpRoot(), id, version) }
 
+// ArtifactPath is the verified tarball kept beside the version folder,
+// ~/.local/share/jarvis/mcp/<id>/<version>.tar.gz. jarvisd re-hashes it
+// against the index sha256 at every launch (contracts §7.2).
+func (s *Store) ArtifactPath(id, version string) string {
+	return filepath.Join(s.mcpRoot(), id, version+".tar.gz")
+}
+
 // RegistrationPath is ~/.config/jarvis/mcp.d/<id>.json.
 func (s *Store) RegistrationPath(id string) string {
 	return filepath.Join(s.Home, ".config", "jarvis", "mcp.d", id+".json")
@@ -185,7 +192,7 @@ func (s *Store) Install(ctx context.Context, e Entry) (InstallResult, error) {
 
 	res := InstallResult{ID: e.ID, Version: e.Version, Tier: e.Tier, Status: StatusInstalled, Tools: toolNames(e)}
 	if prev, err := s.Read(e.ID); err == nil {
-		if prev.Version == e.Version && regularFile(cmd[len(cmd)-1]) {
+		if prev.Version == e.Version && regularFile(cmd[len(cmd)-1]) && regularFile(s.ArtifactPath(e.ID, e.Version)) {
 			res.Status = StatusAlready
 			return res, nil
 		}
@@ -201,9 +208,14 @@ func (s *Store) Install(ctx context.Context, e Entry) (InstallResult, error) {
 		return InstallResult{}, err
 	}
 	defer os.RemoveAll(staging) // a no-op once renamed
-	if err := s.fetchInto(ctx, e, staging); err != nil {
+	dl, err := s.fetchInto(ctx, e, staging)
+	if err != nil {
 		os.RemoveAll(staging)
 		os.Remove(idDir) // only succeeds when nothing else is in it
+		return InstallResult{}, err
+	}
+	defer os.Remove(dl) // a no-op once renamed
+	if err := os.Rename(dl, s.ArtifactPath(e.ID, e.Version)); err != nil {
 		return InstallResult{}, err
 	}
 	if err := os.RemoveAll(final); err != nil { // leftover of a broken attempt
@@ -233,37 +245,52 @@ func (s *Store) Install(ctx context.Context, e Entry) (InstallResult, error) {
 	// Older versions go only once the new registration is in place.
 	des, _ := os.ReadDir(idDir)
 	for _, d := range des {
-		if d.Name() != e.Version {
+		if d.Name() != e.Version && d.Name() != e.Version+".tar.gz" {
 			os.RemoveAll(filepath.Join(idDir, d.Name()))
 		}
 	}
 	return res, nil
 }
 
-func (s *Store) fetchInto(ctx context.Context, e Entry, dir string) error {
+// fetchInto downloads and verifies the artifact, unpacks it into dir and
+// returns the path of the verified tarball (a temp file the caller renames
+// into place or removes).
+func (s *Store) fetchInto(ctx context.Context, e Entry, dir string) (string, error) {
 	tmp, err := os.CreateTemp(filepath.Dir(dir), ".download-")
 	if err != nil {
-		return err
+		return "", err
 	}
-	defer os.Remove(tmp.Name())
-	defer tmp.Close()
+	name := tmp.Name()
+	ok := false
+	defer func() {
+		tmp.Close()
+		if !ok {
+			os.Remove(name)
+		}
+	}()
 	if err := Download(ctx, s.Client, e.Artifact.URL, e.Artifact.SHA256, tmp); err != nil {
-		return err
+		return "", err
 	}
 	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
-		return err
+		return "", err
 	}
 	if err := Unpack(tmp, dir); err != nil {
-		return err
+		return "", err
 	}
 	ep := EntryPoint(e.Artifact.Runtime)
 	if !regularFile(filepath.Join(dir, ep)) {
-		return invalid("the artifact of %s has no %s", e.ID, ep)
+		return "", invalid("the artifact of %s has no %s", e.ID, ep)
 	}
 	if e.Artifact.Runtime == RuntimeGoStatic {
-		return os.Chmod(filepath.Join(dir, ep), 0o755)
+		if err := os.Chmod(filepath.Join(dir, ep), 0o755); err != nil {
+			return "", err
+		}
 	}
-	return nil
+	if err := os.Chmod(name, 0o600); err != nil {
+		return "", err
+	}
+	ok = true
+	return name, nil
 }
 
 // Remove deletes the registration first (jarvisd stops the server) and

@@ -111,8 +111,36 @@ func TestInstallFreshWritesServerAndRegistration(t *testing.T) {
 	if got := names(t, filepath.Join(st.Home, ".local/share/jarvis/mcp")); !reflect.DeepEqual(got, []string{".lock", "weather"}) {
 		t.Fatalf("mcp root holds %v", got)
 	}
-	if got := names(t, filepath.Join(st.Home, ".local/share/jarvis/mcp/weather")); !reflect.DeepEqual(got, []string{"1.2.0"}) {
+	if got := names(t, filepath.Join(st.Home, ".local/share/jarvis/mcp/weather")); !reflect.DeepEqual(got, []string{"1.2.0", "1.2.0.tar.gz"}) {
 		t.Fatalf("leftovers next to the version: %v", got)
+	}
+}
+
+func TestInstallKeepsTheVerifiedArtifact(t *testing.T) {
+	rs := newRegistryServer(t)
+	st := newStore(t, rs)
+	art := packServer(t, RuntimeGoStatic)
+	e := serve(rs, "weather", "1.2.0", RuntimeGoStatic, art)
+	if _, err := st.Install(context.Background(), e); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(st.ArtifactPath("weather", "1.2.0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sha256Hex(b) != e.Artifact.SHA256 {
+		t.Fatalf("kept artifact hashes to %s, index says %s", sha256Hex(b), e.Artifact.SHA256)
+	}
+	// An upgrade keeps only the new version's artifact.
+	e2 := serve(rs, "weather", "1.3.0", RuntimeGoStatic, packServer(t, RuntimeGoStatic))
+	if _, err := st.Install(context.Background(), e2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(st.ArtifactPath("weather", "1.2.0")); !os.IsNotExist(err) {
+		t.Fatal("old artifact left behind")
+	}
+	if b, err := os.ReadFile(st.ArtifactPath("weather", "1.3.0")); err != nil || sha256Hex(b) != e2.Artifact.SHA256 {
+		t.Fatalf("new artifact: %v", err)
 	}
 }
 
@@ -146,7 +174,7 @@ func TestUpgradeSwitchesAndDropsTheOldVersion(t *testing.T) {
 	if err != nil || r.Version != "1.3.0" {
 		t.Fatalf("registration %+v %v", r, err)
 	}
-	if got := names(t, filepath.Join(st.Home, ".local/share/jarvis/mcp/weather")); !reflect.DeepEqual(got, []string{"1.3.0"}) {
+	if got := names(t, filepath.Join(st.Home, ".local/share/jarvis/mcp/weather")); !reflect.DeepEqual(got, []string{"1.3.0", "1.3.0.tar.gz"}) {
 		t.Fatalf("versions left: %v", got)
 	}
 }
@@ -184,7 +212,7 @@ func TestFailedUpgradeKeepsWorkingVersion(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(st.ServerDir("weather", "1.2.0"), "server")); err != nil {
 		t.Fatalf("the working version must survive: %v", err)
 	}
-	if got := names(t, filepath.Join(st.Home, ".local/share/jarvis/mcp/weather")); !reflect.DeepEqual(got, []string{"1.2.0"}) {
+	if got := names(t, filepath.Join(st.Home, ".local/share/jarvis/mcp/weather")); !reflect.DeepEqual(got, []string{"1.2.0", "1.2.0.tar.gz"}) {
 		t.Fatalf("leftovers: %v", got)
 	}
 }
