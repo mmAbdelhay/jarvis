@@ -35,6 +35,10 @@ type Source struct {
 // ErrExpired means a signed index is past its validUntil (contracts §7.6).
 var ErrExpired = errors.New("registry: the index is past its validUntil")
 
+// ErrRollback means the fetched index is older than the last accepted one
+// and the expired cache cannot stand in for it (contracts §7.6).
+var ErrRollback = errors.New("registry: the index is older than the last accepted one")
+
 func (s *Source) now() time.Time {
 	if s.Now != nil {
 		return s.Now()
@@ -110,9 +114,9 @@ func (s *Source) Load(ctx context.Context, persist bool) (*Index, error) {
 		return nil, err
 	}
 	cached, cacheErr := s.cached(kr)
-	if cacheErr == nil && !s.now().Before(cached.Expiry()) {
-		cached, cacheErr = nil, ErrExpired
-	}
+	// An expired cache is still the last accepted index for the rollback
+	// check; only its use as an offline fallback depends on expiry.
+	cacheUsable := cacheErr == nil && s.now().Before(cached.Expiry())
 
 	ctx, cancel := context.WithTimeout(ctx, fetchTimeout)
 	defer cancel()
@@ -125,7 +129,7 @@ func (s *Source) Load(ctx context.Context, persist bool) (*Index, error) {
 		if !errors.Is(err, ErrNetwork) {
 			return nil, err
 		}
-		if cacheErr == nil {
+		if cacheUsable {
 			return cached, nil
 		}
 		return nil, fmt.Errorf("%w (%v)", ErrOffline, err)
@@ -141,7 +145,10 @@ func (s *Source) Load(ctx context.Context, persist bool) (*Index, error) {
 		return nil, ErrExpired
 	}
 	if cacheErr == nil && ix.Generated().Before(cached.Generated()) {
-		return cached, nil
+		if cacheUsable {
+			return cached, nil
+		}
+		return nil, ErrRollback
 	}
 	if persist {
 		// A cache that cannot be written only costs offline use.

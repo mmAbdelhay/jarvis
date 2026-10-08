@@ -217,3 +217,27 @@ func TestLoadRefusesExpiredIndex(t *testing.T) {
 		t.Fatalf("Cached() of an expired cache: %v", err)
 	}
 }
+
+func TestLoadNoRollbackAfterCacheExpires(t *testing.T) {
+	rs := newRegistryServer(t)
+	s := registrytest.NewSigner(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	doc := func(gen, until string) []byte {
+		return []byte(`{"version":1,"generatedAt":"` + gen + `","validUntil":"` + until + `","entries":[]}`)
+	}
+	src := newSource(t, rs, s, cache)
+	rs.publish(s, doc("2026-10-09T08:00:00Z", "2026-10-10T08:00:00Z"))
+	if _, err := src.Load(context.Background(), true); err != nil {
+		t.Fatal(err)
+	}
+	newer, _ := os.ReadFile(filepath.Join(cache, "index.verified.json"))
+
+	src.Now = func() time.Time { return time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC) }
+	rs.publish(s, doc("2026-10-01T08:00:00Z", "2026-10-25T08:00:00Z"))
+	if _, err := src.Load(context.Background(), true); !errors.Is(err, ErrRollback) {
+		t.Fatalf("replayed older index after cache expiry: %v", err)
+	}
+	if now, _ := os.ReadFile(filepath.Join(cache, "index.verified.json")); !bytes.Equal(now, newer) {
+		t.Fatal("the cache must keep the newer index")
+	}
+}
