@@ -15,9 +15,10 @@ Item {
     property RegistryModel registry: null
     property VoiceModel voice: null
     property PhoneModel phone: null
+    property CuSettingsModel cuSettings: null
     property bool doctorAvailable: false // sys:snapshot says offline (contracts §6.8)
     property string section: "providers"
-    readonly property var sections: [{ id: "providers", label: qsTr("Model providers") }, { id: "memory", label: qsTr("Memory") }, { id: "tools", label: qsTr("Tools") }, { id: "voice", label: qsTr("Voice") }, { id: "phone", label: qsTr("Phone") }, { id: "language", label: qsTr("Language") }]
+    readonly property var sections: [{ id: "providers", label: qsTr("Model providers") }, { id: "memory", label: qsTr("Memory") }, { id: "tools", label: qsTr("Tools") }, { id: "computerUse", label: qsTr("Computer use") }, { id: "voice", label: qsTr("Voice") }, { id: "phone", label: qsTr("Phone") }, { id: "language", label: qsTr("Language") }]
     signal doctorRequested()
 
     Flickable {
@@ -106,6 +107,14 @@ Item {
                 visible: root.section === "tools"
                 active: root.registry !== null
                 sourceComponent: ToolsSection { registry: root.registry }
+            }
+
+            Loader {
+                objectName: "computerUseSection"
+                Layout.fillWidth: true
+                visible: root.section === "computerUse"
+                active: root.cuSettings !== null
+                sourceComponent: ComputerUseSection { settings: root.cuSettings }
             }
 
             Loader {

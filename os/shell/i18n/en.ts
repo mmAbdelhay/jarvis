@@ -232,6 +232,49 @@
         </message>
     </context>
     <context>
+        <name>ComputerUseSection</name>
+        <message>
+            <source>Jarvis can look at the screen and use the mouse and keyboard in apps you allow, for one task at a time. It's off until you turn it on for a model, and you can take over at any moment with Esc.</source>
+            <translation>Jarvis can look at the screen and use the mouse and keyboard in apps you allow, for one task at a time. It's off until you turn it on for a model, and you can take over at any moment with Esc.</translation>
+        </message>
+        <message>
+            <source>No model providers yet.</source>
+            <translation>No model providers yet.</translation>
+        </message>
+        <message>
+            <source>Let %1 use the screen</source>
+            <translation>Let %1 use the screen</translation>
+        </message>
+        <message>
+            <source>Send screenshots to %1?</source>
+            <translation>Send screenshots to %1?</translation>
+        </message>
+        <message>
+            <source>While Jarvis uses the screen, screenshots of the allowed windows are sent to %1. Other windows are blacked out, and screenshots are never saved.</source>
+            <translation>While Jarvis uses the screen, screenshots of the allowed windows are sent to %1. Other windows are blacked out, and screenshots are never saved.</translation>
+        </message>
+        <message>
+            <source>Cancel</source>
+            <translation>Cancel</translation>
+        </message>
+        <message>
+            <source>Allow and turn on</source>
+            <translation>Allow and turn on</translation>
+        </message>
+        <message>
+            <source>Saving…</source>
+            <translation>Saving…</translation>
+        </message>
+        <message>
+            <source>Never controlled</source>
+            <translation>Never controlled</translation>
+        </message>
+        <message>
+            <source>These are always protected and can't be removed.</source>
+            <translation>These are always protected and can't be removed.</translation>
+        </message>
+    </context>
+    <context>
         <name>ConfirmCard</name>
         <message>
             <source>Approval needed</source>
@@ -1085,6 +1128,10 @@
         <message>
             <source>Phone</source>
             <translation>Phone</translation>
+        </message>
+        <message>
+            <source>Computer use</source>
+            <translation>Computer use</translation>
         </message>
         <message>
             <source>Settings</source>

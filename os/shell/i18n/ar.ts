@@ -236,6 +236,49 @@
         </message>
     </context>
     <context>
+        <name>ComputerUseSection</name>
+        <message>
+            <source>Jarvis can look at the screen and use the mouse and keyboard in apps you allow, for one task at a time. It's off until you turn it on for a model, and you can take over at any moment with Esc.</source>
+            <translation>يستطيع جارفيس أن ينظر إلى الشاشة ويستخدم الفأرة ولوحة المفاتيح في التطبيقات التي تسمح بها، لمهمة واحدة في كل مرة. هذه الميزة متوقفة حتى تشغّلها لنموذج، ويمكنك تولّي التحكم في أي لحظة بالضغط على Esc.</translation>
+        </message>
+        <message>
+            <source>No model providers yet.</source>
+            <translation>لا يوجد مزوّدو نماذج بعد.</translation>
+        </message>
+        <message>
+            <source>Let %1 use the screen</source>
+            <translation>اسمح لـ %1 باستخدام الشاشة</translation>
+        </message>
+        <message>
+            <source>Send screenshots to %1?</source>
+            <translation>إرسال لقطات الشاشة إلى %1؟</translation>
+        </message>
+        <message>
+            <source>While Jarvis uses the screen, screenshots of the allowed windows are sent to %1. Other windows are blacked out, and screenshots are never saved.</source>
+            <translation>أثناء استخدام جارفيس للشاشة، تُرسَل لقطات النوافذ المسموح بها إلى %1. تُحجَب النوافذ الأخرى بالأسود، ولا تُحفَظ لقطات الشاشة أبدًا.</translation>
+        </message>
+        <message>
+            <source>Cancel</source>
+            <translation>إلغاء</translation>
+        </message>
+        <message>
+            <source>Allow and turn on</source>
+            <translation>اسمح وشغّل</translation>
+        </message>
+        <message>
+            <source>Saving…</source>
+            <translation>جارٍ الحفظ…</translation>
+        </message>
+        <message>
+            <source>Never controlled</source>
+            <translation>لا يتحكم بها جارفيس أبدًا</translation>
+        </message>
+        <message>
+            <source>These are always protected and can't be removed.</source>
+            <translation>هذه محمية دائمًا ولا يمكن إزالتها.</translation>
+        </message>
+    </context>
+    <context>
         <name>ConfirmCard</name>
         <message>
             <source>Approval needed</source>
@@ -1089,6 +1132,10 @@
         <message>
             <source>Phone</source>
             <translation>الهاتف</translation>
+        </message>
+        <message>
+            <source>Computer use</source>
+            <translation>استخدام الحاسوب</translation>
         </message>
         <message>
             <source>Settings</source>

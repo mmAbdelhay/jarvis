@@ -19,6 +19,7 @@ Item {
         registry: page.shell.registry
         voice: page.shell.voice
         phone: page.shell.phone
+        cuSettings: page.shell.cuSettings
         doctorAvailable: page.shell.system.known && !page.shell.system.online
         onDoctorRequested: page.doctorRequested()
     }
