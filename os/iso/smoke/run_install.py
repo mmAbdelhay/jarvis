@@ -103,8 +103,11 @@ def keyboard_checks(layout: str) -> list[tuple[str, str]]:
         ("§11.5: the greeter's cage types with the chosen layout",
          f"for i in $(seq 90); do pid=$(pgrep -u _greetd -x cage | head -n1); [ -n \"$pid\" ] && break; sleep 1; done; "
          f"[ -n \"$pid\" ] && {env}"),
+        # Bounded wait: on a slow runner the serial shell answers before the
+        # user's labwc has started jarvis-shell (or while it relaunches).
         ("§11.5: the user's labwc session types with the chosen layout",
-         f"pid=$(pgrep -u {flow.USER} -x jarvis-shell | head -n1) && [ -n \"$pid\" ] && {env}"),
+         f"for i in $(seq 90); do pid=$(pgrep -u {flow.USER} -x jarvis-shell | head -n1); "
+         f"[ -n \"$pid\" ] && {env} && exit 0; sleep 1; done; exit 1"),
     ]
 
 

@@ -26,6 +26,8 @@ class RunInstallTest(unittest.TestCase):
             self.assertIn(needle, names)
         cmds = dict(run_install.keyboard_checks("de"))
         self.assertTrue(all("\n" not in c and "de" in c for c in cmds.values()))
+        labwc = next(c for n, c in cmds.items() if "labwc" in n)
+        self.assertIn("seq 90", labwc, "the labwc check waits for the user's session (slow runners)")
         self.assertEqual(run_install.ERASE_KEYBOARD, "de", "the erase install types its secrets on a non-US layout")
         names = " ".join(n for n, _ in run_install.model_checks(run_install.flow.USER))
         for needle in ("criterion 7", "model-state", "ollama", "jarvis.yaml"):
