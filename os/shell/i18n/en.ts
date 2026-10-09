@@ -290,6 +290,40 @@
         </message>
     </context>
     <context>
+        <name>CuOverlay</name>
+        <message>
+            <source>Take over (Esc)</source>
+            <translation>Take over (Esc)</translation>
+        </message>
+        <message>
+            <source>Resume</source>
+            <translation>Resume</translation>
+        </message>
+        <message>
+            <source>Stop</source>
+            <translation>Stop</translation>
+        </message>
+        <message>
+            <source>Screen control</source>
+            <translation>Screen control</translation>
+        </message>
+        <message>
+            <source>Steps</source>
+            <translation>Steps</translation>
+        </message>
+        <message>
+            <source>Screen control request failed.</source>
+            <translation>Screen control request failed.</translation>
+        </message>
+    </context>
+    <context>
+        <name>CuOverlayWindow</name>
+        <message>
+            <source>Jarvis screen control</source>
+            <translation>Jarvis screen control</translation>
+        </message>
+    </context>
+    <context>
         <name>CuSessionModel</name>
         <message>
             <source>Couldn't stop Jarvis: %1</source>

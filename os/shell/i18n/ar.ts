@@ -294,6 +294,40 @@
         </message>
     </context>
     <context>
+        <name>CuOverlay</name>
+        <message>
+            <source>Take over (Esc)</source>
+            <translation>تولَّ التحكم (Esc)</translation>
+        </message>
+        <message>
+            <source>Resume</source>
+            <translation>استئناف</translation>
+        </message>
+        <message>
+            <source>Stop</source>
+            <translation>إيقاف</translation>
+        </message>
+        <message>
+            <source>Screen control</source>
+            <translation>التحكم في الشاشة</translation>
+        </message>
+        <message>
+            <source>Steps</source>
+            <translation>الخطوات</translation>
+        </message>
+        <message>
+            <source>Screen control request failed.</source>
+            <translation>تعذّر تنفيذ طلب التحكم في الشاشة.</translation>
+        </message>
+    </context>
+    <context>
+        <name>CuOverlayWindow</name>
+        <message>
+            <source>Jarvis screen control</source>
+            <translation>تحكم جارفيس في الشاشة</translation>
+        </message>
+    </context>
+    <context>
         <name>CuSessionModel</name>
         <message>
             <source>Couldn't stop Jarvis: %1</source>
