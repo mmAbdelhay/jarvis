@@ -15,13 +15,13 @@ check "user unit shipped" deb_has "$deb" usr/lib/systemd/user/jarvis-cu.service
 check "autostart fragment shipped" deb_has "$deb" usr/share/jarvis-cu/labwc/autostart
 check "root-owned files" test "$(deb_owners "$deb")" = "root/root"
 deps=$(deb_field "$deb" Depends)
-for p in at-spi2-core iproute2 systemd; do check "Depends has $p" grep -qw -- "$p" <<<"$deps"; done
+for p in at-spi2-core systemd; do check "Depends has $p" grep -qw -- "$p" <<<"$deps"; done
 check "no maintainer scripts: never enabled for every user (the autostart starts it)" \
   bash -c '! dpkg-deb --ctrl-tarfile "$1" | tar -t | grep -qE "(post|pre)(inst|rm)"' _ "$deb"
 
 u=$d/jarvis-cu.service
 check "unit runs the contract binary" grep -qx 'ExecStart=/usr/libexec/jarvis/jarvis-cu' "$u"
-for line in 'UMask=0077' 'NoNewPrivileges=yes' 'RestrictAddressFamilies=AF_UNIX AF_NETLINK' 'Restart=on-failure' \
+for line in 'UMask=0077' 'NoNewPrivileges=yes' 'RestrictAddressFamilies=AF_UNIX' 'Restart=on-failure' \
   'ConditionEnvironment=WAYLAND_DISPLAY' 'LockPersonality=yes' 'RestrictNamespaces=yes'; do
   check "unit: $line" grep -qx "$line" "$u"
 done
@@ -58,5 +58,14 @@ install -D -m0755 /bin/true "$dist/usr/libexec/jarvis/jarvis-cu"
 install -D -m0644 /dev/null "$dist/usr/lib/systemd/user/jarvis-cu.service"
 echo '[Service]' > "$dist/usr/lib/systemd/user/jarvis-cu.service"
 err=$(GO_DIST=$dist "$PACKAGING_DIR/build.sh" --out "$tmp/out3" jarvis-cu 2>&1 || true)
-check "a different unit in os/go/dist fails the build (one owner, gap G4)" grep -q 'Reconcile them' <<<"$err"
+check "a unit in os/go/dist with another ExecStart or address family fails the build" grep -q 'Reconcile them' <<<"$err"
+printf '[Service]\nExecStart=/usr/libexec/jarvis/jarvis-cu\nRestrictAddressFamilies=AF_UNIX AF_INET\n' > "$dist/usr/lib/systemd/user/jarvis-cu.service"
+err=$(GO_DIST=$dist "$PACKAGING_DIR/build.sh" --out "$tmp/out4" jarvis-cu 2>&1 || true)
+check "a dist unit that opens network sockets fails the build" grep -q 'Reconcile them' <<<"$err"
+# Plan U's real unit (os/go/data/jarvis-cu.service): same ExecStart, AF_UNIX only,
+# fewer hardening lines. Contracts §4.6 has U produce it; X ships its stricter one.
+printf '[Unit]\nPartOf=graphical-session.target\n[Service]\nType=exec\nExecStart=/usr/libexec/jarvis/jarvis-cu\nRestrictAddressFamilies=AF_UNIX\n' > "$dist/usr/lib/systemd/user/jarvis-cu.service"
+GO_DIST=$dist "$PACKAGING_DIR/build.sh" --out "$tmp/out5" jarvis-cu >/dev/null 2>&1 || true
+check "Plan U's unit (same ExecStart, AF_UNIX) builds, shipping X's stricter unit" \
+  bash -c 'dpkg-deb --fsys-tarfile "$1" | tar -xOf - ./usr/lib/systemd/user/jarvis-cu.service | grep -qx "UMask=0077"' _ "$tmp/out5/jarvis-cu_${OS_VERSION}_amd64.deb"
 finish

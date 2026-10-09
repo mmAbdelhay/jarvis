@@ -17,6 +17,8 @@ fresh; sed -i.bak '/^Package: at-spi2-core$/,/^$/d' "$c/var/lib/dpkg/status"; ch
 fresh; rm "$c/usr/libexec/jarvis/jarvis-cu"; check "missing helper binary is caught" caught
 fresh; sed -i.bak 's/^RestrictAddressFamilies=.*/RestrictAddressFamilies=AF_UNIX AF_INET/' "$c/usr/lib/systemd/user/jarvis-cu.service"
 check "network address family is caught" caught
+fresh; sed -i.bak 's/^RestrictAddressFamilies=.*/RestrictAddressFamilies=AF_UNIX AF_NETLINK/' "$c/usr/lib/systemd/user/jarvis-cu.service"
+check "netlink beside AF_UNIX is caught (the unit is AF_UNIX only)" caught
 fresh; sed -i.bak '/RestrictAddressFamilies/d' "$c/usr/lib/systemd/user/jarvis-cu.service"; check "a unit that may use the network is caught" caught
 fresh; mkdir -p "$c/etc/systemd/user/default.target.wants"; ln -s /usr/lib/systemd/user/jarvis-cu.service "$c/etc/systemd/user/default.target.wants/jarvis-cu.service"
 check "an enabled unit (would run in every session) is caught" caught

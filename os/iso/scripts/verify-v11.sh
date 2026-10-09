@@ -24,7 +24,7 @@ if [ -f "$unit" ]; then
       seen++; n = split($2, families, " "); unix = 0
       for (i = 1; i <= n; i++) {
         if (families[i] == "AF_UNIX") unix = 1
-        else if (families[i] != "AF_NETLINK") unsafe = 1
+        else unsafe = 1
       }
       if (!unix) unsafe = 1
     }
