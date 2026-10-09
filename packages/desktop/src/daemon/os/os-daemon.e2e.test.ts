@@ -142,7 +142,7 @@ describe.skipIf(WINDOWS)("jarvisd OS mode over the real control socket", () => {
       providers: [],
       activeId: null,
       allowCloudFallback: false,
-      kinds: ["anthropic", "openai-compatible", "ollama", "gemini"],
+      kinds: ["anthropic", "openai-compatible", "ollama", "gemini", "account"],
     });
     await expect(client.invoke("agent:prompt", [{}])).rejects.toMatchObject({
       code: "bad-request",

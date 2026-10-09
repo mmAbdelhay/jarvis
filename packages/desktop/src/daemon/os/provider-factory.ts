@@ -76,9 +76,20 @@ export function createLazyKeyProvider(options: {
 export function buildProvider(
   section: ProviderSection,
   apiKey: string | undefined,
-  deps: { fetch: FetchLike; subscription?: (model: string) => ModelProvider; language?(): Lang },
+  deps: {
+    fetch: FetchLike;
+    subscription?: (model: string) => ModelProvider;
+    /** Plan Y: the account adapter (Task 13 wires it). */
+    account?: (section: ProviderSection) => ModelProvider;
+    language?(): Lang;
+  },
 ): ModelProvider {
   switch (section.kind) {
+    case "account":
+      return (
+        deps.account?.(section) ??
+        unavailableProvider(() => USER_TEXT[deps.language?.() ?? "en"].accountUnavailable)
+      );
     case "anthropic":
       if (section.auth === "subscription") {
         return (

@@ -42,7 +42,12 @@
     "cu:stop",
     "cu:resume",
     "cu:setEnabled",
-    "cu:consent"
+    "cu:consent",
+    "account:status",
+    "account:install",
+    "account:login",
+    "account:logout",
+    "account:uninstall"
   ],
   "pushes": [
     "agent:events",
@@ -53,7 +58,8 @@
     "pairing:pending",
     "remote:status",
     "ui:language",
-    "cu:state"
+    "cu:state",
+    "account:state"
   ],
   "blobs": ["voice:utterance"],
   "otherClients": ["sys:setLocked"]

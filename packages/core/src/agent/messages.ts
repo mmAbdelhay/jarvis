@@ -60,6 +60,7 @@ const USER_EN = {
   doctorRunning: "The network doctor is running.",
   subscriptionUnavailable:
     "Claude subscription sign-in is not available in Jarvis OS. Use an API key instead.",
+  accountUnavailable: "Signing in with an account is not available on this system.",
   memoryOff: "Memory is off",
   updatesUnavailable: "Checking for updates is not available on this system.",
   updatesCheckFailed: (message: string) => `Could not check for updates: ${message}`,
@@ -80,6 +81,7 @@ const USER_AR: UserText = {
   doctorRunning: "مُشخِّص الشبكة يعمل الآن.",
   subscriptionUnavailable:
     "تسجيل الدخول باشتراك Claude غير متاح في رفيق. استخدم مفتاح API بدلًا من ذلك.",
+  accountUnavailable: "تسجيل الدخول بحساب غير متاح على هذا النظام.",
   memoryOff: "الذاكرة متوقفة",
   updatesUnavailable: "التحقق من التحديثات غير متاح على هذا النظام.",
   updatesCheckFailed: (message) => `تعذّر التحقق من التحديثات: ${message}`,

@@ -19,6 +19,7 @@ describe("core's agent types are exactly the contract's (@jarvis/wire)", () => {
     expectTypeOf<Core.DoctorStep>().toEqualTypeOf<Wire.DoctorStep>();
     expectTypeOf<Core.AuditEntry>().toEqualTypeOf<Wire.AuditEntry>();
     expectTypeOf<Core.ProbeResult>().toEqualTypeOf<Wire.ProbeResult>();
+    expectTypeOf<Core.AccountId>().toEqualTypeOf<Wire.AccountId>();
     expectTypeOf<Core.ProviderConfig>().toEqualTypeOf<Wire.ProviderConfig>();
     expectTypeOf<Core.ProviderDraft>().toEqualTypeOf<Wire.ProviderDraft>();
     expectTypeOf<Core.ConfirmAnswer>().toEqualTypeOf<Wire.ConfirmAnswer>();

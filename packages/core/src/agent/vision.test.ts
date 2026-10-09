@@ -101,4 +101,12 @@ describe("modelSupportsVision", () => {
     expect(normalizeOllamaTag("LLaVA")).toBe("llava:latest");
     expect(normalizeOllamaTag("llava:7b")).toBe("llava:7b");
   });
+  it("gives vision to Claude accounts only (Plan Y §5.8)", () => {
+    expect(modelSupportsVision("account", "default", new Set(), "claude")).toBe(true);
+    expect(modelSupportsVision("account", "opus", new Set(), "claude")).toBe(true);
+    expect(modelSupportsVision("account", "default", new Set(), "chatgpt")).toBe(false);
+    expect(modelSupportsVision("account", "gemini-2.5-pro", new Set(), "gemini")).toBe(false);
+    expect(modelSupportsVision("account", "default", new Set(), "copilot")).toBe(false);
+    expect(modelSupportsVision("account", "default")).toBe(false);
+  });
 });

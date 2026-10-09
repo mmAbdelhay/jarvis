@@ -61,6 +61,16 @@ export const OS_CONTROL_REQUESTS = {
   cuSetEnabled: "cu:setEnabled",
   /** Rafiq v1.1 §4.8: a: [{providerId, revoke?}], v: null — consent for non-loopback screenshots. Local only. */
   cuConsent: "cu:consent",
+  /** Plan Y §2.4: a: [], v: AccountStatusResult. The only account channel a phone may call. */
+  accountStatus: "account:status",
+  /** Plan Y §2.4: a: [{account}], v: null; progress on account:state. Local only. */
+  accountInstall: "account:install",
+  /** Plan Y §2.4: a: [{account}], v: null; awaiting-browser then signed-in | failed. Local only. */
+  accountLogin: "account:login",
+  /** Plan Y §2.4: a: [{account}], v: null — the CLI's logout, then its config dir is deleted. Local only. */
+  accountLogout: "account:logout",
+  /** Plan Y §2.4: a: [{account}], v: null — signs out first, then removes the CLI. Local only. */
+  accountUninstall: "account:uninstall",
 } as const;
 
 export const OS_CONTROL_PUSHES = {
@@ -78,18 +88,48 @@ export const OS_CONTROL_PUSHES = {
   uiLanguage: "ui:language",
   /** Rafiq v1.1 §2: CuState on every change and on every new connection. */
   cuState: "cu:state",
+  /** Plan Y §2.4: AccountStatePush, on every install/login step. */
+  accountState: "account:state",
 } as const;
 
-export const PROVIDER_KINDS = ["anthropic", "openai-compatible", "ollama", "gemini"] as const;
+export const PROVIDER_KINDS = [
+  "anthropic",
+  "openai-compatible",
+  "ollama",
+  "gemini",
+  "account",
+] as const;
 export type ProviderKind = (typeof PROVIDER_KINDS)[number];
+
+/** Plan Y §2.1: the accounts a user can sign in with. */
+export const ACCOUNT_IDS = ["claude", "chatgpt", "gemini", "copilot"] as const;
+export type AccountId = (typeof ACCOUNT_IDS)[number];
+export function isAccountId(value: unknown): value is AccountId {
+  return typeof value === "string" && (ACCOUNT_IDS as readonly string[]).includes(value);
+}
+/** Plan Y §2.1: "set to the vendor's fixed value for display only". */
+export const ACCOUNT_BASE_URLS: Readonly<Record<AccountId, string>> = {
+  claude: "https://claude.ai",
+  chatgpt: "https://chatgpt.com",
+  gemini: "https://gemini.google.com",
+  copilot: "https://github.com/copilot",
+};
 
 export type ProviderConfig = {
   kind: ProviderKind;
   baseUrl: string;
   model: string;
   hasKey: boolean;
+  account?: AccountId;
 };
-export type ProviderDraft = { kind: ProviderKind; baseUrl: string; model: string; apiKey?: string };
+export type ProviderDraft = {
+  kind: ProviderKind;
+  baseUrl: string;
+  model: string;
+  apiKey?: string;
+  account?: AccountId;
+};
+
 export type ProbeResult = { ok: boolean; supportsTools: boolean; models: string[]; error?: string };
 /** M2.5 contracts §1: lower-case letters, digits and "-", up to 32. */
 export const PROVIDER_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,31}$/;
@@ -357,18 +397,25 @@ export function parseBaseUrl(value: unknown): string | undefined {
 
 function parseDraftFields(value: unknown): Parsed<ProviderDraft> {
   const a = fields(value);
-  if (a === undefined) return fail("expected {kind, baseUrl, model, apiKey?}");
-  const { kind, model, apiKey } = a;
+  if (a === undefined) return fail("expected {kind, baseUrl, model, apiKey?, account?}");
+  const { kind, model, apiKey, account } = a;
   if (typeof kind !== "string" || !(PROVIDER_KINDS as readonly string[]).includes(kind)) {
     return fail(`kind must be one of ${PROVIDER_KINDS.join(", ")}`);
   }
-  const baseUrl = parseBaseUrl(a["baseUrl"]);
-  if (baseUrl === undefined) return fail("baseUrl must be an http(s) URL without credentials");
   // "" is allowed: provider:probe with an empty model lists models only
   // (contracts §6 #10). provider:save refuses it (parseProviderSave).
   if (typeof model !== "string" || model.length > MAX_MODEL_CHARS || CONTROL_CHARS.test(model)) {
     return fail("model must be at most 200 printable characters");
   }
+  if (kind === "account") {
+    // Plan Y §2.1: no apiKey; the base URL is the vendor's, for display only.
+    if (!isAccountId(account)) return fail(`account must be one of ${ACCOUNT_IDS.join(", ")}`);
+    if (apiKey !== undefined) return fail("an account provider takes no apiKey");
+    return ok({ kind: "account", account, baseUrl: ACCOUNT_BASE_URLS[account], model });
+  }
+  if (account !== undefined) return fail("account is only for kind account");
+  const baseUrl = parseBaseUrl(a["baseUrl"]);
+  if (baseUrl === undefined) return fail("baseUrl must be an http(s) URL without credentials");
   const draft: ProviderDraft = { kind: kind as ProviderKind, baseUrl, model };
   if (apiKey !== undefined) {
     if (
@@ -682,4 +729,39 @@ export function parseCuConsent(args: readonly unknown[]): Parsed<CuConsentReques
   if (revoke === undefined) return ok({ providerId });
   if (typeof revoke !== "boolean") return fail("revoke must be true or false");
   return ok({ providerId, revoke });
+}
+
+/** Plan Y §2.4: account:status. */
+export type AccountStatus = {
+  account: AccountId;
+  installed: boolean;
+  version: string | null;
+  signedIn: boolean;
+  identity: string | null;
+};
+export type AccountStatusResult = { accounts: AccountStatus[] };
+export const ACCOUNT_PHASES = [
+  "installing",
+  "installed",
+  "failed",
+  "awaiting-browser",
+  "signed-in",
+] as const;
+export type AccountPhase = (typeof ACCOUNT_PHASES)[number];
+/** Plan Y §2.4: the account:state push. `url`/`code` only with awaiting-browser,
+ *  `identity` only with signed-in, `message` with installing/installed/failed. */
+export type AccountStatePush = {
+  account: AccountId;
+  phase: AccountPhase;
+  message?: string;
+  url?: string;
+  code?: string;
+  identity?: string;
+};
+
+export function parseAccountRequest(args: readonly unknown[]): Parsed<{ account: AccountId }> {
+  const account = single(args)?.["account"];
+  if (!isAccountId(account))
+    return fail(`expected [{account}] with account one of ${ACCOUNT_IDS.join(", ")}`);
+  return ok({ account });
 }

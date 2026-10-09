@@ -2,15 +2,41 @@
 // packages/desktop/src/daemon/os/contract-types.test.ts asserts each type
 // here equals @jarvis/wire's; change both or neither.
 
-export const PROVIDER_KINDS = ["anthropic", "openai-compatible", "ollama", "gemini"] as const;
+export const PROVIDER_KINDS = [
+  "anthropic",
+  "openai-compatible",
+  "ollama",
+  "gemini",
+  "account",
+] as const;
 export type ProviderKind = (typeof PROVIDER_KINDS)[number];
+/** Plan Y §2.1 (copied from @jarvis/wire; contract-types.test.ts pins them equal). */
+export const ACCOUNT_IDS = ["claude", "chatgpt", "gemini", "copilot"] as const;
+export type AccountId = (typeof ACCOUNT_IDS)[number];
+export function isAccountId(value: unknown): value is AccountId {
+  return typeof value === "string" && (ACCOUNT_IDS as readonly string[]).includes(value);
+}
+export const ACCOUNT_BASE_URLS: Readonly<Record<AccountId, string>> = {
+  claude: "https://claude.ai",
+  chatgpt: "https://chatgpt.com",
+  gemini: "https://gemini.google.com",
+  copilot: "https://github.com/copilot",
+};
 export type ProviderConfig = {
   kind: ProviderKind;
   baseUrl: string;
   model: string;
   hasKey: boolean;
+  account?: AccountId;
 };
-export type ProviderDraft = { kind: ProviderKind; baseUrl: string; model: string; apiKey?: string };
+export type ProviderDraft = {
+  kind: ProviderKind;
+  baseUrl: string;
+  model: string;
+  apiKey?: string;
+  account?: AccountId;
+};
+
 export type ProbeResult = { ok: boolean; supportsTools: boolean; models: string[]; error?: string };
 /** The provider:status push. Not "ProviderStatus": core already exports one. */
 /** Rafiq v1.1 §4.8: computer-use state per provider. */

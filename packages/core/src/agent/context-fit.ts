@@ -17,6 +17,9 @@ export const CONTEXT_TOKENS: Readonly<Record<ProviderKind, number>> = {
   "openai-compatible": 32_000,
   ollama: 8_192,
   gemini: 900_000,
+  // Plan Y: the smallest window among the four accounts' default models
+  // (Copilot routes some requests to 64k models); the CLI adds its own prompt.
+  account: 64_000,
 };
 export const RESPONSE_RESERVE_TOKENS = 2_048;
 export const MIN_HISTORY_TOKENS = 1_024;

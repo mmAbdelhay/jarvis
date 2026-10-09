@@ -4,7 +4,7 @@
 // `vision: true` tags; Ollama /api/show evidence is injected by the daemon.
 // Cloud models: a conservative name table — a false "true" would send images
 // to a text-only model, a false "false" only greys the feature out. Pure.
-import type { ProviderKind } from "./contract.js";
+import type { AccountId, ProviderKind } from "./contract.js";
 
 const ANTHROPIC_VISION = /^claude-(?:[3-9]|(?:opus|sonnet|haiku)-[4-9])(?:[-.]|$)/;
 const ANTHROPIC_TEXT_ONLY = /^claude-3-5-haiku(?:-|$)/;
@@ -26,6 +26,7 @@ export function modelSupportsVision(
   kind: ProviderKind,
   model: string,
   localVisionTags: ReadonlySet<string> = new Set(),
+  account?: AccountId,
 ): boolean {
   const name = model.trim().toLowerCase();
   if (name === "") return false;
@@ -36,6 +37,15 @@ export function modelSupportsVision(
       return OPENAI_VISION.test(name) && !OPENAI_NO_IMAGES.test(name);
     case "gemini":
       return GEMINI_VISION.test(name);
+    case "account":
+      // Plan Y §5.8: only Claude accounts take images (stream-json base64,
+      // never a file); the aliases name Claude 4+ models, all of which see.
+      return (
+        account === "claude" &&
+        (name === "default" ||
+          /^(sonnet|opus|haiku|fable)$/.test(name) ||
+          ANTHROPIC_VISION.test(name))
+      );
     case "ollama":
       return localVisionTags.has(normalizeOllamaTag(name));
   }

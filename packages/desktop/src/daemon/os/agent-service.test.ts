@@ -699,7 +699,7 @@ describe("updates and model download (M2 contracts §2, §5)", () => {
   });
 });
 
-const KINDS = ["anthropic", "openai-compatible", "ollama", "gemini"];
+const KINDS = ["anthropic", "openai-compatible", "ollama", "gemini", "account"];
 const YAML = "/home/jarvis/.config/jarvis/jarvis.yaml";
 
 function okProvider(models: string[] = ["m"]): ModelProvider {
