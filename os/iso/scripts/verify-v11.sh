@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+# verify-v11.sh CHROOT — Rafiq v1.1 computer-use pieces in the built image
+# (contracts §1, §3): the helper and its network-less user unit, started only
+# from the full session's autostart and stopped by the classic fallback, the
+# AT-SPI bus and toolkit switches for password-field detection, and the
+# catalog's vision flags. Lists every problem, then fails. Called by
+# verify-chroot.sh.
+set -euo pipefail
+c=$1
+problems=()
+field() { # field PACKAGE FIELD — from the image's dpkg status
+  [ -r "$c/var/lib/dpkg/status" ] || return 0
+  awk -v p="$1" -v f="$2: " '$0 == "Package: " p {s = 1; next} s && /^$/ {exit}
+    s && index($0, f) == 1 {print substr($0, length(f) + 1); exit}' "$c/var/lib/dpkg/status"
+}
+installed() { [ "$(field "$1" Status)" = "install ok installed" ]; }
+
+for p in jarvis-cu at-spi2-core; do installed "$p" || problems+=("package $p is not installed"); done
+[ -x "$c/usr/libexec/jarvis/jarvis-cu" ] || problems+=("/usr/libexec/jarvis/jarvis-cu missing (contracts §1)")
+unit=$c/usr/lib/systemd/user/jarvis-cu.service
+if [ -f "$unit" ]; then
+  awk -F= '
+    /^RestrictAddressFamilies=/ {
+      seen++; n = split($2, families, " "); unix = 0
+      for (i = 1; i <= n; i++) {
+        if (families[i] == "AF_UNIX") unix = 1
+        else if (families[i] != "AF_NETLINK") unsafe = 1
+      }
+      if (!unix) unsafe = 1
+    }
+    END {exit !(seen == 1 && !unsafe)}' "$unit" ||
+    problems+=("jarvis-cu.service may open network sockets (screenshots must stay on the machine)")
+else
+  problems+=("user unit /usr/lib/systemd/user/jarvis-cu.service missing")
+fi
+for d in etc/systemd/user usr/lib/systemd/user; do
+  if compgen -G "$c/$d/*.wants/jarvis-cu.service" >/dev/null; then
+    problems+=("jarvis-cu.service is enabled under /$d; only the full session's autostart may start it")
+  fi
+done
+line='if [ -r /usr/share/jarvis-cu/labwc/autostart ]; then . /usr/share/jarvis-cu/labwc/autostart; fi'
+grep -qxF "$line" "$c/etc/xdg/labwc/autostart" 2>/dev/null || problems+=("labwc autostart does not start jarvis-cu")
+[ -f "$c/usr/share/jarvis-cu/labwc/autostart" ] || problems+=("jarvis-cu's autostart fragment is missing")
+if grep -q jarvis-cu "$c/etc/xdg/labwc-classic/autostart" 2>/dev/null; then
+  problems+=("the classic session starts jarvis-cu, but it has no overlay to show or stop computer use")
+fi
+grep -q 'jarvis-cu.service' "$c/usr/libexec/jarvis/jarvis-shell-guard" 2>/dev/null ||
+  problems+=("the classic fallback does not stop jarvis-cu")
+for v in GNOME_ACCESSIBILITY=1 QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1; do
+  grep -qx "$v" "$c/etc/xdg/labwc/environment" 2>/dev/null ||
+    problems+=("labwc environment lacks $v (password fields would be invisible to jarvis-cu)")
+done
+[ -f "$c/usr/share/dbus-1/services/org.a11y.Bus.service" ] ||
+  problems+=("the AT-SPI bus is not D-Bus activatable (org.a11y.Bus.service missing)")
+while IFS= read -r l; do
+  [ -n "$l" ] && problems+=("$l")
+done < <(python3 - "$c/usr/share/jarvis/models/catalog.json" <<'PY'
+import json, sys
+try:
+    with open(sys.argv[1]) as source:
+        models = json.load(source)["models"]
+    if not isinstance(models, list) or not all(isinstance(m, dict) for m in models):
+        raise ValueError("models must be a list of objects")
+except (OSError, ValueError, KeyError, TypeError) as error:
+    print(f"model catalog unreadable: {error}")
+    sys.exit(0)
+missing = [m.get("id") for m in models if not isinstance(m.get("vision"), bool)]
+if missing:
+    print(f"catalog models without a vision flag: {missing} (v1.1 contracts §3)")
+if sum(m.get("vision") is True for m in models) > 1:
+    print("the catalog lists more than one local vision model (v1.1 contracts §3)")
+PY
+)
+
+if [ ${#problems[@]} -gt 0 ]; then
+  printf 'verify-v11: %s\n' "${problems[@]}" >&2
+  exit 1
+fi
+echo "verify-v11: ok"
