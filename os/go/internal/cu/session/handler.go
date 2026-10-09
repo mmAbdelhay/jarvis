@@ -22,6 +22,18 @@ func (m *Manager) Handle(op string, line []byte) (any, error) {
 			return nil, err
 		}
 		return nil, m.Begin(p)
+	case "apps":
+		return m.Apps()
+	case "describeAt":
+		var p proto.DescribeAt
+		if err := decode(&p); err != nil {
+			return nil, err
+		}
+		r, err := m.DescribeAt(p)
+		if err != nil {
+			return nil, err
+		}
+		return r, nil
 	case "windows":
 		ws, err := m.Windows()
 		if err != nil {

@@ -59,9 +59,12 @@ type Deps struct {
 	Locked   func() bool
 	Password func(ctx context.Context) (bool, error) // nil: password fields cannot be checked
 	Activity Activity
-	Push     func(proto.Event)
-	Sleep    func(time.Duration)
-	After    func(time.Duration, func())
+	// DescribeAt names the accessible at a point of the window titled
+	// title (window-relative logical pixels); nil answers "unknown".
+	DescribeAt func(ctx context.Context, title string, x, y int) (role, name string)
+	Push       func(proto.Event)
+	Sleep      func(time.Duration)
+	After      func(time.Duration, func())
 }
 
 // Limits (plan U Global Constraints).

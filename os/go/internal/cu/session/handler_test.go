@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"testing"
 
 	"github.com/mmAbdelhay/jarvis/os/go/internal/cu/proto"
@@ -59,5 +60,70 @@ func TestDisconnectedEnds(t *testing.T) {
 	h.m.Disconnected()
 	if !h.d.has("fullscreen w1 false") {
 		t.Fatal("a vanished jarvisd must end the session")
+	}
+}
+
+func TestAppsBeforeBegin(t *testing.T) {
+	h := newHarness(t)
+	data, err := h.m.Handle("apps", []byte(`{"id":1,"op":"apps"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	apps, ok := data.([]proto.App)
+	if !ok || len(apps) == 0 {
+		t.Fatalf("%T %v", data, data)
+	}
+	for _, a := range apps {
+		if a.AppID == "" || a.Name == "" {
+			t.Fatalf("%+v", a)
+		}
+	}
+}
+
+func TestDescribeAt(t *testing.T) {
+	h := newHarness(t)
+	var gotTitle string
+	var gx, gy int
+	h.m.d.DescribeAt = func(_ context.Context, title string, x, y int) (string, string) {
+		gotTitle, gx, gy = title, x, y
+		return "button", "Save"
+	}
+	req := []byte(`{"id":1,"op":"describeAt","x":320,"y":180}`)
+	if _, err := h.m.Handle("describeAt", req); code(err) != proto.CodeNoSession {
+		t.Fatalf("no session: %v", err)
+	}
+	h.begin(t)
+	if _, err := h.m.Capture(proto.Capture{MaxEdge: 1280}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := h.m.Handle("describeAt", req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := data.(*proto.DescribeAtResult)
+	if r.Role != "button" || r.Name != "Save" || gotTitle != "beach.xcf" || gx != 640 || gy != 360 {
+		t.Fatalf("%+v %q %d,%d", r, gotTitle, gx, gy)
+	}
+	// outside the screenshot, bad JSON types, missing coords
+	data, err = h.m.Handle("describeAt", []byte(`{"x":5000,"y":1}`))
+	if err != nil || data.(*proto.DescribeAtResult).Role != "unknown" {
+		t.Fatalf("outside: %v %v", data, err)
+	}
+	if _, err := h.m.Handle("describeAt", []byte(`{"x":"a"}`)); code(err) != proto.CodeFailed {
+		t.Fatalf("bad: %v", err)
+	}
+	// focus on an excluded window: unknown, hook not called
+	gotTitle = ""
+	h.d.focus("w2")
+	data, err = h.m.Handle("describeAt", req)
+	if err != nil || data.(*proto.DescribeAtResult).Role != "unknown" || gotTitle != "" {
+		t.Fatalf("gate: %v %v %q", data, err, gotTitle)
+	}
+	// no hook wired
+	h.d.focus("w1")
+	h.m.d.DescribeAt = nil
+	data, _ = h.m.Handle("describeAt", req)
+	if data.(*proto.DescribeAtResult).Role != "unknown" {
+		t.Fatal("nil hook must answer unknown")
 	}
 }
