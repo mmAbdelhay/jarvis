@@ -256,7 +256,8 @@ export function parseKeyCombo(
   const combo = [...["ctrl", "alt", "shift"].filter((m) => mods.has(m)), key].join("+");
   const altOnly = mods.size === 1 && mods.has("alt");
   const altReserved =
-    altOnly && (key === "space" || /^(up|down|left|right)$/.test(key) || /^f([1-9]|1[0-2])$/.test(key));
+    altOnly &&
+    (key === "space" || /^(up|down|left|right)$/.test(key) || /^f([1-9]|1[0-2])$/.test(key));
   if (altReserved || FORBIDDEN_COMBOS.has(combo)) {
     return {
       ok: false,
