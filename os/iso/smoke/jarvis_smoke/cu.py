@@ -83,7 +83,7 @@ def make_fixture(uid: int) -> str:
 def start_gimp(uid: int) -> str:
     return " && ".join([
         scenarios.as_user(uid, f"mkdir -p {HOME}/.config/GIMP/3.0 {HOME}/Pictures"),
-        scenarios.as_user(uid, f"cp {CU}/gimprc {HOME}/.config/GIMP/3.0/gimprc"),
+        scenarios.as_user(uid, f"sh {CU}/install-gimprc.sh {HOME}/.config/GIMP/3.0"),
         scenarios.as_user(uid, f"env WAYLAND_DISPLAY={display(uid)} setsid -f gimp -n --no-splash {HOME}/beach.xcf")
         + f" > {LOGS}/gimp.log 2>&1",
         wait(f"pgrep -u {scenarios.USER} -f gimp-3 >/dev/null", 90),

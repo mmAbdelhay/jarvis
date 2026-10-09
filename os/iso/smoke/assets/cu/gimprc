@@ -1,7 +1,10 @@
 # GIMP preferences for the computer-use GUI tests: no first-run dialogs,
-# one window, nothing restored from an earlier run.
+# nothing restored from an earlier run. install-gimprc.sh adds the running
+# GIMP's version so the "You installed GIMP" Welcome window stays shut.
+# (single-window-mode is not a gimprc key in GIMP 3: it made GIMP reject
+# the whole file, and the Welcome window then took focus.)
 (show-welcome-dialog no)
 (show-tips no)
 (restore-session no)
 (save-session-info no)
-(single-window-mode yes)
+(check-updates no)

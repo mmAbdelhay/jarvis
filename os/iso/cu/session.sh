@@ -37,7 +37,7 @@ trap cleanup EXIT
 # 1. The session: the ISO's labwc config plus test-only window placement.
 mkdir -p "$HOME/.config/labwc" "$HOME/.config/GIMP/3.0" "$HOME/Pictures"
 cp "$cu/labwc-rules.xml" "$HOME/.config/labwc/rc.xml"
-cp "$cu/gimprc" "$HOME/.config/GIMP/3.0/gimprc"
+sh "$cu/install-gimprc.sh" "$HOME/.config/GIMP/3.0"
 WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_HEADLESS_OUTPUTS=1 WLR_LIBINPUT_NO_DEVICES=1 \
   LABWC_KEYBOARD_FILE=/nonexistent /usr/local/bin/labwc > "$out/labwc.log" 2>&1 &
 pids+=($!)
