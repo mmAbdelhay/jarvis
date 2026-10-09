@@ -117,13 +117,32 @@ describe("detectConsequence", () => {
 });
 
 describe("detectConsequence with AT-SPI description (contracts section 4 #2)", () => {
-  it("uses the accessible name instead of the model's target text", () => {
+  it("reads a consequence from the accessible name even when the model says otherwise", () => {
     expect(
       detectConsequence(click("Cancel"), { described: { role: "push button", name: "Delete" } })
         ?.intent,
     ).toBe("delete");
+  });
+
+  it("still asks when the model names a consequence but AT-SPI gives a generic name", () => {
     expect(
-      detectConsequence(click("Delete"), { described: { role: "push button", name: "Cancel" } }),
+      detectConsequence(click("Send"), { described: { role: "panel", name: "Compose" } })?.intent,
+    ).toBe("send");
+    expect(
+      detectConsequence(click("Delete"), { described: { role: "push button", name: "Cancel" } })
+        ?.intent,
+    ).toBe("delete");
+    expect(
+      detectConsequence(
+        { kind: "drag", x1: 1, y1: 1, x2: 2, y2: 2, target: "Trash" },
+        { described: { role: "icon", name: "photo.jpg" } },
+      )?.intent,
+    ).toBe("delete");
+  });
+
+  it("does not ask when neither name nor target is consequential", () => {
+    expect(
+      detectConsequence(click("Open"), { described: { role: "push button", name: "Cancel" } }),
     ).toBeUndefined();
   });
 

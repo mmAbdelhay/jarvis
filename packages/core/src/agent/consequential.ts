@@ -162,14 +162,31 @@ function isSendField(target: string): boolean {
   return SEND_FIELDS.some((word) => hasPhrase(labelTokens, word));
 }
 
-// Contracts section 4 #2: when jarvis-cu's describeAt names the control under the
-// pointer, that accessible name replaces the model's own target text.
-function labelOf(target: string, described: DescribedTarget | undefined): string {
-  if (described === undefined || described.role === "unknown") return target;
-  const name = described.name?.trim() ?? "";
-  return name === "" ? target : name;
+// Contracts section 4 #2: the model's text alone is not trusted, but it is not
+// ignored either. When jarvis-cu's describeAt names the control under the
+// pointer, that accessible name is read first and wins when it names a
+// consequence; otherwise the model's own target is still checked, because
+// AT-SPI often reports a container or generic name for custom-drawn and
+// web controls. Either one naming a consequence asks (errs toward asking).
+function targetIntent(
+  target: string,
+  described: DescribedTarget | undefined,
+): CuConsequence | undefined {
+  if (described !== undefined && described.role !== "unknown") {
+    const name = described.name?.trim() ?? "";
+    if (name !== "") {
+      const fromName = labelIntent(name);
+      if (fromName !== undefined) return fromName;
+    }
+  }
+  return labelIntent(target);
 }
 
+/**
+ * `context.described` is the AT-SPI description of the point the action acts
+ * on. For a drag that is the DESTINATION (x2,y2), not the source (x1,y1):
+ * dropping "photo.jpg" onto Trash is a delete.
+ */
 export function detectConsequence(
   action: ScreenAction,
   context: { lastTypedTarget?: string; described?: DescribedTarget } = {},
@@ -178,12 +195,12 @@ export function detectConsequence(
     case "click": {
       if (action.intent !== undefined) return { intent: action.intent, source: "declared" };
       if (action.button !== "left") return undefined;
-      const intent = labelIntent(labelOf(action.target, context.described));
+      const intent = targetIntent(action.target, context.described);
       return intent === undefined ? undefined : { intent, source: "label" };
     }
     case "drag": {
       if (action.intent !== undefined) return { intent: action.intent, source: "declared" };
-      const intent = labelIntent(labelOf(action.target, context.described));
+      const intent = targetIntent(action.target, context.described);
       return intent === undefined ? undefined : { intent, source: "label" };
     }
     case "key": {
