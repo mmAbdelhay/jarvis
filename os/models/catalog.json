@@ -89,7 +89,7 @@
       "id": "gpt-oss-20b",
       "ollamaTag": "gpt-oss:20b",
       "displayName": "gpt-oss 20B",
-      "sizeBytes": 13793441244,
+      "sizeBytes": 13793441566,
       "minRamGB": 32,
       "minVramGB": null,
       "tier": "large",
