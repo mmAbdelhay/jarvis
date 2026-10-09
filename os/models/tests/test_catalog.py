@@ -8,10 +8,11 @@ import unittest
 from pathlib import Path
 
 CATALOG = Path(__file__).resolve().parents[1] / "catalog.json"
+VISION_CANDIDATES = Path(__file__).resolve().parents[1] / "vision-candidates.json"
 TIERS = ("small", "medium", "large", "gpu")
 ROLES = ("main", "backup")
 KEYS = {"id", "ollamaTag", "displayName", "sizeBytes", "minRamGB", "minVramGB", "tier",
-        "toolCalling", "languages", "recommendedFor", "role"}
+        "toolCalling", "languages", "recommendedFor", "role", "vision"}
 ID = re.compile(r"^[a-z0-9][a-z0-9.-]*$")
 TAG = re.compile(r"^[a-z0-9][a-z0-9._/-]*:[a-z0-9][a-z0-9._-]*$")
 LANG = re.compile(r"^[a-z]{2,3}(-[A-Z]{2})?$")
@@ -25,7 +26,15 @@ def is_int(v) -> bool:
     return isinstance(v, int) and not isinstance(v, bool)
 
 
-def validate(catalog) -> list[str]:
+def load_candidates() -> dict:
+    """Vision probe evidence (v1.1 contracts §4.12); no file = no evidence."""
+    if VISION_CANDIDATES.is_file():
+        return json.loads(VISION_CANDIDATES.read_text())
+    return {"version": 1, "models": []}
+
+
+def validate(catalog, candidates: dict | None = None) -> list[str]:
+    candidates = load_candidates() if candidates is None else candidates
     p: list[str] = []
     if not isinstance(catalog, dict) or set(catalog) != {"version", "models"}:
         return ["top level must be exactly {version, models}"]
@@ -60,6 +69,7 @@ def validate(catalog) -> list[str]:
         if not isinstance(langs, list) or not langs or not all(isinstance(l, str) and LANG.match(l) for l in langs): p.append(f"{where}: languages must be BCP 47 codes")
         if not isinstance(m["recommendedFor"], str) or not m["recommendedFor"].strip(): p.append(f"{where}: recommendedFor empty")
         if m["role"] not in ROLES: p.append(f"{where}: role must be one of {ROLES} (M4 contracts §1)")
+        if not isinstance(m["vision"], bool): p.append(f"{where}: vision must be true or false (v1.1 contracts §4.12)")
         if is_int(m["sizeBytes"]) and is_int(m["minRamGB"]) and m["tier"] != "gpu" and m["sizeBytes"] > m["minRamGB"] * 1024**3 * 0.75:
             p.append(f"{where}: model is larger than 75% of minRamGB")
     good = [m for m in models if isinstance(m, dict) and set(m) == KEYS]
@@ -78,6 +88,16 @@ def validate(catalog) -> list[str]:
             p.append(f"{w}: must handle en and ar")
         if main_ram and is_int(b["minRamGB"]) and b["minRamGB"] > min(main_ram):
             p.append(f"{w}: needs more RAM than the smallest main model; it must run on every target")
+    passed = {c.get("ollamaTag") for c in candidates.get("models", [])
+              if isinstance(c, dict) and isinstance(c.get("probe"), dict) and c["probe"].get("status") == "passed"}
+    visions = [m for m in good if m["vision"] is True]
+    if len(visions) > 1:
+        p.append(f"at most one local vision model, found {len(visions)} (v1.1 contracts §3)")
+    for m in visions:
+        if m["ollamaTag"] not in passed:
+            p.append(f"vision model {m['id']}: no passed vision probe for {m['ollamaTag']} in vision-candidates.json (v1.1 contracts §4.12)")
+        if m["role"] != "main":
+            p.append(f"vision model {m['id']}: must be a main model, never the backup")
     if not any(m["tier"] == "small" for m in mains):
         p.append("at least one small-tier main model (8 GB machines) is required")
     return p
@@ -93,6 +113,31 @@ class CatalogTest(unittest.TestCase):
 
     def test_catalog_is_valid(self):
         self.assertEqual(validate(self.catalog), [])
+
+    def test_every_model_says_whether_it_sees(self):
+        self.assertTrue(all(isinstance(m.get("vision"), bool) for m in self.catalog["models"]))
+        self.assertLessEqual(sum(m["vision"] for m in self.catalog["models"]), 1)
+
+    def test_vision_needs_probe_evidence_and_is_unique(self):
+        def passed(*tags):
+            return {"version": 1, "models": [{"ollamaTag": t, "probe": {"status": "passed"}} for t in tags]}
+        base = copy.deepcopy(self.catalog)
+        for m in base["models"]:
+            m["vision"] = False
+        mains = [m for m in base["models"] if m["role"] == "main"]
+        one = copy.deepcopy(base)
+        one["models"][1]["vision"] = True
+        self.assertEqual(validate(one, passed(mains[0]["ollamaTag"])), [])
+        self.assertNotEqual(validate(one, passed()), [])
+        failed = {"version": 1, "models": [{"ollamaTag": mains[0]["ollamaTag"], "probe": {"status": "failed"}}]}
+        self.assertNotEqual(validate(one, failed), [])
+        self.assertNotEqual(validate(one), [], "missing evidence file grants no vision")
+        two = copy.deepcopy(one)
+        two["models"][2]["vision"] = True
+        self.assertNotEqual(validate(two, passed(mains[0]["ollamaTag"], mains[1]["ollamaTag"])), [])
+        seeing_backup = copy.deepcopy(base)
+        backup(seeing_backup)["vision"] = True
+        self.assertNotEqual(validate(seeing_backup, passed(backup(seeing_backup)["ollamaTag"])), [])
 
     def test_tiers_ordered_small_to_gpu(self):
         order = [TIERS.index(m["tier"]) for m in self.catalog["models"]]
@@ -117,6 +162,9 @@ class CatalogTest(unittest.TestCase):
             "gpu without vram": lambda c: c["models"][-1].update(tier="gpu", minVramGB=None),
             "string version": lambda c: c.update(version="1"),
             "empty langs": lambda c: c["models"][0].update(languages=[]),
+            "no vision flag": lambda c: c["models"][1].pop("vision", None),
+            "vision as text": lambda c: c["models"][1].update(vision="yes"),
+            "vision as integer": lambda c: c["models"][1].update(vision=1),
             "no role": lambda c: c["models"][1].pop("role"),
             "bad role": lambda c: c["models"][1].update(role="spare"),
             "two backups": lambda c: [m for m in c["models"] if m["role"] == "main"][0].update(role="backup"),
