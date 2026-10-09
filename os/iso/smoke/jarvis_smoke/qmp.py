@@ -108,6 +108,14 @@ class Qmp:
             self.send_keys(keys)
             time.sleep(delay)
 
+    def move_pointer_abs(self, x: int, y: int) -> None:
+        """Moves the usb-tablet pointer (0..32767 on each axis). To the guest
+        this is a real input device: physical input for jarvis-cu (v1.1 §2.3)."""
+        self.command("input-send-event", events=[
+            {"type": "abs", "data": {"axis": "x", "value": x}},
+            {"type": "abs", "data": {"axis": "y", "value": y}},
+        ])
+
     def screendump(self, path: Path) -> Path:
         self.command("screendump", filename=str(path))  # PPM (P6)
         return path
