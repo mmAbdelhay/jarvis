@@ -1,0 +1,7 @@
+# GIMP preferences for the computer-use GUI tests: no first-run dialogs,
+# one window, nothing restored from an earlier run.
+(show-welcome-dialog no)
+(show-tips no)
+(restore-session no)
+(save-session-info no)
+(single-window-mode yes)

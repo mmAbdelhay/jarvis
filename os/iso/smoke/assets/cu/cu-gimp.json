@@ -1,0 +1,437 @@
+{
+  "model": "scripted-vision:latest",
+  "maxEdge": 1280,
+  "turns": [
+    {
+      "name": "off",
+      "expectPromptContains": "cu-off",
+      "steps": [
+        {
+          "text": "I cannot see your screen: computer use is off."
+        }
+      ]
+    },
+    {
+      "name": "probe",
+      "expectPromptContains": "cu-probe",
+      "steps": [
+        {
+          "call": "cu_begin",
+          "input": {
+            "goal": "cu-probe: look at the GIMP window",
+            "apps": [
+              "${GIMP_APP}"
+            ]
+          }
+        },
+        {
+          "call": "screen_look",
+          "input": {}
+        },
+        {
+          "call": "screen_click",
+          "target": {
+            "outside": true
+          },
+          "input": {
+            "button": "left"
+          },
+          "expectError": "outside"
+        },
+        {
+          "call": "screen_done",
+          "input": {
+            "summary": "Looked at GIMP."
+          }
+        },
+        {
+          "text": "Probe finished."
+        }
+      ]
+    },
+    {
+      "name": "deny",
+      "expectPromptContains": "cu-deny",
+      "steps": [
+        {
+          "call": "cu_begin",
+          "input": {
+            "goal": "cu-deny: export beach as PNG to Pictures",
+            "apps": [
+              "${GIMP_APP}"
+            ]
+          }
+        },
+        {
+          "call": "screen_look",
+          "input": {}
+        },
+        {
+          "call": "screen_key",
+          "input": {
+            "combo": "ctrl+shift+e"
+          }
+        },
+        {
+          "call": "screen_look",
+          "input": {}
+        },
+        {
+          "call": "screen_key",
+          "input": {
+            "combo": "ctrl+a"
+          },
+          "onlyIfWindow": "Export Image"
+        },
+        {
+          "call": "screen_type",
+          "input": {
+            "text": "${HOME}/Pictures/beach.png"
+          },
+          "onlyIfWindow": "Export Image"
+        },
+        {
+          "call": "screen_key",
+          "input": {
+            "combo": "Return"
+          }
+        },
+        {
+          "call": "screen_look",
+          "input": {}
+        },
+        {
+          "call": "screen_click",
+          "target": {
+            "window": "Export Image as PNG",
+            "from": "bottom-right",
+            "inset": [
+              46,
+              24
+            ]
+          },
+          "input": {
+            "button": "left",
+            "intent": "save"
+          }
+        },
+        {
+          "call": "screen_look",
+          "input": {}
+        },
+        {
+          "call": "screen_done",
+          "input": {
+            "summary": "Exported beach.png."
+          }
+        },
+        {
+          "text": "Exported beach.png."
+        }
+      ],
+      "onDenied": [
+        {
+          "call": "screen_key",
+          "input": {
+            "combo": "Escape"
+          }
+        },
+        {
+          "call": "screen_look",
+          "input": {}
+        },
+        {
+          "call": "screen_key",
+          "input": {
+            "combo": "Escape"
+          },
+          "onlyIfWindow": "Export Image"
+        },
+        {
+          "call": "screen_look",
+          "input": {}
+        },
+        {
+          "call": "screen_done",
+          "input": {
+            "summary": "Export not approved."
+          }
+        },
+        {
+          "text": "Stopped: you did not approve the export."
+        }
+      ]
+    },
+    {
+      "name": "export",
+      "expectPromptContains": "export it as PNG to Pictures",
+      "steps": [
+        {
+          "call": "cu_begin",
+          "input": {
+            "goal": "open the GIMP image beach.xcf and export it as PNG to Pictures",
+            "apps": [
+              "${GIMP_APP}"
+            ]
+          }
+        },
+        {
+          "call": "screen_look",
+          "input": {}
+        },
+        {
+          "call": "screen_key",
+          "input": {
+            "combo": "ctrl+shift+e"
+          }
+        },
+        {
+          "call": "screen_look",
+          "input": {}
+        },
+        {
+          "call": "screen_key",
+          "input": {
+            "combo": "ctrl+a"
+          },
+          "onlyIfWindow": "Export Image"
+        },
+        {
+          "call": "screen_type",
+          "input": {
+            "text": "${HOME}/Pictures/beach.png"
+          },
+          "onlyIfWindow": "Export Image"
+        },
+        {
+          "call": "screen_key",
+          "input": {
+            "combo": "Return"
+          }
+        },
+        {
+          "call": "screen_look",
+          "input": {}
+        },
+        {
+          "call": "screen_click",
+          "target": {
+            "window": "Export Image as PNG",
+            "from": "bottom-right",
+            "inset": [
+              46,
+              24
+            ]
+          },
+          "input": {
+            "button": "left",
+            "intent": "save"
+          }
+        },
+        {
+          "call": "screen_look",
+          "input": {}
+        },
+        {
+          "call": "screen_key",
+          "input": {
+            "combo": "Return"
+          },
+          "onlyIfWindow": "Export Image as PNG"
+        },
+        {
+          "call": "screen_look",
+          "input": {}
+        },
+        {
+          "call": "screen_done",
+          "input": {
+            "summary": "Exported beach.png to Pictures."
+          }
+        },
+        {
+          "text": "Done: beach.png is in Pictures."
+        }
+      ]
+    },
+    {
+      "name": "excluded",
+      "expectPromptContains": "cu-excluded",
+      "steps": [
+        {
+          "call": "cu_begin",
+          "input": {
+            "goal": "cu-excluded: press a key in GIMP",
+            "apps": [
+              "${GIMP_APP}"
+            ]
+          }
+        },
+        {
+          "call": "screen_look",
+          "input": {}
+        },
+        {
+          "call": "screen_key",
+          "input": {
+            "combo": "ctrl+shift+e"
+          },
+          "expectError": "excluded"
+        },
+        {
+          "call": "screen_done",
+          "input": {
+            "summary": "A terminal has focus."
+          }
+        },
+        {
+          "text": "I cannot type while a terminal has focus."
+        }
+      ]
+    },
+    {
+      "name": "stuck",
+      "expectPromptContains": "cu-stuck",
+      "steps": [
+        {
+          "call": "cu_begin",
+          "input": {
+            "goal": "cu-stuck: keep looking",
+            "apps": [
+              "${GIMP_APP}"
+            ]
+          }
+        },
+        {
+          "call": "screen_look",
+          "input": {}
+        },
+        {
+          "call": "screen_key",
+          "input": {
+            "combo": "shift"
+          }
+        },
+        {
+          "call": "screen_look",
+          "input": {}
+        },
+        {
+          "call": "screen_key",
+          "input": {
+            "combo": "shift"
+          }
+        },
+        {
+          "call": "screen_look",
+          "input": {}
+        },
+        {
+          "call": "screen_key",
+          "input": {
+            "combo": "shift"
+          }
+        },
+        {
+          "call": "screen_look",
+          "input": {}
+        },
+        {
+          "call": "screen_key",
+          "input": {
+            "combo": "shift"
+          }
+        },
+        {
+          "call": "screen_look",
+          "input": {}
+        },
+        {
+          "call": "screen_key",
+          "input": {
+            "combo": "shift"
+          }
+        },
+        {
+          "call": "screen_look",
+          "input": {}
+        },
+        {
+          "call": "screen_key",
+          "input": {
+            "combo": "shift"
+          }
+        },
+        {
+          "call": "screen_look",
+          "input": {}
+        },
+        {
+          "text": "Still nothing changed."
+        }
+      ]
+    },
+    {
+      "name": "lock",
+      "expectPromptContains": "cu-lock",
+      "steps": [
+        {
+          "call": "cu_begin",
+          "input": {
+            "goal": "cu-lock: hold the session",
+            "apps": [
+              "${GIMP_APP}"
+            ]
+          }
+        },
+        {
+          "call": "screen_look",
+          "input": {}
+        },
+        {
+          "call": "screen_look",
+          "input": {},
+          "hold": 20,
+          "expectError": [
+            "paused",
+            "no-session"
+          ]
+        },
+        {
+          "text": "Stopped."
+        }
+      ]
+    },
+    {
+      "name": "physical",
+      "expectPromptContains": "cu-physical",
+      "steps": [
+        {
+          "call": "cu_begin",
+          "input": {
+            "goal": "cu-physical: hold the session",
+            "apps": [
+              "${GIMP_APP}"
+            ]
+          }
+        },
+        {
+          "call": "screen_look",
+          "input": {}
+        },
+        {
+          "call": "screen_look",
+          "input": {},
+          "hold": 20,
+          "expectError": [
+            "paused",
+            "no-session"
+          ]
+        },
+        {
+          "text": "Stopped."
+        }
+      ]
+    }
+  ]
+}
