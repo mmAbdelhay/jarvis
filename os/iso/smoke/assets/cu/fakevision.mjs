@@ -134,7 +134,7 @@ export function createFakeVision(script, { env = process.env } = {}) {
       if ((m?.role === "tool" || Array.isArray(m?.images)) && Array.isArray(data?.windows)) info = data;
       for (const b64 of Array.isArray(m?.images) ? m.images : []) {
         const digest = createHash("sha256").update(String(b64)).digest("hex");
-        const key = JSON.stringify([record === null ? "off" : report.turns.indexOf(record), messageIndex, digest, info?.windows]);
+        const key = JSON.stringify([record === null ? `off:${report.requests}` : report.turns.indexOf(record), messageIndex, digest, info?.windows]);
         if (seen.has(key)) continue;
         seen.add(key);
         if (record === null) {
@@ -243,15 +243,20 @@ export function createFakeVision(script, { env = process.env } = {}) {
     const prompt = String(prompts.at(-1)?.content ?? "");
     const turn = script.turns.find((t) => prompt.includes(t.expectPromptContains));
     const currentMessages = messages.slice(Math.max(0, messages.findLastIndex(isPrompt)));
-    if (tools.length === 0 && turn === undefined) {
-      inspect(currentMessages, null);
-      return { text: "ok" };
+    if (tools.length === 0) {
+      inspect(messages, null);
+      if (turn === undefined || turn.steps.some((step) => step.call !== undefined)) return { text: "ok" };
+      // Text-only scripts (the off turn) can answer without taking over an
+      // in-progress screen turn, including its pending tool result.
+      report.turns.push({ name: turn.name, prompt: prompt.slice(0, 200), toolsOffered: tools,
+        steps: [], images: [], denied: false, finished: true });
+      return { text: substitute(turn.steps.find((step) => step.text !== undefined)?.text ?? "Done.", env) };
     }
     if (active === null || active.promptCount !== prompts.length || active.prompt !== prompt) {
       if (turn === undefined) {
         active = null;
         report.unexpected.push(prompt.slice(0, 200));
-        inspect(currentMessages, null);
+        inspect(messages, null);
         return { text: "fakevision: no script for this prompt" };
       }
       const record = { name: turn.name, prompt: prompt.slice(0, 200), toolsOffered: tools, steps: [], images: [], denied: false, finished: false };
@@ -260,7 +265,7 @@ export function createFakeVision(script, { env = process.env } = {}) {
     }
     const screen = tools.some((n) => n.startsWith("screen_"));
     const info = windowsIn(currentMessages);
-    inspect(currentMessages, screen ? active.record : null);
+    inspect(screen ? currentMessages : messages, screen ? active.record : null);
     let lastAssistant = -1;
     currentMessages.forEach((m, i) => {
       if (m?.role === "assistant") lastAssistant = i;

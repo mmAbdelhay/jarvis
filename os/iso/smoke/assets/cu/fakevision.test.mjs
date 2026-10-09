@@ -137,6 +137,52 @@ test("counts screenshots sent in a turn without screen tools", () => {
   assert.deepEqual(core.report.turns[0].toolsOffered, ["pkg_search"]);
 });
 
+test('counts historical screenshots resent without screen tools on each request', () => {
+  const core = createFakeVision({ turns: [
+    { name: 'probe', expectPromptContains: 'cu-probe', steps: [{ call: 'screen_look' }, { text: 'done' }] },
+    { name: 'off', expectPromptContains: 'cu-off', steps: [{ text: 'off' }] },
+  ] });
+  const messages = [{ role: 'user', content: 'cu-probe: look' }];
+  core.chat({ messages, tools: SCREEN });
+  messages.push(called('screen_look', {}), ...lookResult([GIMP, TERM]));
+  core.chat({ messages, tools: SCREEN });
+  assert.equal(core.report.imagesOutsideComputerUse, 0);
+  messages.push({ role: 'assistant', content: 'done' }, { role: 'user', content: 'cu-off: look' });
+  core.chat({ messages, tools: [{ function: { name: 'pkg_search' } }] });
+  assert.equal(core.report.imagesOutsideComputerUse, 1);
+  core.chat({ messages });
+  assert.equal(core.report.imagesOutsideComputerUse, 2);
+});
+
+test('tool-less title requests quoting a call script leave the active turn intact', () => {
+  const core = createFakeVision({ turns: [{ name: 'x', expectPromptContains: 'cu-x', steps: [
+    { call: 'screen_look' }, { call: 'screen_key', input: { combo: 'Return' } }, { text: 'done' },
+  ] }] });
+  assert.deepEqual(core.chat({ messages: [{ role: 'user', content: 'Title for: cu-x go' }] }), { text: 'ok' });
+  assert.equal(core.report.turns.length, 0);
+  const c = conversation(core, 'cu-x go');
+  c.ask();
+  assert.deepEqual(core.chat({ messages: [{ role: 'user', content: 'Title for: cu-x go' }] }), { text: 'ok' });
+  assert.equal(core.report.turns.length, 1);
+  c.add(called('screen_look', {}), ...lookResult([GIMP]));
+  assert.deepEqual(c.ask().call, { name: 'screen_key', arguments: { combo: 'Return' } });
+  assert.equal(core.report.turns[0].steps[0].result.received, true);
+});
+
+test('a tool-less text-only script preserves an in-progress active turn', () => {
+  const core = createFakeVision({ turns: [
+    { name: 'x', expectPromptContains: 'cu-x', steps: [{ call: 'screen_look' }, { text: 'done' }] },
+    { name: 'off', expectPromptContains: 'cu-off', steps: [{ text: 'off' }] },
+  ] });
+  const c = conversation(core, 'cu-x go');
+  c.ask();
+  assert.deepEqual(core.chat({ messages: [{ role: 'user', content: 'cu-off' }] }), { text: 'off' });
+  c.add(called('screen_look', {}), ...lookResult([GIMP]));
+  assert.deepEqual(c.ask(), { text: 'done' });
+  assert.deepEqual(core.report.turns.map(t => t.name), ['x', 'off']);
+  assert.equal(core.report.turns[0].steps[0].result.received, true);
+});
+
 test("reads tool results the way jarvisd writes them", () => {
   assert.deepEqual(resultBody(`ERROR: ${fenced("screen.click", { error: { code: "paused" } })}`), { error: { code: "paused" } });
   assert.equal(errorCode("ERROR: excluded: a terminal has focus"), "excluded");
