@@ -174,3 +174,30 @@ func TestPointerRefusesRotatedOutput(t *testing.T) {
 		t.Fatal("rotated output reached the compositor")
 	}
 }
+
+func TestWatchIdleTimeoutDoesNotWrap(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		timeout time.Duration
+		want    string
+	}{
+		{"negative", -time.Millisecond, "idle 1ms"},
+		{"large", time.Duration(1<<32) * time.Millisecond, "idle 4294967295ms"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newFake()
+			c, err := startFake(t, f, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			stop, err := c.WatchIdle(tt.timeout, func(bool) {})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer stop()
+			if f.count(tt.want) != 1 {
+				t.Fatalf("got %v; want %s", f.logged(), tt.want)
+			}
+		})
+	}
+}
