@@ -113,7 +113,10 @@ export function openSession({ runDir, build, timeoutMs = 5000 }) {
     });
     socket.on("error", fail);
     socket.on("close", () => {
-      for (const waiter of pending.values()) waiter.reject(Object.assign(new Error("control connection closed"), { code: "ECONNRESET" }));
+      for (const waiter of pending.values())
+        waiter.reject(
+          Object.assign(new Error("control connection closed"), { code: "ECONNRESET" }),
+        );
       pending.clear();
     });
     socket.on("data", (chunk) => {
@@ -337,10 +340,19 @@ export function cardKind(card) {
  *  told, denies any other card of the turn, and logs every cu:state push with
  *  the wall-clock time it arrived. With absentPath, records whether that file
  *  already existed when the consequential card arrived (Review Focus 4). */
-export function runComputerUse(session, {
-  text, begin = "approve", consequential = "approve", absentPath, timeoutMs, log = () => {},
-  wall = () => Date.now(), exists = existsSync,
-}) {
+export function runComputerUse(
+  session,
+  {
+    text,
+    begin = "approve",
+    consequential = "approve",
+    absentPath,
+    timeoutMs,
+    log = () => {},
+    wall = () => Date.now(),
+    exists = existsSync,
+  },
+) {
   const started = wall();
   return new Promise((resolve) => {
     let turnId = null;
@@ -358,11 +370,20 @@ export function runComputerUse(session, {
       if (finished) return;
       if (event.type === "card") {
         const kind = cardKind(event.card);
-        const mine = event.card.turnId === turnId || (event.card.turnId === null && kind !== "other");
+        const mine =
+          event.card.turnId === turnId || (event.card.turnId === null && kind !== "other");
         if (!mine) return;
-        const decision = kind === "begin" ? begin : kind === "consequential" ? consequential : "deny";
-        const entry = { type: "cu-card", kind, decision, wall: wall(), titles: event.card.items.map((item) => item.title) };
-        if (kind === "consequential" && absentPath !== undefined) entry.pathExisted = exists(absentPath);
+        const decision =
+          kind === "begin" ? begin : kind === "consequential" ? consequential : "deny";
+        const entry = {
+          type: "cu-card",
+          kind,
+          decision,
+          wall: wall(),
+          titles: event.card.items.map((item) => item.title),
+        };
+        if (kind === "consequential" && absentPath !== undefined)
+          entry.pathExisted = exists(absentPath);
         cards.push(entry);
         log(entry);
         session
@@ -370,7 +391,12 @@ export function runComputerUse(session, {
           .catch((error) => log({ type: "confirm-error", message: error.message }));
       }
       if (event.type === "turn-end" && event.turnId === turnId) {
-        finish({ code: event.reason === "done" ? 0 : 1, reason: event.reason, error: event.error, cards });
+        finish({
+          code: event.reason === "done" ? 0 : 1,
+          reason: event.reason,
+          error: event.error,
+          cards,
+        });
       }
     };
     session.onPush((channel, payload) => {
@@ -392,8 +418,15 @@ export function runComputerUse(session, {
         for (const event of early.splice(0)) handle(event);
       },
       (error) => {
-        const disconnected = ["ECONNRESET", "ECONNREFUSED", "EPIPE", "ENOTCONN"].includes(error.code);
-        finish({ code: disconnected ? 2 : 1, reason: disconnected ? "connect" : "error", error: error.message, cards });
+        const disconnected = ["ECONNRESET", "ECONNREFUSED", "EPIPE", "ENOTCONN"].includes(
+          error.code,
+        );
+        finish({
+          code: disconnected ? 2 : 1,
+          reason: disconnected ? "connect" : "error",
+          error: error.message,
+          cards,
+        });
       },
     );
   });
@@ -458,7 +491,16 @@ export async function main(argv) {
   if (values["deny-all"]) decision = "deny";
   const log = (event) => process.stdout.write(`${JSON.stringify(event)}\n`);
 
-  const known = ["wait", "prompt", "doctor", "snapshot", "locked-confirm", "cu", "cu-enable", "cu-stop"].includes(command);
+  const known = [
+    "wait",
+    "prompt",
+    "doctor",
+    "snapshot",
+    "locked-confirm",
+    "cu",
+    "cu-enable",
+    "cu-stop",
+  ].includes(command);
   const lockedArg = values.locked === "true" ? true : values.locked === "false" ? false : undefined;
   const answer = (v) => v === "approve" || v === "deny";
   if (
@@ -488,10 +530,19 @@ export async function main(argv) {
   try {
     if (command === "cu") {
       result = await runComputerUse(session, {
-        text: values.text, begin: values.begin, consequential: values.consequential, absentPath: values.absent, timeoutMs, log,
+        text: values.text,
+        begin: values.begin,
+        consequential: values.consequential,
+        absentPath: values.absent,
+        timeoutMs,
+        log,
       });
     } else if (command === "cu-enable") {
-      result = await setComputerUse(session, { providerId: values.provider, enabled: values.off !== true, consent: values.consent === true });
+      result = await setComputerUse(session, {
+        providerId: values.provider,
+        enabled: values.off !== true,
+        consent: values.consent === true,
+      });
     } else if (command === "cu-stop") {
       result = await stopComputerUse(session);
     } else if (command === "prompt") {

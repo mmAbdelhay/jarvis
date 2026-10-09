@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { crc32, deflateSync } from "node:zlib";
-import { SIGNATURE, checkMask, decodePng, encodePng, foreignPoint, readPngInfo, rgbAt } from "./png.mjs";
+import {
+  SIGNATURE,
+  checkMask,
+  decodePng,
+  encodePng,
+  foreignPoint,
+  readPngInfo,
+  rgbAt,
+} from "./png.mjs";
 
 function chunk(type, data) {
   const length = Buffer.alloc(4);
@@ -43,27 +51,62 @@ function pngWithFilters(width, rows, filters, { colorType = 2, bitDepth = 8, int
   header[8] = bitDepth;
   header[9] = colorType;
   header[12] = interlace;
-  return Buffer.concat([SIGNATURE, chunk("IHDR", header), chunk("IDAT", deflateSync(Buffer.concat(lines))),
-    chunk("IEND", Buffer.alloc(0))]);
+  return Buffer.concat([
+    SIGNATURE,
+    chunk("IHDR", header),
+    chunk("IDAT", deflateSync(Buffer.concat(lines))),
+    chunk("IEND", Buffer.alloc(0)),
+  ]);
 }
 
-const ALLOWED = { windowId: "g", appId: "org.gimp.GIMP", title: "GIMP", x: 40, y: 0, w: 60, h: 60, allowed: true };
-const TERMINAL = { windowId: "t", appId: "foot", title: "cu-secret-terminal", x: 0, y: 0, w: 30, h: 30, allowed: false };
+const ALLOWED = {
+  windowId: "g",
+  appId: "org.gimp.GIMP",
+  title: "GIMP",
+  x: 40,
+  y: 0,
+  w: 60,
+  h: 60,
+  allowed: true,
+};
+const TERMINAL = {
+  windowId: "t",
+  appId: "foot",
+  title: "cu-secret-terminal",
+  x: 0,
+  y: 0,
+  w: 30,
+  h: 30,
+  allowed: false,
+};
 const inAllowed = (x, y) => x >= 40 && x < 100 && y < 60;
-const clean = () => decodePng(encodePng(100, 60, (x, y) => (inAllowed(x, y) ? [180, 180, 180] : [0, 0, 0])));
+const clean = () =>
+  decodePng(encodePng(100, 60, (x, y) => (inAllowed(x, y) ? [180, 180, 180] : [0, 0, 0])));
 function withPixel(x0, y0, rgb) {
-  return decodePng(encodePng(100, 60, (x, y) => (x === x0 && y === y0 ? rgb : inAllowed(x, y) ? [180, 180, 180] : [0, 0, 0])));
+  return decodePng(
+    encodePng(100, 60, (x, y) =>
+      x === x0 && y === y0 ? rgb : inAllowed(x, y) ? [180, 180, 180] : [0, 0, 0],
+    ),
+  );
 }
 
 test("encode and decode round-trip RGB", () => {
   const png = encodePng(4, 3, (x, y) => [x * 10, y * 20, 7]);
-  assert.deepEqual(readPngInfo(png), { width: 4, height: 3, bitDepth: 8, colorType: 2, interlace: 0 });
+  assert.deepEqual(readPngInfo(png), {
+    width: 4,
+    height: 3,
+    bitDepth: 8,
+    colorType: 2,
+    interlace: 0,
+  });
   const image = decodePng(png);
   assert.deepEqual(rgbAt(image, 3, 2), [30, 40, 7]);
 });
 
 test("decodes all five filter types", () => {
-  const rows = [0, 1, 2, 3, 4].map((y) => Array.from({ length: 9 }, (_, i) => (y * 37 + i * 29) % 256));
+  const rows = [0, 1, 2, 3, 4].map((y) =>
+    Array.from({ length: 9 }, (_, i) => (y * 37 + i * 29) % 256),
+  );
   const image = decodePng(pngWithFilters(3, rows, [0, 1, 2, 3, 4]));
   assert.deepEqual([...image.pixels], rows.flat());
 });
@@ -76,10 +119,22 @@ test("decodes RGBA and grey", () => {
 });
 
 test("rejects what it cannot read instead of guessing", () => {
-  assert.throws(() => decodePng(Buffer.from("not a png at all, no signature here.....")), /not a PNG/);
-  assert.throws(() => decodePng(pngWithFilters(1, [[0, 0, 0, 0, 0, 0]], [0], { bitDepth: 16 })), /unsupported PNG/);
-  assert.throws(() => decodePng(pngWithFilters(1, [[0, 0, 0]], [0], { interlace: 1 })), /unsupported PNG/);
-  assert.throws(() => decodePng(pngWithFilters(1, [[0]], [0], { colorType: 3 })), /unsupported PNG/);
+  assert.throws(
+    () => decodePng(Buffer.from("not a png at all, no signature here.....")),
+    /not a PNG/,
+  );
+  assert.throws(
+    () => decodePng(pngWithFilters(1, [[0, 0, 0, 0, 0, 0]], [0], { bitDepth: 16 })),
+    /unsupported PNG/,
+  );
+  assert.throws(
+    () => decodePng(pngWithFilters(1, [[0, 0, 0]], [0], { interlace: 1 })),
+    /unsupported PNG/,
+  );
+  assert.throws(
+    () => decodePng(pngWithFilters(1, [[0]], [0], { colorType: 3 })),
+    /unsupported PNG/,
+  );
 });
 
 test("a capture that shows only the allowed window passes, and the terminal was in view", () => {
@@ -123,7 +178,10 @@ test("U-1: an allowed window covering the frame makes the mask vacuous, and says
 
 test("expectAllBlack ignores allowed rectangles: any visible pixel is a leak", () => {
   const full = { ...ALLOWED, x: 0, y: 0, w: 100, h: 60 };
-  assert.equal(checkMask(decodePng(encodePng(100, 60, () => [0, 0, 0])), [full], { expectAllBlack: true }).ok, true);
+  assert.equal(
+    checkMask(decodePng(encodePng(100, 60, () => [0, 0, 0])), [full], { expectAllBlack: true }).ok,
+    true,
+  );
   assert.equal(checkMask(clean(), [full], { expectAllBlack: true }).ok, false);
   const r = checkMask(withPixel(5, 5, [200, 0, 0]), [full], { expectAllBlack: true });
   assert.equal(r.ok, false);

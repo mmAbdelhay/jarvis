@@ -31,10 +31,17 @@ import { checkMask, decodePng, foreignPoint } from "./png.mjs";
 
 export const ERROR_CODES = ["outside", "excluded", "paused", "no-session", "unsupported", "failed"];
 const DENIED = /\b(denied|declined|not approved|timed out)\b/i;
-const DETAILS = { format: "gguf", family: "scripted", families: ["scripted"], parameter_size: "0B", quantization_level: "none" };
+const DETAILS = {
+  format: "gguf",
+  family: "scripted",
+  families: ["scripted"],
+  parameter_size: "0B",
+  quantization_level: "none",
+};
 
 export function substitute(value, env) {
-  if (typeof value === "string") return value.replace(/\$\{([A-Z_][A-Z0-9_]*)\}/g, (_, name) => env[name] ?? "");
+  if (typeof value === "string")
+    return value.replace(/\$\{([A-Z_][A-Z0-9_]*)\}/g, (_, name) => env[name] ?? "");
   if (Array.isArray(value)) return value.map((v) => substitute(v, env));
   if (value !== null && typeof value === "object") {
     return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, substitute(v, env)]));
@@ -66,7 +73,10 @@ export function resultBody(content) {
 // map those texts back to the code they stand for; fakevision.test.mjs reads cu-text.ts
 // so a reworded text fails the static tests instead of the container run.
 const V_REFUSALS = [
-  [/has ended for this request|could not start or went away|No computer-use session is running|stopped computer use/, "no-session"],
+  [
+    /has ended for this request|could not start or went away|No computer-use session is running|stopped computer use/,
+    "no-session",
+  ],
   [/outside the allowed windows|is outside the \d+x\d+ screenshot/, "outside"],
   [/A protected window .* has focus/, "excluded"],
   [/took over the screen|paused and then resumed/, "paused"],
@@ -89,7 +99,10 @@ export function errorCode(content) {
 export function captureOf(content) {
   const body = resultBody(content);
   if (body !== null && Array.isArray(body.windows)) return body;
-  if (Array.isArray(body) && body.every((w) => w !== null && typeof w === "object" && typeof w.appId === "string")) {
+  if (
+    Array.isArray(body) &&
+    body.every((w) => w !== null && typeof w === "object" && typeof w.appId === "string")
+  ) {
     const size = String(content ?? "").match(/(\d+)x(\d+) pixels/);
     return {
       ...(size ? { width: Number(size[1]), height: Number(size[2]) } : {}),
@@ -123,20 +136,25 @@ export function resolveTarget(target, windows) {
   if (target?.outside === true) {
     // U-1 redacts foreign rectangles and fills the capture with the allowed
     // window. In that case use a coordinate beyond every reported rectangle.
-    const allowed = windows.filter(w => w?.allowed === true &&
-      [w.x, w.y, w.w, w.h].every(Number.isFinite) && w.w > 0 && w.h > 0);
+    const allowed = windows.filter(
+      (w) =>
+        w?.allowed === true && [w.x, w.y, w.w, w.h].every(Number.isFinite) && w.w > 0 && w.h > 0,
+    );
     if (allowed.length === 0) return null;
-    return foreignPoint(windows) ?? {
-      x: Math.max(0, ...allowed.map((w) => w.x + w.w)) + 4,
-      y: Math.max(0, ...allowed.map((w) => w.y + w.h)) + 4,
-    };
+    return (
+      foreignPoint(windows) ?? {
+        x: Math.max(0, ...allowed.map((w) => w.x + w.w)) + 4,
+        y: Math.max(0, ...allowed.map((w) => w.y + w.h)) + 4,
+      }
+    );
   }
   if (typeof target?.window !== "string") return null;
   const pattern = new RegExp(target.window, "i");
   const w = windows.find((x) => x?.allowed === true && pattern.test(String(x.title ?? "")));
   if (w === undefined) return null;
   const [dx, dy] = Array.isArray(target.inset) ? target.inset : [0, 0];
-  if (target.from === "bottom-right") return { x: Math.round(w.x + w.w - dx), y: Math.round(w.y + w.h - dy) };
+  if (target.from === "bottom-right")
+    return { x: Math.round(w.x + w.w - dx), y: Math.round(w.y + w.h - dy) };
   return { x: Math.round(w.x + w.w / 2 + dx), y: Math.round(w.y + w.h / 2 + dy) };
 }
 
@@ -161,7 +179,12 @@ export function createFakeVision(script, { env = process.env } = {}) {
       if ((m?.role === "tool" || Array.isArray(m?.images)) && data !== null) info = data;
       for (const b64 of Array.isArray(m?.images) ? m.images : []) {
         const digest = createHash("sha256").update(String(b64)).digest("hex");
-        const key = JSON.stringify([record === null ? `off:${report.requests}` : report.turns.indexOf(record), messageIndex, digest, info?.windows]);
+        const key = JSON.stringify([
+          record === null ? `off:${report.requests}` : report.turns.indexOf(record),
+          messageIndex,
+          digest,
+          info?.windows,
+        ]);
         if (seen.has(key)) continue;
         seen.add(key);
         if (record === null) {
@@ -171,13 +194,18 @@ export function createFakeVision(script, { env = process.env } = {}) {
         const id = digest.slice(0, 16);
         try {
           const image = decodePng(Buffer.from(String(b64), "base64"));
-          const mask = substitute(active.last?.mask ?? active.turn.mask ?? { mode: "outside" }, env);
+          const mask = substitute(
+            active.last?.mask ?? active.turn.mask ?? { mode: "outside" },
+            env,
+          );
           const options = { maxEdge: script.maxEdge ?? 1280 };
           let fixtureMatches = null;
           if (mask.mode === "all-black") options.expectAllBlack = true;
           else if (mask.mode === "fixture") {
             const fixture = decodePng(Buffer.from(mask.pngBase64, "base64"));
-            fixtureMatches = fixture.width === image.width && fixture.height === image.height &&
+            fixtureMatches =
+              fixture.width === image.width &&
+              fixture.height === image.height &&
               Buffer.from(fixture.pixels).equals(Buffer.from(image.pixels));
             options.fullFrameChecked = fixtureMatches;
           } else if (mask.mode !== "outside") throw new Error(`unknown mask mode: ${mask.mode}`);
@@ -186,7 +214,9 @@ export function createFakeVision(script, { env = process.env } = {}) {
           // text summary. Preserve all pixel/size failures; waive only the
           // metadata prerequisite after an independent full-frame assertion.
           if (mask.mode === "all-black" || fixtureMatches === true) {
-            checked.problems = checked.problems.filter(p => p !== "the capture's window list has no allowed window");
+            checked.problems = checked.problems.filter(
+              (p) => p !== "the capture's window list has no allowed window",
+            );
             checked.ok = checked.problems.length === 0;
           }
           if (fixtureMatches === false) {
@@ -195,7 +225,11 @@ export function createFakeVision(script, { env = process.env } = {}) {
           }
           record.images.push({ sha256: id, maskMode: mask.mode, ...checked });
         } catch (error) {
-          record.images.push({ sha256: id, ok: false, problems: [`undecodable screenshot: ${error.message}`] });
+          record.images.push({
+            sha256: id,
+            ok: false,
+            problems: [`undecodable screenshot: ${error.message}`],
+          });
         }
       }
     }
@@ -212,7 +246,8 @@ export function createFakeVision(script, { env = process.env } = {}) {
       denied: results.some(isDenied),
       text: results.join("\n").slice(0, 300),
     };
-    if (step.expectError !== undefined) step.pass = step.result.error !== null && step.expectError.includes(step.result.error);
+    if (step.expectError !== undefined)
+      step.pass = step.result.error !== null && step.expectError.includes(step.result.error);
     if (step.result.denied) {
       active.record.denied = true;
       if (Array.isArray(active.turn.onDenied) && !active.branched) {
@@ -253,7 +288,10 @@ export function createFakeVision(script, { env = process.env } = {}) {
       if (step.mask !== undefined) record.mask = step.mask;
       if (step.expectError !== undefined) record.expectError = [step.expectError].flat();
       active.last = record;
-      return { call: { name: step.call, arguments: input }, holdMs: Math.round(Number(step.hold ?? 0) * 1000) };
+      return {
+        call: { name: step.call, arguments: input },
+        holdMs: Math.round(Number(step.hold ?? 0) * 1000),
+      };
     }
     active.record.finished = true;
     return { text: "Done." };
@@ -272,12 +310,22 @@ export function createFakeVision(script, { env = process.env } = {}) {
     const currentMessages = messages.slice(Math.max(0, messages.findLastIndex(isPrompt)));
     if (tools.length === 0) {
       inspect(messages, null);
-      if (turn === undefined || turn.steps.some((step) => step.call !== undefined)) return { text: "ok" };
+      if (turn === undefined || turn.steps.some((step) => step.call !== undefined))
+        return { text: "ok" };
       // Text-only scripts (the off turn) can answer without taking over an
       // in-progress screen turn, including its pending tool result.
-      report.turns.push({ name: turn.name, prompt: prompt.slice(0, 200), toolsOffered: tools,
-        steps: [], images: [], denied: false, finished: true });
-      return { text: substitute(turn.steps.find((step) => step.text !== undefined)?.text ?? "Done.", env) };
+      report.turns.push({
+        name: turn.name,
+        prompt: prompt.slice(0, 200),
+        toolsOffered: tools,
+        steps: [],
+        images: [],
+        denied: false,
+        finished: true,
+      });
+      return {
+        text: substitute(turn.steps.find((step) => step.text !== undefined)?.text ?? "Done.", env),
+      };
     }
     if (active === null || active.promptCount !== prompts.length || active.prompt !== prompt) {
       if (turn === undefined) {
@@ -286,9 +334,26 @@ export function createFakeVision(script, { env = process.env } = {}) {
         inspect(messages, null);
         return { text: "fakevision: no script for this prompt" };
       }
-      const record = { name: turn.name, prompt: prompt.slice(0, 200), toolsOffered: tools, steps: [], images: [], denied: false, finished: false };
+      const record = {
+        name: turn.name,
+        prompt: prompt.slice(0, 200),
+        toolsOffered: tools,
+        steps: [],
+        images: [],
+        denied: false,
+        finished: false,
+      };
       report.turns.push(record);
-      active = { turn, record, steps: turn.steps, cursor: 0, prompt, promptCount: prompts.length, last: null, branched: false };
+      active = {
+        turn,
+        record,
+        steps: turn.steps,
+        cursor: 0,
+        prompt,
+        promptCount: prompts.length,
+        last: null,
+        branched: false,
+      };
     }
     const screen = tools.some((n) => n.startsWith("screen_"));
     const info = windowsIn(currentMessages);
@@ -324,23 +389,48 @@ export function createServerFor(core, { reportPath, model }) {
       try {
         if (path === "/" || path === "/api/version") return json(200, { version: "0.12.6" });
         if (path === "/api/tags") {
-          return json(200, { models: [{ name: model, model, modified_at: now, size: 1, digest: "0".repeat(64), details: DETAILS }] });
+          return json(200, {
+            models: [
+              {
+                name: model,
+                model,
+                modified_at: now,
+                size: 1,
+                digest: "0".repeat(64),
+                details: DETAILS,
+              },
+            ],
+          });
         }
         if (path === "/api/ps") return json(200, { models: [] });
         if (path === "/api/show") {
-          return json(200, { modelfile: "", parameters: "", template: "", details: DETAILS, model_info: {},
-            capabilities: ["completion", "tools", "vision"] });
+          return json(200, {
+            modelfile: "",
+            parameters: "",
+            template: "",
+            details: DETAILS,
+            model_info: {},
+            capabilities: ["completion", "tools", "vision"],
+          });
         }
         if (path === "/api/chat" && req.method === "POST") {
           const body = raw === "" ? {} : JSON.parse(raw);
           const reply = core.chat(body);
           save();
           if (reply.holdMs > 0) await new Promise((resolve) => setTimeout(resolve, reply.holdMs));
-          const message = reply.text !== undefined
-            ? { role: "assistant", content: reply.text }
-            : { role: "assistant", content: "", tool_calls: [{ function: reply.call }] };
-          const done = { model, created_at: now, message: { role: "assistant", content: "" }, done: true,
-            done_reason: "stop", prompt_eval_count: 1, eval_count: 1 };
+          const message =
+            reply.text !== undefined
+              ? { role: "assistant", content: reply.text }
+              : { role: "assistant", content: "", tool_calls: [{ function: reply.call }] };
+          const done = {
+            model,
+            created_at: now,
+            message: { role: "assistant", content: "" },
+            done: true,
+            done_reason: "stop",
+            prompt_eval_count: 1,
+            eval_count: 1,
+          };
           if (body.stream === false) return json(200, { ...done, message });
           res.writeHead(200, { "content-type": "application/x-ndjson" });
           res.write(`${JSON.stringify({ model, created_at: now, message, done: false })}\n`);
@@ -368,7 +458,9 @@ export async function main(argv) {
     },
   });
   if (!values.script || !values.report) {
-    process.stderr.write("usage: fakevision.mjs --script FILE --report FILE [--port 11500] [--host 127.0.0.1]\n");
+    process.stderr.write(
+      "usage: fakevision.mjs --script FILE --report FILE [--port 11500] [--host 127.0.0.1]\n",
+    );
     return 64;
   }
   const script = JSON.parse(readFileSync(values.script, "utf8"));

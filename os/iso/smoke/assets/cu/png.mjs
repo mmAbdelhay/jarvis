@@ -9,7 +9,8 @@ const CHANNELS = { 0: 1, 2: 3, 4: 2, 6: 4 }; // grey, RGB, grey+alpha, RGBA
 
 export function readPngInfo(buffer) {
   if (buffer.length < 33 || !buffer.subarray(0, 8).equals(SIGNATURE)) throw new Error("not a PNG");
-  if (buffer.toString("latin1", 12, 16) !== "IHDR") throw new Error("not a PNG: IHDR is not the first chunk");
+  if (buffer.toString("latin1", 12, 16) !== "IHDR")
+    throw new Error("not a PNG: IHDR is not the first chunk");
   return {
     width: buffer.readUInt32BE(16),
     height: buffer.readUInt32BE(20),
@@ -31,7 +32,9 @@ export function decodePng(buffer) {
   const info = readPngInfo(buffer);
   const channels = CHANNELS[info.colorType];
   if (info.bitDepth !== 8 || channels === undefined || info.interlace !== 0) {
-    throw new Error(`unsupported PNG: depth ${info.bitDepth}, colour type ${info.colorType}, interlace ${info.interlace}`);
+    throw new Error(
+      `unsupported PNG: depth ${info.bitDepth}, colour type ${info.colorType}, interlace ${info.interlace}`,
+    );
   }
   const idat = [];
   let offset = 8;
@@ -59,12 +62,23 @@ export function decodePng(buffer) {
       const value = raw[line + i];
       let out;
       switch (filter) {
-        case 0: out = value; break;
-        case 1: out = value + a; break;
-        case 2: out = value + b; break;
-        case 3: out = value + ((a + b) >> 1); break;
-        case 4: out = value + paeth(a, b, c); break;
-        default: throw new Error(`bad PNG filter ${filter} on row ${y}`);
+        case 0:
+          out = value;
+          break;
+        case 1:
+          out = value + a;
+          break;
+        case 2:
+          out = value + b;
+          break;
+        case 3:
+          out = value + ((a + b) >> 1);
+          break;
+        case 4:
+          out = value + paeth(a, b, c);
+          break;
+        default:
+          throw new Error(`bad PNG filter ${filter} on row ${y}`);
       }
       pixels[row + i] = out & 0xff;
     }
@@ -105,15 +119,26 @@ export function encodePng(width, height, color) {
   header.writeUInt32BE(height, 4);
   header[8] = 8;
   header[9] = 2;
-  return Buffer.concat([SIGNATURE, chunk("IHDR", header), chunk("IDAT", deflateSync(raw)), chunk("IEND", Buffer.alloc(0))]);
+  return Buffer.concat([
+    SIGNATURE,
+    chunk("IHDR", header),
+    chunk("IDAT", deflateSync(raw)),
+    chunk("IEND", Buffer.alloc(0)),
+  ]);
 }
 
 function rectOf(w) {
-  const r = { x: Math.round(Number(w?.x)), y: Math.round(Number(w?.y)), w: Math.round(Number(w?.w)), h: Math.round(Number(w?.h)) };
+  const r = {
+    x: Math.round(Number(w?.x)),
+    y: Math.round(Number(w?.y)),
+    w: Math.round(Number(w?.w)),
+    h: Math.round(Number(w?.h)),
+  };
   return Object.values(r).every(Number.isFinite) ? r : { x: 0, y: 0, w: 0, h: 0 };
 }
 
-const within = (x, y, r, pad) => x >= r.x - pad && x < r.x + r.w + pad && y >= r.y - pad && y < r.y + r.h + pad;
+const within = (x, y, r, pad) =>
+  x >= r.x - pad && x < r.x + r.w + pad && y >= r.y - pad && y < r.y + r.h + pad;
 
 /** Only allowed windows may be visible: every pixel farther than `tolerance`
  *  from all allowed rectangles must be exactly black. `foreignPixels` counts
@@ -132,18 +157,34 @@ const within = (x, y, r, pad) => x >= r.x - pad && x < r.x + r.w + pad && y >= r
  *    against the known GIMP fixture); otherwise a frame-covering allowed
  *    rectangle is reported as a problem and `vacuous` is true.
  */
-export function checkMask(image, windows, { tolerance = 2, maxEdge = 1280, expectAllBlack = false, fullFrameChecked = false } = {}) {
+export function checkMask(
+  image,
+  windows,
+  { tolerance = 2, maxEdge = 1280, expectAllBlack = false, fullFrameChecked = false } = {},
+) {
   const problems = [];
   if (Math.max(image.width, image.height) > maxEdge) {
-    problems.push(`capture is ${image.width}x${image.height}; the longest edge must be at most ${maxEdge}`);
+    problems.push(
+      `capture is ${image.width}x${image.height}; the longest edge must be at most ${maxEdge}`,
+    );
   }
   const list = Array.isArray(windows) ? windows : [];
   const allowed = list.filter((w) => w?.allowed === true).map(rectOf);
   const foreign = list.filter((w) => w?.allowed !== true).map(rectOf);
   if (allowed.length === 0) problems.push("the capture's window list has no allowed window");
-  const vacuous = !expectAllBlack && allowed.some((r) => r.x - tolerance <= 0 && r.y - tolerance <= 0 && r.x + r.w + tolerance >= image.width && r.y + r.h + tolerance >= image.height);
+  const vacuous =
+    !expectAllBlack &&
+    allowed.some(
+      (r) =>
+        r.x - tolerance <= 0 &&
+        r.y - tolerance <= 0 &&
+        r.x + r.w + tolerance >= image.width &&
+        r.y + r.h + tolerance >= image.height,
+    );
   if (vacuous && !fullFrameChecked) {
-    problems.push("the allowed window covers the whole frame, so the mask cannot detect a leak; pass expectAllBlack, or fullFrameChecked after comparing the content to the fixture");
+    problems.push(
+      "the allowed window covers the whole frame, so the mask cannot detect a leak; pass expectAllBlack, or fullFrameChecked after comparing the content to the fixture",
+    );
   }
   let leaked = 0;
   let foreignPixels = 0;
@@ -160,9 +201,19 @@ export function checkMask(image, windows, { tolerance = 2, maxEdge = 1280, expec
     }
   }
   if (first !== null) {
-    problems.push(`${leaked} pixels outside the allowed windows are not black (first at ${first.x},${first.y} = ${first.rgb.join(",")})`);
+    problems.push(
+      `${leaked} pixels outside the allowed windows are not black (first at ${first.x},${first.y} = ${first.rgb.join(",")})`,
+    );
   }
-  return { ok: problems.length === 0, problems, leakedPixels: leaked, foreignPixels, vacuous, width: image.width, height: image.height };
+  return {
+    ok: problems.length === 0,
+    problems,
+    leakedPixels: leaked,
+    foreignPixels,
+    vacuous,
+    width: image.width,
+    height: image.height,
+  };
 }
 
 /** A point inside a non-allowed window and away from every allowed one: the

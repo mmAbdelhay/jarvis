@@ -55,7 +55,10 @@ async function post<T>(path: string, body: unknown, timeoutMs: number): Promise<
 describe.skipIf(tag === "")("vision probe", () => {
   // Invalidate an earlier run before any request can hang or be interrupted.
   if (tag !== "" && out !== "") {
-    writeFileSync(out, `${JSON.stringify({ tag, status: "failed", capabilities: [], trials: [], contextSize: OLLAMA_NUM_CTX }, null, 2)}\n`);
+    writeFileSync(
+      out,
+      `${JSON.stringify({ tag, status: "failed", capabilities: [], trials: [], contextSize: OLLAMA_NUM_CTX }, null, 2)}\n`,
+    );
   }
   // Both checks use one capability response; a failed check cannot be
   // overwritten by a later, successful /api/show request.
@@ -84,7 +87,10 @@ describe.skipIf(tag === "")("vision probe", () => {
             options: { temperature: 0, num_ctx: OLLAMA_NUM_CTX },
             tools: [CLICK_TOOL],
             messages: [
-              { role: "system", content: "You operate a computer by calling tools. Answer only with a tool call." },
+              {
+                role: "system",
+                content: "You operate a computer by calling tools. Answer only with a tool call.",
+              },
               {
                 role: "user",
                 content: `This screenshot is ${PROBE_WIDTH}x${PROBE_HEIGHT} pixels. Click the centre of the red button.`,
@@ -103,7 +109,10 @@ describe.skipIf(tag === "")("vision probe", () => {
     } finally {
       // Even a capability or HTTP failure replaces stale passing evidence.
       if (out !== "") {
-        writeFileSync(out, `${JSON.stringify({ tag, status, capabilities, trials, contextSize: OLLAMA_NUM_CTX }, null, 2)}\n`);
+        writeFileSync(
+          out,
+          `${JSON.stringify({ tag, status, capabilities, trials, contextSize: OLLAMA_NUM_CTX }, null, 2)}\n`,
+        );
       }
     }
   }, 1_900_000);

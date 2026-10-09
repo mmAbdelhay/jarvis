@@ -19,9 +19,7 @@
           "call": "screen_look",
           "input": {
             "goal": "cu-probe: look at the GIMP window",
-            "apps": [
-              "${GIMP_APP}"
-            ]
+            "apps": ["${GIMP_APP}"]
           }
         },
         {
@@ -53,9 +51,7 @@
           "call": "screen_look",
           "input": {
             "goal": "cu-deny: export beach as PNG to Pictures",
-            "apps": [
-              "${GIMP_APP}"
-            ]
+            "apps": ["${GIMP_APP}"]
           }
         },
         {
@@ -77,9 +73,7 @@
           "call": "screen_look",
           "input": {
             "goal": "open the GIMP image beach.xcf and export it as PNG to Pictures",
-            "apps": [
-              "${GIMP_APP}"
-            ]
+            "apps": ["${GIMP_APP}"]
           }
         },
         {
@@ -101,9 +95,7 @@
           "call": "screen_look",
           "input": {
             "goal": "cu-excluded: press a key in GIMP",
-            "apps": [
-              "${GIMP_APP}"
-            ]
+            "apps": ["${GIMP_APP}"]
           }
         },
         {
@@ -119,9 +111,7 @@
           "input": {
             "combo": "ctrl+shift+a"
           },
-          "expectError": [
-            "outside"
-          ]
+          "expectError": ["outside"]
         },
         {
           "call": "screen_key",
@@ -149,9 +139,7 @@
           "call": "screen_look",
           "input": {
             "goal": "cu-stuck: keep looking",
-            "apps": [
-              "${GIMP_APP}"
-            ]
+            "apps": ["${GIMP_APP}"]
           }
         },
         {
@@ -201,19 +189,14 @@
           "call": "screen_look",
           "input": {
             "goal": "cu-lock: hold the session",
-            "apps": [
-              "${GIMP_APP}"
-            ]
+            "apps": ["${GIMP_APP}"]
           }
         },
         {
           "call": "screen_look",
           "input": {},
           "hold": 20,
-          "expectError": [
-            "paused",
-            "no-session"
-          ]
+          "expectError": ["paused", "no-session"]
         },
         {
           "text": "Stopped."
@@ -228,19 +211,14 @@
           "call": "screen_look",
           "input": {
             "goal": "cu-physical: hold the session",
-            "apps": [
-              "${GIMP_APP}"
-            ]
+            "apps": ["${GIMP_APP}"]
           }
         },
         {
           "call": "screen_look",
           "input": {},
           "hold": 20,
-          "expectError": [
-            "paused",
-            "no-session"
-          ]
+          "expectError": ["paused", "no-session"]
         },
         {
           "text": "Stopped."

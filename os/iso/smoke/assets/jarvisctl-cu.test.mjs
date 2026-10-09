@@ -6,11 +6,19 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import {
-  FrameReader, cardKind, encodeFrame, main, openSession, runComputerUse, setComputerUse, stopComputerUse,
+  FrameReader,
+  cardKind,
+  encodeFrame,
+  main,
+  openSession,
+  runComputerUse,
+  setComputerUse,
+  stopComputerUse,
 } from "./jarvisctl.mjs";
 
 const BUILD = "0.5.0+test.1";
-const proof = (secret, label, a, b) => createHmac("sha256", secret).update(label).update(a).update(b).digest("hex");
+const proof = (secret, label, a, b) =>
+  createHmac("sha256", secret).update(label).update(a).update(b).digest("hex");
 
 /** jarvisd's control endpoint in miniature: the real handshake, scripted channels. */
 async function fakeDaemon(handlers) {
@@ -34,7 +42,11 @@ async function fakeDaemon(handlers) {
         if (phase === "hello") {
           nonceC = Buffer.from(m.nonceC, "hex");
           nonceS = randomBytes(32);
-          send({ t: "challenge", nonceS: nonceS.toString("hex"), proof: proof(secret, "jarvisd-server", nonceC, nonceS) });
+          send({
+            t: "challenge",
+            nonceS: nonceS.toString("hex"),
+            proof: proof(secret, "jarvisd-server", nonceC, nonceS),
+          });
           phase = "auth";
         } else if (phase === "auth") {
           assert.equal(m.proof, proof(secret, "jarvisd-client", nonceS, nonceC));
@@ -62,12 +74,26 @@ async function fakeDaemon(handlers) {
   };
 }
 
-const item = (itemId, tool, title) => ({ itemId, tool, title, detail: "", source: "system", risk: "confirm", secretFields: [] });
+const item = (itemId, tool, title) => ({
+  itemId,
+  tool,
+  title,
+  detail: "",
+  source: "system",
+  risk: "confirm",
+  secretFields: [],
+});
 const card = (cardId, turnId, ...items) => ({ cardId, turnId, expiresAt: 0, items });
 
 test("card kinds follow the v1.1 contract", () => {
-  assert.equal(cardKind(card("a", "t", item("i", "cu.begin", "Let Jarvis use GIMP to: x"))), "begin");
-  assert.equal(cardKind(card("b", "t", item("i", "screen.click", "Click Export"))), "consequential");
+  assert.equal(
+    cardKind(card("a", "t", item("i", "cu.begin", "Let Jarvis use GIMP to: x"))),
+    "begin",
+  );
+  assert.equal(
+    cardKind(card("b", "t", item("i", "screen.click", "Click Export"))),
+    "consequential",
+  );
   assert.equal(cardKind(card("c", "t", item("i", "pkg.install", "Install"))), "other");
   assert.equal(cardKind(card("d", "t")), "other");
 });
@@ -77,7 +103,10 @@ test("approves the session and consequential cards, denies anything else, logs c
   const daemon = await fakeDaemon({
     "agent:prompt": (args, { reply, push }) => {
       push("agent:events", { type: "turn-start", turnId: "t1", text: args[0].text });
-      push("agent:events", { type: "card", card: card("c1", "t1", item("b", "cu.begin", "Let Jarvis use GIMP to: export")) });
+      push("agent:events", {
+        type: "card",
+        card: card("c1", "t1", item("b", "cu.begin", "Let Jarvis use GIMP to: export")),
+      });
       reply({ turnId: "t1" });
     },
     "agent:confirm": (args, { reply, push }) => {
@@ -85,9 +114,15 @@ test("approves the session and consequential cards, denies anything else, logs c
       reply(null);
       if (args[0].cardId === "c1") {
         push("cu:state", { active: true, step: 1, maxSteps: 50, paused: null });
-        push("agent:events", { type: "card", card: card("c2", "t1", item("s", "screen.click", "Click Export (save)")) });
+        push("agent:events", {
+          type: "card",
+          card: card("c2", "t1", item("s", "screen.click", "Click Export (save)")),
+        });
       } else if (args[0].cardId === "c2") {
-        push("agent:events", { type: "card", card: card("c3", "t1", item("p", "pkg.install", "Install hello")) });
+        push("agent:events", {
+          type: "card",
+          card: card("c3", "t1", item("p", "pkg.install", "Install hello")),
+        });
       } else {
         push("agent:events", { type: "turn-end", turnId: "t1", reason: "done" });
       }
@@ -97,12 +132,26 @@ test("approves the session and consequential cards, denies anything else, logs c
   const lines = [];
   let clock = 1000;
   const result = await runComputerUse(session, {
-    text: "export", absentPath: "/nope/beach.png", timeoutMs: 5000, log: (e) => lines.push(e),
-    wall: () => (clock += 10), exists: () => false,
+    text: "export",
+    absentPath: "/nope/beach.png",
+    timeoutMs: 5000,
+    log: (e) => lines.push(e),
+    wall: () => (clock += 10),
+    exists: () => false,
   });
   assert.equal(result.code, 0);
-  assert.deepEqual(confirmed.map((c) => [c.cardId, c.approve, c.ticked]), [["c1", true, ["b"]], ["c2", true, ["s"]], ["c3", false, []]]);
-  assert.deepEqual(result.cards.map((c) => c.kind), ["begin", "consequential", "other"]);
+  assert.deepEqual(
+    confirmed.map((c) => [c.cardId, c.approve, c.ticked]),
+    [
+      ["c1", true, ["b"]],
+      ["c2", true, ["s"]],
+      ["c3", false, []],
+    ],
+  );
+  assert.deepEqual(
+    result.cards.map((c) => c.kind),
+    ["begin", "consequential", "other"],
+  );
   assert.equal(result.cards[1].pathExisted, false);
   const state = lines.find((l) => l.type === "cu-state");
   assert.equal(state.active, true);
@@ -114,22 +163,42 @@ test("approves the session and consequential cards, denies anything else, logs c
 test("--consequential deny denies the save card; a begin card without a turn is still answered", async () => {
   const confirmed = [];
   const daemon = await fakeDaemon({
-    "agent:prompt": (args, { reply, push }) => {
-      push("agent:events", { type: "card", card: card("c1", null, item("b", "cu.begin", "Let Jarvis use GIMP to: x")) });
-      push("agent:events", { type: "card", card: card("d1", null, item("w", "net.wifi_connect", "Doctor card")) });
+    "agent:prompt": (_args, { reply, push }) => {
+      push("agent:events", {
+        type: "card",
+        card: card("c1", null, item("b", "cu.begin", "Let Jarvis use GIMP to: x")),
+      });
+      push("agent:events", {
+        type: "card",
+        card: card("d1", null, item("w", "net.wifi_connect", "Doctor card")),
+      });
       reply({ turnId: "t1" });
     },
     "agent:confirm": (args, { reply, push }) => {
       confirmed.push(args[0]);
       reply(null);
-      if (args[0].cardId === "c1") push("agent:events", { type: "card", card: card("c2", "t1", item("s", "screen.click", "Save")) });
+      if (args[0].cardId === "c1")
+        push("agent:events", {
+          type: "card",
+          card: card("c2", "t1", item("s", "screen.click", "Save")),
+        });
       else push("agent:events", { type: "turn-end", turnId: "t1", reason: "done" });
     },
   });
   const { session } = await openSession({ runDir: daemon.runDir, build: BUILD });
-  const result = await runComputerUse(session, { text: "x", consequential: "deny", timeoutMs: 5000 });
+  const result = await runComputerUse(session, {
+    text: "x",
+    consequential: "deny",
+    timeoutMs: 5000,
+  });
   assert.equal(result.code, 0);
-  assert.deepEqual(confirmed.map((c) => [c.cardId, c.approve]), [["c1", true], ["c2", false]]);
+  assert.deepEqual(
+    confirmed.map((c) => [c.cardId, c.approve]),
+    [
+      ["c1", true],
+      ["c2", false],
+    ],
+  );
   session.close();
   daemon.close();
 });
@@ -137,7 +206,10 @@ test("--consequential deny denies the save card; a begin card without a turn is 
 test("cu-enable sends setEnabled then consent; cu-stop sends cu:stop", async () => {
   const daemon = await fakeDaemon({});
   const { session } = await openSession({ runDir: daemon.runDir, build: BUILD });
-  assert.equal((await setComputerUse(session, { providerId: "scripted", enabled: true, consent: true })).code, 0);
+  assert.equal(
+    (await setComputerUse(session, { providerId: "scripted", enabled: true, consent: true })).code,
+    0,
+  );
   assert.equal((await stopComputerUse(session)).code, 0);
   assert.deepEqual(daemon.calls, [
     { ch: "cu:setEnabled", a: [{ providerId: "scripted", enabled: true }] },
@@ -159,19 +231,31 @@ test("a timed-out computer-use run never answers late cards", async () => {
   let pushEvent;
   const calls = [];
   const session = {
-    onPush(listener) { pushEvent = listener; },
+    onPush(listener) {
+      pushEvent = listener;
+    },
     async invoke(ch, a) {
       calls.push({ ch, a });
       return ch === "agent:prompt" ? { turnId: "t1" } : null;
     },
   };
   const lines = [];
-  const result = await runComputerUse(session, { text: "x", timeoutMs: 10, log: (e) => lines.push(e) });
+  const result = await runComputerUse(session, {
+    text: "x",
+    timeoutMs: 10,
+    log: (e) => lines.push(e),
+  });
   assert.equal(result.code, 2);
   assert.equal(result.reason, "timeout");
   const count = lines.length;
-  pushEvent("agent:events", { type: "card", card: card("late", "t1", item("b", "cu.begin", "Begin")) });
-  assert.deepEqual(calls.map((c) => c.ch), ["agent:prompt"]);
+  pushEvent("agent:events", {
+    type: "card",
+    card: card("late", "t1", item("b", "cu.begin", "Begin")),
+  });
+  assert.deepEqual(
+    calls.map((c) => c.ch),
+    ["agent:prompt"],
+  );
   assert.equal(lines.length, count);
   assert.deepEqual(result.cards, []);
 });

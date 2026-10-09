@@ -9,7 +9,7 @@
       "minRamGB": 8,
       "tier": "small",
       "languages": ["en", "ar", "zh", "fr", "de", "es"],
-      "probe": {"status": "untested", "runId": null, "date": null, "detail": ""}
+      "probe": { "status": "untested", "runId": null, "date": null, "detail": "" }
     },
     {
       "id": "qwen3-vl-8b",
@@ -19,7 +19,7 @@
       "minRamGB": 16,
       "tier": "medium",
       "languages": ["en", "ar", "zh", "fr", "de", "es"],
-      "probe": {"status": "untested", "runId": null, "date": null, "detail": ""}
+      "probe": { "status": "untested", "runId": null, "date": null, "detail": "" }
     },
     {
       "id": "qwen2.5vl-7b",
@@ -29,7 +29,7 @@
       "minRamGB": 16,
       "tier": "medium",
       "languages": ["en", "ar", "zh", "fr", "de", "es"],
-      "probe": {"status": "untested", "runId": null, "date": null, "detail": ""}
+      "probe": { "status": "untested", "runId": null, "date": null, "detail": "" }
     },
     {
       "id": "mistral-small3.2-24b",
@@ -39,7 +39,7 @@
       "minRamGB": 32,
       "tier": "large",
       "languages": ["en", "fr", "de", "es", "it", "pt", "ar"],
-      "probe": {"status": "untested", "runId": null, "date": null, "detail": ""}
+      "probe": { "status": "untested", "runId": null, "date": null, "detail": "" }
     }
   ]
 }

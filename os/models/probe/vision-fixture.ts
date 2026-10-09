@@ -40,7 +40,11 @@ export function targetPng(target: Target, width = PROBE_WIDTH, height = PROBE_HE
   for (let y = 0; y < height; y++) {
     raw[y * stride] = 0; // filter: none
     for (let x = 0; x < width; x++) {
-      const [r, g, b] = inside(x, y, target) ? [220, 30, 30] : y < 40 ? [50, 50, 56] : [236, 236, 236];
+      const [r, g, b] = inside(x, y, target)
+        ? [220, 30, 30]
+        : y < 40
+          ? [50, 50, 56]
+          : [236, 236, 236];
       const o = y * stride + 1 + x * 3;
       raw[o] = r;
       raw[o + 1] = g;
