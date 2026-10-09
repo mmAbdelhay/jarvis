@@ -441,9 +441,12 @@ func (c *Client) dispatch(m wl.Message) error {
 			obj, code, text := r.Uint(), r.Uint(), r.String()
 			return fmt.Errorf("wlcu: protocol error on object %d (code %d): %s", obj, code, text)
 		case evDisplayDeleteID:
-			delete(c.objects, r.Uint())
+			id := r.Uint()
+			if r.Err() == nil {
+				delete(c.objects, id)
+			}
 		}
-		return nil
+		return r.Err()
 	}
 	switch c.objects[m.Object] {
 	case kindRegistry:

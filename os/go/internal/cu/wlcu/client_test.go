@@ -356,3 +356,24 @@ func TestDefaultAllocator(t *testing.T) {
 	s.Close()
 	s.Close()
 }
+
+func TestTruncatedDisplayEventKillsTheClient(t *testing.T) {
+	f := newFake()
+	c, err := startFake(t, f, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// delete_id requires one uint32 argument; an empty payload is malformed.
+	f.emit(displayID, evDisplayDeleteID, nil)
+	select {
+	case <-c.Dead():
+	case <-time.After(time.Second):
+		t.Fatal("client accepted a truncated display event")
+	}
+	if !errors.Is(c.Err(), wl.ErrShort) {
+		t.Fatalf("want truncated arguments, got %v", c.Err())
+	}
+	if _, err := c.Outputs(); !errors.Is(err, wl.ErrShort) {
+		t.Fatalf("dead client answered: %v", err)
+	}
+}
