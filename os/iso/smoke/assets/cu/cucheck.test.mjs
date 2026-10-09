@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  cardProblems, hasEvidence, isActive, leaks, missingEvidence, looksBelow, noScreenTools, pausedProblems, pngProblems, readLog, turnProblems,
+  cardProblems, hasEvidence, isActive, leaks, missingEvidence, looksBelow, noScreenTools, pausedProblems, pngProblems, readLog, stepIssued, turnProblems,
 } from "./cucheck.mjs";
 import { encodePng } from "./png.mjs";
 
@@ -18,7 +18,8 @@ const report = {
     ] },
     { name: "off", toolsOffered: ["pkg_search"], images: [], steps: [] },
     { name: "stuck", toolsOffered: ["screen_look"], images: [], steps: [
-      { call: "screen_look", result: { received: true } }, { call: "screen_look", result: { received: true } },
+      { call: "screen_look", result: { received: true, error: null } }, { call: "screen_look", result: { received: true, error: null } },
+      { call: "screen_look", result: { received: true, error: "failed" } }, { call: "screen_look", result: { received: true, error: "no-session" } },
       { call: "screen_look", result: { received: false } },
     ] },
   ],
@@ -43,8 +44,11 @@ test("turn: a clean turn passes and every failure is named", () => {
 test("no-screen-tools, looks-below and no-leaks", () => {
   assert.deepEqual(noScreenTools(report, "off"), []);
   assert.match(noScreenTools(report, "probe").join(), /screen_look, screen_click/);
-  assert.deepEqual(looksBelow(report, "stuck", 7), []);
+  // Only looks that returned a screenshot count: merged V answers the stuck look and every
+  // later one with a refusal, which fakevision still records as received.
+  assert.deepEqual(looksBelow(report, "stuck", 5), []);
   assert.match(looksBelow(report, "stuck", 2).join(), /2 looks/);
+  assert.match(looksBelow(report, "stuck", 7).join(), /only 5 looks were issued/);
   assert.deepEqual(leaks(report), []);
   assert.match(leaks({ ...report, imagesOutsideComputerUse: 1 }).join(), /without screen tools/);
 });
@@ -99,4 +103,10 @@ test("vacuous screenshots are missing evidence: not a leak, not a pass", () => {
   assert.deepEqual(turnProblems(r, "t", { evidence: true }), []);
   r.turns[0].images.push({ ...okImage, ok: false, leakedPixels: 9, problems: ["9 pixels outside"] });
   assert.match(leaks(r).join(), /9 pixels outside/);
+});
+
+test("step: the model has issued a turn's step N (harness synchronisation)", () => {
+  assert.deepEqual(stepIssued(report, "stuck", 4), []);
+  assert.match(stepIssued(report, "stuck", 5).join(), /has issued 5 steps/);
+  assert.match(stepIssued(report, "nope", 0).join(), /no turn "nope"/);
 });

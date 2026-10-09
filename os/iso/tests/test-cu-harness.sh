@@ -16,8 +16,9 @@ check "headless pixman labwc" grep -q 'WLR_BACKENDS=headless' "$h/session.sh"
 check "jarvisd's brain is the scripted vision model" grep -q 'fakevision.mjs' "$h/session.sh"
 for case in "criterion 2: computer use is off by default (no screen tools offered)" \
   "criterion 4: exactly one session card, 'Let Jarvis use … to: …'" \
-  "criterion 4: input refused while a terminal has focus (excluded)" \
-  "criterion 6: with a terminal focused the capture is entirely black (non-vacuous mask evidence)" \
+  "criterion 4: a terminal taking focus pauses computer use (excluded-focus)" \
+  "criterion 4: no key reached GIMP while the terminal had focus" \
+  "criterion 6: with a foreign window focused the capture is entirely black (non-vacuous mask evidence)" \
   "criterion 7: the stuck loop stops before the seventh identical look" \
   "criterion 8: no screenshot is stored (no PNG data in jarvis's directories or the logs)" \
   "the privacy scan detects planted PNG data (with a missing directory in the list)" \
@@ -32,11 +33,42 @@ for case in "criterion 1: Pictures/beach.png is a 640x480 PNG" "criterion 5: a c
   "criterion 5: denying it leaves no file"; do
   check "blocked, not claimed: $case" bash -c 'grep -qF "blocked \"$1\"" "$2" && ! grep -qF "check \"$1\"" "$2"' _ "$case" "$h/session.sh"
 done
-check "the excluded turn starts the terminal after begin (held look, all-black)" python3 - "$ISO_DIR/smoke/assets/cu/cu-gimp.json" <<'PY'
+check "the excluded turn holds an all-black look, then a key" python3 - "$ISO_DIR/smoke/assets/cu/cu-gimp.json" <<'PY'
 import json, sys
 t = next(t for t in json.load(open(sys.argv[1]))["turns"] if t["name"] == "excluded")
-held = [s for s in t["steps"] if s.get("hold", 0) > 0 and s.get("mask", {}).get("mode") == "all-black"]
-assert held and "mask" not in t, t
+s = [x for x in t["steps"] if "call" in x]
+assert "mask" not in t, t
+assert s[1]["call"] == "screen_look" and s[1].get("hold", 0) > 0 and s[1].get("mask", {}).get("mode") == "all-black", s[1]
+assert s[2]["call"] == "screen_key" and s[2].get("hold", 0) > 0 and "expectError" not in s[2], s[2]
+PY
+# Merged U/V pause semantics (session.go checkFocus, computer-use.ts waitForResume): a
+# terminal taking focus pauses the session and jarvisd holds every later call until
+# resume/stop. So criterion 4 is asserted through the pause and the turn is stopped,
+# and the all-black evidence needs a foreign window jarvis-cu does NOT exclude.
+check "criterion 4 is asserted through the excluded-focus pause, then cu-stop" bash -c \
+  'grep -qF "cuc paused \"\$out/turn-excluded.log\" excluded-focus" "$1" && grep -q "^check .*ctl cu-stop" "$1"' _ "$h/session.sh"
+check "the foreign window's app id is one jarvis-cu neither allows nor excludes" python3 - \
+  "$h/session.sh" "$ISO_DIR/../go/internal/cu/policy/apps.go" <<'PY'
+import re, sys
+sh, go = (open(f).read() for f in sys.argv[1:])
+app = re.search(r"^foreign_app=\"?([\w.-]+)\"?", sh, re.M).group(1)
+assert '--app-id "$foreign_app"' in sh
+def strings(pattern):
+    return set(re.findall(r'"([^"]+)"', re.search(pattern, go, re.S).group(1)))
+terminals = strings(r"builtinTerminals = set\(([^)]*)\)")
+prompts = strings(r"credentialPrompts = \[\]string\{([^}]*)\}")
+a = app.lower()
+assert a not in terminals and not any(a.startswith(p) for p in prompts), app
+assert not re.match(r"(jarvis|os\.jarvis\.|rafiq)", a) and "polkit" not in a and "gimp" not in a, app
+PY
+check "every scripted call is a tool merged V offers the model (no cu_begin)" python3 - \
+  "$ISO_DIR/smoke/assets/cu/cu-gimp.json" "$ISO_DIR/../../packages/core/src/agent/screen-tools.ts" <<'PY'
+import json, re, sys
+ts = open(sys.argv[2]).read()
+block = re.search(r"export const SCREEN_TOOLS = \{([^}]*)\}", ts).group(1)
+offered = {v.replace(".", "_") for v in re.findall(r'"(screen\.\w+)"', block)}
+calls = {s["call"] for t in json.load(open(sys.argv[1]))["turns"] for s in t["steps"] if "call" in s}
+assert calls and calls <= offered, (calls - offered, offered)
 PY
 # The privacy scan must not be fooled by a missing directory under pipefail.
 scan_test() {

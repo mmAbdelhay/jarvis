@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Sourced by session.sh (and tests). Safe under `set -o pipefail`.
 # png_hits PATH... — prints every regular file under the existing PATHs (files
 # or directories) that contains a base64 or raw PNG signature. Missing paths

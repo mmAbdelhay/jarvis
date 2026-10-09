@@ -16,17 +16,13 @@
       "expectPromptContains": "cu-probe",
       "steps": [
         {
-          "call": "cu_begin",
+          "call": "screen_look",
           "input": {
             "goal": "cu-probe: look at the GIMP window",
             "apps": [
               "${GIMP_APP}"
             ]
           }
-        },
-        {
-          "call": "screen_look",
-          "input": {}
         },
         {
           "call": "screen_click",
@@ -54,17 +50,13 @@
       "expectPromptContains": "cu-deny",
       "steps": [
         {
-          "call": "cu_begin",
+          "call": "screen_look",
           "input": {
             "goal": "cu-deny: export beach as PNG to Pictures",
             "apps": [
               "${GIMP_APP}"
             ]
           }
-        },
-        {
-          "call": "screen_look",
-          "input": {}
         },
         {
           "call": "screen_done",
@@ -82,17 +74,13 @@
       "expectPromptContains": "export it as PNG to Pictures",
       "steps": [
         {
-          "call": "cu_begin",
+          "call": "screen_look",
           "input": {
             "goal": "open the GIMP image beach.xcf and export it as PNG to Pictures",
             "apps": [
               "${GIMP_APP}"
             ]
           }
-        },
-        {
-          "call": "screen_look",
-          "input": {}
         },
         {
           "call": "screen_done",
@@ -110,17 +98,13 @@
       "expectPromptContains": "cu-excluded",
       "steps": [
         {
-          "call": "cu_begin",
+          "call": "screen_look",
           "input": {
             "goal": "cu-excluded: press a key in GIMP",
             "apps": [
               "${GIMP_APP}"
             ]
           }
-        },
-        {
-          "call": "screen_look",
-          "input": {}
         },
         {
           "call": "screen_look",
@@ -135,7 +119,7 @@
           "input": {
             "combo": "ctrl+shift+e"
           },
-          "expectError": "excluded"
+          "hold": 8
         },
         {
           "call": "screen_done",
@@ -153,7 +137,7 @@
       "expectPromptContains": "cu-stuck",
       "steps": [
         {
-          "call": "cu_begin",
+          "call": "screen_look",
           "input": {
             "goal": "cu-stuck: keep looking",
             "apps": [
@@ -162,13 +146,9 @@
           }
         },
         {
-          "call": "screen_look",
-          "input": {}
-        },
-        {
           "call": "screen_key",
           "input": {
-            "combo": "shift"
+            "combo": "ctrl+shift+a"
           }
         },
         {
@@ -176,50 +156,24 @@
           "input": {}
         },
         {
-          "call": "screen_key",
-          "input": {
-            "combo": "shift"
-          }
+          "call": "screen_look",
+          "input": {}
         },
         {
           "call": "screen_look",
           "input": {}
         },
         {
-          "call": "screen_key",
-          "input": {
-            "combo": "shift"
-          }
+          "call": "screen_look",
+          "input": {}
         },
         {
           "call": "screen_look",
           "input": {}
         },
         {
-          "call": "screen_key",
-          "input": {
-            "combo": "shift"
-          }
-        },
-        {
           "call": "screen_look",
           "input": {}
-        },
-        {
-          "call": "screen_key",
-          "input": {
-            "combo": "shift"
-          }
-        },
-        {
-          "call": "screen_look",
-          "input": {}
-        },
-        {
-          "call": "screen_key",
-          "input": {
-            "combo": "shift"
-          }
         },
         {
           "call": "screen_look",
@@ -235,17 +189,13 @@
       "expectPromptContains": "cu-lock",
       "steps": [
         {
-          "call": "cu_begin",
+          "call": "screen_look",
           "input": {
             "goal": "cu-lock: hold the session",
             "apps": [
               "${GIMP_APP}"
             ]
           }
-        },
-        {
-          "call": "screen_look",
-          "input": {}
         },
         {
           "call": "screen_look",
@@ -266,17 +216,13 @@
       "expectPromptContains": "cu-physical",
       "steps": [
         {
-          "call": "cu_begin",
+          "call": "screen_look",
           "input": {
             "goal": "cu-physical: hold the session",
             "apps": [
               "${GIMP_APP}"
             ]
           }
-        },
-        {
-          "call": "screen_look",
-          "input": {}
         },
         {
           "call": "screen_look",
@@ -295,6 +241,8 @@
   ],
   "concerns": [
     "Escalation to U/V: contracts \u00a74 U-1 makes only the original allowed GIMP toplevel fullscreen. Export Image and Export Image as PNG are separate toplevels: their titles/rectangles are redacted and their focus makes captures all black. X cannot locate or verify their save buttons via screen.look. U/V must agree a safe visible, focusable dialog capture/input contract before X10/X11 can test Review Focus 4 (deny leaves no file; approve writes PNG). These turns are blocked and do not claim consequential-card or export coverage.",
-    "X10/X11: ordinary fullscreen screenshots have vacuous:true and ok:false because there are no foreign pixels to inspect. This means missing mask evidence, not a leak. Require a controlled all-black capture (turn.mask or step.mask mode all-black), or a known full-frame fixture (mode fixture with pngBase64) before asserting ok. Excluded-focus captures must be all black. Summary-only screen.look cannot provide outside-target geometry."
+    "X10/X11: ordinary fullscreen screenshots have vacuous:true and ok:false because there are no foreign pixels to inspect. This means missing mask evidence, not a leak. Require a controlled all-black capture (turn.mask or step.mask mode all-black), or a known full-frame fixture (mode fixture with pngBase64) before asserting ok. Excluded-focus captures must be all black. Summary-only screen.look cannot provide outside-target geometry.",
+    "Merged V (screen-tools.ts, computer-use.ts) never offers cu_begin to the model: a session starts with screen_look {goal, apps}, and the begin card's cu.begin item is hidden. V also rewrites helper refusals into English (cu-text.ts CU_MODEL_TEXT); fakevision maps those texts back to codes, and its tests read cu-text.ts.",
+    "Excluded turn (merged U session.go checkFocus): a terminal taking focus PAUSES the session (excluded-focus); V then holds every call in waitForResume until cu:resume/cu:stop. So criterion 4 is the pause plus no key in the audit (session.sh ends the turn with cu-stop), and the all-black evidence comes from the held look while a foreign NON-excluded window (foot --app-id cu-foreign-viewer) has focus: Capture blanks because the focused window is not allowed, without pausing."
   ]
 }

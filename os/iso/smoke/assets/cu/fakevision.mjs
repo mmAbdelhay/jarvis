@@ -61,6 +61,17 @@ export function resultBody(content) {
   }
 }
 
+// Merged V (packages/core/src/agent/cu-text.ts CU_MODEL_TEXT, screen-tools.ts) never
+// passes the helper's code to the model: it rewrites each refusal into English. These
+// map those texts back to the code they stand for; fakevision.test.mjs reads cu-text.ts
+// so a reworded text fails the static tests instead of the container run.
+const V_REFUSALS = [
+  [/has ended for this request|could not start or went away|No computer-use session is running|stopped computer use/, "no-session"],
+  [/outside the allowed windows|is outside the \d+x\d+ screenshot/, "outside"],
+  [/A protected window .* has focus/, "excluded"],
+  [/took over the screen|paused and then resumed/, "paused"],
+];
+
 /** The contract §1 error code in a tool result, or null when it succeeded. */
 export function errorCode(content) {
   const text = String(content ?? "");
@@ -68,13 +79,29 @@ export function errorCode(content) {
   const code = body?.error?.code ?? body?.code;
   if (typeof code === "string" && ERROR_CODES.includes(code)) return code;
   if (!text.startsWith("ERROR:")) return null;
+  const v = V_REFUSALS.find(([re]) => re.test(text));
+  if (v !== undefined) return v[1];
   return ERROR_CODES.find((c) => new RegExp(`\\b${c}\\b`).test(text)) ?? "failed";
+}
+
+/** Capture data ({windows, ...}) from a tool result: the helper's shape, or merged V's
+ *  screen.look result — a fenced array of the allowed windows only (no "allowed" field). */
+export function captureOf(content) {
+  const body = resultBody(content);
+  if (body !== null && Array.isArray(body.windows)) return body;
+  if (Array.isArray(body) && body.every((w) => w !== null && typeof w === "object" && typeof w.appId === "string")) {
+    const size = String(content ?? "").match(/(\d+)x(\d+) pixels/);
+    return {
+      ...(size ? { width: Number(size[1]), height: Number(size[2]) } : {}),
+      windows: body.map((w) => ({ ...w, allowed: true })),
+    };
+  }
+  return null;
 }
 
 /** The user said no to a card (a window list mentioning "denied" is not that). */
 export function isDenied(content) {
-  const body = resultBody(content);
-  if (body !== null && Array.isArray(body.windows)) return false;
+  if (captureOf(content) !== null) return false;
   return DENIED.test(String(content ?? ""));
 }
 
@@ -83,8 +110,8 @@ export function windowsIn(messages) {
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
     if (m?.role !== "tool" && !(Array.isArray(m?.images) && m.images.length > 0)) continue;
-    const body = resultBody(m.content);
-    if (body !== null && Array.isArray(body.windows)) return body;
+    const body = captureOf(m.content);
+    if (body !== null) return body;
   }
   return null;
 }
@@ -126,8 +153,8 @@ export function createFakeVision(script, { env = process.env } = {}) {
   function inspect(messages, record) {
     let info = null;
     for (const [messageIndex, m] of messages.entries()) {
-      const data = resultBody(m?.content);
-      if ((m?.role === "tool" || Array.isArray(m?.images)) && Array.isArray(data?.windows)) info = data;
+      const data = captureOf(m?.content);
+      if ((m?.role === "tool" || Array.isArray(m?.images)) && data !== null) info = data;
       for (const b64 of Array.isArray(m?.images) ? m.images : []) {
         const digest = createHash("sha256").update(String(b64)).digest("hex");
         const key = JSON.stringify([record === null ? "off" : report.turns.indexOf(record), messageIndex, digest, info?.windows]);

@@ -6,6 +6,7 @@
 //   cucheck turn REPORT NAME [--images] [--evidence]
 //   cucheck no-screen-tools REPORT NAME
 //   cucheck looks-below REPORT NAME N
+//   cucheck step REPORT NAME N
 //   cucheck no-leaks REPORT
 //   cucheck card LOG begin|consequential [--absent] [--title-has TEXT]
 //   cucheck active LOG
@@ -53,11 +54,24 @@ export function noScreenTools(report, name) {
   return screen.length === 0 ? [] : [`screen tools offered while computer use is off: ${screen.join(", ")}`];
 }
 
+// A look "reached the model" when it came back without an error: merged V answers the
+// stuck look and every later one with a refusal (no screenshot), which fakevision still
+// records as received. The script must also issue at least n looks, or the bound is vacuous.
 export function looksBelow(report, name, n) {
   const turn = lastTurn(report, name);
   if (turn === undefined) return [`no turn "${name}" reached the model`];
-  const looks = turn.steps.filter((s) => s.call === "screen_look" && s.result?.received).length;
-  return looks < n ? [] : [`${looks} looks reached the model; the stuck loop was not stopped before ${n}`];
+  const issued = turn.steps.filter((s) => s.call === "screen_look").length;
+  const looks = turn.steps.filter((s) => s.call === "screen_look" && s.result?.received && s.result.error === null).length;
+  const p = looks < n ? [] : [`${looks} looks reached the model; the stuck loop was not stopped before ${n}`];
+  if (issued < n) p.push(`only ${issued} looks were issued; the script must try at least ${n}`);
+  return p;
+}
+
+/** The model has issued step index n of the turn (fakevision saves the report before a held reply). */
+export function stepIssued(report, name, n) {
+  const turn = lastTurn(report, name);
+  if (turn === undefined) return [`no turn "${name}" reached the model`];
+  return turn.steps.length > n ? [] : [`turn "${name}" has issued ${turn.steps.length} steps, waiting for step ${n}`];
 }
 
 export function leaks(report) {
@@ -133,6 +147,7 @@ export function main(argv) {
       case "turn": problems = turnProblems(json(a), b, { images: values.images === true, evidence: values.evidence === true }); break;
       case "no-screen-tools": problems = noScreenTools(json(a), b); break;
       case "looks-below": problems = looksBelow(json(a), b, Number(c)); break;
+      case "step": problems = stepIssued(json(a), b, Number(c)); break;
       case "no-leaks": problems = leaks(json(a)); break;
       case "card": problems = cardProblems(events(a), b, { absent: values.absent === true, titleHas: values["title-has"] }); break;
       case "active": problems = isActive(events(a)) ? [] : ["no cu:state with active true"]; break;

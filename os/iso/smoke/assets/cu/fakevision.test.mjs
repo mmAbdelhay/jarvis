@@ -206,18 +206,76 @@ test("U-1: fullscreen images fail closed rather than claiming mask evidence", ()
   assert.equal(core.report.turns[0].images[0].ok, false);
 });
 
-test("fixture flows use cu.begin before capture, with explicit blocked export coverage", () => {
+test("fixture flows begin the way merged V does: screen_look {goal, apps}, never cu_begin", () => {
   const script = JSON.parse(readFileSync(new URL("./cu-gimp.json", import.meta.url), "utf8"));
   assert.deepEqual(script.turns.map((t) => t.name), ["off", "probe", "deny", "export", "excluded", "stuck", "lock", "physical"]);
+  // V offers only the screen_* tools; cu.begin is the session card's hidden tool (screen-tools.ts).
+  const modelTools = /^screen_(look|click|type|key|scroll|drag|done)$/;
   for (const turn of script.turns.filter((t) => t.name !== "off")) {
-    assert.equal(turn.steps[0].call, "cu_begin", turn.name);
+    assert.equal(turn.steps[0].call, "screen_look", turn.name);
     assert.ok(turn.steps[0].input.goal);
     assert.deepEqual(turn.steps[0].input.apps, ["${GIMP_APP}"]);
-    assert.equal(turn.steps[1].call, "screen_look", turn.name);
-    assert.deepEqual(turn.steps[1].input, {});
+    for (const step of turn.steps.filter((s) => s.call !== undefined)) assert.match(step.call, modelTools, turn.name);
   }
   assert.ok(script.turns.find((t) => t.name === "deny").steps.some((s) => s.call === "screen_done"));
   assert.match(script.turns.find((t) => t.name === "export").steps.at(-1).text, /blocked/);
+});
+
+// What merged V (computer-use.ts look()) actually sends: a header line, then the fenced
+// array of the ALLOWED windows only (no "allowed" field), then the image as a user message.
+const vLook = (windows, png) => [
+  { role: "tool", tool_name: "screen_look", content:
+    `Screenshot of the allowed windows, 100x60 pixels (everything else is black). The allowed windows are listed below.\n${fenced("screen.look", windows)}` },
+  { role: "user", content: "[screenshot from screen_look]", images: [png.toString("base64")] },
+];
+const vWindow = ({ allowed: _a, windowId: _w, ...rest }) => rest;
+
+test("reads merged V's look result: a fenced array of allowed windows", () => {
+  const core = createFakeVision({ turns: [{ name: "p", expectPromptContains: "cu-v", steps: [
+    { call: "screen_look", input: {} },
+    { call: "screen_click", target: { outside: true }, input: { button: "left" }, expectError: "outside" },
+    { call: "screen_look", input: {}, mask: { mode: "all-black" } },
+    { text: "done" },
+  ] }] });
+  const full = vWindow({ ...GIMP, x: 0, y: 0, w: 100, h: 60 });
+  const c = conversation(core, "cu-v");
+  c.ask();
+  c.add(called("screen_look", {}), ...vLook([full], encodePng(100, 60, () => [120, 120, 120])));
+  const r = c.ask();
+  assert.equal(r.call.name, "screen_click", JSON.stringify(core.report.turns[0].steps));
+  assert.ok(r.call.arguments.x >= 100 || r.call.arguments.y >= 60, "a point beyond the screenshot");
+  c.add(called("screen_click", r.call.arguments),
+    { role: "tool", tool_name: "screen_click", content: `ERROR: (${r.call.arguments.x}, ${r.call.arguments.y}) is outside the 100x60 screenshot` });
+  c.ask();
+  c.add(called("screen_look", {}), ...vLook([full], encodePng(100, 60, () => [0, 0, 0])));
+  assert.deepEqual(c.ask(), { text: "done" });
+  const turn = core.report.turns[0];
+  assert.equal(turn.steps[1].pass, true);
+  assert.equal(turn.images[0].vacuous, true, "the fullscreen window list was read");
+  assert.ok(!turn.images[0].problems.some((p) => /no allowed window/.test(p)));
+  assert.equal(turn.images[1].ok, true);
+  assert.equal(turn.images[1].maskMode, "all-black");
+});
+
+test("maps merged V's refusal texts (cu-text.ts) to the helper's error codes", () => {
+  const src = readFileSync(new URL("../../../../../packages/core/src/agent/cu-text.ts", import.meta.url), "utf8");
+  const block = src.slice(src.indexOf("export const CU_MODEL_TEXT"));
+  const text = (key) => {
+    const m = block.match(new RegExp(`\\b${key}:\\s*"((?:[^"\\\\]|\\\\.)*)"`));
+    assert.ok(m, `CU_MODEL_TEXT.${key} not found`);
+    return m[1];
+  };
+  const expect = { outside: "outside", excluded: "excluded", pausedNow: "paused", resumedLookFirst: "paused",
+    stoppedByUser: "no-session", closedThisTurn: "no-session", noSession: "no-session" };
+  for (const [key, code] of Object.entries(expect)) assert.equal(errorCode(`ERROR: ${text(key)}`), code, key);
+  const begin = block.match(/beginFailed: \(message: string\) => `([^$]*)\$\{message\}`/);
+  assert.ok(begin, "beginFailed not found");
+  assert.equal(errorCode(`ERROR: ${begin[1]}a terminal is excluded`), "no-session");
+  const tools = readFileSync(new URL("../../../../../packages/core/src/agent/screen-tools.ts", import.meta.url), "utf8");
+  assert.ok(tools.includes("is outside the ${bounds.width}x${bounds.height} screenshot"));
+  assert.equal(errorCode("ERROR: (1284, 804) is outside the 1280x800 screenshot"), "outside");
+  assert.equal(errorCode(`ERROR: ${text("lookFirst")}`), "failed");
+  assert.equal(isDenied(`Screenshot of the allowed windows.\n${fenced("screen.look", [{ appId: "firefox", title: "Access denied" }])}`), false);
 });
 
 test("fixture creation accepts quotes in the output directory without evaluating them", () => {
