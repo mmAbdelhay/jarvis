@@ -1,10 +1,12 @@
 // packages/desktop/src/daemon/os/cu.e2e.test.ts
 import { type ChildProcess, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { EventEmitter } from "node:events";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { runInNewContext } from "node:vm";
 import { type AgentEvent, type AuditEntry, type CuState, parseFakeScript } from "@jarvis/core";
 import { createAuditLog, createMemorySecretStore, nodeAuditFs } from "@jarvis/platform/model";
 import { afterEach, describe, expect, it } from "vitest";
@@ -44,7 +46,7 @@ const CONFIG = [
 ].join("\n");
 
 describe.skipIf(WINDOWS)("computer use over the real control socket and a fake jarvis-cu", () => {
-  it("prompt -> session card -> look -> click -> save card -> done, audited without screenshots", async () => {
+  it("prompt -> session card -> look -> click -> excluded click -> save card -> done, audited without screenshots", async () => {
     const dir = await mkdtemp(join("/tmp", "jcu-"));
     cleanups.push(() => rm(dir, { recursive: true, force: true }));
     const cuSock = join(dir, "cu.sock");
@@ -198,7 +200,7 @@ describe.skipIf(WINDOWS)("computer use over the real control socket and a fake j
     expect(audit.map((e) => [e.tool, e.result])).toEqual([
       ["cu.end", "ok"],
       ["screen.click", "ok"],
-      ["screen.click", "ok"],
+      ["screen.click", "failed"],
       ["screen.click", "ok"],
       ["cu.begin", "ok"],
     ]);
@@ -213,4 +215,57 @@ describe.skipIf(WINDOWS)("computer use over the real control socket and a fake j
       code: "bad-request",
     });
   }, 15_000);
+});
+
+// Exercise the fixture's actual NDJSON handler with injected filesystem and
+// transport effects, so its contract can also be checked without socket access.
+describe("fake jarvis-cu protocol", () => {
+  it("refuses an excluded surface inside the fullscreen capture without logging payloads", () => {
+    const socket = new EventEmitter();
+    const replies: Array<{ id: string; ok: boolean; data?: unknown; error?: { code: string } }> =
+      [];
+    const ops: string[] = [];
+    const wire = Object.assign(socket, {
+      setEncoding: () => {},
+      write: (line: string) => replies.push(JSON.parse(line)),
+    });
+    const source = readFileSync(FAKE_CU, "utf8").replace(
+      /^import .* from "node:(fs|net)";\n/gm,
+      "",
+    );
+    runInNewContext(source, {
+      appendFileSync: (_path: string, line: string) => ops.push(line),
+      chmodSync: () => {},
+      createServer: (connect: (socket: typeof wire) => void) => ({
+        listen: (_path: string, ready: () => void) => {
+          connect(wire);
+          ready();
+        },
+      }),
+      process: { argv: ["node", FAKE_CU, "cu.sock", "ops.log"], stdout: { write: () => {} } },
+    });
+    const request = (id: string, op: string, fields = {}) =>
+      socket.emit("data", `${JSON.stringify({ id, op, ...fields })}\n`);
+    request("1", "apps");
+    request("2", "begin", { sessionId: "private-goal", appIds: ["org.gimp.GIMP"] });
+    request("3", "capture");
+    request("4", "click", { x: 20, y: 20, button: "left" });
+    request("5", "click", { x: 300, y: 20, button: "left" });
+    request("6", "click", { x: 1280, y: 20, button: "left" });
+    request("7", "end");
+    request("8", "click", { x: 20, y: 20, button: "left" });
+    request("9", "end");
+    expect(replies[0]?.data).toEqual([{ appId: "org.gimp.GIMP", name: "GIMP" }]);
+    expect(replies[2]?.data).toMatchObject({
+      width: 1280,
+      height: 800,
+      windows: [{ x: 0, y: 0, w: 1280, h: 800, focused: true, allowed: true }],
+    });
+    expect(replies[3]).toEqual({ id: "4", ok: true, data: null });
+    expect(replies[4]).toMatchObject({ id: "5", ok: false, error: { code: "excluded" } });
+    expect(replies[5]).toMatchObject({ id: "6", ok: false, error: { code: "outside" } });
+    expect(replies[7]).toMatchObject({ id: "8", ok: false, error: { code: "no-session" } });
+    expect(replies[8]).toEqual({ id: "9", ok: true, data: null });
+    expect(ops.join("")).toBe("apps\nbegin\ncapture\nclick\nclick\nclick\nend\nclick\nend\n");
+  });
 });
