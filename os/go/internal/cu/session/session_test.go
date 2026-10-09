@@ -351,3 +351,30 @@ func TestCaptureBlanksWhenNonAllowedWindowSitsBetweenBaseAndAllowedDialog(t *tes
 		}
 	}
 }
+
+func TestResumeRaisesBaseAfterFocusHopsWhilePaused(t *testing.T) {
+	h := newHarness(t)
+	h.begin(t)
+	h.d.tops = append(h.d.tops, wlcu.Toplevel{ID: "w5", AppID: "gimp", Title: "Export", Outputs: []string{"HEADLESS-1"}})
+	h.m.Pause(proto.ReasonPhysicalInput)
+	// While paused the user clicks around: a browser over the base, then
+	// an allowed dialog over the browser.
+	h.d.focus("w3")
+	h.m.FocusChanged()
+	h.d.focus("w5")
+	h.m.FocusChanged()
+	before := h.d.count("activate w1")
+	if err := h.m.Begin(proto.Begin{SessionID: "s1", AppIDs: []string{"gimp"}}); err != nil {
+		t.Fatal(err)
+	}
+	raised := h.d.count("activate w1") > before
+	r, err := h.m.Capture(proto.Capture{MaxEdge: 640})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Either resume raised the base (nothing sits above it) or the frame
+	// is blanked; never an unblanked frame with w3 possibly above the base.
+	if _, _, c := decodePNG(t, r); !raised && c != [3]uint32{0, 0, 0} {
+		t.Fatalf("resume left a window between base and dialog unblanked: %v", c)
+	}
+}

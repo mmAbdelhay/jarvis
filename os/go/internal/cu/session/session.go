@@ -302,7 +302,10 @@ func (m *Manager) settle(activate bool) (view, error) {
 	}
 	focusedOK := func(v view) bool { return v.focused != nil && m.allowed(*v.focused) }
 	changed := false
-	if activate && (!focusedOK(v) || m.isTainted()) {
+	// At begin/resume the base is raised unless it already holds focus:
+	// focus hops while paused are not tracked (the user may have put a
+	// window that is not allowed between the base and an allowed dialog).
+	if activate && (v.focused == nil || v.focused.ID != v.base.ID || m.isTainted()) {
 		if err := m.d.Desktop.Activate(v.base.ID); err != nil {
 			return v, err
 		}
