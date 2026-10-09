@@ -1,39 +1,35 @@
 # Headless labwc verification
 
-Task 16, Step 4 was run on the owner's Linux box (docker `--context default`,
-debian:trixie, labwc under `WLR_BACKENDS=headless`, build artifacts under
-`~/rafiq-build/v11/cu-e2e`) via `os/go/ci/cu-headless.sh`.
+Run with `os/go/ci/cu-headless.sh` (build with `--build-only` on a dev Mac,
+run with `--run-only` on a Linux box or in CI): debian:trixie, labwc 0.8.3
+under `WLR_BACKENDS=headless`, the real jarvis-cu binary and this test.
 
-Result: 9 of 10 subtests PASS on a real compositor, including the 200 ms
-physical-input pause, terminal-focus blanking, lock end and disconnect
-restore. `--- PASS: TestComputerUseAgainstLabwc` is NOT yet reached.
+Last run (v1.1 final review, owner's Linux box, docker `--context default`,
+artifacts under `~/rafiq-build/v11/final/cu-e2e`):
+`--- PASS: TestComputerUseAgainstLabwc`, all 11 subtests, including the
+200 ms physical-input pause, terminal-focus blanking and pause, the GTK4
+password field, the dialog contract, the lock end and the disconnect
+restore.
 
-## Verified
+## Notes
 - wev matchers `button: 272`, `utf8: 'م'`, `sym: s ` are correct for trixie's
   wev. wev block-buffers stdout on a pipe, so the test starts it through
   `stdbuf -oL`; without that its output stays empty.
+- The terminal-focus subtest found a deadlock: FocusChanged ran a Wayland
+  round trip on the read goroutine, and jarvis-cu exited on the first
+  window change of a session. FocusChanged now reads `wlcu.Client.Current()`.
+- The dialog subtest opens a second zenity window of the allowed app: keys
+  are refused (`outside`) until a capture has raised it and made it the
+  fullscreen base, then they go to it.
 
-## Contract gap (open) — proposed gap 13 for the plan's "Contract gaps" list
+## GTK4 password fields (was proposed contract gap 13)
 
-The plan file is gitignored and is not edited by task agents, so the
-coordinator should copy this entry into that list as item 13:
-
-> 13. **GTK4 password fields are not detected (§4 safety hole).** On trixie,
-> GTK4 password entries expose `ATSPI_ROLE_TEXT` (61), not
-> `ATSPI_ROLE_PASSWORD_TEXT` (40), with no distinguishing state or attribute.
-> `guard.PasswordWatch` never sees a password field, so `type`, `key`,
-> `click`, `scroll` and `drag` are all allowed there. Password refusal is
-> proven by unit tests only until a different detection signal exists, and
-> `--- PASS: TestComputerUseAgainstLabwc` is blocked on it.
-
-Details:
-`password_field_refuses_all_input` FAILS: trixie GTK4 `zenity --password`
-exposes its entry over AT-SPI as `ATSPI_ROLE_TEXT` (61), not
-`ATSPI_ROLE_PASSWORD_TEXT` (40) (states: editable, focusable, showing; no
-distinguishing attribute; interfaces Text/EditableText). `guard.PasswordWatch`
-therefore never reports a password field, and typing is not refused.
-The assertion is intentionally NOT loosened: contracts §4 requires all input
-to be refused in a password field. Toolkits that report role 40 (GTK3, Qt)
-are covered by unit tests only. The coordinator must decide how to close the
-GTK4 gap (for example a different detection signal) before the password
-safety claim counts as proven on a real compositor.
+Trixie's GTK4 `zenity --password` (zenity 4.1.90) exposes its entry as
+`ATSPI_ROLE_TEXT` (61), not `ATSPI_ROLE_PASSWORD_TEXT` (40), with no name,
+no distinguishing state or attribute, and a sibling label `Password:`
+(probed with pyatspi in the same container). `guard.PasswordWatch` now also
+treats a focused text or entry as a password field when its name, its
+labelled-by labels or one of the two labels just before it contains a
+password word (password, passphrase, passcode, PIN; كلمة المرور, كلمة السر,
+رمز المرور, الرقم السري). A GTK4 hidden-text entry with no such label is
+still not detected; `docs/os/threat-model.md` records it as an accepted risk.
