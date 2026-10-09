@@ -73,7 +73,7 @@ Item {
                 Text {
                     objectName: "cuDetail"
                     visible: text.length > 0
-                    text: (root.session?.detailText ?? "")
+                    text: (root.session?.paused ?? false) ? root.session.detailText : ""
                     textFormat: Text.PlainText
                     color: (root.session?.paused ?? false) ? Theme.approvalMuted : Theme.warn
                     font.pixelSize: Theme.fontTiny

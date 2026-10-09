@@ -109,6 +109,22 @@ TestCase {
         verify(!findChild(c.overlay, "cuTakeOver").enabled) // busy until jarvisd answers
     }
 
+    function test_failedStopNeverShowsDaemonError() {
+        const c = make(state({}))
+        c.session.stop()
+        verify(c.session.busy)
+        testCuRequests.applyCuRequestResult(c.session, false, "secret")
+        waitForRendering(c.overlay)
+        verify(c.session.error.indexOf("secret") >= 0)
+        const detail = findChild(c.overlay, "cuDetail")
+        verify(detail.text.indexOf("secret") < 0)
+        verify(detail.Accessible.name.indexOf("secret") < 0)
+        verify(findChild(c.overlay, "cuPill").Accessible.name.indexOf("secret") < 0)
+        compare(detail.text, "")
+        verify(!detail.visible)
+        compare(findChild(c.overlay, "cuError").text, "Screen control request failed.")
+    }
+
     function test_pausedOffersResumeAndStop() {
         const c = make(state({ paused: "physical-input" }))
         compare(findChild(c.overlay, "cuStatus").text, "Paused · you have control")
