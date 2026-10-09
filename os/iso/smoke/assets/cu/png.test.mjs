@@ -111,6 +111,25 @@ test("an over-large capture and a list without allowed windows are problems", ()
   assert.match(checkMask(clean(), [TERMINAL]).problems.join(), /no allowed window/);
 });
 
+test("U-1: an allowed window covering the frame makes the mask vacuous, and says so", () => {
+  const full = { ...ALLOWED, x: 0, y: 0, w: 100, h: 60 };
+  const img = withPixel(5, 5, [200, 0, 0]);
+  const r = checkMask(img, [full]);
+  assert.equal(r.vacuous, true);
+  assert.equal(r.ok, false);
+  assert.match(r.problems.join(), /cannot detect a leak/);
+  assert.equal(checkMask(img, [full], { fullFrameChecked: true }).ok, true);
+});
+
+test("expectAllBlack ignores allowed rectangles: any visible pixel is a leak", () => {
+  const full = { ...ALLOWED, x: 0, y: 0, w: 100, h: 60 };
+  assert.equal(checkMask(decodePng(encodePng(100, 60, () => [0, 0, 0])), [full], { expectAllBlack: true }).ok, true);
+  assert.equal(checkMask(clean(), [full], { expectAllBlack: true }).ok, false);
+  const r = checkMask(withPixel(5, 5, [200, 0, 0]), [full], { expectAllBlack: true });
+  assert.equal(r.ok, false);
+  assert.equal(r.leakedPixels, 1 + 60 * 60);
+});
+
 test("foreignPoint finds a spot on the terminal away from GIMP, or nothing", () => {
   const p = foreignPoint([ALLOWED, TERMINAL]);
   assert.ok(p !== null && p.x < 30 && p.y < 30, JSON.stringify(p));

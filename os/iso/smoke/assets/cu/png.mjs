@@ -119,7 +119,20 @@ const within = (x, y, r, pad) => x >= r.x - pad && x < r.x + r.w + pad && y >= r
  *  from all allowed rectangles must be exactly black. `foreignPixels` counts
  *  the checked pixels that lie on a non-allowed window, so a test can prove a
  *  foreign window was actually in view. */
-export function checkMask(image, windows, { tolerance = 2, maxEdge = 1280 } = {}) {
+/**
+ * Contracts section 4 ruling U-1: `windows` reports the one allowed window as
+ * 0,0,capW,capH, so with the real jarvis-cu every pixel is "allowed" and the
+ * mask below is vacuous (it can never see a leak). Callers must therefore say
+ * what they are checking:
+ *  - `expectAllBlack: true` ignores the allowed rectangles: the whole frame must
+ *    be black (use it when a foreign window is raised or focused, or the allowed
+ *    window is not fullscreen and focused).
+ *  - `fullFrameChecked: true` acknowledges that the allowed rectangle covers the
+ *    frame and that the caller verifies the content another way (for example
+ *    against the known GIMP fixture); otherwise a frame-covering allowed
+ *    rectangle is reported as a problem and `vacuous` is true.
+ */
+export function checkMask(image, windows, { tolerance = 2, maxEdge = 1280, expectAllBlack = false, fullFrameChecked = false } = {}) {
   const problems = [];
   if (Math.max(image.width, image.height) > maxEdge) {
     problems.push(`capture is ${image.width}x${image.height}; the longest edge must be at most ${maxEdge}`);
@@ -128,12 +141,16 @@ export function checkMask(image, windows, { tolerance = 2, maxEdge = 1280 } = {}
   const allowed = list.filter((w) => w?.allowed === true).map(rectOf);
   const foreign = list.filter((w) => w?.allowed !== true).map(rectOf);
   if (allowed.length === 0) problems.push("the capture's window list has no allowed window");
+  const vacuous = !expectAllBlack && allowed.some((r) => r.x - tolerance <= 0 && r.y - tolerance <= 0 && r.x + r.w + tolerance >= image.width && r.y + r.h + tolerance >= image.height);
+  if (vacuous && !fullFrameChecked) {
+    problems.push("the allowed window covers the whole frame, so the mask cannot detect a leak; pass expectAllBlack, or fullFrameChecked after comparing the content to the fixture");
+  }
   let leaked = 0;
   let foreignPixels = 0;
   let first = null;
   for (let y = 0; y < image.height; y++) {
     for (let x = 0; x < image.width; x++) {
-      if (allowed.some((r) => within(x, y, r, tolerance))) continue;
+      if (!expectAllBlack && allowed.some((r) => within(x, y, r, tolerance))) continue;
       if (foreign.some((r) => within(x, y, r, 0))) foreignPixels += 1;
       const [r, g, b] = rgbAt(image, x, y);
       if (r !== 0 || g !== 0 || b !== 0) {
@@ -145,7 +162,7 @@ export function checkMask(image, windows, { tolerance = 2, maxEdge = 1280 } = {}
   if (first !== null) {
     problems.push(`${leaked} pixels outside the allowed windows are not black (first at ${first.x},${first.y} = ${first.rgb.join(",")})`);
   }
-  return { ok: problems.length === 0, problems, leakedPixels: leaked, foreignPixels, width: image.width, height: image.height };
+  return { ok: problems.length === 0, problems, leakedPixels: leaked, foreignPixels, vacuous, width: image.width, height: image.height };
 }
 
 /** A point inside a non-allowed window and away from every allowed one: the
