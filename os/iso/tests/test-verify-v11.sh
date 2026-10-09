@@ -23,6 +23,18 @@ fresh; sed -i.bak '/RestrictAddressFamilies/d' "$c/usr/lib/systemd/user/jarvis-c
 fresh; mkdir -p "$c/etc/systemd/user/default.target.wants"; ln -s /usr/lib/systemd/user/jarvis-cu.service "$c/etc/systemd/user/default.target.wants/jarvis-cu.service"
 check "an enabled unit (would run in every session) is caught" caught
 fresh; sed -i.bak '/jarvis-cu\/labwc\/autostart/d' "$c/etc/xdg/labwc/autostart"; check "autostart without jarvis-cu is caught" caught
+fresh; sed -i.bak '/^systemctl --user import-environment /d' "$c/etc/xdg/labwc/autostart"
+check "helper without session environment import is caught" caught
+fresh; python3 - "$c/etc/xdg/labwc/autostart" <<'PYTEST'
+import sys
+from pathlib import Path
+p = Path(sys.argv[1])
+lines = p.read_text().splitlines()
+helper = next(line for line in lines if line.startswith('if [ -r /usr/share/jarvis-cu/'))
+lines.remove(helper)
+p.write_text(helper + '\n' + '\n'.join(lines) + '\n')
+PYTEST
+check "helper started before session environment import is caught" caught
 fresh; echo '. /usr/share/jarvis-cu/labwc/autostart' >> "$c/etc/xdg/labwc-classic/autostart"; check "jarvis-cu in the classic session is caught" caught
 fresh; sed -i.bak '/jarvis-cu.service/d' "$c/usr/libexec/jarvis/jarvis-shell-guard"; check "a fallback that leaves jarvis-cu running is caught" caught
 fresh; sed -i.bak '/QT_LINUX_ACCESSIBILITY_ALWAYS_ON/d' "$c/etc/xdg/labwc/environment"; check "Qt not on the AT-SPI bus is caught" caught
