@@ -53,6 +53,14 @@ export const OS_CONTROL_REQUESTS = {
   /** Rafiq M4 §3: a: [{lang: "en"|"ar"}], v: null. jarvisd writes os.language
    *  in jarvis.yaml and pushes ui:language to every client. */
   uiSetLanguage: "ui:setLanguage",
+  /** Rafiq v1.1 §2: a: [], v: null — ends the computer-use session and stops the turn. Local only. */
+  cuStop: "cu:stop",
+  /** Rafiq v1.1 §2: a: [], v: null — resumes a paused session. Local only. */
+  cuResume: "cu:resume",
+  /** Rafiq v1.1 §2: a: [{providerId, enabled}], v: null. Local only. */
+  cuSetEnabled: "cu:setEnabled",
+  /** Rafiq v1.1 §4.8: a: [{providerId, revoke?}], v: null — consent for non-loopback screenshots. Local only. */
+  cuConsent: "cu:consent",
 } as const;
 
 export const OS_CONTROL_PUSHES = {
@@ -68,6 +76,8 @@ export const OS_CONTROL_PUSHES = {
   remoteStatus: "remote:status",
   /** Rafiq M4 §3: {lang}; on every change and first on every new connection. */
   uiLanguage: "ui:language",
+  /** Rafiq v1.1 §2: CuState on every change and on every new connection. */
+  cuState: "cu:state",
 } as const;
 
 export const PROVIDER_KINDS = ["anthropic", "openai-compatible", "ollama", "gemini"] as const;
@@ -616,4 +626,54 @@ export function parseUiSetLanguage(args: readonly unknown[]): Parsed<{ lang: UiL
     return fail('expected [{lang: "en" | "ar"}]');
   }
   return ok({ lang: lang as UiLanguage });
+}
+
+// ── Rafiq v1.1 computer use (contracts §2) ──────────────────────────────
+
+/** Max actions per computer-use goal (design §2.7). */
+export const CU_MAX_STEPS = 50;
+export type CuStepStatus = "done" | "running" | "pending" | "failed";
+export type CuStep = { title: string; status: CuStepStatus };
+export const CU_PAUSE_REASONS = ["physical-input", "esc", "locked", "excluded-focus"] as const;
+export type CuPauseReason = (typeof CU_PAUSE_REASONS)[number];
+/** The cu:state push. With no session: active false, sessionId null, goal "",
+ *  apps [], step 0, maxSteps 50, steps [], paused null (contracts §4.9). */
+export type CuState = {
+  active: boolean;
+  sessionId: string | null;
+  goal: string;
+  apps: string[];
+  step: number;
+  maxSteps: number;
+  steps: CuStep[];
+  paused: CuPauseReason | null;
+};
+export type CuSetEnabledRequest = { providerId: string; enabled: boolean };
+export type CuConsentRequest = { providerId: string; revoke?: boolean };
+
+function isConfigurableProviderId(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    PROVIDER_ID_PATTERN.test(value) &&
+    !RESERVED_PROVIDER_IDS.has(value)
+  );
+}
+
+export function parseCuSetEnabled(args: readonly unknown[]): Parsed<CuSetEnabledRequest> {
+  const a = single(args);
+  const providerId = a?.["providerId"];
+  const enabled = a?.["enabled"];
+  if (!isConfigurableProviderId(providerId)) return fail("providerId must be a provider id");
+  if (typeof enabled !== "boolean") return fail("enabled must be true or false");
+  return ok({ providerId, enabled });
+}
+
+export function parseCuConsent(args: readonly unknown[]): Parsed<CuConsentRequest> {
+  const a = single(args);
+  const providerId = a?.["providerId"];
+  const revoke = a?.["revoke"];
+  if (!isConfigurableProviderId(providerId)) return fail("providerId must be a provider id");
+  if (revoke === undefined) return ok({ providerId });
+  if (typeof revoke !== "boolean") return fail("revoke must be true or false");
+  return ok({ providerId, revoke });
 }
