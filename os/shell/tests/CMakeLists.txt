@@ -79,3 +79,22 @@ set_tests_properties(settings_window_smoke PROPERTIES LABELS smoke TIMEOUT 30
   ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QML_IMPORT_PATH=${QT_QML_OUTPUT_DIRECTORY};XDG_RUNTIME_DIR=${CMAKE_CURRENT_BINARY_DIR}/settings-smoke;JARVIS_I18N_DIR=${JARVIS_I18N_BUILD_DIR}"
   FAIL_REGULAR_EXPRESSION "is not installed|is not a type|ReferenceError|TypeError|Cannot assign")
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/settings-smoke)
+
+# Rafiq v1.1 design §2.3 on a real compositor: the overlay on two headless
+# labwc outputs, click-through outside the pill, outputs coming and going.
+# Linux only; registered when every tool it drives is installed (CI checks it is).
+if(JARVIS_SHELL_LAYERSHELL)
+  find_program(JARVIS_LABWC labwc)
+  find_program(JARVIS_GRIM grim)
+  find_program(JARVIS_WLRCTL wlrctl)
+  find_program(JARVIS_WLR_RANDR wlr-randr)
+  if(JARVIS_LABWC AND JARVIS_GRIM AND JARVIS_WLRCTL AND JARVIS_WLR_RANDR)
+    qt_add_executable(tst_overlay_wayland wayland/tst_overlay_wayland.cpp)
+    target_link_libraries(tst_overlay_wayland PRIVATE jarvis_shell_core jarvis_shell_coreplugin Qt6::Test)
+    target_compile_definitions(tst_overlay_wayland PRIVATE JARVIS_QML_DIR="${QT_QML_OUTPUT_DIRECTORY}")
+    add_dependencies(tst_overlay_wayland jarvis_ui)
+    add_test(NAME overlay_wayland
+      COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/wayland/run-headless-labwc.sh $<TARGET_FILE:tst_overlay_wayland>)
+    set_tests_properties(overlay_wayland PROPERTIES LABELS wayland TIMEOUT 150)
+  endif()
+endif()

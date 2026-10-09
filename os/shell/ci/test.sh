@@ -20,6 +20,9 @@ cmake --build os/shell/build
 export QT_QPA_PLATFORM=offscreen
 export JARVISD_ENTRY="${JARVISD_ENTRY:-$PWD/packages/desktop/dist-daemon/jarvisd.mjs}"
 ctest --test-dir os/shell/build --output-on-failure
+# Rafiq v1.1: the overlay test must really run on CI, not be skipped for a missing tool.
+ctest --test-dir os/shell/build -N -L wayland | grep -q overlay_wayland \
+  || { echo "overlay_wayland not registered: install labwc grim wlrctl wlr-randr" >&2; exit 1; }
 
 rm -rf os/shell/build/stage
 DESTDIR="$PWD/os/shell/build/stage" cmake --install os/shell/build
