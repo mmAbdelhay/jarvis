@@ -30,6 +30,8 @@ QJsonObject list(const QSet<QString>& enabled = {}, const QSet<QString>& consent
                          provider(u"work"_s, u"anthropic"_s, u"https://api.anthropic.com"_s, u"claude-sonnet-5-5"_s, true),
                          provider(u"tiny"_s, u"ollama"_s, u"http://127.0.0.1:11434"_s, u"qwen3:1.7b"_s, false),
                          provider(u"den"_s, u"ollama"_s, u"http://192.168.1.20:11434"_s, u"llava:13b"_s, true),
+                         provider(u"vps"_s, u"ollama"_s, u"https://ollama.example.com"_s, u"llava:13b"_s, true),
+                         provider(u"vpsip"_s, u"ollama"_s, u"http://203.0.113.7:11434"_s, u"llava:13b"_s, true),
                          provider(u"llama"_s, u"openai-compatible"_s, u"http://[::1]:8080/v1"_s, u"vl"_s, true),
                          provider(u"old"_s, u"anthropic"_s, u"https://api.anthropic.com"_s, u"claude-x"_s, QJsonValue::Undefined)};
     for (qsizetype i = 0; i < providers.size(); ++i) {
@@ -64,7 +66,7 @@ private slots:
         QVERIFY(!m.known());
         m.loadList(list());
         QVERIFY(m.known());
-        QCOMPARE(m.count(), 6);
+        QCOMPARE(m.count(), 8);
         for (int i = 0; i < m.rowCount(); ++i)
             QVERIFY(!m.data(m.index(i), CuSettingsModel::EnabledRole).toBool());
         QVERIFY(role(m, u"local"_s, CuSettingsModel::VisionRole).toBool());
@@ -100,6 +102,11 @@ private slots:
                  u"Screenshots of the allowed windows go to Anthropic."_s);
         QCOMPARE(role(m, u"den"_s, CuSettingsModel::PrivacyRole).toString(),
                  u"Screenshots of the allowed windows go to a computer on your network."_s);
+        // A public Ollama host is not "your network": name the host.
+        QCOMPARE(role(m, u"vps"_s, CuSettingsModel::PrivacyRole).toString(),
+                 u"Screenshots of the allowed windows go to ollama.example.com."_s);
+        QCOMPARE(role(m, u"vpsip"_s, CuSettingsModel::PrivacyRole).toString(),
+                 u"Screenshots of the allowed windows go to 203.0.113.7."_s);
     }
 
     void noVisionCannotBeEnabled()
@@ -246,8 +253,8 @@ private slots:
     void excludedAppsAreFixed()
     {
         CuSettingsModel m;
-        QCOMPARE(m.excludedApps(), (QStringList{u"The Jarvis shell and Settings"_s, u"Lock screen"_s, u"Installer"_s,
-                                                u"Password prompts (polkit)"_s, u"Terminals"_s,
+        QCOMPARE(m.excludedApps(), (QStringList{u"Jarvis apps, the shell and Settings"_s, u"Lock screen"_s, u"Installer"_s,
+                                                u"Password and key prompts (polkit, keyrings, SSH)"_s, u"Terminals"_s,
                                                 u"Password fields in any app"_s}));
     }
 

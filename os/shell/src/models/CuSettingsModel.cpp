@@ -16,6 +16,17 @@ bool isLoopbackHost(const QString& host)
     const QHostAddress address(host);
     return !address.isNull() && address.isLoopback();
 }
+
+// RFC1918, link-local, ULA, mDNS names and bare single-label LAN names.
+bool isPrivateHost(const QString& host)
+{
+    if (host.endsWith(u".local", Qt::CaseInsensitive))
+        return true;
+    const QHostAddress address(host);
+    if (address.isNull())
+        return !host.isEmpty() && !host.contains(u'.');
+    return address.isPrivateUse() || address.isLinkLocal();
+}
 } // namespace
 
 CuSettingsModel::CuSettingsModel(QObject* parent)
@@ -63,9 +74,11 @@ bool CuSettingsModel::screenshotsLeave(const Row& row)
 
 QString CuSettingsModel::destination(const Row& row) const
 {
-    return ProviderModel::providerMode(row.kind, row.baseUrl) == u"cloud"
-               ? ProviderModel::providerLabel(row.kind, row.baseUrl)
-               : tr("a computer on your network");
+    if (ProviderModel::providerMode(row.kind, row.baseUrl) == u"cloud")
+        return ProviderModel::providerLabel(row.kind, row.baseUrl);
+    // Self-hosted Ollama and similar can sit on the public internet: name the host then.
+    const QString host = QUrl(row.baseUrl).host();
+    return isPrivateHost(host) ? tr("a computer on your network") : host;
 }
 
 QString CuSettingsModel::consentProviderName() const
@@ -76,9 +89,10 @@ QString CuSettingsModel::consentProviderName() const
 
 QStringList CuSettingsModel::excludedApps() const
 {
-    // Contracts §1: jarvis-cu refuses all input while one of these has focus.
-    return {tr("The Jarvis shell and Settings"), tr("Lock screen"), tr("Installer"),
-            tr("Password prompts (polkit)"), tr("Terminals"), tr("Password fields in any app")};
+    // Contracts §1 + §4.4: jarvis-cu refuses all input while one of these has focus.
+    return {tr("Jarvis apps, the shell and Settings"), tr("Lock screen"), tr("Installer"),
+            tr("Password and key prompts (polkit, keyrings, SSH)"), tr("Terminals"),
+            tr("Password fields in any app")};
 }
 
 int CuSettingsModel::rowOf(const QString& id) const

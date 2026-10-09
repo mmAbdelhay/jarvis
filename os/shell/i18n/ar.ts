@@ -375,8 +375,8 @@
             <translation>حاسوب على شبكتك</translation>
         </message>
         <message>
-            <source>The Jarvis shell and Settings</source>
-            <translation>واجهة جارفيس والإعدادات</translation>
+            <source>Jarvis apps, the shell and Settings</source>
+            <translation>تطبيقات جارفيس والواجهة والإعدادات</translation>
         </message>
         <message>
             <source>Lock screen</source>
@@ -387,8 +387,8 @@
             <translation>المثبّت</translation>
         </message>
         <message>
-            <source>Password prompts (polkit)</source>
-            <translation>نوافذ طلب كلمة المرور (polkit)</translation>
+            <source>Password and key prompts (polkit, keyrings, SSH)</source>
+            <translation>نوافذ كلمات المرور والمفاتيح (polkit وحلقات المفاتيح وSSH)</translation>
         </message>
         <message>
             <source>Terminals</source>

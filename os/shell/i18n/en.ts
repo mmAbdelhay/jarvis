@@ -371,8 +371,8 @@
             <translation>a computer on your network</translation>
         </message>
         <message>
-            <source>The Jarvis shell and Settings</source>
-            <translation>The Jarvis shell and Settings</translation>
+            <source>Jarvis apps, the shell and Settings</source>
+            <translation>Jarvis apps, the shell and Settings</translation>
         </message>
         <message>
             <source>Lock screen</source>
@@ -383,8 +383,8 @@
             <translation>Installer</translation>
         </message>
         <message>
-            <source>Password prompts (polkit)</source>
-            <translation>Password prompts (polkit)</translation>
+            <source>Password and key prompts (polkit, keyrings, SSH)</source>
+            <translation>Password and key prompts (polkit, keyrings, SSH)</translation>
         </message>
         <message>
             <source>Terminals</source>
