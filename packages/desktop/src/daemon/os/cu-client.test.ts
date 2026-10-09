@@ -168,6 +168,26 @@ describe.skipIf(WINDOWS)("createCuClient over a real Unix socket (contracts §1)
     expect(helper.received).toEqual([]);
   });
 
+  it("survives a socket error while the peer check is pending", async () => {
+    const helper = await fakeHelper((req) => ({ id: req["id"], ok: true, data: null }));
+    const lines: string[] = [];
+    const c = createCuClient({
+      connect: () => connectUnix(helper.path),
+      verifyPeer: (socket) =>
+        new Promise<boolean>((resolve) => {
+          setImmediate(() =>
+            socket.emit("error", Object.assign(new Error("reset"), { code: "ECONNRESET" })),
+          );
+          setTimeout(() => resolve(false), 20);
+        }),
+      timers,
+      log: (line) => lines.push(line),
+    });
+    cleanups.push(() => c.close());
+    await expect(c.begin("s", ["x"])).rejects.toMatchObject({ code: "unsupported" });
+    expect(lines).toContain("[cu] socket error: ECONNRESET");
+  });
+
   it("says unsupported when the helper is not running", async () => {
     const { c } = client("/tmp/does-not-exist-jarvis-cu.sock");
     await expect(c.capture(1280)).rejects.toMatchObject({ code: "unsupported" });

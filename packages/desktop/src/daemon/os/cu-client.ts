@@ -133,6 +133,11 @@ export function createCuClient(options: CuClientOptions): CuClient & { close(): 
           `jarvis-cu is not running (${(error as { code?: string }).code ?? "no socket"})`,
         );
       }
+      // connectUnix drops its own error listener once connected; keep one on
+      // from now on so a reset while the peer check is pending cannot throw.
+      connected.on("error", (error: NodeJS.ErrnoException) =>
+        options.log(`[cu] socket error: ${error.code ?? "unknown"}`),
+      );
       if (!(await options.verifyPeer(connected).catch(() => false))) {
         connected.destroy();
         options.log("[cu] the program on cu.sock is not jarvis-cu; refused");
@@ -156,9 +161,6 @@ export function createCuClient(options: CuClientOptions): CuClient & { close(): 
           if (line.trim() !== "") onLine(line);
         }
       });
-      connected.on("error", (error: NodeJS.ErrnoException) =>
-        options.log(`[cu] socket error: ${error.code ?? "unknown"}`),
-      );
       connected.on("close", () => {
         if (socket === connected) socket = undefined;
         failAll(new CuClientError("failed", "jarvis-cu closed the connection"));
