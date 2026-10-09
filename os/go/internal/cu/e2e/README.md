@@ -13,7 +13,20 @@ restore. `--- PASS: TestComputerUseAgainstLabwc` is NOT yet reached.
   wev. wev block-buffers stdout on a pipe, so the test starts it through
   `stdbuf -oL`; without that its output stays empty.
 
-## Contract gap (open)
+## Contract gap (open) — proposed gap 13 for the plan's "Contract gaps" list
+
+The plan file is gitignored and is not edited by task agents, so the
+coordinator should copy this entry into that list as item 13:
+
+> 13. **GTK4 password fields are not detected (§4 safety hole).** On trixie,
+> GTK4 password entries expose `ATSPI_ROLE_TEXT` (61), not
+> `ATSPI_ROLE_PASSWORD_TEXT` (40), with no distinguishing state or attribute.
+> `guard.PasswordWatch` never sees a password field, so `type`, `key`,
+> `click`, `scroll` and `drag` are all allowed there. Password refusal is
+> proven by unit tests only until a different detection signal exists, and
+> `--- PASS: TestComputerUseAgainstLabwc` is blocked on it.
+
+Details:
 `password_field_refuses_all_input` FAILS: trixie GTK4 `zenity --password`
 exposes its entry over AT-SPI as `ATSPI_ROLE_TEXT` (61), not
 `ATSPI_ROLE_PASSWORD_TEXT` (40) (states: editable, focusable, showing; no

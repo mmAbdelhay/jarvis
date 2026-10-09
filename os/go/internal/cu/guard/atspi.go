@@ -12,6 +12,11 @@ import (
 )
 
 // RolePasswordText is ATSPI_ROLE_PASSWORD_TEXT.
+//
+// Known gap (proposed contract gap 13, see cu/e2e/README.md): GTK4 password
+// entries (e.g. trixie's zenity --password) report ATSPI_ROLE_TEXT (61) with
+// no distinguishing state or attribute, so they are NOT detected here and
+// input into them is not refused. Toolkits reporting role 40 (GTK3, Qt) are.
 const RolePasswordText = 40
 
 const (
