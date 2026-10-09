@@ -397,6 +397,15 @@ jobs:
           name: debs-distro
           path: ${{ runner.temp }}/debs
       - run: os/iso/cu/run.sh --debs "$RUNNER_TEMP/debs" --out "$RUNNER_TEMP/cu"
+      # BLOCKED criteria (export, consequential card: contracts U-1) are unverified, not
+      # passed. Visible here; a release blocker until Plans U/V settle dialog capture.
+      - if: always()
+        run: |
+          n=$(grep -c '^BLOCKED' "$RUNNER_TEMP/cu/results.txt" 2>/dev/null || true)
+          if [ "${n:-0}" -gt 0 ]; then
+            echo "::warning title=cu-test::$n BLOCKED computer-use criteria are NOT verified (release blocker: U/V dialog-capture decision)"
+            { echo "### cu-test: $n BLOCKED criteria (unverified)"; grep '^BLOCKED' "$RUNNER_TEMP/cu/results.txt"; } >> "$GITHUB_STEP_SUMMARY"
+          fi
       - if: always()
         uses: actions/upload-artifact@v4
         with:

@@ -33,14 +33,20 @@ for case in "criterion 1: Pictures/beach.png is a 640x480 PNG" "criterion 5: a c
   "criterion 5: denying it leaves no file"; do
   check "blocked, not claimed: $case" bash -c 'grep -qF "blocked \"$1\"" "$2" && ! grep -qF "check \"$1\"" "$2"' _ "$case" "$h/session.sh"
 done
-check "the excluded turn holds an all-black look, then a key" python3 - "$ISO_DIR/smoke/assets/cu/cu-gimp.json" <<'PY'
+check "the excluded turn holds an all-black look, a key refused by the helper (outside), then a held key" python3 - "$ISO_DIR/smoke/assets/cu/cu-gimp.json" <<'PY'
 import json, sys
 t = next(t for t in json.load(open(sys.argv[1]))["turns"] if t["name"] == "excluded")
 s = [x for x in t["steps"] if "call" in x]
 assert "mask" not in t, t
 assert s[1]["call"] == "screen_look" and s[1].get("hold", 0) > 0 and s[1].get("mask", {}).get("mode") == "all-black", s[1]
-assert s[2]["call"] == "screen_key" and s[2].get("hold", 0) > 0 and "expectError" not in s[2], s[2]
+assert s[2]["call"] == "screen_key" and s[2].get("expectError") == ["outside"] and not s[2].get("hold"), s[2]
+assert s[3]["call"] == "screen_key" and s[3].get("hold", 0) > 0 and "expectError" not in s[3], s[3]
 PY
+# BLOCKED criteria must not read as a green run: session.sh counts them, says so in its
+# final line and fails under CU_FAIL_ON_BLOCKED=1; CI shows them as a warning.
+check "BLOCKED criteria are counted and not reported as 'all passed'" bash -c \
+  'grep -q "blocked_n=\$((blocked_n + 1))" "$1" && grep -q "CU_FAIL_ON_BLOCKED" "$1" && grep -q "NOT verified" "$1"' _ "$h/session.sh"
+check "CI surfaces BLOCKED results" grep -q "BLOCKED" "$ISO_DIR/../../.github/workflows/os.yml"
 # Merged U/V pause semantics (session.go checkFocus, computer-use.ts waitForResume): a
 # terminal taking focus pauses the session and jarvisd holds every later call until
 # resume/stop. So criterion 4 is asserted through the pause and the turn is stopped,

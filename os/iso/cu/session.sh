@@ -22,7 +22,8 @@ wait_for() { local secs=$1 _; shift; for _ in $(seq "$secs"); do "$@" && return 
 ctl() { "$node" "$assets/jarvisctl.mjs" "$@"; }
 cuc() { "$node" "$cu/cucheck.mjs" "$@"; }
 # blocked NAME REASON — a check that cannot run yet. Recorded, not claimed, not a failure.
-blocked() { echo "BLOCKED $1 ($2)" | tee -a "$out/results.txt"; }
+blocked() { echo "BLOCKED $1 ($2)" | tee -a "$out/results.txt"; blocked_n=$((blocked_n + 1)); }
+blocked_n=0
 # shellcheck source=scan.sh
 source "$(dirname "$0")/scan.sh"
 turn() { # turn NAME TEXT [jarvisctl cu flags...] — one computer-use turn, log in $out/turn-NAME.log
@@ -97,7 +98,8 @@ check "criterion 4: exactly one session card, 'Let Jarvis use … to: …'" cuc 
 # Under contracts U-1 an ordinary screenshot is a fullscreen GIMP frame: the mask is
 # vacuous there (no evidence, neither a leak nor a pass), and no point of it is outside
 # GIMP, so the scripted click lands beyond the screenshot and V refuses it (outside)
-# before it reaches jarvis-cu. The privacy evidence is the all-black capture in section 11.
+# before it reaches jarvis-cu (the excluded turn in section 11 exercises the helper's
+# own refusal of input while a foreign window has focus). The privacy evidence is the all-black capture in section 11.
 check "the probe turn ran as scripted (a click beyond the screenshot is refused: outside)" cuc turn "$report" probe --images
 
 # 9-10. Criteria 1 and 5 (export, consequential card, deny leaves no file) are BLOCKED:
@@ -118,6 +120,8 @@ blocked "criterion 1: Pictures/beach.png is a 640x480 PNG" "$blocked_reason"
 #  - a foreign window that is neither allowed nor excluded takes focus during the
 #    held second look. jarvis-cu does not pause for it, but Capture blanks the frame
 #    (the focused window is not allowed): the non-vacuous all-black evidence;
+#  - a key sent right then is refused by the helper itself (outside: the focused
+#    window is not one of the allowed apps; expectError, checked by the turn check);
 #  - then a terminal takes focus. jarvis-cu pauses the session (excluded-focus),
 #    and jarvisd holds the next action (the held ctrl+shift+e) until the user
 #    resumes or stops. The harness stops it (cu-stop, as Esc / Take over would),
@@ -130,7 +134,7 @@ excluded_turn=$!
 check "the excluded turn's held look is issued (first look done)" wait_for 60 cuc step "$report" excluded 1
 foot --app-id "$foreign_app" --title cu-foreign-viewer sh -c 'echo SECRET-CANARY; exec sleep infinity' > /dev/null 2>&1 &
 foreign=$!
-check "the excluded turn's held key is issued (black look done)" wait_for 60 cuc step "$report" excluded 2
+check "the excluded turn's refused key (outside) and its held key are issued (black look done)" wait_for 60 cuc step "$report" excluded 3
 t0=$(date +%s%3N)
 foot --title cu-excluded-terminal sh -c 'exec sleep infinity' > /dev/null 2>&1 &
 excluded=$!
@@ -192,5 +196,13 @@ if [ "$failures" -gt 0 ]; then
     echo "--- jarvis-cu.log (tail)"; tail -n 40 "$out/jarvis-cu.log"; } >&2
   echo "$failures failure(s)"
   exit 1
+fi
+if [ "$blocked_n" -gt 0 ]; then
+  # Not green: the v1.1 export and consequential-action gating are unproven end to end
+  # until Plans U/V settle dialog capture (contracts U-1). CU_FAIL_ON_BLOCKED=1 (the
+  # release gate) turns this into a failure; CI also surfaces it as a warning.
+  echo "passed, but $blocked_n BLOCKED criteria are NOT verified (release blocker: U/V dialog-capture decision)"
+  [ "${CU_FAIL_ON_BLOCKED:-0}" = 1 ] && exit 1
+  exit 0
 fi
 echo "all passed"
