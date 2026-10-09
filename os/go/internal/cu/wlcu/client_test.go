@@ -150,6 +150,63 @@ func TestOnChangeFiresForNewAndClosedWindows(t *testing.T) {
 	}
 }
 
+func TestToplevelHandleIDReusedAfterClose(t *testing.T) {
+	f := newFake()
+	c, err := startFake(t, f, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	id := f.handles[0]
+	f.mu.Unlock()
+	window := 0
+	for i := 0; i < 3; i++ {
+		f.closeWindow(window)
+		tops, err := c.Toplevels()
+		if err != nil || len(tops) != 1 || tops[0].AppID != "foot" {
+			t.Fatalf("after close: %+v %v", tops, err)
+		}
+		if f.count("destroy handle") != i+1 {
+			t.Fatal("closed handle was not destroyed before reuse")
+		}
+		f.mu.Lock()
+		f.nextServer = id - 1
+		f.mu.Unlock()
+		f.open(fakeWindow{appID: "zenity", title: "Replacement"})
+		window = i + 2
+		tops, err = c.Toplevels()
+		if err != nil || len(tops) != 2 || tops[0].AppID != "foot" || tops[1].AppID != "zenity" {
+			t.Fatalf("after reuse: %+v %v", tops, err)
+		}
+		c.mu.Lock()
+		created := len(c.created)
+		c.mu.Unlock()
+		if created != 2 {
+			t.Fatalf("creation list retains closed handles: %d", created)
+		}
+	}
+}
+
+func TestToplevelDuplicateHandleAnnouncement(t *testing.T) {
+	f := newFake()
+	c, err := startFake(t, f, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := c.Toplevels()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	f.emit(f.toplevelMgr, evManagerToplevel, new(wl.Builder).Uint(f.handles[0]))
+	f.emitState(0)
+	f.mu.Unlock()
+	got, err := c.Toplevels()
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("duplicate announcement changed windows: got %+v, want %+v, error %v", got, want, err)
+	}
+}
+
 func TestProtocolErrorKillsTheClient(t *testing.T) {
 	f := newFake()
 	c, err := startFake(t, f, nil)

@@ -28,7 +28,7 @@ func (c *Client) managerEvent(op uint16, r *wl.Reader) {
 	switch op {
 	case evManagerToplevel:
 		id := r.Uint()
-		if r.Err() != nil {
+		if r.Err() != nil || c.handles[id] != nil {
 			return
 		}
 		c.objects[id] = kindHandle
@@ -80,6 +80,12 @@ func (c *Client) handleEvent(obj uint32, op uint16, r *wl.Reader) {
 	case evHandleClosed:
 		delete(c.handles, obj)
 		delete(c.byWindow, h.pending.ID)
+		for i, id := range c.created {
+			if id == obj {
+				c.created = append(c.created[:i], c.created[i+1:]...)
+				break
+			}
+		}
 		c.destroy = append(c.destroy, obj)
 		c.changed()
 	}
