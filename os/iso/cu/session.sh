@@ -105,7 +105,7 @@ check "the probe turn ran as scripted (a click beyond the screenshot is refused:
 # 9-10. Criteria 1 and 5 (export, consequential card, deny leaves no file) are BLOCKED:
 # contracts U-1 makes the Export dialogs invisible to screen.look, so cu-gimp.json's
 # deny/export turns stop after begin/look/done. They run, but claim nothing.
-blocked_reason="U-1: dialogs are not capturable; escalated to Plans U/V (see cu-gimp.json concerns)"
+blocked_reason="export script not restored: dialogs are now the visible base, but GTK3 (GIMP) receives no virtual-keyboard input under headless labwc (os/go/internal/cu/e2e/README.md)"
 turn deny "cu-deny: export beach as PNG to Pictures"
 check "the deny turn ran as scripted (no export attempted)" cuc turn "$report" deny
 turn export "open the GIMP image beach.xcf and export it as PNG to Pictures"
@@ -199,10 +199,9 @@ if [ "$failures" -gt 0 ]; then
   exit 1
 fi
 if [ "$blocked_n" -gt 0 ]; then
-  # Not green: the v1.1 export and consequential-action gating are unproven end to end
-  # until Plans U/V settle dialog capture (contracts U-1). CU_FAIL_ON_BLOCKED=1 (the
-  # release gate) turns this into a failure; CI also surfaces it as a warning.
-  echo "passed, but $blocked_n BLOCKED criteria are NOT verified (release blocker: U/V dialog-capture decision)"
+  # Not green: the v1.1 export and consequential-action gating are unproven end to end.
+  # CU_FAIL_ON_BLOCKED=1 (release tags) turns this into a failure; CI also warns.
+  echo "passed, but $blocked_n BLOCKED criteria are NOT verified (release blocker: GIMP export not yet proven end to end)"
   [ "${CU_FAIL_ON_BLOCKED:-0}" = 1 ] && exit 1
   exit 0
 fi

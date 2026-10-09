@@ -396,14 +396,17 @@ jobs:
         with:
           name: debs-distro
           path: ${{ runner.temp }}/debs
+      # On a release tag BLOCKED criteria fail the job (v1.1 final review): the
+      # headline export must be proven before os-v* ships.
       - run: os/iso/cu/run.sh --debs "$RUNNER_TEMP/debs" --out "$RUNNER_TEMP/cu"
-      # BLOCKED criteria (export, consequential card: contracts U-1) are unverified, not
-      # passed. Visible here; a release blocker until Plans U/V settle dialog capture.
+        env:
+          CU_FAIL_ON_BLOCKED: ${{ startsWith(github.ref, 'refs/tags/os-v') && '1' || '0' }}
+      # BLOCKED criteria (GIMP export, consequential card) are unverified, not passed.
       - if: always()
         run: |
           n=$(grep -c '^BLOCKED' "$RUNNER_TEMP/cu/results.txt" 2>/dev/null || true)
           if [ "${n:-0}" -gt 0 ]; then
-            echo "::warning title=cu-test::$n BLOCKED computer-use criteria are NOT verified (release blocker: U/V dialog-capture decision)"
+            echo "::warning title=cu-test::$n BLOCKED computer-use criteria are NOT verified (release blocker: GIMP export not yet proven end to end)"
             { echo "### cu-test: $n BLOCKED criteria (unverified)"; grep '^BLOCKED' "$RUNNER_TEMP/cu/results.txt"; } >> "$GITHUB_STEP_SUMMARY"
           fi
       - if: always()
@@ -412,6 +415,21 @@ jobs:
           name: cu-test
           path: ${{ runner.temp }}/cu/
           if-no-files-found: warn
+
+  # v1.1 jarvis-cu against a real (headless) labwc 0.8.3: capture, input,
+  # dialogs, password fields, pause, lock (os/go/ci/cu-headless.sh).
+  cu-labwc-e2e:
+    needs: [changes]
+    if: needs.changes.outputs.cu == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: os/go/go.mod
+          cache-dependency-path: os/go/go.sum
+      - run: CU_E2E_DIR="$RUNNER_TEMP/cu-e2e" os/go/ci/cu-headless.sh
 
   # v1.1 in the release ISO under KVM: the systemd-started helper, the overlay
   # border, real (QMP usb-tablet) pointer input, Super+L (os/iso/smoke/run_cu.py).
@@ -440,15 +458,17 @@ jobs:
         with:
           name: os-iso
           path: ${{ runner.temp }}/iso
-      - run: |
+      - env:
+          CU_FAIL_ON_BLOCKED: ${{ startsWith(github.ref, 'refs/tags/os-v') && '1' || '0' }}
+        run: |
           python3 os/iso/smoke/run_cu.py --iso "$(ls "$RUNNER_TEMP"/iso/*.iso)" \
             --out "$RUNNER_TEMP/cu-kvm" --accel kvm ${{ steps.apt.outputs.flag }}
-      # BLOCKED criteria are unverified, not passed (contracts U-1); release blocker until X14.
+      # BLOCKED criteria are unverified, not passed; on a release tag they fail the job.
       - if: always()
         run: |
           n=$(jq '[.results[] | select(.blocked)] | length' "$RUNNER_TEMP/cu-kvm/results.json" 2>/dev/null || echo 0)
           if [ "${n:-0}" -gt 0 ]; then
-            echo "::warning title=cu-kvm-test::$n BLOCKED computer-use criteria are NOT verified (release blocker: U/V dialog-capture decision)"
+            echo "::warning title=cu-kvm-test::$n BLOCKED computer-use criteria are NOT verified (release blocker: GIMP export not yet proven end to end)"
             { echo "### cu-kvm-test: $n BLOCKED criteria (unverified)"; jq -r '.results[] | select(.blocked) | "- " + .name' "$RUNNER_TEMP/cu-kvm/results.json"; } >> "$GITHUB_STEP_SUMMARY"
           fi
       - if: always()
@@ -800,7 +820,7 @@ jobs:
 
   repo:
     if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/os-v'))
-    needs: [smoke-test, install-test, loop-tests, build-distro, agent-install, docker-image, session-test, voice-roundtrip, i18n-gate, backup-model-test, classic-session-test, cu-test, cu-kvm-test]
+    needs: [smoke-test, install-test, loop-tests, build-distro, agent-install, docker-image, session-test, voice-roundtrip, i18n-gate, backup-model-test, classic-session-test, cu-test, cu-kvm-test, cu-labwc-e2e]
     runs-on: ubuntu-24.04
     container: debian:trixie
     steps:
@@ -885,7 +905,7 @@ jobs:
 
   release:
     if: startsWith(github.ref, 'refs/tags/os-v')
-    needs: [smoke-test, install-test, loop-tests, repo, agent-install, docker-publish, session-test, voice-roundtrip, i18n-gate, backup-model-test, classic-session-test, cu-test, cu-kvm-test, build-workspace]
+    needs: [smoke-test, install-test, loop-tests, repo, agent-install, docker-publish, session-test, voice-roundtrip, i18n-gate, backup-model-test, classic-session-test, cu-test, cu-kvm-test, cu-labwc-e2e, build-workspace]
     runs-on: ubuntu-24.04
     permissions:
       contents: write

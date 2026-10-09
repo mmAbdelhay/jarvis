@@ -147,7 +147,7 @@ build = next(i for i, s in enumerate(steps) if "build.sh" in s.get("run", "") an
 assert ids.index("aptrepo") < build, "the gate must run before the keyring package is built"
 PY
 # --- Rafiq v1.1 Plan X ---
-for j in changes cu-test cu-kvm-test; do check "job $j" grep -qw "$j" <<<"$jobs"; done
+for j in changes cu-test cu-kvm-test cu-labwc-e2e; do check "job $j" grep -qw "$j" <<<"$jobs"; done
 check "v1.1 CI version" grep -qF "'0.5.0~ci{0}'" "$wf"
 check "v1.1 wiring" python3 - "$wf" <<'PY'
 import sys, yaml
@@ -171,6 +171,11 @@ assert "pattern: debs-*" not in d("cu-test"), "the voice and backup-model debs a
 assert {"build-iso", "build-distro"} <= needs("cu-kvm-test") and "run_cu.py" in d("cu-kvm-test")
 assert "computer-use tests need KVM" in d("cu-kvm-test")
 for n in ("repo", "release"):
-    assert {"cu-test", "cu-kvm-test"} <= needs(n), n
+    assert {"cu-test", "cu-kvm-test", "cu-labwc-e2e"} <= needs(n), n
+# v1.1 final review: the labwc e2e runs in CI, and a release tag fails on BLOCKED criteria.
+assert "needs.changes.outputs.cu == 'true'" in j["cu-labwc-e2e"]["if"]
+assert "os/go/ci/cu-headless.sh" in d("cu-labwc-e2e")
+for n in ("cu-test", "cu-kvm-test"):
+    assert "CU_FAIL_ON_BLOCKED: ${{ startsWith(github.ref, 'refs/tags/os-v') && '1' || '0' }}" in d(n), n
 PY
 finish

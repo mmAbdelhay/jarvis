@@ -9,8 +9,9 @@ check, the overlay border, real (QMP) pointer input pausing
 Jarvis, and Super+L ending it. The lock check is last: it leaves the screen locked.
 
 The GIMP export, the consequential card, the screen-action audit entries and the
-privacy-mask evidence are BLOCKED (contracts U-1, until X14): recorded as not
-verified, never as passes; CU_FAIL_ON_BLOCKED=1 turns them into a failing exit.
+privacy-mask evidence are BLOCKED until the export script is restored on the
+dialog contract (v1.1 final review): recorded as not verified, never as passes;
+CU_FAIL_ON_BLOCKED=1 (set on release tags) turns them into a failing exit.
 """
 
 from __future__ import annotations
@@ -33,7 +34,8 @@ from jarvis_smoke.qmp import Qmp  # noqa: E402
 from jarvis_smoke.serial_shell import SerialShell, SerialTimeout  # noqa: E402
 from run_smoke import BOOTAPPEND, Run, build_assets  # noqa: E402
 
-BLOCKED_REASON = "U-1: dialogs are not capturable; escalated to Plans U/V (see cu-gimp.json concerns)"
+BLOCKED_REASON = ("export script not restored: jarvis-cu now makes a focused dialog the visible base "
+                  "(final review), but GTK3 key input (GIMP) is unproven; see os/go/internal/cu/e2e/README.md")
 USB_TABLET = ("-device", "qemu-xhci", "-device", "usb-tablet")
 
 
@@ -77,9 +79,9 @@ def run_checks(run: Run, args: argparse.Namespace, qmp: Qmp, out: Path) -> int:
     run.check("criterion 2: off by default, no screen tools reach the model", off)
     run.check("computer use enabled for the scripted provider", lambda: sh(cu.enable(uid), 60))
 
-    # Criteria 1 and 5 are BLOCKED (contracts U-1, as in os/iso/cu/session.sh): cu-gimp.json's
-    # export turn stops after look/done because the Export dialogs are not capturable. The
-    # turn still runs as scripted; nothing below claims an export, a card or a screen action.
+    # Criteria 1 and 5 are BLOCKED (as in os/iso/cu/session.sh): cu-gimp.json's export turn
+    # still stops after look/done. jarvis-cu now makes a focused dialog the visible base, but
+    # GTK3 key input (GIMP) is unproven; nothing below claims an export, a card or an action.
     def export():
         sh(cu.turn(uid, "export", "open the GIMP image beach.xcf and export it as PNG to Pictures"), 700)
         sh(cu.cucheck(uid, f"turn {cu.REPORT} export --images"))
@@ -210,7 +212,7 @@ def main(argv: list[str] | None = None) -> int:
     print(summary)
     blocked = [r for r in results if r.get("blocked")]
     if blocked:
-        print(f"passed, but {len(blocked)} BLOCKED criteria are NOT verified (release blocker: U/V dialog-capture decision)")
+        print(f"passed, but {len(blocked)} BLOCKED criteria are NOT verified (release blocker: GIMP export not yet proven end to end)")
     return report.exit_code(results, os.environ.get("CU_FAIL_ON_BLOCKED") == "1")
 
 

@@ -22,7 +22,7 @@ def render_summary(results: list[dict], ram: dict | None, accel: str, title: str
         )
     blocked = [r for r in results if r.get("blocked")]
     if blocked:
-        lines += ["", f"**{len(blocked)} BLOCKED criteria are NOT verified (release blocker until X14 / the U/V dialog-capture decision):**", ""]
+        lines += ["", f"**{len(blocked)} BLOCKED criteria are NOT verified (release blocker until the GIMP export is proven end to end):**", ""]
         lines += [f"- {r['name']}: {r['detail']}" for r in blocked]
     failed = [r for r in results if not r["ok"]]
     for r in failed:
