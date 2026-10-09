@@ -59,6 +59,12 @@ check "missing dpkg status is caught" caught
 check "missing dpkg status only emits verifier diagnostics" bash -c '! grep -v "^verify-v11: " "$1"' _ "$tmp/result"
 fresh; rm "$c/usr/share/jarvis/models/catalog.json"
 check "missing catalog is caught" caught
+fresh; sed -i.bak '/W-Escape/,/<\/keybind>/d' "$c/etc/xdg/labwc/rc.xml"
+check "no Super+Esc take-over bind is caught" caught
+fresh; sed -i.bak 's/--cu-stop/--focus/' "$c/etc/xdg/labwc/rc.xml"
+check "a Super+Esc bind that does not stop computer use is caught" caught
+fresh; sed -i.bak '/cu-stop/d' "$c/usr/libexec/jarvis/jarvis-session-key"
+check "a session key script that cannot stop computer use is caught" caught
 fresh; rm "$c/usr/share/jarvis-cu/labwc/autostart"
 check "missing helper autostart fragment is caught" caught
 fresh; rm "$c/usr/lib/systemd/user/jarvis-cu.service"

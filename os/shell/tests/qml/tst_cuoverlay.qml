@@ -66,7 +66,7 @@ TestCase {
         compare(border.opacity, 1)
         compare(findChild(c.overlay, "cuStatus").text, "Jarvis is controlling the screen · step 2 of 50")
         verify(findChild(c.overlay, "cuTakeOver").visible)
-        compare(findChild(c.overlay, "cuTakeOver").text, "Take over (Esc)")
+        compare(findChild(c.overlay, "cuTakeOver").text, "Take over (Super+Esc)")
         verify(!findChild(c.overlay, "cuResume").visible)
         verify(!findChild(c.overlay, "cuStop").visible)
         const goal = findChild(c.overlay, "cuGoal")
@@ -195,7 +195,7 @@ TestCase {
         verify(panel.x + panel.width < c.overlay.width / 2)  // trailing edge is the left in Arabic
         compare(c.overlay.inputRects[1].x, panel.x)
         compare(findChild(c.overlay, "cuStatus").text, "جارفيس يتحكم في الشاشة · الخطوة 2 من 50")
-        compare(findChild(c.overlay, "cuTakeOver").text, "تولَّ التحكم (Esc)")
+        compare(findChild(c.overlay, "cuTakeOver").text, "تولَّ التحكم (Super+Esc)")
         compare(findChild(c.overlay, "cuStepTitle_1").text, "الخطوة 2")
         compare(findChild(c.overlay, "cuStepStatus_1").text, "قيد التنفيذ")
         compare(findChild(c.overlay, "cuStep_1").Accessible.name, "قيد التنفيذ: الخطوة 2")

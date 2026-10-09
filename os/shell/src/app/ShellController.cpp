@@ -792,6 +792,10 @@ bool ShellController::handleInstanceMessage(const QByteArray& message)
         pushToTalk();
         return true;
     }
+    if (message == "cu-stop") { // Super+Esc (labwc) -> jarvis-shell --cu-stop: Take over
+        m_cu->stop();          // no-op without a running or paused session
+        return true;
+    }
     return false;
 }
 

@@ -335,8 +335,8 @@
     <context>
         <name>CuOverlay</name>
         <message>
-            <source>Take over (Esc)</source>
-            <translation>Take over (Esc)</translation>
+            <source>Take over (Super+Esc)</source>
+            <translation>Take over (Super+Esc)</translation>
         </message>
         <message>
             <source>Resume</source>

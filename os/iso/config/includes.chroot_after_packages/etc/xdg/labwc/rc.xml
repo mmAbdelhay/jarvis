@@ -1,7 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- labwc for Rafiq. <default/> keeps the stock key binds.
      Super alone on release focuses Jarvis; Super+key chords cancel it.
-     Super+Space toggles push-to-talk; Super+L runs jarvis-lock directly,
+     Super+Space toggles push-to-talk; Super+Esc takes over from computer
+     use (the pill's Take over; the model may never press Super, v1.1
+     final review finding 4); Super+L runs jarvis-lock directly,
      including live boots without jarvis-idle (deliberate deviation from
      contracts §5.15). Trade-off: jarvis-idle relaunches only lockers it
      started, so a Super+L locker that crashes or loses its lock leaves the
@@ -24,6 +26,9 @@
     </keybind>
     <keybind key="W-space">
       <action name="Execute" command="/usr/libexec/jarvis/jarvis-session-key --voice" />
+    </keybind>
+    <keybind key="W-Escape">
+      <action name="Execute" command="/usr/libexec/jarvis/jarvis-session-key --cu-stop" />
     </keybind>
     <keybind key="W-l">
       <action name="Execute" command="jarvis-lock" />

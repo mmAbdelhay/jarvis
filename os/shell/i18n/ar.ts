@@ -339,8 +339,8 @@
     <context>
         <name>CuOverlay</name>
         <message>
-            <source>Take over (Esc)</source>
-            <translation>تولَّ التحكم (Esc)</translation>
+            <source>Take over (Super+Esc)</source>
+            <translation>تولَّ التحكم (Super+Esc)</translation>
         </message>
         <message>
             <source>Resume</source>

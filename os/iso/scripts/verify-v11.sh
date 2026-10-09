@@ -54,6 +54,16 @@ if awk '
 fi
 grep -q 'jarvis-cu.service' "$c/usr/libexec/jarvis/jarvis-shell-guard" 2>/dev/null ||
   problems+=("the classic fallback does not stop jarvis-cu")
+# Final review finding 4: Super+Esc is the keyboard Take over (the model may
+# never press Super); it must reach jarvis-shell --cu-stop.
+awk '
+  /<keybind key="W-Escape"/ {inbind = 1}
+  inbind && /command="\/usr\/libexec\/jarvis\/jarvis-session-key --cu-stop"/ {ok = 1}
+  /<\/keybind>/ {inbind = 0}
+  END {exit !ok}' "$c/etc/xdg/labwc/rc.xml" 2>/dev/null ||
+  problems+=("labwc rc.xml lacks the Super+Esc -> jarvis-session-key --cu-stop take-over bind")
+grep -q -- '--cu-stop' "$c/usr/libexec/jarvis/jarvis-session-key" 2>/dev/null ||
+  problems+=("jarvis-session-key cannot stop computer use (Super+Esc)")
 for v in GNOME_ACCESSIBILITY=1 QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1; do
   grep -qx "$v" "$c/etc/xdg/labwc/environment" 2>/dev/null ||
     problems+=("labwc environment lacks $v (password fields would be invisible to jarvis-cu)")

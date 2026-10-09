@@ -83,7 +83,7 @@ Item {
                 objectName: "cuTakeOver"
                 visible: (root.session?.running ?? false)
                 enabled: !(root.session?.busy ?? false)
-                text: qsTr("Take over (Esc)")
+                text: qsTr("Take over (Super+Esc)")
                 onClicked: root.session.stop()
             }
             ActionButton {

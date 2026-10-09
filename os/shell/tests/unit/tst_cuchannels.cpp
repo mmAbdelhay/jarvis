@@ -68,6 +68,26 @@ private slots:
         QTRY_VERIFY(!f.shell->cu()->visible());
     }
 
+    // Final review finding 4: Super+Esc (labwc) -> jarvis-session-key
+    // --cu-stop -> jarvis-shell --cu-stop -> "cu-stop": Take over, without
+    // summoning the shell over the app the user takes back.
+    void superEscTakesOver()
+    {
+        ShellFixture f;
+        QVERIFY(f.open());
+        f.push(u"cu:state"_s, cuState(true));
+        QTRY_VERIFY(f.shell->cu()->running());
+        f.shell->setSurfaceShown(false);
+        QVERIFY(f.shell->handleInstanceMessage("cu-stop"));
+        QTRY_COMPARE(f.requests(u"cu:stop"_s).size(), 1);
+        QVERIFY(!f.shell->surfaceShown());
+        f.push(u"cu:state"_s, cuState(false));
+        QTRY_VERIFY(!f.shell->cu()->active());
+        QVERIFY(f.shell->handleInstanceMessage("cu-stop")); // no session: a known no-op
+        QTest::qWait(50);
+        QCOMPARE(f.requests(u"cu:stop"_s).size(), 1);
+    }
+
     void takeOverSendsStop()
     {
         ShellFixture f;
