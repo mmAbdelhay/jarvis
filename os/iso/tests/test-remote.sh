@@ -34,7 +34,17 @@ cat > "$tmp/bin/rsync" <<'SH'
 #!/usr/bin/env bash
 printf 'rsync %s\n' "$*" >> "$TRACE"
 SH
+# Dry runs must not allocate local artifact storage or contact transports.
+cat > "$tmp/bin/mktemp" <<'SH'
+#!/usr/bin/env bash
+printf 'mktemp\n' >> "$TRACE"
+exit 99
+SH
 chmod +x "$tmp/bin/"*
+dry_status=0
+PATH="$tmp/bin:$PATH" TRACE="$tmp/dry-trace" JARVIS_LINUX_BOX=me@box "$r" --dry-run --run-id 42 --artifact debs-go -- true > "$tmp/dry-output" || dry_status=$?
+check "dry run succeeds without allocating artifact storage" test "$dry_status" -eq 0
+check "dry run invokes no external side effects" test ! -e "$tmp/dry-trace"
 status=0
 PATH="$tmp/bin:$PATH" TRACE="$tmp/trace" FAKE_HOME="$tmp/home" JARVIS_LINUX_BOX=me@box "$r" -- 'printf "%s\n" "it is a quote: '\'' and \$HOME" > "$OUT/result"; exit 7' || status=$?
 check "preserves command status" test "$status" -eq 7

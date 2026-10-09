@@ -169,7 +169,8 @@ and `OUT` set. `OUT` is emptied before each run; results return to
 `./remote-out/`, even when the test fails. The runner preserves the test's
 exit status and reports retrieval failure when the test succeeded. Git metadata
 is excluded because this checkout is a worktree; `OS_VERSION` carries the local
-package version instead. `--dry-run` prints commands without connecting.
+package version instead. `--dry-run` prints commands without connecting or
+creating local artifact directories; its temporary path is a display placeholder.
 The host comes only from `JARVIS_LINUX_BOX` and is never recorded in the repo.
 
 ```bash
