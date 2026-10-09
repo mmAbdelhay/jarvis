@@ -60,6 +60,18 @@ function fakeAgent() {
     memoryClear: record("memoryClear", Promise.resolve(null)) as OsAgent["memoryClear"],
     cuSetEnabled: record("cuSetEnabled", Promise.resolve(null)) as OsAgent["cuSetEnabled"],
     cuConsent: record("cuConsent", Promise.resolve(null)) as OsAgent["cuConsent"],
+    cuState: () => ({
+      active: false,
+      sessionId: null,
+      goal: "",
+      apps: [],
+      step: 0,
+      maxSteps: 50,
+      steps: [],
+      paused: null,
+    }),
+    cuStop: record("cuStop", Promise.resolve(null)) as OsAgent["cuStop"],
+    cuResume: record("cuResume", Promise.resolve(null)) as OsAgent["cuResume"],
     memorySetEnabled: record(
       "memorySetEnabled",
       Promise.resolve(null),
@@ -619,5 +631,23 @@ describe("ui:setLanguage (Rafiq M4 §3)", () => {
       code: "forbidden",
     });
     expect(calls).toEqual([]);
+  });
+});
+
+describe("computer-use control channels (v1.1 §2)", () => {
+  it("routes cu:stop and cu:resume from the computer only", async () => {
+    const { agent, calls } = fakeAgent();
+    const router = createOsRouter({ agent });
+    const local = { kind: "local" as const, connection };
+    await expect(router.invoke("cu:stop", [], local)).resolves.toBeNull();
+    await expect(router.invoke("cu:resume", [], local)).resolves.toBeNull();
+    expect(calls.slice(-2).map((c) => c.method)).toEqual(["cuStop", "cuResume"]);
+    await expect(router.invoke("cu:stop", [{}], local)).rejects.toMatchObject({
+      code: "bad-request",
+    });
+    const phone = { kind: "phone" as const, device: { id: "d1", name: "Pixel" } };
+    await expect(router.invoke("cu:resume", [], phone)).rejects.toMatchObject({
+      code: "forbidden",
+    });
   });
 });

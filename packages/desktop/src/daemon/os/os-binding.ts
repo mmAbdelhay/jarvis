@@ -175,6 +175,14 @@ export function createOsRouter(services: OsServices): OsRouter {
       case OS_CONTROL_REQUESTS.cuSetEnabled:
         requireLocal(origin, agent.language());
         return agent.cuSetEnabled(value(parseCuSetEnabled(args)));
+      case OS_CONTROL_REQUESTS.cuStop:
+        requireLocal(origin, agent.language());
+        value(parseNoArgs(args));
+        return agent.cuStop();
+      case OS_CONTROL_REQUESTS.cuResume:
+        requireLocal(origin, agent.language());
+        value(parseNoArgs(args));
+        return agent.cuResume();
       case OS_CONTROL_REQUESTS.cuConsent: {
         requireLocal(origin, agent.language());
         const request = value(parseCuConsent(args));

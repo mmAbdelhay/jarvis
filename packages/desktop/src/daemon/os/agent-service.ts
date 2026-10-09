@@ -6,7 +6,18 @@
 //
 // No electron here (core/no-electron.test.ts).
 import {
+  CU_IDLE_STATE,
+  CU_MODEL_TEXT,
   CU_TEXT,
+  CU_TURN_MAX_STEPS,
+  type ComputerUse,
+  type CuClient,
+  type CuState,
+  MAX_STEPS,
+  SCREEN_TOOL_MODEL_NAMES,
+  createComputerUse,
+  withImagePolicy,
+  withScreenTools,
   modelSupportsVision,
   AGENT_TEXT,
   BACKUP_BASE_URL,
@@ -122,6 +133,8 @@ export class OsAgentError extends Error {
 }
 
 export type OsAgentDeps = {
+  /** v1.1 §2: jarvis-cu (cu-client.ts) and a capture digest (SHA-256). Absent: no computer use. */
+  computerUse?: { client: CuClient; hash(pngBase64: string): Promise<string> };
   /** M4 §4: runs recipes locally with one card item per step. */
   recipes?: RecipeEngine;
   defaultLanguage?: Lang;
@@ -213,6 +226,12 @@ export interface OsAgent {
   memoryClear(): Promise<null>;
   /** memory:setEnabled (M2.5 contracts §7 #9); persisted in jarvis.yaml. */
   memorySetEnabled(enabled: boolean): Promise<null>;
+  /** cu:state now (v1.1 §2). */
+  cuState(): CuState;
+  /** cu:stop: ends the session and stops the running turn. */
+  cuStop(): Promise<null>;
+  /** cu:resume: resumes a paused session. */
+  cuResume(): Promise<null>;
   /** cu:setEnabled (v1.1 §2). Enabling needs a vision model. */
   cuSetEnabled(request: CuSetEnabledRequest): Promise<null>;
   /** cu:consent (v1.1 §2, §4.8): screenshots may go to this provider from now on; `revoke` withdraws it. */
@@ -332,6 +351,7 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
     }, SESSION_IDLE_MS);
   };
   const coreToolNames = new Set(CORE_TOOLS.map(toModelName));
+  const cuCoreToolNames = new Set([...coreToolNames, ...SCREEN_TOOL_MODEL_NAMES]);
   let lastSearchNote = "";
   const logSearchOnce = (line: string) => {
     if (line === lastSearchNote) return;
@@ -449,6 +469,36 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
       void sys.refresh();
     },
   });
+
+  /** null when computer use may run for `entry` now, else why not (model-facing).
+   *  Contracts §2 + design §2.2/§2.6/§2.9; asked before every screen call. */
+  function cuBlocked(entry: ProviderEntry | null): string | null {
+    if (deps.computerUse === undefined || safeOnly) return CU_MODEL_TEXT.off;
+    if (locked) return CU_MODEL_TEXT.locked;
+    if (entry === null || entry.id === BACKUP_PROVIDER_ID) return CU_MODEL_TEXT.notEnabled;
+    if (brain.computerUse.enabled[entry.id] !== true) return CU_MODEL_TEXT.notEnabled;
+    if (!visionOf(entry)) return CU_MODEL_TEXT.noVision;
+    if (!isLocalBaseUrl(entry.baseUrl) && brain.computerUse.cloudConsent[entry.id] === undefined) {
+      return CU_MODEL_TEXT.noConsent;
+    }
+    return null;
+  }
+
+  const computerUse: ComputerUse | undefined =
+    deps.computerUse === undefined
+      ? undefined
+      : createComputerUse({
+          client: deps.computerUse.client,
+          gate,
+          audit: (entry) => deps.audit.append(entry),
+          emitState: (state) => deps.push(OS_CONTROL_PUSHES.cuState, state),
+          available: () => cuBlocked(activeEntry()),
+          hash: deps.computerUse.hash,
+          now: deps.now,
+          newId: deps.newId,
+          timers: deps.timers,
+          log: deps.log,
+        });
 
   const monitor = createProviderMonitor({
     check: () => provider.reachable(),
@@ -591,12 +641,15 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
         : {
             id: BACKUP_PROVIDER_ID,
             locality: "local" as const,
-            provider: withSimpleProfile(
-              createBackupProvider({
-                tag: backupTag,
-                make: (section) => deps.makeProvider(section, undefined),
-              }),
-              () => (registry === undefined ? [] : simpleToolSpecs(registry)),
+            provider: withImagePolicy(
+              withSimpleProfile(
+                createBackupProvider({
+                  tag: backupTag,
+                  make: (section) => deps.makeProvider(section, undefined),
+                }),
+                () => (registry === undefined ? [] : simpleToolSpecs(registry)),
+              ),
+              () => false,
             ),
           };
     if (brain.providers.length === 0 && backup === undefined) {
@@ -607,7 +660,7 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
       entries: brain.providers.map((entry) => ({
         id: entry.id,
         locality: isLocalBaseUrl(entry.baseUrl) ? ("local" as const) : ("cloud" as const),
-        provider: keyedProvider(entry, entry),
+        provider: withImagePolicy(keyedProvider(entry, entry), () => cuBlocked(entry) === null),
       })),
       allowCloudFallback: brain.allowCloudFallback,
       ...(backup === undefined ? {} : { backup }),
@@ -756,11 +809,16 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
           const notes = await memory.recall(text).catch(() => []);
           const before = history.length;
           failover?.beginTurn();
+          const cuOn = computerUse !== undefined && cuBlocked(activeEntry()) === null;
+          const turnTools = cuOn ? withScreenTools(tools) : tools;
+          computerUse?.beginTurn();
           const result = await runTurn(
             {
               ...(deps.recipes === undefined ? {} : { recipes: deps.recipes }),
+              ...(computerUse === undefined ? {} : { computerUse }),
+              maxSteps: () => (computerUse?.active() === true ? CU_TURN_MAX_STEPS : MAX_STEPS),
               provider,
-              registry: tools,
+              registry: turnTools,
               gate,
               contextTokens: contextTokens(),
               toolsEnabled: deps.fakeScript !== undefined || activeEntry()?.supportsTools !== false,
@@ -770,7 +828,7 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
               newId: deps.newId,
               selectTools: (query, all) =>
                 selectTools(all, query, {
-                  coreModelNames: coreToolNames,
+                  coreModelNames: cuOn ? cuCoreToolNames : coreToolNames,
                   embedder,
                   log: logSearchOnce,
                 }),
@@ -780,6 +838,7 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
               lang: turnLanguage(uiLanguage, text),
               history,
               text,
+              via: from.via,
               signal: controller.signal,
               ...(context === undefined ? {} : { context }),
               ...(notes.length === 0 ? {} : { notes }),
@@ -800,7 +859,11 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
             error: describeError(error),
           });
         } finally {
+          // A session never outlives its turn. endSession drops the session
+          // synchronously; the helper's `end` finishes after the turn is free.
+          const ending = computerUse?.endSession("turn-end");
           if (turn?.turnId === turnId) turn = undefined;
+          await ending;
         }
       })();
       return { turnId };
@@ -833,6 +896,8 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
     async setLocked(next) {
       if (locked !== next) {
         locked = next;
+        // Design §2.9: the lock ends computer use at once.
+        if (next) void computerUse?.endSession("locked");
         deps.log(`[lock] ${next ? "locked" : "unlocked"}`);
         const current = sys.current();
         if (current !== undefined) deps.push(OS_CONTROL_PUSHES.sysSnapshot, { ...current, locked });
@@ -1083,6 +1148,20 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
       });
     },
 
+    cuState: () => computerUse?.state() ?? CU_IDLE_STATE,
+
+    async cuStop() {
+      await computerUse?.stop();
+      turn?.controller.abort();
+      return null;
+    },
+
+    async cuResume() {
+      if (locked) throw new OsAgentError("locked", CONTROL_TEXT[uiLanguage].locked);
+      await computerUse?.resume();
+      return null;
+    },
+
     async cuConsent(providerId, revoke) {
       configuredEntry(providerId);
       const cloudConsent = { ...brain.computerUse.cloudConsent };
@@ -1130,6 +1209,7 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
     },
     resync() {
       deps.push(OS_CONTROL_PUSHES.uiLanguage, { lang: uiLanguage });
+      deps.push(OS_CONTROL_PUSHES.cuState, computerUse?.state() ?? CU_IDLE_STATE);
       // Contracts §6 #7: on every new connection, re-push provider:status,
       // doctor:state, sys:snapshot and every open card (the shell de-dups
       // cards by cardId).
@@ -1143,6 +1223,7 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
 
     async shutdown() {
       turn?.controller.abort();
+      await computerUse?.endSession("stopped");
       doctor.cancel();
       gate.closeAll();
       if (idleTimer !== undefined) deps.timers.clearTimeout(idleTimer);
