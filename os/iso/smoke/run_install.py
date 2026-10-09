@@ -70,9 +70,13 @@ def boot_checks() -> list[tuple[str, str]]:
     read the argon2id LUKS2 root); the kernel and initramfs live there and
     the passphrase is asked by Plymouth in the initramfs."""
     src = "$(findmnt -no SOURCE /boot)"
+    # The serial shell answers seconds after the unlock, while systemd is
+    # still mounting the fstab entries: wait for local-fs.target first (a
+    # failed /boot mount leaves it inactive, so the checks still fail).
+    mounted = "for i in $(seq 90); do systemctl is-active -q local-fs.target && break; sleep 1; done; "
     return [
         ("§12: /boot is a separate unencrypted ext4 partition labelled 'Rafiq boot'",
-         f"findmnt -no FSTYPE /boot | grep -qx ext4 && case \"{src}\" in /dev/mapper/*) exit 1;; esac && "
+         f"{mounted}findmnt -no FSTYPE /boot | grep -qx ext4 && case \"{src}\" in /dev/mapper/*) exit 1;; esac && "
          f"[ \"$(blkid -s LABEL -o value {src})\" = 'Rafiq boot' ] && [ \"$(lsblk -no TYPE {src})\" = part ]"),
         ("§12: fstab mounts /boot by UUID; /boot holds the kernel and initramfs; GRUB reads it",
          "grep -Eq '^UUID=[0-9a-f-]+ /boot ext4 ' /etc/fstab && ls /boot/vmlinuz-* /boot/initrd.img-* >/dev/null && "
