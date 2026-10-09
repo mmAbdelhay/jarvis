@@ -26,12 +26,15 @@ PREFIXES = (
 
 
 def wants_cu(paths: Iterable[str]) -> bool:
-    return any(p.startswith(PREFIXES) for p in paths if p)
+    return any(
+        p.startswith(pattern) if pattern.endswith("/") else p == pattern
+        for p in paths if p for pattern in PREFIXES
+    )
 
 
 def changed(base: str) -> list[str]:
-    out = subprocess.run(["git", "diff", "--name-only", f"{base}...HEAD"], check=True, capture_output=True, text=True)
-    return out.stdout.splitlines()
+    out = subprocess.run(["git", "diff", "--no-renames", "--name-only", "-z", f"{base}...HEAD", "--"], check=True, capture_output=True, text=True)
+    return [path for path in out.stdout.split("\0") if path]
 
 
 def main(argv: list[str] | None = None) -> int:
