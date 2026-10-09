@@ -1,0 +1,2 @@
+{"type":"system","subtype":"init","session_id":"5f1c","tools":["Bash","Read","WebFetch"],"mcp_servers":[],"model":"claude-sonnet-5-5"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"hello"}]},"session_id":"5f1c"}

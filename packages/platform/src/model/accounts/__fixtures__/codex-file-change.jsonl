@@ -1,0 +1,2 @@
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_2","type":"file_change","changes":[{"path":"/tmp/x","kind":"add"}],"status":"completed"}}

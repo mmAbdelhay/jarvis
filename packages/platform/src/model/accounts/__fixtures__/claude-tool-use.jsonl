@@ -1,0 +1,2 @@
+{"type":"system","subtype":"init","session_id":"5f1c","tools":[],"mcp_servers":[],"model":"claude-sonnet-5-5"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Checking."},{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"ls ~"}}]},"session_id":"5f1c"}
