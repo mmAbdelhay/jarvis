@@ -274,3 +274,46 @@ func TestLockedNowPausesAndEnds(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 }
+
+func TestCaptureBlanksWhenBaseScreenIsUnknownOrAmbiguous(t *testing.T) {
+	cases := map[string][]string{"empty": nil, "unknown": {"DP-9"}, "two": {"DP-2", "DP-1"}}
+	for name, outs := range cases {
+		h := newHarness(t)
+		h.d.outs = []wlcu.Output{{Name: "DP-1", Width: 2560, Height: 1440}, {Name: "DP-2", Width: 2560, Height: 1440}}
+		h.begin(t)
+		h.d.set("w1", func(w *wlcu.Toplevel) { w.Outputs = outs })
+		r, err := h.m.Capture(proto.Capture{MaxEdge: 640})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, _, c := decodePNG(t, r); c != [3]uint32{0, 0, 0} {
+			t.Fatalf("%s: unblanked %v", name, c)
+		}
+	}
+	h := newHarness(t)
+	h.d.outs = []wlcu.Output{{Name: "DP-1", Width: 2560, Height: 1440}, {Name: "HEADLESS-1", Width: 2560, Height: 1440}}
+	h.begin(t)
+	r, err := h.m.Capture(proto.Capture{MaxEdge: 640})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, c := decodePNG(t, r); c != [3]uint32{100, 150, 200} {
+		t.Fatalf("matched output must show: %v", c)
+	}
+	if !h.d.has("capture HEADLESS-1") {
+		t.Fatal("wrong output captured")
+	}
+}
+
+func TestCaptureBlanksWhenFocusChangesDuringCopy(t *testing.T) {
+	h := newHarness(t)
+	h.begin(t)
+	h.d.onCapture = func() { h.d.focus("w3") }
+	r, err := h.m.Capture(proto.Capture{MaxEdge: 640})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, c := decodePNG(t, r); c != [3]uint32{0, 0, 0} {
+		t.Fatalf("unblanked %v", c)
+	}
+}

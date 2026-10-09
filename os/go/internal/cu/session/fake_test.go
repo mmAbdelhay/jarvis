@@ -29,6 +29,7 @@ type fakeDesk struct {
 	onMove           func()
 	onType           func(call int)
 	types            int
+	onCapture        func()
 }
 
 func newDesk() *fakeDesk {
@@ -120,6 +121,11 @@ func (d *fakeDesk) Capture(output string) (img.Frame, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.logf("capture %s", output)
+	if hook := d.onCapture; hook != nil {
+		d.mu.Unlock()
+		hook()
+		d.mu.Lock()
+	}
 	pix := make([]byte, 4*d.frameW*d.frameH)
 	for i := 0; i < len(pix); i += 4 {
 		pix[i], pix[i+1], pix[i+2] = 200, 150, 100 // B G R

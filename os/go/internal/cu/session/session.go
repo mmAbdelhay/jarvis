@@ -391,22 +391,26 @@ func clampEdge(n int) int {
 	return n
 }
 
-func (m *Manager) outputOf(base *wlcu.Toplevel) (wlcu.Output, error) {
+// outputOf picks the screen to copy. matched is true only when the base
+// reports exactly one output and it is the one returned (a lone connected
+// screen is trivially the base's). Otherwise the caller must blank: some
+// other screen may be showing windows that are not allowed.
+func (m *Manager) outputOf(base *wlcu.Toplevel) (out wlcu.Output, matched bool, err error) {
 	outs, err := m.d.Desktop.Outputs()
 	if err != nil {
-		return wlcu.Output{}, proto.Errorf(proto.CodeFailed, "could not read the screens: %v", err)
+		return wlcu.Output{}, false, proto.Errorf(proto.CodeFailed, "could not read the screens: %v", err)
 	}
 	if len(outs) == 0 {
-		return wlcu.Output{}, proto.Errorf(proto.CodeFailed, "no screen is connected")
+		return wlcu.Output{}, false, proto.Errorf(proto.CodeFailed, "no screen is connected")
 	}
-	if base != nil && len(base.Outputs) > 0 {
+	if base != nil && len(base.Outputs) == 1 {
 		for _, o := range outs {
 			if o.Name == base.Outputs[0] {
-				return o, nil
+				return o, true, nil
 			}
 		}
 	}
-	return outs[0], nil
+	return outs[0], base != nil && len(outs) == 1 && len(base.Outputs) == 0, nil
 }
 
 // Capture returns the base window's screen, blanked unless only allowed
@@ -425,7 +429,7 @@ func (m *Manager) Capture(p proto.Capture) (*proto.CaptureResult, error) {
 	if err != nil {
 		return nil, proto.Errorf(proto.CodeFailed, "could not read the windows: %v", err)
 	}
-	out, err := m.outputOf(v.base)
+	out, matched, err := m.outputOf(v.base)
 	if err != nil {
 		return nil, err
 	}
@@ -441,7 +445,12 @@ func (m *Manager) Capture(p proto.Capture) (*proto.CaptureResult, error) {
 	if err != nil {
 		return nil, proto.Errorf(proto.CodeFailed, "%v", err)
 	}
-	if !m.visible(v) {
+	// Re-read the windows after the frame arrived: anything that mapped or
+	// took focus during the copy may be in the pixels.
+	v2, err2 := m.snapshot()
+	same := err2 == nil && v.base != nil && v2.base != nil && v2.base.ID == v.base.ID &&
+		v.focused != nil && v2.focused != nil && v2.focused.ID == v.focused.ID
+	if !matched || !same || !m.visible(v) || !m.visible(v2) {
 		img.Blank(rgba)
 	}
 	small, scale := img.Downscale(rgba, clampEdge(p.MaxEdge))
