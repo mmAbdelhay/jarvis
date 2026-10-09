@@ -41,6 +41,7 @@ dist: clean
 	$(BUILD) -o $(DIST)/usr/lib/jarvis/mcp/jarvis-apps ./cmd/jarvis-apps
 	$(BUILD) -o $(DIST)/usr/lib/jarvis/mcp/jarvis-files ./cmd/jarvis-files-os
 	$(BUILD) -o $(DIST)/usr/libexec/jarvis/jarvis-wl ./cmd/jarvis-wl
+	$(BUILD) -o $(DIST)/usr/libexec/jarvis/jarvis-cu ./cmd/jarvis-cu
 	mkdir -p $(DIST)/usr/share/dbus-1/system.d $(DIST)/usr/share/dbus-1/system-services \
 		$(DIST)/usr/lib/systemd/system $(DIST)/usr/share/polkit-1/actions
 	install -m 0644 data/os.jarvis.Helper1.conf $(DIST)/usr/share/dbus-1/system.d/os.jarvis.Helper1.conf
@@ -52,6 +53,8 @@ dist: clean
 	install -m 0644 data/jarvis-installer-backend.service $(DIST)/usr/lib/systemd/system/jarvis-installer-backend.service
 	install -m 0644 data/os.jarvis.installer.policy $(DIST)/usr/share/polkit-1/actions/os.jarvis.installer.policy
 	install -m 0644 data/jarvis-model-fetch.service $(DIST)/usr/lib/systemd/system/jarvis-model-fetch.service
+	mkdir -p $(DIST)/usr/lib/systemd/user
+	install -m 0644 data/jarvis-cu.service $(DIST)/usr/lib/systemd/user/jarvis-cu.service
 
 # Official registry servers (Rafiq M2.5 contracts section 3 and 7): static
 # linux binaries at dist-registry/<id>/server, deterministic artifacts under

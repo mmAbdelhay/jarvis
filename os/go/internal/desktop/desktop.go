@@ -163,6 +163,26 @@ func DefaultDirs(home string) []Dir {
 // (a user copy with Hidden=true hides the system one); only visible apps
 // are returned, sorted by name.
 func Index(dirs []Dir) []Entry {
+	out := walk(dirs, true, Entry.Visible)
+	sort.SliceStable(out, func(i, j int) bool {
+		a, b := strings.ToLower(out[i].Name), strings.ToLower(out[j].Name)
+		if a != b {
+			return a < b
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out
+}
+
+// IndexAll returns every Type=Application entry in every folder: no
+// de-duplication and no visibility filter. jarvis-cu needs hidden and
+// shadowed entries so that a NoDisplay terminal is still refused (Rafiq
+// v1.1 contracts §1).
+func IndexAll(dirs []Dir) []Entry {
+	return walk(dirs, false, func(e Entry) bool { return e.Type == "Application" })
+}
+
+func walk(dirs []Dir, dedupe bool, keep func(Entry) bool) []Entry {
 	seen := map[string]bool{}
 	out := []Entry{}
 	for _, d := range dirs {
@@ -178,7 +198,7 @@ func Index(dirs []Dir) []Entry {
 			}
 			rel, _ := filepath.Rel(d.Path, p)
 			id := strings.TrimSuffix(strings.ReplaceAll(filepath.ToSlash(rel), "/", "-"), ".desktop")
-			if seen[id] {
+			if dedupe && seen[id] {
 				return nil
 			}
 			data, err := readSmall(p)
@@ -188,19 +208,12 @@ func Index(dirs []Dir) []Entry {
 			seen[id] = true
 			e := Parse(string(data))
 			e.ID, e.Path, e.Source = id, p, d.Source
-			if e.Visible() {
+			if keep(e) {
 				out = append(out, e)
 			}
 			return nil
 		})
 	}
-	sort.SliceStable(out, func(i, j int) bool {
-		a, b := strings.ToLower(out[i].Name), strings.ToLower(out[j].Name)
-		if a != b {
-			return a < b
-		}
-		return out[i].ID < out[j].ID
-	})
 	return out
 }
 

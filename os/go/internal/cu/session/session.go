@@ -1,0 +1,476 @@
+// Package session is jarvis-cu's state machine (Rafiq v1.1 contracts §1,
+// design §2.3, §2.4, §2.6, §2.9): one session at a time, scoped to the apps
+// the user allowed; every capture is blanked unless only allowed windows
+// can be on screen; every input op passes the gate in input.go first.
+//
+// Ruling U-1: labwc gives no window geometry, so the session keeps one
+// allowed window (the base) fullscreen and maps capture space onto it.
+package session
+
+import (
+	"context"
+	"encoding/base64"
+	"errors"
+	"slices"
+	"sync"
+	"time"
+
+	"github.com/mmAbdelhay/jarvis/os/go/internal/cu/img"
+	"github.com/mmAbdelhay/jarvis/os/go/internal/cu/policy"
+	"github.com/mmAbdelhay/jarvis/os/go/internal/cu/proto"
+	"github.com/mmAbdelhay/jarvis/os/go/internal/cu/wlcu"
+)
+
+// Desktop is what the session needs from the compositor.
+type Desktop interface {
+	Toplevels() ([]wlcu.Toplevel, error)
+	Outputs() ([]wlcu.Output, error)
+	Activate(id string) error
+	SetFullscreen(id string, on bool) error
+	Capture(output string) (img.Frame, error)
+	Pointer(output string) (Pointer, error)
+	Keyboard() (Keyboard, error)
+}
+
+// Pointer is a virtual pointer on one output.
+type Pointer interface {
+	MoveTo(x, y, w, h int) error
+	Button(b wlcu.Button, pressed bool) error
+	Scroll(dx, dy int) error
+}
+
+// Keyboard is the virtual keyboard.
+type Keyboard interface {
+	Type(syms []string) error
+	Combo(mask uint32, keysym string) error
+}
+
+// Activity is the physical-input detector (activity.Detector).
+type Activity interface {
+	Arm(max time.Duration) error
+	Begin() error
+	End()
+}
+
+// Deps are the session's collaborators.
+type Deps struct {
+	Desktop  Desktop
+	Apps     func() *policy.AppIndex // re-read at every begin
+	Locked   func() bool
+	Password func(ctx context.Context) (bool, error) // nil: password fields cannot be checked
+	Activity Activity
+	// DescribeAt names the accessible at a point of the window titled
+	// title (window-relative logical pixels); nil answers "unknown".
+	DescribeAt func(ctx context.Context, title string, x, y int) (role, name string)
+	Push       func(proto.Event)
+	Sleep      func(time.Duration)
+	After      func(time.Duration, func())
+}
+
+// Limits (plan U Global Constraints).
+const (
+	MaxInputOps     = 200
+	DefaultMaxEdge  = 1280
+	MinMaxEdge      = 320
+	MaxMaxEdge      = 1920
+	armTimeout      = time.Second
+	fullscreenPolls = 20
+	fullscreenPoll  = 50 * time.Millisecond
+	focusDebounce   = 250 * time.Millisecond
+)
+
+type shot struct {
+	output                 string
+	outW, outH, capW, capH int
+}
+
+type state struct {
+	apps         []string
+	index        *policy.AppIndex
+	baseID       string
+	fullscreened map[string]bool
+	ops          int
+	shot         *shot
+}
+
+type view struct {
+	tops    []wlcu.Toplevel
+	focused *wlcu.Toplevel
+	base    *wlcu.Toplevel
+}
+
+// Manager owns the (single) session.
+type Manager struct {
+	d    Deps
+	opMu sync.Mutex // serialises ops; guards s
+	s    *state
+
+	smu    sync.Mutex // guards active/id/paused (Pause never takes opMu)
+	active bool
+	id     string
+	paused string
+}
+
+// New makes a Manager.
+func New(d Deps) *Manager {
+	if d.Sleep == nil {
+		d.Sleep = time.Sleep
+	}
+	if d.After == nil {
+		d.After = func(t time.Duration, f func()) { time.AfterFunc(t, f) }
+	}
+	if d.Push == nil {
+		d.Push = func(proto.Event) {}
+	}
+	return &Manager{d: d}
+}
+
+func (m *Manager) gateSession() error {
+	m.smu.Lock()
+	defer m.smu.Unlock()
+	if !m.active || m.s == nil {
+		return proto.Errorf(proto.CodeNoSession, "no computer-use session; begin one first")
+	}
+	if m.paused != "" {
+		return proto.Errorf(proto.CodePaused, "paused (%s); the user has to resume", m.paused)
+	}
+	return nil
+}
+
+// Pause stops the session until a resuming begin; the event is pushed once.
+func (m *Manager) Pause(reason string) {
+	m.smu.Lock()
+	if !m.active || m.paused != "" {
+		m.smu.Unlock()
+		return
+	}
+	m.paused = reason
+	m.smu.Unlock()
+	m.d.Push(proto.Event{Event: "paused", Reason: reason})
+}
+
+// LockedNow: the screen locked. Pause with "locked" and end the session.
+func (m *Manager) LockedNow() {
+	m.smu.Lock()
+	active, already := m.active, m.paused == proto.ReasonLocked
+	if active && !already {
+		m.paused = proto.ReasonLocked
+	}
+	m.smu.Unlock()
+	if !active || already {
+		return
+	}
+	m.d.Push(proto.Event{Event: "paused", Reason: proto.ReasonLocked})
+	go m.End()
+}
+
+// FocusChanged is called when any window changes; after a short debounce
+// it pauses if keyboard focus sits on an excluded surface.
+func (m *Manager) FocusChanged() {
+	m.smu.Lock()
+	running := m.active && m.paused == ""
+	m.smu.Unlock()
+	if running {
+		m.d.After(focusDebounce, m.checkFocus)
+	}
+}
+
+func (m *Manager) checkFocus() {
+	m.opMu.Lock()
+	defer m.opMu.Unlock()
+	if m.gateSession() != nil {
+		return
+	}
+	v, err := m.snapshot()
+	if err != nil {
+		return
+	}
+	if v.focused == nil {
+		m.Pause(proto.ReasonExcludedFocus)
+		return
+	}
+	if ex, _ := m.s.index.Excluded(v.focused.AppID); ex {
+		m.Pause(proto.ReasonExcludedFocus)
+	}
+}
+
+func (m *Manager) allowed(t wlcu.Toplevel) bool {
+	if ex, _ := m.s.index.Excluded(t.AppID); ex {
+		return false
+	}
+	return m.s.index.Matches(t.AppID, m.s.apps)
+}
+
+func (m *Manager) snapshot() (view, error) {
+	tops, err := m.d.Desktop.Toplevels()
+	if err != nil {
+		return view{}, err
+	}
+	v := view{tops: tops}
+	for i := range tops {
+		if tops[i].Focused {
+			v.focused = &tops[i]
+		}
+		if tops[i].ID == m.s.baseID && m.allowed(tops[i]) {
+			v.base = &tops[i]
+		}
+	}
+	return v, nil
+}
+
+// pickBase chooses a base when there is none: the focused allowed window,
+// else the newest allowed one.
+func (m *Manager) pickBase(v *view) {
+	if v.base == nil {
+		if v.focused != nil && m.allowed(*v.focused) {
+			v.base = v.focused
+		} else {
+			for i := len(v.tops) - 1; i >= 0; i-- {
+				if m.allowed(v.tops[i]) {
+					v.base = &v.tops[i]
+					break
+				}
+			}
+		}
+	}
+	m.s.baseID = ""
+	if v.base != nil {
+		m.s.baseID = v.base.ID
+	}
+}
+
+// settle keeps the base fullscreen (and, at begin, focused) and waits up
+// to a second for labwc to confirm.
+func (m *Manager) settle(activate bool) (view, error) {
+	v, err := m.snapshot()
+	if err != nil {
+		return v, err
+	}
+	m.pickBase(&v)
+	if v.base == nil {
+		return v, nil
+	}
+	focusedOK := func(v view) bool { return v.focused != nil && m.allowed(*v.focused) }
+	changed := false
+	if activate && !focusedOK(v) {
+		if err := m.d.Desktop.Activate(v.base.ID); err != nil {
+			return v, err
+		}
+		changed = true
+	}
+	if !v.base.Fullscreen {
+		if err := m.d.Desktop.SetFullscreen(v.base.ID, true); err != nil {
+			return v, err
+		}
+		m.s.fullscreened[v.base.ID] = true
+		changed = true
+	}
+	for i := 0; changed && i < fullscreenPolls; i++ {
+		if v, err = m.snapshot(); err != nil {
+			return v, err
+		}
+		if v.base != nil && v.base.Fullscreen && (!activate || focusedOK(v)) {
+			break
+		}
+		m.d.Sleep(fullscreenPoll)
+	}
+	return v, nil
+}
+
+func sameSet(a, b []string) bool {
+	x, y := slices.Clone(a), slices.Clone(b)
+	slices.Sort(x)
+	slices.Sort(y)
+	return slices.Equal(x, y)
+}
+
+// Begin starts a session, or resumes a paused one (same id, same apps).
+func (m *Manager) Begin(p proto.Begin) error {
+	m.opMu.Lock()
+	defer m.opMu.Unlock()
+	if p.SessionID == "" || len(p.SessionID) > 128 {
+		return proto.Errorf(proto.CodeFailed, "sessionId must be 1-128 characters")
+	}
+	idx := m.d.Apps()
+	if err := idx.CheckAllowed(p.AppIDs); err != nil {
+		return err
+	}
+	m.smu.Lock()
+	active, id := m.active, m.id
+	m.smu.Unlock()
+	if active && id != p.SessionID {
+		return proto.Errorf(proto.CodeFailed, "another computer-use session is running; end it first")
+	}
+	if active && !sameSet(m.s.apps, p.AppIDs) {
+		return proto.Errorf(proto.CodeFailed, "a resumed session keeps its apps; end it and begin a new one")
+	}
+	if m.d.Locked() {
+		return proto.Errorf(proto.CodeExcluded, "the screen is locked")
+	}
+	if err := m.d.Activity.Arm(armTimeout); err != nil {
+		return proto.Errorf(proto.CodeUnsupported,
+			"Jarvis cannot tell when you use the mouse or keyboard: something (a playing video, or your own typing) keeps the screen awake; stop it and try again")
+	}
+	if !active {
+		m.s = &state{apps: slices.Clone(p.AppIDs), index: idx, fullscreened: map[string]bool{}}
+	} else {
+		m.s.index = idx
+	}
+	if _, err := m.settle(true); err != nil {
+		if !active {
+			m.restore()
+			m.s = nil
+		}
+		return proto.Errorf(proto.CodeFailed, "could not prepare the app window: %v", err)
+	}
+	m.smu.Lock()
+	m.active, m.id, m.paused = true, p.SessionID, ""
+	m.smu.Unlock()
+	return nil
+}
+
+func (m *Manager) restore() {
+	for id := range m.s.fullscreened {
+		_ = m.d.Desktop.SetFullscreen(id, false)
+	}
+}
+
+// End ends the session (no-op without one) and restores fullscreen.
+func (m *Manager) End() {
+	m.opMu.Lock()
+	defer m.opMu.Unlock()
+	m.smu.Lock()
+	m.active, m.id, m.paused = false, "", ""
+	m.smu.Unlock()
+	if m.s == nil {
+		return
+	}
+	m.restore()
+	m.s = nil
+}
+
+func (m *Manager) visible(v view) bool {
+	return v.base != nil && v.base.Fullscreen && v.focused != nil && m.allowed(*v.focused)
+}
+
+func (m *Manager) windowList(v view) []proto.Window {
+	out := []proto.Window{}
+	for _, t := range v.tops {
+		w := proto.Window{WindowID: t.ID, AppID: t.AppID, Focused: t.Focused, Allowed: m.allowed(t)}
+		if w.Allowed {
+			w.Title = t.Title
+		}
+		if v.base != nil && t.ID == v.base.ID && t.Fullscreen && m.s.shot != nil {
+			w.W, w.H = m.s.shot.capW, m.s.shot.capH
+		}
+		out = append(out, w)
+	}
+	return out
+}
+
+// Windows lists windows; non-allowed titles are "" (they may be private).
+func (m *Manager) Windows() ([]proto.Window, error) {
+	m.opMu.Lock()
+	defer m.opMu.Unlock()
+	if err := m.gateSession(); err != nil {
+		return nil, err
+	}
+	v, err := m.snapshot()
+	if err != nil {
+		return nil, proto.Errorf(proto.CodeFailed, "could not read the windows: %v", err)
+	}
+	return m.windowList(v), nil
+}
+
+func clampEdge(n int) int {
+	switch {
+	case n <= 0:
+		return DefaultMaxEdge
+	case n < MinMaxEdge:
+		return MinMaxEdge
+	case n > MaxMaxEdge:
+		return MaxMaxEdge
+	}
+	return n
+}
+
+// outputOf picks the screen to copy. matched is true only when the base
+// reports exactly one output and it is the one returned (a lone connected
+// screen is trivially the base's). Otherwise the caller must blank: some
+// other screen may be showing windows that are not allowed.
+func (m *Manager) outputOf(base *wlcu.Toplevel) (out wlcu.Output, matched bool, err error) {
+	outs, err := m.d.Desktop.Outputs()
+	if err != nil {
+		return wlcu.Output{}, false, proto.Errorf(proto.CodeFailed, "could not read the screens: %v", err)
+	}
+	if len(outs) == 0 {
+		return wlcu.Output{}, false, proto.Errorf(proto.CodeFailed, "no screen is connected")
+	}
+	if base != nil && len(base.Outputs) == 1 {
+		for _, o := range outs {
+			if o.Name == base.Outputs[0] {
+				return o, true, nil
+			}
+		}
+	}
+	return outs[0], base != nil && len(outs) == 1 && len(base.Outputs) == 0, nil
+}
+
+// Capture returns the base window's screen, blanked unless only allowed
+// windows can be visible (Ruling U-1).
+func (m *Manager) Capture(p proto.Capture) (*proto.CaptureResult, error) {
+	m.opMu.Lock()
+	defer m.opMu.Unlock()
+	if err := m.gateSession(); err != nil {
+		return nil, err
+	}
+	if m.d.Locked() {
+		m.LockedNow()
+		return nil, proto.Errorf(proto.CodeExcluded, "the screen is locked")
+	}
+	v, err := m.settle(false)
+	if err != nil {
+		return nil, proto.Errorf(proto.CodeFailed, "could not read the windows: %v", err)
+	}
+	out, matched, err := m.outputOf(v.base)
+	if err != nil {
+		return nil, err
+	}
+	frame, err := m.d.Desktop.Capture(out.Name)
+	if err != nil {
+		if errors.Is(err, wlcu.ErrRotated) {
+			return nil, proto.Errorf(proto.CodeUnsupported, "%v", err)
+		}
+		return nil, proto.Errorf(proto.CodeFailed, "could not copy the screen: %v", err)
+	}
+	rgba, err := frame.RGBA()
+	clear(frame.Pix)
+	if err != nil {
+		return nil, proto.Errorf(proto.CodeFailed, "%v", err)
+	}
+	// Re-read the windows after the frame arrived: anything that mapped or
+	// took focus during the copy may be in the pixels.
+	v2, err2 := m.snapshot()
+	same := err2 == nil && v.base != nil && v2.base != nil && v2.base.ID == v.base.ID &&
+		v.focused != nil && v2.focused != nil && v2.focused.ID == v.focused.ID
+	if !matched || !same || !m.visible(v) || !m.visible(v2) {
+		img.Blank(rgba)
+	}
+	small, scale := img.Downscale(rgba, clampEdge(p.MaxEdge))
+	data, err := img.EncodePNG(small)
+	sh := &shot{output: out.Name, outW: rgba.Bounds().Dx(), outH: rgba.Bounds().Dy(),
+		capW: small.Bounds().Dx(), capH: small.Bounds().Dy()}
+	clear(rgba.Pix)
+	if small != rgba {
+		clear(small.Pix)
+	}
+	if err != nil {
+		return nil, proto.Errorf(proto.CodeFailed, "could not encode the screenshot: %v", err)
+	}
+	m.s.shot = sh
+	return &proto.CaptureResult{
+		PNGBase64: base64.StdEncoding.EncodeToString(data),
+		Width:     sh.capW, Height: sh.capH, Scale: scale,
+		Windows: m.windowList(v),
+	}, nil
+}
