@@ -113,7 +113,7 @@ export function openSession({ runDir, build, timeoutMs = 5000 }) {
     });
     socket.on("error", fail);
     socket.on("close", () => {
-      for (const waiter of pending.values()) waiter.reject(new Error("control connection closed"));
+      for (const waiter of pending.values()) waiter.reject(Object.assign(new Error("control connection closed"), { code: "ECONNRESET" }));
       pending.clear();
     });
     socket.on("data", (chunk) => {
@@ -346,8 +346,16 @@ export function runComputerUse(session, {
     let turnId = null;
     const early = [];
     const cards = [];
-    const timer = setTimeout(() => resolve({ code: 2, reason: "timeout", cards }), timeoutMs);
+    let finished = false;
+    const finish = (result) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
+    const timer = setTimeout(() => finish({ code: 2, reason: "timeout", cards }), timeoutMs);
     const handle = (event) => {
+      if (finished) return;
       if (event.type === "card") {
         const kind = cardKind(event.card);
         const mine = event.card.turnId === turnId || (event.card.turnId === null && kind !== "other");
@@ -362,11 +370,11 @@ export function runComputerUse(session, {
           .catch((error) => log({ type: "confirm-error", message: error.message }));
       }
       if (event.type === "turn-end" && event.turnId === turnId) {
-        clearTimeout(timer);
-        resolve({ code: event.reason === "done" ? 0 : 1, reason: event.reason, error: event.error, cards });
+        finish({ code: event.reason === "done" ? 0 : 1, reason: event.reason, error: event.error, cards });
       }
     };
     session.onPush((channel, payload) => {
+      if (finished) return;
       if (channel === "cu:state") {
         log({ type: "cu-state", wall: wall(), ...payload });
         return;
@@ -379,12 +387,13 @@ export function runComputerUse(session, {
     log({ type: "cu-start", wall: started });
     session.invoke("agent:prompt", [{ text }]).then(
       (result) => {
+        if (finished) return;
         turnId = result.turnId;
         for (const event of early.splice(0)) handle(event);
       },
       (error) => {
-        clearTimeout(timer);
-        resolve({ code: 1, reason: "error", error: error.message, cards });
+        const disconnected = ["ECONNRESET", "ECONNREFUSED", "EPIPE", "ENOTCONN"].includes(error.code);
+        finish({ code: disconnected ? 2 : 1, reason: disconnected ? "connect" : "error", error: error.message, cards });
       },
     );
   });
