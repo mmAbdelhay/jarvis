@@ -91,6 +91,7 @@ grep -q pam_gnome_keyring "$c/etc/pam.d/greetd" 2>/dev/null || problems+=("greet
 
 "$(dirname "$0")/verify-m3.sh" "$c" || problems+=("Rafiq M3 image checks failed (verify-m3 lines above)")
 "$(dirname "$0")/verify-m4.sh" "$c" || problems+=("Rafiq M4 image checks failed (verify-m4 lines above)")
+"$(dirname "$0")/verify-v11.sh" "$c" || problems+=("Rafiq v1.1 image checks failed (verify-v11 lines above)")
 
 if [ ${#problems[@]} -gt 0 ]; then
   printf 'verify-chroot: %s\n' "${problems[@]}" >&2

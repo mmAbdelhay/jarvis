@@ -1,0 +1,15 @@
+Package: jarvis-cu
+Version: @VERSION@
+Architecture: amd64
+Maintainer: Muhammad AbdElHay <mmAbdelhay@users.noreply.github.com>
+Installed-Size: @INSTALLED_SIZE@
+Depends: systemd, iproute2, at-spi2-core
+Section: x11
+Priority: optional
+Homepage: @HOME_URL@
+Description: @DISTRO_NAME@ computer use helper for Jarvis
+ Captures only the windows of the apps you allowed and moves the mouse and
+ keyboard inside them while Jarvis uses an app for you. It refuses the
+ shell, the lock screen, the installer, password prompts, terminals and
+ password fields, and pauses when you touch the mouse or keyboard. Computer
+ use is off until you turn it on in Settings.

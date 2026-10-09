@@ -1,0 +1,7 @@
+# jarvisd's brain for the computer-use GUI tests: fakevision.mjs, a scripted
+# vision model behind Ollama's API on loopback (M2.5 contracts §1 format).
+os:
+  providers:
+    - { id: scripted, kind: ollama, baseUrl: "http://127.0.0.1:11500", model: "scripted-vision:latest" }
+  allowCloudFallback: false
+  memory: { enabled: false }

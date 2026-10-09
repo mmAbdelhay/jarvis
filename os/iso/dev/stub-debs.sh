@@ -135,3 +135,11 @@ done
 stub jarvis-i18n
 # No weights (verify-m4 warns on a ~stub version); the real postinst is kept.
 stub jarvis-backup-model "$packaging/jarvis-backup-model"
+
+# --- Rafiq v1.1 (Plan X) ---
+# jarvis-cu with its real unit and autostart fragment; the helper exits at once.
+cu_dist=$tmp/cu-dist
+install -D -m0755 /bin/true "$cu_dist/usr/libexec/jarvis/jarvis-cu"
+mkdir -p "$tmp/jarvis-cu"
+REPO_ROOT=$repo_root GO_DIST=$cu_dist "$packaging/jarvis-cu/stage.sh" "$tmp/jarvis-cu"
+stub jarvis-cu

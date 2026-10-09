@@ -1,0 +1,295 @@
+{
+  "model": "scripted-vision:latest",
+  "maxEdge": 1280,
+  "turns": [
+    {
+      "name": "off",
+      "expectPromptContains": "cu-off",
+      "steps": [
+        {
+          "text": "I cannot see your screen: computer use is off."
+        }
+      ]
+    },
+    {
+      "name": "probe",
+      "expectPromptContains": "cu-probe",
+      "steps": [
+        {
+          "call": "cu_begin",
+          "input": {
+            "goal": "cu-probe: look at the GIMP window",
+            "apps": [
+              "${GIMP_APP}"
+            ]
+          }
+        },
+        {
+          "call": "screen_look",
+          "input": {}
+        },
+        {
+          "call": "screen_click",
+          "target": {
+            "outside": true
+          },
+          "input": {
+            "button": "left"
+          },
+          "expectError": "outside"
+        },
+        {
+          "call": "screen_done",
+          "input": {
+            "summary": "Looked at GIMP."
+          }
+        },
+        {
+          "text": "Probe finished."
+        }
+      ]
+    },
+    {
+      "name": "deny",
+      "expectPromptContains": "cu-deny",
+      "steps": [
+        {
+          "call": "cu_begin",
+          "input": {
+            "goal": "cu-deny: export beach as PNG to Pictures",
+            "apps": [
+              "${GIMP_APP}"
+            ]
+          }
+        },
+        {
+          "call": "screen_look",
+          "input": {}
+        },
+        {
+          "call": "screen_done",
+          "input": {
+            "summary": "Export blocked by U-1 dialog capture contract; U/V resolution required."
+          }
+        },
+        {
+          "text": "Export blocked: U/V must resolve invisible dialog capture and input before approval or denial can be tested."
+        }
+      ]
+    },
+    {
+      "name": "export",
+      "expectPromptContains": "export it as PNG to Pictures",
+      "steps": [
+        {
+          "call": "cu_begin",
+          "input": {
+            "goal": "open the GIMP image beach.xcf and export it as PNG to Pictures",
+            "apps": [
+              "${GIMP_APP}"
+            ]
+          }
+        },
+        {
+          "call": "screen_look",
+          "input": {}
+        },
+        {
+          "call": "screen_done",
+          "input": {
+            "summary": "Export blocked by U-1 dialog capture contract; U/V resolution required."
+          }
+        },
+        {
+          "text": "Export blocked: U/V must resolve invisible dialog capture and input before approval or denial can be tested."
+        }
+      ]
+    },
+    {
+      "name": "excluded",
+      "expectPromptContains": "cu-excluded",
+      "steps": [
+        {
+          "call": "cu_begin",
+          "input": {
+            "goal": "cu-excluded: press a key in GIMP",
+            "apps": [
+              "${GIMP_APP}"
+            ]
+          }
+        },
+        {
+          "call": "screen_look",
+          "input": {}
+        },
+        {
+          "call": "screen_key",
+          "input": {
+            "combo": "ctrl+shift+e"
+          },
+          "expectError": "excluded"
+        },
+        {
+          "call": "screen_done",
+          "input": {
+            "summary": "A terminal has focus."
+          }
+        },
+        {
+          "text": "I cannot type while a terminal has focus."
+        }
+      ],
+      "mask": {
+        "mode": "all-black"
+      }
+    },
+    {
+      "name": "stuck",
+      "expectPromptContains": "cu-stuck",
+      "steps": [
+        {
+          "call": "cu_begin",
+          "input": {
+            "goal": "cu-stuck: keep looking",
+            "apps": [
+              "${GIMP_APP}"
+            ]
+          }
+        },
+        {
+          "call": "screen_look",
+          "input": {}
+        },
+        {
+          "call": "screen_key",
+          "input": {
+            "combo": "shift"
+          }
+        },
+        {
+          "call": "screen_look",
+          "input": {}
+        },
+        {
+          "call": "screen_key",
+          "input": {
+            "combo": "shift"
+          }
+        },
+        {
+          "call": "screen_look",
+          "input": {}
+        },
+        {
+          "call": "screen_key",
+          "input": {
+            "combo": "shift"
+          }
+        },
+        {
+          "call": "screen_look",
+          "input": {}
+        },
+        {
+          "call": "screen_key",
+          "input": {
+            "combo": "shift"
+          }
+        },
+        {
+          "call": "screen_look",
+          "input": {}
+        },
+        {
+          "call": "screen_key",
+          "input": {
+            "combo": "shift"
+          }
+        },
+        {
+          "call": "screen_look",
+          "input": {}
+        },
+        {
+          "call": "screen_key",
+          "input": {
+            "combo": "shift"
+          }
+        },
+        {
+          "call": "screen_look",
+          "input": {}
+        },
+        {
+          "text": "Still nothing changed."
+        }
+      ]
+    },
+    {
+      "name": "lock",
+      "expectPromptContains": "cu-lock",
+      "steps": [
+        {
+          "call": "cu_begin",
+          "input": {
+            "goal": "cu-lock: hold the session",
+            "apps": [
+              "${GIMP_APP}"
+            ]
+          }
+        },
+        {
+          "call": "screen_look",
+          "input": {}
+        },
+        {
+          "call": "screen_look",
+          "input": {},
+          "hold": 20,
+          "expectError": [
+            "paused",
+            "no-session"
+          ]
+        },
+        {
+          "text": "Stopped."
+        }
+      ]
+    },
+    {
+      "name": "physical",
+      "expectPromptContains": "cu-physical",
+      "steps": [
+        {
+          "call": "cu_begin",
+          "input": {
+            "goal": "cu-physical: hold the session",
+            "apps": [
+              "${GIMP_APP}"
+            ]
+          }
+        },
+        {
+          "call": "screen_look",
+          "input": {}
+        },
+        {
+          "call": "screen_look",
+          "input": {},
+          "hold": 20,
+          "expectError": [
+            "paused",
+            "no-session"
+          ]
+        },
+        {
+          "text": "Stopped."
+        }
+      ]
+    }
+  ],
+  "concerns": [
+    "Escalation to U/V: contracts §4 U-1 makes only the original allowed GIMP toplevel fullscreen. Export Image and Export Image as PNG are separate toplevels: their titles/rectangles are redacted and their focus makes captures all black. X cannot locate or verify their save buttons via screen.look. U/V must agree a safe visible, focusable dialog capture/input contract before X10/X11 can test Review Focus 4 (deny leaves no file; approve writes PNG). These turns are blocked and do not claim consequential-card or export coverage.",
+    "X10/X11: ordinary fullscreen screenshots have vacuous:true and ok:false because there are no foreign pixels to inspect. This means missing mask evidence, not a leak. Require a controlled all-black capture (turn.mask or step.mask mode all-black), or a known full-frame fixture (mode fixture with pngBase64) before asserting ok. Excluded-focus captures must be all black. Summary-only screen.look cannot provide outside-target geometry."
+  ]
+}
