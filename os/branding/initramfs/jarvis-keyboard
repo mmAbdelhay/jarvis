@@ -1,7 +1,7 @@
 #!/bin/sh
 # initramfs-tools hook (jarvis-branding): the disk unlock prompt types with
 # the installed keyboard layout (contracts §11.5). Plymouth reads XKBLAYOUT
-# from /etc/vconsole.conf (written by the installer) and compiles it with
+# from /etc/vconsole.conf (Debian links it to /etc/default/keyboard) and compiles it with
 # libxkbcommon; Debian's plymouth hook copies neither that file nor the XKB
 # data, so without this Plymouth falls back to the console's US keymap.
 # Plymouth only applies the XKB layout to evdev keyboards (/dev/input/event*),

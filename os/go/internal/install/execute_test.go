@@ -290,7 +290,6 @@ func TestExecuteEraseEncryptLocalModel(t *testing.T) {
 		"/target/etc/locale.gen":                      "en_US.UTF-8 UTF-8\n",
 		"/target/etc/default/locale":                  "LANG=en_US.UTF-8\n",
 		"/target/etc/default/keyboard":                "XKBMODEL=\"pc105\"\nXKBLAYOUT=\"us\"\nXKBVARIANT=\"\"\nXKBOPTIONS=\"\"\nBACKSPACE=\"guess\"\n",
-		"/target/etc/vconsole.conf":                   "# Written by the Rafiq installer: the disk unlock prompt's keyboard.\nXKBLAYOUT=us\nXKBMODEL=pc105\nXKBVARIANT=\nXKBOPTIONS=\n",
 		"/target/etc/timezone":                        "Africa/Cairo\n",
 		"/target/etc/machine-id":                      "",
 		"/target/etc/greetd/config.toml":              packagedGreetd, // untouched without autologin
@@ -304,6 +303,9 @@ func TestExecuteEraseEncryptLocalModel(t *testing.T) {
 	}
 	if h.fs.Exists("/target/etc/apt/sources.list.d/jarvis.sources") {
 		t.Error("jarvis.sources is shipped by jarvis-archive-keyring; the installer must not write it")
+	}
+	if l, _ := os.Readlink(filepath.Join(h.root, "target/etc/vconsole.conf")); l != "default/keyboard" {
+		t.Errorf("vconsole.conf -> %q (Plymouth reads the unlock prompt's layout from it)", l)
 	}
 	if l, _ := os.Readlink(filepath.Join(h.root, "target/etc/localtime")); l != "/usr/share/zoneinfo/Africa/Cairo" {
 		t.Errorf("localtime -> %q", l)

@@ -743,7 +743,7 @@ func (j *job) configure(ctx context.Context) error {
 		func() error { return j.chroot(ctx, slow, "locale-gen") },
 		func() error { return j.write("/etc/default/locale", renderDefaultLocale(c.Locale), 0o644) },
 		func() error { return j.write("/etc/default/keyboard", renderKeyboard(c.Keyboard), 0o644) },
-		func() error { return j.write("/etc/vconsole.conf", renderVconsole(c.Keyboard), 0o644) },
+		func() error { return j.vconsole() },
 		func() error { return j.timezone(c.Timezone) },
 		func() error { return j.chroot(ctx, quick, "groupadd", "-f", "-r", "jarvis-admins") },
 		func() error { return j.chroot(ctx, quick, "groupadd", "-f", "-r", "netdev") },
@@ -767,6 +767,18 @@ func (j *job) configure(ctx context.Context) error {
 	}
 	j.done()
 	return nil
+}
+
+// vconsole points /etc/vconsole.conf at /etc/default/keyboard, as Debian's
+// systemd does on every boot (tmpfiles.d/debian.conf "L+"): Plymouth's unlock
+// prompt reads its XKB layout from vconsole.conf only (quotes stripped), and
+// jarvis-branding's initramfs hook copies it into the initramfs, so the
+// layout is right from the first boot's initramfs on (contracts §11.5).
+func (j *job) vconsole() error {
+	if err := j.d.Files.Remove(Target + "/etc/vconsole.conf"); err != nil {
+		return err
+	}
+	return j.d.Files.Symlink("default/keyboard", Target+"/etc/vconsole.conf")
 }
 
 func (j *job) timezone(tz string) error {
