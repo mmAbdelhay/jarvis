@@ -21,7 +21,7 @@ offer (shipped by `jarvis-models-catalog` at
 | `languages` | Languages it handles well |
 | `recommendedFor` | One-line guidance |
 | `role` | `main` (offered to the user) or `backup` (exactly one: the small built-in model jarvisd falls back to, M4 contracts §1; shipped by `jarvis-backup-model`) |
-| `vision` | `true` only with passing tool-calling and vision probe evidence at the model’s context size in `vision-candidates.json` (`os-models.yml`, input `vision`); at most one entry, always a main model (v1.1 contracts §4.12). Computer use requires it; without passing evidence, v1.1 computer use is cloud-only. |
+| `vision` | `true` only with passing tool-calling and vision probe evidence at jarvisd’s runtime context size (`OLLAMA_NUM_CTX`, 8,192 tokens) in `vision-candidates.json` (`os-models.yml`, input `vision`); at most one entry, always a main model (v1.1 contracts §4.12). Computer use requires it; without passing evidence, v1.1 computer use is cloud-only. |
 
 ## Adding a model
 

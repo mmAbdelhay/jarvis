@@ -5,13 +5,13 @@
 // space jarvis-cu's capture uses). Run by os-models.yml (input "vision").
 import { writeFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { OLLAMA_NUM_CTX } from "@jarvis/platform/model";
 import {
   PROBE_HEIGHT,
   PROBE_TARGETS,
   PROBE_WIDTH,
   type Click,
   type Target,
-  contextSize,
   hits,
   readClick,
   targetPng,
@@ -21,8 +21,6 @@ import {
 const tag = process.env.VISION_MODEL_TAG ?? "";
 const baseUrl = process.env.OLLAMA_BASE_URL ?? "http://127.0.0.1:11434";
 const out = process.env.VISION_PROBE_OUT ?? "";
-// Set this to the catalog context size when the model has no num_ctx parameter.
-const explicitContext = process.env.VISION_MODEL_CONTEXT_SIZE ?? "";
 
 const CLICK_TOOL = {
   type: "function",
@@ -38,7 +36,7 @@ const CLICK_TOOL = {
   },
 };
 
-type ShowReply = { capabilities?: string[]; parameters?: string };
+type ShowReply = { capabilities?: string[] };
 type ChatReply = {
   message?: { tool_calls?: { function?: { name?: string; arguments?: unknown } }[] };
 };
@@ -57,7 +55,7 @@ async function post<T>(path: string, body: unknown, timeoutMs: number): Promise<
 describe.skipIf(tag === "")("vision probe", () => {
   // Invalidate an earlier run before any request can hang or be interrupted.
   if (tag !== "" && out !== "") {
-    writeFileSync(out, `${JSON.stringify({ tag, status: "failed", capabilities: [], trials: [], contextSize: null }, null, 2)}\n`);
+    writeFileSync(out, `${JSON.stringify({ tag, status: "failed", capabilities: [], trials: [], contextSize: OLLAMA_NUM_CTX }, null, 2)}\n`);
   }
   // Both checks use one capability response; a failed check cannot be
   // overwritten by a later, successful /api/show request.
@@ -73,20 +71,17 @@ describe.skipIf(tag === "")("vision probe", () => {
     const trials: { target: Target; click: Click | null; hit: boolean }[] = [];
     let capabilities: string[] = [];
     let status: "passed" | "failed" = "failed";
-    let numCtx: number | null = null;
     try {
       const show = await showModel();
       capabilities = show.capabilities ?? [];
       expect(capabilities).toEqual(expect.arrayContaining(["vision", "tools"]));
-      numCtx = contextSize(show.parameters, explicitContext);
-      expect(numCtx, "Set VISION_MODEL_CONTEXT_SIZE to the model's catalog context size").not.toBeNull();
       for (const target of PROBE_TARGETS) {
         const reply = await post<ChatReply>(
           "/api/chat",
           {
             model: tag,
             stream: false,
-            options: { temperature: 0, num_ctx: numCtx },
+            options: { temperature: 0, num_ctx: OLLAMA_NUM_CTX },
             tools: [CLICK_TOOL],
             messages: [
               { role: "system", content: "You operate a computer by calling tools. Answer only with a tool call." },
@@ -106,9 +101,9 @@ describe.skipIf(tag === "")("vision probe", () => {
       status = verdict(trials.map((t) => t.hit));
       expect(status, JSON.stringify(trials)).toBe("passed");
     } finally {
-      // Even a capability, HTTP or context failure replaces stale passing evidence.
+      // Even a capability or HTTP failure replaces stale passing evidence.
       if (out !== "") {
-        writeFileSync(out, `${JSON.stringify({ tag, status, capabilities, trials, contextSize: numCtx }, null, 2)}\n`);
+        writeFileSync(out, `${JSON.stringify({ tag, status, capabilities, trials, contextSize: OLLAMA_NUM_CTX }, null, 2)}\n`);
       }
     }
   }, 1_900_000);

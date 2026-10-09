@@ -8,7 +8,6 @@ import {
   TOLERANCE,
   hits,
   readClick,
-  contextSize,
   targetPng,
   verdict,
 } from "./vision-fixture";
@@ -65,22 +64,5 @@ describe("vision probe fixture", () => {
     expect(verdict([true, true, false])).toBe("passed");
     expect(verdict([true, false, false])).toBe("failed");
     expect(verdict([])).toBe("failed");
-  });
-});
-
-// The probe must use the selected model's configured context, not a fixed 8192.
-describe("vision probe context", () => {
-  it("reads num_ctx from Ollama model parameters", () => {
-    expect(contextSize("temperature 0\nnum_ctx 16384\n")).toBe(16384);
-  });
-  it("accepts an explicit catalog context size", () => {
-    expect(contextSize("num_ctx 2048", "32768")).toBe(32768);
-  });
-  it("refuses absent or invalid context sizes", () => {
-    for (const value of ["", "0", "-1", "2.5", "Infinity", "oops"]) {
-      expect(contextSize("", value)).toBeNull();
-    }
-    expect(contextSize(undefined)).toBeNull();
-    expect(contextSize("num_ctx 8192", "oops")).toBeNull();
   });
 });

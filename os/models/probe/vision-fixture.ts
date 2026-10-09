@@ -87,11 +87,3 @@ export function hits(click: Click | null, t: Target, tol = TOLERANCE): boolean {
 export function verdict(results: readonly boolean[]): "passed" | "failed" {
   return results.filter(Boolean).length >= 2 ? "passed" : "failed";
 }
-
-/** Use the catalog's explicit context or the model's configured num_ctx.
- * Missing context is not evidence of a successful probe at catalog size. */
-export function contextSize(parameters?: string, explicit = ""): number | null {
-  const configured = parameters?.match(/^\s*num_ctx\s+(\S+)\s*$/m)?.[1];
-  const value = Number(explicit !== "" ? explicit : configured);
-  return Number.isSafeInteger(value) && value > 0 ? value : null;
-}
