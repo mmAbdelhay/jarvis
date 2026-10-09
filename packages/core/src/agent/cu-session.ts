@@ -63,7 +63,11 @@ export function createCuSession(init: {
   stuckRepeats?: number;
 }): CuSession {
   const apps = [...init.apps];
-  const maxSteps = init.maxSteps ?? CU_MAX_STEPS;
+  const requestedMax = init.maxSteps ?? CU_MAX_STEPS;
+  const maxSteps =
+    Number.isInteger(requestedMax) && requestedMax > 0
+      ? Math.min(requestedMax, CU_MAX_STEPS)
+      : CU_MAX_STEPS;
   const repeats = init.stuckRepeats ?? CU_STUCK_REPEATS;
   const steps: CuStep[] = [];
   let actions = 0;
@@ -84,7 +88,7 @@ export function createCuSession(init: {
   });
   const mark = (index: number, status: CuStepStatus) => {
     const step = steps[index];
-    if (step !== undefined) step.status = status;
+    if (active && step !== undefined) step.status = status;
   };
 
   return {
@@ -94,7 +98,7 @@ export function createCuSession(init: {
     lang: init.lang,
     via: init.via,
     startStep(title) {
-      if (actions >= maxSteps) return "cap";
+      if (!active || actions >= maxSteps) return "cap";
       actions++;
       steps.push({ title, status: "running" });
       return steps.length - 1;
@@ -112,7 +116,7 @@ export function createCuSession(init: {
       return same >= repeats ? "stuck" : "ok";
     },
     pause(reason) {
-      paused = reason;
+      if (active) paused = reason;
     },
     resume() {
       paused = null;
@@ -121,6 +125,7 @@ export function createCuSession(init: {
     stepCount: () => actions,
     state,
     end(why) {
+      if (!active) return state();
       active = false;
       paused = null;
       for (const step of steps) {
