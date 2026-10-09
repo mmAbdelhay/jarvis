@@ -3,6 +3,7 @@ package guard
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/godbus/dbus/v5"
@@ -148,5 +149,104 @@ func TestPasswordFocusedUnseededRefuses(t *testing.T) {
 	w2.Focus(Accessible{":1.1", "/e"}, true) // an event also seeds
 	if _, err := w2.PasswordFocused(context.Background()); errors.Is(err, ErrNoA11y) {
 		t.Fatal("focus event should seed")
+	}
+}
+
+// fakeTree is an in-memory accessibility tree for the seed walk.
+type fakeTree struct {
+	kids     map[Accessible][]Accessible
+	states   map[Accessible][]uint32
+	stateErr map[Accessible]error
+	kidsErr  map[Accessible]error
+}
+
+func (f *fakeTree) States(_ context.Context, a Accessible) ([]uint32, error) {
+	if err := f.stateErr[a]; err != nil {
+		return nil, err
+	}
+	return f.states[a], nil
+}
+
+func (f *fakeTree) children(_ context.Context, a Accessible) ([]Accessible, error) {
+	if err := f.kidsErr[a]; err != nil {
+		return nil, err
+	}
+	return f.kids[a], nil
+}
+
+// chain builds root > app > n1 > ... > nDepth and returns the leaf.
+func chain(f *fakeTree, depth int) Accessible {
+	parent := seedRoot
+	for i := 1; i <= depth; i++ {
+		n := Accessible{":1.50", dbus.ObjectPath(fmt.Sprintf("/n/%d", i))}
+		f.kids[parent] = append(f.kids[parent], n)
+		parent = n
+	}
+	return parent
+}
+
+func newFakeTree() *fakeTree {
+	return &fakeTree{kids: map[Accessible][]Accessible{}, states: map[Accessible][]uint32{},
+		stateErr: map[Accessible]error{}, kidsErr: map[Accessible]error{}}
+}
+
+func TestFocusedWalkFindsDeepFocus(t *testing.T) {
+	f := newFakeTree()
+	leaf := chain(f, 30) // a web login field sits far below the app node
+	f.states[leaf] = []uint32{1 << 12}
+	a, found, err := focusedWalk(context.Background(), f)
+	if err != nil || !found || a != leaf {
+		t.Fatalf("deep focused node: %v %v %v", a, found, err)
+	}
+}
+
+func TestFocusedWalkCutShortIsError(t *testing.T) {
+	f := newFakeTree()
+	leaf := chain(f, seedMaxDepth+5)
+	f.states[leaf] = []uint32{1 << 12}
+	if _, found, err := focusedWalk(context.Background(), f); err == nil || found {
+		t.Fatalf("a walk cut by the depth cap must be an error, got found=%v err=%v", found, err)
+	}
+}
+
+func TestFocusedWalkPartialIsError(t *testing.T) {
+	timeout := errors.New("call timed out")
+	goneErr := dbus.Error{Name: "org.freedesktop.DBus.Error.ServiceUnknown"}
+
+	f := newFakeTree()
+	chain(f, 5)
+	f.stateErr[f.kids[seedRoot][0]] = timeout // hung app: its subtree is unknown
+	if _, _, err := focusedWalk(context.Background(), f); err == nil {
+		t.Fatal("a States timeout must make the walk an error")
+	}
+
+	f = newFakeTree()
+	chain(f, 5)
+	f.kidsErr[f.kids[seedRoot][0]] = timeout
+	if _, _, err := focusedWalk(context.Background(), f); err == nil {
+		t.Fatal("a children timeout must make the walk an error")
+	}
+
+	f = newFakeTree()
+	chain(f, 5)
+	app := f.kids[seedRoot][0]
+	f.stateErr[app] = goneErr
+	f.kidsErr[app] = goneErr
+	if _, found, err := focusedWalk(context.Background(), f); err != nil || found {
+		t.Fatalf("an app that vanished is skipped: %v %v", found, err)
+	}
+
+	f = newFakeTree()
+	f.kidsErr[seedRoot] = goneErr
+	if _, _, err := focusedWalk(context.Background(), f); err == nil {
+		t.Fatal("root failure is an error")
+	}
+}
+
+func TestFocusedWalkNothingFocused(t *testing.T) {
+	f := newFakeTree()
+	chain(f, 10)
+	if _, found, err := focusedWalk(context.Background(), f); found || err != nil {
+		t.Fatalf("nothing focused: %v %v", found, err)
 	}
 }

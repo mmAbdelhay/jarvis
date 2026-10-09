@@ -185,8 +185,13 @@ func (b busQuery) States(ctx context.Context, a Accessible) ([]uint32, error) {
 
 const (
 	seedMaxNodes = 4000
-	seedMaxDepth = 12
+	// Web content nests deep (app > frame > ... > document > sections >
+	// form > entry); the node cap is what bounds the walk, this only stops
+	// runaway or cyclic trees.
+	seedMaxDepth = 64
 )
+
+var seedRoot = Accessible{Bus: "org.a11y.atspi.Registry", Path: "/org/a11y/atspi/accessible/root"}
 
 func (b busQuery) children(ctx context.Context, a Accessible) ([]Accessible, error) {
 	var kids [][]interface{}
@@ -208,17 +213,30 @@ func (b busQuery) children(ctx context.Context, a Accessible) ([]Accessible, err
 	return out, nil
 }
 
-// Focused walks the accessibility tree from the registry root and returns the
-// first node in the focused state. An application that vanishes mid-walk is
-// skipped; a failure at the root, or a walk cut short by the node cap, is an
-// error so the caller keeps refusing instead of assuming nothing has focus.
+// Focused walks the live accessibility tree (see focusedWalk).
 func (b busQuery) Focused(ctx context.Context) (Accessible, bool, error) {
+	return focusedWalk(ctx, b)
+}
+
+// treeQuery is what the seed walk needs from the bus.
+type treeQuery interface {
+	States(ctx context.Context, a Accessible) ([]uint32, error)
+	children(ctx context.Context, a Accessible) ([]Accessible, error)
+}
+
+// focusedWalk walks the tree breadth-first from the registry root and returns
+// the first node in the focused state. found=false with a nil error is only
+// returned after every node was examined: a node (and its subtree) is skipped
+// only when the bus says its application or object is gone. Any other
+// failure, a failure at the root, or a walk cut short by the node or depth
+// cap is an error, so the caller keeps refusing instead of assuming nothing
+// has focus.
+func focusedWalk(ctx context.Context, t treeQuery) (Accessible, bool, error) {
 	type item struct {
 		a     Accessible
 		depth int
 	}
-	root := Accessible{Bus: "org.a11y.atspi.Registry", Path: "/org/a11y/atspi/accessible/root"}
-	apps, err := b.children(ctx, root)
+	apps, err := t.children(ctx, seedRoot)
 	if err != nil {
 		return Accessible{}, false, err
 	}
@@ -227,27 +245,36 @@ func (b busQuery) Focused(ctx context.Context) (Accessible, bool, error) {
 		queue = append(queue, item{a, 1})
 	}
 	for n := 0; len(queue) > 0; n++ {
+		if err := ctx.Err(); err != nil {
+			return Accessible{}, false, err
+		}
 		if n >= seedMaxNodes {
 			return Accessible{}, false, errors.New("accessibility tree too large to search")
 		}
 		it := queue[0]
 		queue = queue[1:]
-		if st, err := b.States(ctx, it.a); err == nil {
-			if len(st) > 0 && st[0]&(1<<stateFocused) != 0 {
-				return it.a, true, nil
+		st, err := t.States(ctx, it.a)
+		if err != nil {
+			if gone(err) {
+				continue
 			}
-		} else if !gone(err) {
-			if ctx.Err() != nil {
-				return Accessible{}, false, ctx.Err()
+			return Accessible{}, false, fmt.Errorf("reading state of %s%s: %w", it.a.Bus, it.a.Path, err)
+		}
+		if len(st) > 0 && st[0]&(1<<stateFocused) != 0 {
+			return it.a, true, nil
+		}
+		kids, err := t.children(ctx, it.a)
+		if err != nil {
+			if gone(err) {
+				continue
 			}
+			return Accessible{}, false, fmt.Errorf("listing children of %s%s: %w", it.a.Bus, it.a.Path, err)
+		}
+		if len(kids) == 0 {
 			continue
 		}
 		if it.depth >= seedMaxDepth {
-			continue
-		}
-		kids, err := b.children(ctx, it.a)
-		if err != nil {
-			continue
+			return Accessible{}, false, errors.New("accessibility tree too deep to search")
 		}
 		for _, k := range kids {
 			queue = append(queue, item{k, it.depth + 1})
