@@ -9,6 +9,17 @@ import { HOST_FORCED_RISK } from "./tool-registry.js";
 
 /** Arguments for every function cell, by "<table>.<key>". */
 const SAMPLES: Record<string, unknown[]> = {
+  "cu.sessionTitle": ["GIMP", "export beach.xcf"],
+  "cu.stepClick": ["Export"],
+  "cu.stepDoubleClick": ["beach.xcf"],
+  "cu.stepType": ["File name", 9],
+  "cu.stepKey": ["ctrl+s"],
+  "cu.stepDrag": ["layer"],
+  "cu.consequenceTitle": ["Click", "save"],
+  "cu.consequenceDetail": ["GIMP"],
+  "cu.cap": [50],
+  "cu.endTitle": [3],
+  "cu.noSuchProvider": ["work"],
   "user.toolFailed": ["X", "failed"],
   "user.stepLimitFallback": [8, ["net.status", "net.status"]],
   "user.updatesCheckFailed": ["boom"],

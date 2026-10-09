@@ -1,3 +1,4 @@
+import { CU_TEXT } from "./cu-text.js";
 import type { Lang, Localized } from "./i18n.js";
 
 // Every string jarvisd produces. Text a person sees lives in the {en, ar}
@@ -491,6 +492,7 @@ export const RECIPE_TEXT = {
 
 /** Every user-visible table, for the i18n gate (i18n-tables.test.ts). */
 export const I18N_TABLES = {
+  cu: CU_TEXT,
   user: USER_TEXT,
   activity: TOOL_ACTIVITY,
   doctor: DOCTOR_TEXT,
