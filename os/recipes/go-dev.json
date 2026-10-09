@@ -1,0 +1,27 @@
+{
+  "id": "go-dev",
+  "title": { "en": "Go development", "ar": "تطوير Go" },
+  "description": {
+    "en": "The Go toolchain from Debian, with the gopls language server, the Delve debugger and Git.",
+    "ar": "أدوات لغة Go من مستودعات دبيان، مع خادم اللغة gopls ومنقّح الأخطاء Delve وGit."
+  },
+  "steps": [
+    {
+      "tool": "pkg.install",
+      "input": { "items": [{ "source": "apt", "id": "golang-go" }] },
+      "title": { "en": "Install the Go toolchain", "ar": "تثبيت أدوات لغة Go" }
+    },
+    {
+      "tool": "pkg.install",
+      "input": {
+        "items": [
+          { "source": "apt", "id": "gopls" },
+          { "source": "apt", "id": "delve" },
+          { "source": "apt", "id": "git" }
+        ]
+      },
+      "title": { "en": "Install gopls, Delve and Git", "ar": "تثبيت gopls وDelve وGit" }
+    }
+  ],
+  "requires": { "os": "rafiq" }
+}

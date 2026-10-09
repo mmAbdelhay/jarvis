@@ -1,0 +1,93 @@
+# The model catalog (M2 design §5.3, §13): sizes match the registry, and every
+# model passes the M1 tool-call probe. Each probe downloads gigabytes and runs
+# minutes on CPU, so the full catalog runs weekly and on demand only. A pull
+# request touching os/models/** runs the registry checks and probes just the
+# backup model (os/models/backup-model.lock.json), the one every install has.
+name: OS models
+
+on:
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+    inputs:
+      large_runner:
+        description: "runs-on label for models over 12 GiB or 16 GB RAM (empty: skip them)"
+        required: false
+        default: ""
+  pull_request:
+    paths:
+      - "os/models/**"
+
+# A newer push to the same ref makes the older run's answer moot.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  registry:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m unittest discover -s os/models/tests -v
+      - run: python3 -m unittest discover -s os/models/tools/tests -v
+      - run: python3 os/models/tools/check_registry.py
+      - id: m
+        run: |
+          only=""
+          if [ "${{ github.event_name }}" = pull_request ]; then
+            only=$(python3 -c 'import json; print(json.load(open("os/models/backup-model.lock.json"))["ollamaTag"])')
+          fi
+          echo "matrix=$(python3 os/models/tools/matrix.py --large-runner '${{ inputs.large_runner || 'skip' }}' --only-tag "$only")" >> "$GITHUB_OUTPUT"
+
+  probe:
+    needs: registry
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.registry.outputs.matrix) }}
+    runs-on: ${{ matrix.runner == 'skip' && 'ubuntu-24.04' || matrix.runner }}
+    timeout-minutes: 120
+    name: probe ${{ matrix.id }}
+    steps:
+      - if: matrix.runner == 'skip'
+        run: |
+          echo "::warning title=Catalog probe::${{ matrix.id }} (${{ matrix.sizeBytes }} bytes) is too large for a hosted runner; run with large_runner set"
+      - if: matrix.runner != 'skip'
+        uses: actions/checkout@v4
+      - if: matrix.runner != 'skip'
+        name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL && df -h /
+      - if: matrix.runner != 'skip'
+        uses: pnpm/action-setup@v4
+      - if: matrix.runner != 'skip'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - if: matrix.runner != 'skip'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/jarvis-build
+          key: ollama-${{ hashFiles('os/packaging/jarvis-ollama/ollama.env') }}
+      - if: matrix.runner != 'skip'
+        name: Pinned Ollama (same tarball as jarvis-ollama)
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq zstd
+          os/packaging/lib/fetch-ollama.sh "$RUNNER_TEMP/ollama"
+          OLLAMA_HOST=127.0.0.1:11434 OLLAMA_KEEP_ALIVE=60m nohup "$RUNNER_TEMP/ollama/bin/ollama" serve > "$RUNNER_TEMP/ollama.log" 2>&1 &
+          for i in $(seq 60); do "$RUNNER_TEMP/ollama/bin/ollama" list >/dev/null 2>&1 && break; sleep 1; done
+          "$RUNNER_TEMP/ollama/bin/ollama" pull "${{ matrix.tag }}"
+          # Load it once so the probe's 30 s budget measures the tool call, not the load.
+          "$RUNNER_TEMP/ollama/bin/ollama" run "${{ matrix.tag }}" "Say ok." > /dev/null
+      - if: matrix.runner != 'skip'
+        run: pnpm install --frozen-lockfile --ignore-scripts
+      - if: matrix.runner != 'skip'
+        run: pnpm exec vitest run --config os/models/probe/vitest.config.ts
+        env:
+          CATALOG_MODEL_TAG: ${{ matrix.tag }}
+      - if: failure()
+        run: tail -n 200 "$RUNNER_TEMP/ollama.log" || true

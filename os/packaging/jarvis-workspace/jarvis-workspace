@@ -1,0 +1,10 @@
+#!/bin/sh
+# Jarvis Workspace launcher (M4 contracts §6.16): a private config directory so
+# the app never shares jarvisd's config or run directory. packages/desktop reads
+# JARVIS_CONFIG_DIR (src/daemon/control/config-dir.ts) for jarvis.yaml, logs, the
+# control socket and its own bookkeeping. No setuid sandbox; Chromium uses
+# unprivileged user namespaces.
+JARVIS_CONFIG_DIR=${XDG_CONFIG_HOME:-$HOME/.config}/jarvis-workspace
+export JARVIS_CONFIG_DIR
+(umask 077 && mkdir -p "$JARVIS_CONFIG_DIR") || exit 1
+exec /opt/jarvis-workspace/jarvis "$@"

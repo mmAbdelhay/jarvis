@@ -62,6 +62,8 @@ export interface ControlConnection {
   readonly id: number;
   /** Runs once, when this client's connection closes. */
   onClose(listener: () => void): void;
+  /** The peer's executable path as the kernel reports it, or undefined. */
+  peerExecutable?(): Promise<string | undefined>;
 }
 
 export interface ControlHandlers {
@@ -170,6 +172,10 @@ export async function createControlServer(
         if (phase === "closing") listener();
         else closeListeners.push(listener);
       },
+      peerExecutable: () =>
+        deps.peer === undefined
+          ? Promise.resolve(undefined)
+          : deps.peer.executableOf(socket).catch(() => undefined),
     };
 
     const respond = (id: number, run: () => Promise<unknown>) => {

@@ -1,0 +1,8 @@
+#!/bin/sh
+# First-boot model download (contracts §5); a no-op unless the installer left
+# /var/lib/jarvis/model-pending (ConditionPathExists in the unit).
+set -e
+if [ "$1" = configure ]; then
+  systemctl enable jarvis-model-fetch.service >/dev/null 2>&1 || true
+fi
+exit 0

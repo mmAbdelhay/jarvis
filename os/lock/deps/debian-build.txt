@@ -1,0 +1,32 @@
+# Build dependencies of jarvis-lock on Debian 13 (trixie). One package per line.
+cmake
+ninja-build
+g++
+pkgconf
+qt6-base-dev
+qt6-declarative-dev
+qt6-tools-dev
+qt6-l10n-tools
+python3
+libpam0g-dev
+# ext-session-lock-v1 client (QtWaylandClient private API: rebuild with every Qt upgrade)
+qt6-base-private-dev
+qt6-wayland-dev
+qt6-wayland-private-dev
+qt6-wayland-dev-tools
+libwayland-dev
+libwayland-bin
+wayland-protocols
+# needed only to run the tests
+libpam-wrapper
+qml6-module-qttest
+qml6-module-qtquick
+qml6-module-qtquick-controls
+qml6-module-qtquick-templates
+qml6-module-qtquick-layouts
+qml6-module-qtquick-shapes
+qml6-module-qtquick-window
+qml6-module-qtqml-workerscript
+labwc
+# the Wayland QPA plugin the session test runs jarvis-lock-testhooks with
+qt6-wayland

@@ -1,0 +1,14 @@
+Package: jarvis-backup-model
+Version: @VERSION@
+Architecture: all
+Maintainer: Muhammad AbdElHay <mmAbdelhay@users.noreply.github.com>
+Installed-Size: @INSTALLED_SIZE@
+Depends: jarvis-ollama
+Section: misc
+Priority: optional
+Homepage: @HOME_URL@
+Description: Built-in backup model for the Jarvis assistant on @DISTRO_NAME@
+ A small local model (tool calling verified, English and Arabic) that
+ Jarvis switches to when every configured provider fails. It answers with
+ a restricted set of simple tools. Installed into the Ollama model store
+ in /var/lib/ollama, byte for byte as pinned at build time.

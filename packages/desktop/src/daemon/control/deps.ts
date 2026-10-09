@@ -5,6 +5,7 @@
 import { randomBytes } from "node:crypto";
 import { chmod, link, lstat, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { connect, createServer, type Server, type Socket } from "node:net";
+import { nodePeerCheck, type PeerCheck } from "./peer.js";
 
 export interface ControlStat {
   isSocket(): boolean;
@@ -52,6 +53,8 @@ export interface ControlDeps {
   clock: ControlClock;
   process: ControlProcess;
   randomBytes(count: number): Uint8Array;
+  /** Which program is on the other end (Linux; undefined elsewhere or on any doubt). */
+  peer?: PeerCheck;
 }
 
 export function errorCode(error: unknown): string | undefined {
@@ -85,5 +88,6 @@ export function nodeControlDeps(): ControlDeps {
       },
     },
     randomBytes: (count) => randomBytes(count),
+    peer: nodePeerCheck(),
   };
 }

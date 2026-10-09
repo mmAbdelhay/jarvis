@@ -1,0 +1,31 @@
+# Installed to /usr/lib/systemd/system/jarvis-model-fetch.service (package
+# jarvis-model-fetch; enabled by its postinst/preset). Runs only while the
+# installer left /var/lib/jarvis/model-pending. Type=exec, not oneshot: a
+# oneshot would hold multi-user.target (and the login screen) until a
+# multi-gigabyte download ends; this one retries with backoff in the
+# background and exits 0 when the model is ready.
+[Unit]
+Description=Finish downloading Jarvis's local model
+ConditionPathExists=/var/lib/jarvis/model-pending
+Wants=network-online.target ollama.service
+After=network-online.target ollama.service
+
+[Service]
+Type=exec
+ExecStart=/usr/libexec/jarvis/jarvis-model-fetch
+Restart=on-failure
+RestartSec=1min
+Nice=10
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/jarvis
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+IPAddressDeny=any
+IPAddressAllow=localhost
+
+[Install]
+WantedBy=multi-user.target

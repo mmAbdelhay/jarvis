@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+# verify-chroot.sh CHROOT — after lb build, check the image carries the
+# session wiring the design requires (§9, contracts §4). Every problem is
+# listed, then the script fails.
+set -euo pipefail
+c=$1
+# shellcheck source=../../branding/lib/brand.sh
+. "$(dirname "$0")/../../branding/lib/brand.sh"
+brand_load
+problems=()
+
+grep -q 'C-A-t' "$c/etc/xdg/labwc/rc.xml" 2>/dev/null ||
+  problems+=("labwc rc.xml lacks the Ctrl+Alt+T terminal bind")
+grep -q 'command="/usr/libexec/jarvis/jarvis-session-key --focus"' "$c/etc/xdg/labwc/rc.xml" 2>/dev/null ||
+  problems+=("labwc rc.xml lacks the Super -> jarvis-session-key --focus bind")
+grep -Fxq '. /usr/share/jarvis-session/labwc/autostart' "$c/etc/xdg/labwc/autostart" 2>/dev/null ||
+  problems+=("labwc autostart does not start the shell through jarvis-session's guard")
+[ -f "$c/usr/share/jarvis-shell/jarvis-shell-loop" ] ||
+  problems+=("jarvis-shell's relaunch loop is not installed")
+[ -f "$c/usr/share/polkit-1/rules.d/50-jarvis.rules" ] ||
+  problems+=("polkit rule 50-jarvis.rules missing")
+grep -q '^jarvis-admins:' "$c/etc/group" 2>/dev/null ||
+  problems+=("group jarvis-admins missing")
+[ -L "$c/etc/systemd/system/multi-user.target.wants/jarvis-flathub-appstream.service" ] ||
+  problems+=("jarvis-flathub-appstream.service is not enabled")
+if [ ! -d "$c/var/lib/flatpak/appstream/flathub" ]; then
+  # Soft (coordinator decision on §6 #20): fetched on first boot instead.
+  echo "JARVIS-BUILD-WARNING: image has no Flathub appstream; it will be fetched on first boot" >&2
+fi
+[ -L "$c/etc/systemd/user/default.target.wants/jarvisd.service" ] ||
+  problems+=("jarvisd user unit is not enabled for every user")
+case $(readlink "$c/etc/systemd/system/display-manager.service" 2>/dev/null) in
+  */greetd.service) ;;
+  *) problems+=("greetd is not the display manager") ;;
+esac
+case $(readlink "$c/etc/systemd/system/default.target" 2>/dev/null) in
+  */graphical.target) ;;
+  *) problems+=("default target is not graphical.target") ;;
+esac
+grep -q '^\[remote "flathub"\]' "$c/var/lib/flatpak/repo/config" 2>/dev/null ||
+  problems+=("Flathub system remote missing")
+for p in jarvisd jarvis-shell jarvis-pkg jarvis-diag jarvis-helper jarvis-ui jarvis-greeter jarvis-installer \
+  jarvis-installer-backend jarvis-model-fetch jarvis-ollama jarvis-models-catalog jarvis-archive-keyring jarvis-branding \
+  greetd cage labwc foot flatpak network-manager plymouth cryptsetup-initramfs grub-efi-amd64-signed shim-signed mokutil os-prober; do
+  # Whole stanzas: Essential/Protected (grub-efi-amd64-signed) come before Status.
+  awk -v p="$p" 'BEGIN {RS = ""; FS = "\n"}
+    {pkg = ""; st = ""; for (i = 1; i <= NF; i++) {
+      if ($i ~ /^Package: /) pkg = substr($i, 10); if ($i ~ /^Status: /) st = substr($i, 9) }
+     if (pkg == p && st == "install ok installed") found = 1}
+    END {exit !found}' "$c/var/lib/dpkg/status" || problems+=("package $p is not installed")
+done
+
+grep -q 'command = "/usr/lib/jarvis-greeter/with-keyboard cage -s -- jarvis-greeter"' "$c/etc/greetd/config.toml" 2>/dev/null ||
+  problems+=("greetd does not run jarvis-greeter in cage (contracts §7)")
+if grep -q '^\[initial_session\]' "$c/etc/greetd/config.toml" 2>/dev/null; then
+  problems+=("the image autologins: an installed system would too (Review Focus 1)")
+fi
+[ -x "$c/usr/lib/live/config/2000-jarvis-live-session" ] ||
+  problems+=("live-config script for the live autologin is missing")
+# /etc/os-release must stay base-files' symlink (live-build copies a stale
+# Debian file there; hook 0050-os-release undoes that). Read the target inside
+# the chroot, never through the link, which could resolve on the build host.
+[ "$(readlink "$c/etc/os-release" 2>/dev/null)" = ../usr/lib/os-release ] ||
+  problems+=("/etc/os-release is not the symlink to ../usr/lib/os-release")
+osr=$c/usr/lib/os-release
+grep -qx "ID=$DISTRO_ID" "$osr" 2>/dev/null || problems+=("os-release ID is not $DISTRO_ID")
+grep -qx "PRETTY_NAME=\"$PRETTY_NAME\"" "$osr" 2>/dev/null || problems+=("os-release PRETTY_NAME is not $PRETTY_NAME")
+grep -qx 'ID_LIKE=debian' "$osr" 2>/dev/null || problems+=("os-release lacks ID_LIKE=debian")
+grep -qx 'Theme=jarvis' "$c/etc/plymouth/plymouthd.conf" 2>/dev/null || problems+=("Plymouth theme is not jarvis")
+initrd=$(find "$c/boot" -maxdepth 1 -name 'initrd.img-*' | sort | tail -n1)
+if [ -n "${VERIFY_LSINITRAMFS:-}" ]; then
+  listing=$("$VERIFY_LSINITRAMFS" "$initrd" 2>/dev/null || true)
+else
+  listing=$(chroot "$c" lsinitramfs "/boot/$(basename "$initrd")" 2>/dev/null || true)
+fi
+grep -q 'usr/share/plymouth/themes/jarvis/jarvis.script' <<<"$listing" || problems+=("initramfs lacks the jarvis Plymouth theme")
+grep -q 'cryptsetup' <<<"$listing" || problems+=("initramfs lacks cryptsetup")
+[ -f "$c/usr/share/keyrings/jarvis-archive-keyring.gpg" ] || problems+=("archive keyring missing")
+if [ ! -f "$c/etc/apt/sources.list.d/jarvis.sources" ]; then
+  problems+=("APT source jarvis.sources missing")
+elif ! grep -qxE 'Enabled: (yes|no)' "$c/etc/apt/sources.list.d/jarvis.sources"; then
+  # "Enabled: no" until the repo is published (jarvis-archive-keyring, JARVIS_APT_REPO_ENABLED).
+  problems+=("APT source jarvis.sources does not say Enabled: yes or no")
+fi
+[ -f "$c/usr/share/jarvis/models/catalog.json" ] || problems+=("model catalog missing")
+[ -L "$c/etc/systemd/system/multi-user.target.wants/ollama.service" ] || problems+=("ollama.service not enabled")
+grep -qx 'ConditionKernelCommandLine=!boot=live' "$c/usr/lib/systemd/system/ollama.service" 2>/dev/null ||
+  problems+=("ollama would run in the live session")
+grep -q pam_gnome_keyring "$c/etc/pam.d/greetd" 2>/dev/null || problems+=("greetd PAM does not unlock gnome-keyring")
+[ -f "$c/usr/share/grub/themes/jarvis/theme.txt" ] || problems+=("GRUB theme missing")
+
+"$(dirname "$0")/verify-m3.sh" "$c" || problems+=("Rafiq M3 image checks failed (verify-m3 lines above)")
+"$(dirname "$0")/verify-m4.sh" "$c" || problems+=("Rafiq M4 image checks failed (verify-m4 lines above)")
+
+if [ ${#problems[@]} -gt 0 ]; then
+  printf 'verify-chroot: %s\n' "${problems[@]}" >&2
+  exit 1
+fi
+echo "verify-chroot: ok"

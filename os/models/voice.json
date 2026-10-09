@@ -1,0 +1,65 @@
+{
+  "version": 3,
+  "models": [
+    {
+      "id": "whisper-base",
+      "kind": "stt",
+      "file": "stt/ggml-base.bin",
+      "sha256": "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe",
+      "license": "MIT",
+      "redistributable": true,
+      "source": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin",
+      "notes": "whisper.cpp GGML conversion of OpenAI Whisper base; weights and code MIT. Multilingual (incl. Arabic)."
+    },
+    {
+      "id": "whisper-small",
+      "kind": "stt",
+      "file": "stt/ggml-small.bin",
+      "sha256": "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
+      "license": "MIT",
+      "redistributable": true,
+      "source": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin",
+      "notes": "whisper.cpp GGML conversion of OpenAI Whisper small; weights and code MIT. Better Arabic than base."
+    },
+    {
+      "id": "piper-en_US-ljspeech-medium",
+      "kind": "tts",
+      "file": "tts/en_US-ljspeech-medium.onnx",
+      "sha256": "6f52a751e2349abe7a76735eb09dc1875298c77ea2342ffd2fef79ff81b87f22",
+      "license": "Public-Domain",
+      "redistributable": true,
+      "source": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/ljspeech/medium/en_US-ljspeech-medium.onnx",
+      "notes": "Piper voice trained from scratch on the LJ Speech dataset (public domain). Config en_US-ljspeech-medium.onnx.json ships beside it. MODEL_CARD https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/ljspeech/medium/MODEL_CARD says 'License: public domain'."
+    },
+    {
+      "id": "piper-en_US-amy-medium",
+      "kind": "tts",
+      "file": "tts/en_US-amy-medium.onnx",
+      "sha256": "b3a6e47b57b8c7fbe6a0ce2518161a50f59a9cdd8a50835c02cb02bdd6206c18",
+      "license": "CC-BY-4.0",
+      "redistributable": true,
+      "source": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/amy/medium/en_US-amy-medium.onnx",
+      "notes": "M3 English Piper voice; CC-BY-4.0 per Task 1 fix requirements. Config en_US-amy-medium.onnx.json ships beside it. SHA256 verified from the upstream Hugging Face ONNX file metadata."
+    },
+    {
+      "id": "piper-ar_JO-kareem-medium",
+      "kind": "tts",
+      "file": "tts/ar_JO-kareem-medium.onnx",
+      "sha256": "9e95cab07b679da603bba17c4dec7ab3111320571964ee95c0379603c086491e",
+      "license": "Proprietary",
+      "redistributable": false,
+      "source": "https://huggingface.co/rhasspy/piper-voices/resolve/main/ar/ar_JO/kareem/medium/ar_JO-kareem-medium.onnx",
+      "notes": "NOT SHIPPED: redistribution permission unverified; Proprietary is the conservative registry classification, not an upstream license claim. MODEL_CARD refers to https://github.com/AliMokhammad/arabicttstrain/ without an explicit license. Enable only after verifying a redistributable license. Config ar_JO-kareem-medium.onnx.json is committed. SHA256 verified from the upstream Hugging Face ONNX file metadata."
+    },
+    {
+      "id": "oww-hey-jarvis",
+      "kind": "wake",
+      "file": "wake/hey_jarvis_v0.1.onnx",
+      "sha256": "94a13cfe60075b132f6a472e7e462e8123ee70861bc3fb58434a73712ee0d2cb",
+      "license": "CC-BY-NC-SA-4.0",
+      "redistributable": false,
+      "source": "https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/hey_jarvis_v0.1.onnx",
+      "notes": "NOT SHIPPED. Listed so the build gate refuses it anywhere in an image. Wake word ships disabled (design 3.6 ruling); M3 decides."
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+#!/bin/sh
+# base-files owns /usr/lib/os-release (and the /etc/os-release symlink to it).
+# Divert the Debian file aside so ours can take its place (design §11).
+set -e
+if [ "$1" = install ] || [ "$1" = upgrade ]; then
+  dpkg-divert --package jarvis-branding --add --rename --divert /usr/lib/os-release.debian /usr/lib/os-release
+fi
+exit 0

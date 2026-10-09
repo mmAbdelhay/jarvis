@@ -1,0 +1,11 @@
+Package: jarvis-greeter
+Version: @VERSION@
+Architecture: amd64
+Maintainer: Muhammad AbdElHay <mmAbdelhay@users.noreply.github.com>
+Installed-Size: @INSTALLED_SIZE@
+Depends: greetd, cage, jarvis-ui (= @VERSION@), jarvis-branding (= @VERSION@)
+Section: x11
+Priority: optional
+Homepage: @HOME_URL@
+Description: @DISTRO_NAME@ login screen (greetd greeter)
+ Qt login screen run by greetd inside cage.

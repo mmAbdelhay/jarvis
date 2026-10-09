@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { linuxSwapScript, prepareLinux } from "./update-install-linux.js";
 
@@ -134,37 +134,59 @@ describe("linuxSwapScript text", () => {
 });
 
 describe.skipIf(process.platform === "win32")("linuxSwapScript run", () => {
-  let dir: string;
-  afterEach(() => {
+  let dir: string | undefined;
+  /** Done-markers of every launcher whose script has been run in this test. */
+  let pending: string[] = [];
+
+  // The swap script starts the launcher in the background and returns at
+  // once. Whatever a test asserts, wait for every launcher it triggered to
+  // finish before deleting the temp dir, or the launcher races the rmSync.
+  afterEach(async () => {
+    const markers = pending;
+    pending = [];
+    for (const marker of markers) await waitFor(marker);
     if (dir !== undefined) {
       spawnSync("/bin/chmod", ["-R", "u+w", dir]);
-      rmSync(dir, { recursive: true, force: true });
+      rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+      dir = undefined;
     }
   });
 
+  async function waitFor(file: string): Promise<void> {
+    for (let i = 0; i < 500 && !existsSync(file); i++) await new Promise((r) => setTimeout(r, 20));
+  }
+
   function setup() {
-    dir = mkdtempSync(join(tmpdir(), "jarvis swap 'l' "));
-    const appImage = join(dir, "Jarvis.AppImage");
+    const d = mkdtempSync(join(tmpdir(), "jarvis swap 'l' "));
+    dir = d;
+    const quote = (p: string) => p.replace(/'/g, `'\\''`);
+    const appImage = join(d, "Jarvis.AppImage");
     writeFileSync(appImage, "old");
     const staged = `${appImage}.new`;
     writeFileSync(staged, "new");
-    const log = join(dir, "launched.log");
-    const launcher = join(dir, "launcher.sh");
-    writeFileSync(launcher, `printf '%s\\n' "$1" >> '${log.replace(/'/g, `'\\''`)}'\n`);
-    return { appImage, staged, log, launch: `/bin/sh '${launcher.replace(/'/g, `'\\''`)}'` };
+    const log = join(d, "launched.log");
+    const done = join(d, "launched.done");
+    const launcher = join(d, "launcher.sh");
+    // The done marker is written last, so its presence means the launcher
+    // has finished touching `dir`.
+    writeFileSync(launcher, `printf '%s\\n' "$1" >> '${quote(log)}'\n: > '${quote(done)}'\n`);
+    return { appImage, staged, log, launch: `/bin/sh '${quote(launcher)}'`, done };
   }
 
   const exitedPid = () => spawnSync("/usr/bin/true").pid as number;
 
+  /** Runs the swap script; the launcher it starts is awaited in afterEach. */
   function run(script: string) {
-    const file = join(dir, "swap.sh");
+    const d = dir as string;
+    pending.push(join(d, "launched.done"));
+    const file = join(d, "swap.sh");
     writeFileSync(file, script);
     return spawnSync("/bin/sh", [file], { encoding: "utf8" });
   }
 
-  /** The launch runs in the background; wait briefly for its log line. */
+  /** The launch runs in the background; wait for it, then return its log. */
   async function launched(log: string): Promise<string> {
-    for (let i = 0; i < 50 && !existsSync(log); i++) await new Promise((r) => setTimeout(r, 20));
+    await waitFor(join(dirname(log), "launched.done"));
     return readFileSync(log, "utf8");
   }
 
@@ -188,30 +210,35 @@ describe.skipIf(process.platform === "win32")("linuxSwapScript run", () => {
     expect(await launched(log)).toBe(`${appImage}\n`);
   });
 
-  it("never touches a stale .old when there is no current AppImage", () => {
-    const { appImage, staged, launch } = setup();
+  // Every run that launches is awaited: the launcher writes into `dir` in
+  // the background, and a test that ends first races afterEach's rmSync
+  // (ENOTEMPTY on macOS CI).
+  it("never touches a stale .old when there is no current AppImage", async () => {
+    const { appImage, staged, log, launch } = setup();
     rmSync(appImage);
     writeFileSync(`${appImage}.old`, "stale");
     const result = run(linuxSwapScript({ pid: exitedPid(), appImage, staged, launch }));
     expect(result.status).toBe(0);
     expect(readFileSync(appImage, "utf8")).toBe("new");
     expect(readFileSync(`${appImage}.old`, "utf8")).toBe("stale");
+    expect(await launched(log)).toBe(`${appImage}\n`);
   });
 
-  it("replaces a stale .old left by a failed earlier run", () => {
-    const { appImage, staged, launch } = setup();
+  it("replaces a stale .old left by a failed earlier run", async () => {
+    const { appImage, staged, log, launch } = setup();
     writeFileSync(`${appImage}.old`, "stale");
     const result = run(linuxSwapScript({ pid: exitedPid(), appImage, staged, launch }));
     expect(result.status).toBe(0);
     expect(readFileSync(appImage, "utf8")).toBe("new");
     expect(existsSync(`${appImage}.old`)).toBe(false);
+    expect(await launched(log)).toBe(`${appImage}\n`);
   });
 
   it.skipIf(process.getuid?.() === 0)(
     "puts the old AppImage back and starts it when the new one cannot move in",
     async () => {
       const { appImage, log, launch } = setup();
-      const locked = join(dir, "locked");
+      const locked = join(dirname(appImage), "locked");
       mkdirSync(locked);
       const staged = join(locked, "Jarvis.AppImage.new");
       writeFileSync(staged, "new");

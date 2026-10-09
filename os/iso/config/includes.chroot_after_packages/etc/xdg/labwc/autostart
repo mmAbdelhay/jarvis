@@ -1,0 +1,27 @@
+#!/bin/sh
+# Session autostart; labwc runs this with sh at start, live and installed.
+
+# Live session only: it autologins, so there is no password to unlock the
+# login keyring with; unlock (or create) it with an empty one (M1 design §4).
+# Installed systems unlock it with the login password via greetd's PAM
+# (hook 0300-boot) and must never get an empty-password keyring.
+if [ -d /run/live/medium ]; then
+  printf '' | gnome-keyring-daemon --unlock --components=secrets >/dev/null 2>&1 &
+fi
+
+# Give user services and D-Bus activated tools access to this session (§5.14).
+systemctl --user import-environment WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP >/dev/null 2>&1 || true
+dbus-update-activation-environment --systemd WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP >/dev/null 2>&1 || true
+
+# Desktop notifications (M2.5 §7 #15).
+mako &
+
+# Handle session lock requests, idle, lid and suspend; off on live boots.
+. /usr/share/jarvis-idle/labwc/autostart
+
+# jarvis-shell under its relaunch loop, through the classic-fallback guard
+# (M4 contracts §2); the classic session runs jarvis-classic instead.
+. /usr/share/jarvis-session/labwc/autostart
+
+# The installer exists only on the live ISO (removed on installed systems).
+if [ -x /usr/bin/jarvis-installer ]; then jarvis-installer & fi

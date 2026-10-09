@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="256" viewBox="0 0 1200 256">
+  <g transform="translate(0,0) scale(0.5)">
+    <circle cx="256" cy="256" r="220" fill="none" stroke="#4FD8C4" stroke-width="28"/>
+    <circle cx="256" cy="256" r="150" fill="none" stroke="#4FD8C4" stroke-opacity="0.55" stroke-width="16"/>
+    <circle cx="256" cy="256" r="64" fill="#E7EAEE"/>
+  </g>
+  <text x="300" y="165" font-family="IBM Plex Sans" font-weight="500" font-size="120" fill="#E7EAEE">@DISTRO_NAME@</text>
+</svg>

@@ -1,0 +1,13 @@
+# Installed to /usr/lib/systemd/system/jarvis-installer-backend.service
+# (live ISO only). Started by D-Bus activation only, never enabled. It
+# partitions disks, so no sandboxing that would hide /dev or /sys.
+[Unit]
+Description=Rafiq installer backend (disk probe, plan and install)
+
+[Service]
+Type=dbus
+BusName=os.jarvis.Installer1
+ExecStart=/usr/libexec/jarvis/jarvis-installer-backend
+# A shutdown waits for a running install rather than leave a disk half written.
+TimeoutStopSec=infinity
+KillMode=mixed

@@ -1,0 +1,13 @@
+#!/bin/sh
+# System user for ollama.service; enable the unit (works offline in a chroot).
+set -e
+if [ "$1" = configure ]; then
+  getent passwd ollama >/dev/null || adduser --system --group --home /var/lib/ollama --no-create-home ollama
+  install -d -o ollama -g ollama -m0755 /var/lib/ollama /var/lib/ollama/models
+  systemctl enable ollama.service >/dev/null 2>&1 || true
+  if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload || true
+    systemctl restart ollama.service || true
+  fi
+fi
+exit 0

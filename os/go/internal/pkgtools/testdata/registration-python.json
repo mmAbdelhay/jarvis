@@ -1,0 +1,22 @@
+{
+  "id": "old-py",
+  "version": "0.1",
+  "tier": "community",
+  "command": [
+    "/usr/bin/python3",
+    "-I",
+    "/home/ali/.local/share/jarvis/mcp/old-py/0.1/server.py"
+  ],
+  "permissions": {
+    "network": true,
+    "paths": [
+      "~/Old"
+    ]
+  },
+  "tools": [
+    {
+      "name": "old.run",
+      "risk": "confirm"
+    }
+  ]
+}

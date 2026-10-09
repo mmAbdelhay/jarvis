@@ -1,0 +1,30 @@
+cubemap - scalable video reflector, designed to be used with VLC
+gem-plugin-vlc - Graphics Environment for Multimedia - VLC support
+phonon-backend-vlc-common - Phonon VLC backends - shared files
+phonon4qt5-backend-vlc - Phonon4Qt5 VLC backend
+phonon4qt6-backend-vlc - Phonon4Qt6 VLC backend
+python3-aiovlc - control VLC over telnet connection using asyncio
+python3-vlc - VLC Python bindings
+libvlc-bin - tools for VLC's base library
+libvlc-dev - development files for libvlc
+libvlc5 - multimedia player and streamer library
+libvlccore-dev - development files for libvlccore
+libvlccore9 - base library for VLC and its modules
+vlc - multimedia player and streamer
+vlc-bin - binaries from VLC
+vlc-data - common data for VLC
+vlc-l10n - translations for VLC
+vlc-plugin-access-extra - multimedia player and streamer (extra access plugins)
+vlc-plugin-base - multimedia player and streamer (base plugins)
+vlc-plugin-fluidsynth - FluidSynth plugin for VLC
+vlc-plugin-jack - JACK audio plugins for VLC
+vlc-plugin-notify - LibNotify plugin for VLC
+vlc-plugin-qt - multimedia player and streamer (Qt plugin)
+vlc-plugin-samba - Samba plugin for VLC
+vlc-plugin-skins2 - multimedia player and streamer (Skins2 plugin)
+vlc-plugin-svg - SVG plugin for VLC
+vlc-plugin-video-output - multimedia player and streamer (video output plugins)
+vlc-plugin-video-splitter - multimedia player and streamer (video splitter plugins)
+vlc-plugin-visualization - multimedia player and streamer (visualization plugins)
+vlc-plugin-bittorrent - Bittorrent plugin for VLC
+vlc-plugin-pipewire - PipeWire audio plugins for VLC

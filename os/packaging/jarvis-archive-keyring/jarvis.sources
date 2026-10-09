@@ -1,0 +1,8 @@
+# Rafiq APT repository (contracts §7). Shipped disabled until the repository
+# is published; builds with JARVIS_APT_REPO_ENABLED=1 ship "Enabled: yes".
+Types: deb
+URIs: https://mmabdelhay.github.io/jarvis-apt
+Suites: trixie
+Components: main
+Signed-By: /usr/share/keyrings/jarvis-archive-keyring.gpg
+Enabled: no

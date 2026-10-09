@@ -1,0 +1,140 @@
+Reading package lists...
+Building dependency tree...
+Reading state information...
+Calculating upgrade...
+The following packages will be upgraded:
+  base-files bash bsdutils curl dirmngr dpkg gpg gpg-agent gpgconf gpgsm gzip
+  libaprutil1t64 libaudit-common libaudit1 libblkid1 libc-bin libc-dev-bin
+  libc6 libc6-dev libcap2 libcom-err2 libcurl3t64-gnutls libcurl4t64 libexpat1
+  libgcrypt20 libgnutls30t64 libgssapi-krb5-2 libk5crypto3 libkrb5-3
+  libkrb5support0 liblastlog2-2 liblzma5 libmount1 libnghttp2-14 libngtcp2-16
+  libngtcp2-crypto-gnutls8 libpcre2-8-0 libperl5.40 libpython3.13-minimal
+  libpython3.13-stdlib libsmartcols1 libsqlite3-0 libssh2-1t64 libssl3t64
+  libsystemd0 libtasn1-6 libudev1 libuuid1 linux-libc-dev login mount
+  openssh-client openssl openssl-provider-legacy perl perl-base
+  perl-modules-5.40 python3.13 python3.13-minimal sed tzdata util-linux
+62 upgraded, 0 newly installed, 0 to remove and 0 not upgraded.
+Inst libc6-dev [2.41-12+deb13u1] (2.41-12+deb13u4 Debian:13.7/stable [arm64]) []
+Inst libc-dev-bin [2.41-12+deb13u1] (2.41-12+deb13u4 Debian:13.7/stable [arm64]) []
+Inst linux-libc-dev [6.12.63-1] (6.12.111-1 Debian-Security:13/stable-security [all]) []
+Inst libc6 [2.41-12+deb13u1] (2.41-12+deb13u4 Debian:13.7/stable [arm64])
+Conf libc6 (2.41-12+deb13u4 Debian:13.7/stable [arm64])
+Inst base-files [13.8+deb13u3] (13.8+deb13u7 Debian:13.7/stable [arm64])
+Conf base-files (13.8+deb13u7 Debian:13.7/stable [arm64])
+Inst bash [5.2.37-2+b7] (5.2.37-2+b10 Debian:13.7/stable [arm64])
+Conf bash (5.2.37-2+b10 Debian:13.7/stable [arm64])
+Inst bsdutils [1:2.41-5] (1:2.41.5-0+deb13u1 Debian:13.7/stable, Debian-Security:13/stable-security [arm64])
+Conf bsdutils (1:2.41.5-0+deb13u1 Debian:13.7/stable, Debian-Security:13/stable-security [arm64])
+Inst dpkg [1.22.21] (1.22.22 Debian:13.7/stable [arm64])
+Conf dpkg (1.22.22 Debian:13.7/stable [arm64])
+Inst gzip [1.13-1] (1.13-1+deb13u1 Debian:13.7/stable [arm64])
+Conf gzip (1.13-1+deb13u1 Debian:13.7/stable [arm64])
+Inst libperl5.40 [5.40.1-6] (5.40.1-6+deb13u1 Debian:13.7/stable [arm64]) [perl:arm64 ]
+Inst perl [5.40.1-6] (5.40.1-6+deb13u1 Debian:13.7/stable [arm64]) []
+Inst perl-base [5.40.1-6] (5.40.1-6+deb13u1 Debian:13.7/stable [arm64]) []
+Conf perl-base (5.40.1-6+deb13u1 Debian:13.7/stable [arm64]) []
+Inst perl-modules-5.40 [5.40.1-6] (5.40.1-6+deb13u1 Debian:13.7/stable [all])
+Inst sed [4.9-2+b1] (4.9-2+deb13u1 Debian:13.7/stable [arm64])
+Conf sed (4.9-2+deb13u1 Debian:13.7/stable [arm64])
+Inst liblastlog2-2 [2.41-5] (2.41.5-0+deb13u1 Debian:13.7/stable, Debian-Security:13/stable-security [arm64]) [util-linux:arm64 on liblastlog2-2:arm64] [util-linux:arm64 ]
+Conf liblastlog2-2 (2.41.5-0+deb13u1 Debian:13.7/stable, Debian-Security:13/stable-security [arm64]) [util-linux:arm64 ]
+Inst libuuid1 [2.41-5] (2.41.5-0+deb13u1 Debian:13.7/stable, Debian-Security:13/stable-security [arm64]) [util-linux:arm64 on liblastlog2-2:arm64] [util-linux:arm64 on libuuid1:arm64] [util-linux:arm64 ]
+Conf libuuid1 (2.41.5-0+deb13u1 Debian:13.7/stable, Debian-Security:13/stable-security [arm64]) [util-linux:arm64 ]
+Inst libblkid1 [2.41-5] (2.41.5-0+deb13u1 Debian:13.7/stable, Debian-Security:13/stable-security [arm64]) [util-linux:arm64 on libblkid1:arm64] [util-linux:arm64 on liblastlog2-2:arm64] [util-linux:arm64 on libuuid1:arm64] [mount:arm64 on libblkid1:arm64] [libmount1:arm64 util-linux:arm64 mount:arm64 ]
+Conf libblkid1 (2.41.5-0+deb13u1 Debian:13.7/stable, Debian-Security:13/stable-security [arm64]) [libmount1:arm64 util-linux:arm64 mount:arm64 ]
+Inst libmount1 [2.41-5] (2.41.5-0+deb13u1 Debian:13.7/stable, Debian-Security:13/stable-security [arm64]) [util-linux:arm64 on libblkid1:arm64] [util-linux:arm64 on liblastlog2-2:arm64] [util-linux:arm64 on libmount1:arm64] [util-linux:arm64 on libuuid1:arm64] [mount:arm64 on libblkid1:arm64] [mount:arm64 on libmount1:arm64] [util-linux:arm64 mount:arm64 ]
+Conf libmount1 (2.41.5-0+deb13u1 Debian:13.7/stable, Debian-Security:13/stable-security [arm64]) [util-linux:arm64 mount:arm64 ]
+Inst libsmartcols1 [2.41-5] (2.41.5-0+deb13u1 Debian:13.7/stable, Debian-Security:13/stable-security [arm64]) [util-linux:arm64 on libblkid1:arm64] [util-linux:arm64 on liblastlog2-2:arm64] [util-linux:arm64 on libmount1:arm64] [util-linux:arm64 on libsmartcols1:arm64] [util-linux:arm64 on libuuid1:arm64] [mount:arm64 on libblkid1:arm64] [mount:arm64 on libmount1:arm64] [mount:arm64 on libsmartcols1:arm64] [util-linux:arm64 mount:arm64 ]
+Conf libsmartcols1 (2.41.5-0+deb13u1 Debian:13.7/stable, Debian-Security:13/stable-security [arm64]) [util-linux:arm64 mount:arm64 ]
+Inst util-linux [2.41-5] (2.41.5-0+deb13u1 Debian:13.7/stable, Debian-Security:13/stable-security [arm64]) [mount:arm64 on libblkid1:arm64] [mount:arm64 on libmount1:arm64] [mount:arm64 on libsmartcols1:arm64] [mount:arm64 ]
+Conf util-linux (2.41.5-0+deb13u1 Debian:13.7/stable, Debian-Security:13/stable-security [arm64]) [mount:arm64 ]
+Inst mount [2.41-5] (2.41.5-0+deb13u1 Debian:13.7/stable, Debian-Security:13/stable-security [arm64])
+Inst libsqlite3-0 [3.46.1-7] (3.46.1-7+deb13u2 Debian:13.7/stable [arm64])
+Conf libsqlite3-0 (3.46.1-7+deb13u2 Debian:13.7/stable [arm64])
+Inst libc-bin [2.41-12+deb13u1] (2.41-12+deb13u4 Debian:13.7/stable [arm64])
+Conf libc-bin (2.41-12+deb13u4 Debian:13.7/stable [arm64])
+Inst libaudit-common [1:4.0.2-2] (1:4.0.2-2+deb13u1 Debian:13.7/stable [all])
+Conf libaudit-common (1:4.0.2-2+deb13u1 Debian:13.7/stable [all])
+Inst libaudit1 [1:4.0.2-2+b2] (1:4.0.2-2+deb13u1 Debian:13.7/stable [arm64])
+Conf libaudit1 (1:4.0.2-2+deb13u1 Debian:13.7/stable [arm64])
+Inst login [1:4.16.0-2+really2.41-5] (1:4.16.0-2+really2.41.5-0+deb13u1 Debian:13.7/stable, Debian-Security:13/stable-security [arm64])
+Inst libexpat1 [2.7.1-2] (2.8.3-1~deb13u1 Debian:13.7/stable, Debian-Security:13/stable-security [arm64])
+Inst openssl-provider-legacy [3.5.4-1~deb13u2] (3.5.7-1~deb13u3 Debian-Security:13/stable-security [arm64])
+Conf openssl-provider-legacy (3.5.7-1~deb13u3 Debian-Security:13/stable-security [arm64])
+Inst libssl3t64 [3.5.4-1~deb13u2] (3.5.7-1~deb13u3 Debian-Security:13/stable-security [arm64])
+Conf libssl3t64 (3.5.7-1~deb13u3 Debian-Security:13/stable-security [arm64])
+Inst python3.13 [3.13.5-2] (3.13.5-2+deb13u5 Debian:13.7/stable [arm64]) []
+Inst libpython3.13-stdlib [3.13.5-2] (3.13.5-2+deb13u5 Debian:13.7/stable [arm64]) []
+Inst python3.13-minimal [3.13.5-2] (3.13.5-2+deb13u5 Debian:13.7/stable [arm64]) []
+Inst libpython3.13-minimal [3.13.5-2] (3.13.5-2+deb13u5 Debian:13.7/stable [arm64])
+Inst tzdata [2025b-4+deb13u1] (2026c-0+deb13u1 Debian:13.7/stable [all])
+Inst liblzma5 [5.8.1-1] (5.8.1-1+deb13u2 Debian-Security:13/stable-security [arm64])
+Conf liblzma5 (5.8.1-1+deb13u2 Debian-Security:13/stable-security [arm64])
+Inst libcap2 [1:2.75-10+b3] (1:2.75-10+deb13u1+b3 Debian:13.7/stable [arm64])
+Conf libcap2 (1:2.75-10+deb13u1+b3 Debian:13.7/stable [arm64])
+Inst libpcre2-8-0 [10.46-1~deb13u1] (10.46-1~deb13u3 Debian-Security:13/stable-security [arm64])
+Conf libpcre2-8-0 (10.46-1~deb13u3 Debian-Security:13/stable-security [arm64])
+Inst libsystemd0 [257.9-1~deb13u1] (257.13-1~deb13u1 Debian:13.7/stable [arm64])
+Conf libsystemd0 (257.13-1~deb13u1 Debian:13.7/stable [arm64])
+Inst libudev1 [257.9-1~deb13u1] (257.13-1~deb13u1 Debian:13.7/stable [arm64])
+Conf libudev1 (257.13-1~deb13u1 Debian:13.7/stable [arm64])
+Inst libgssapi-krb5-2 [1.21.3-5] (1.21.3-5+deb13u1 Debian:13.7/stable, Debian-Security:13/stable-security [arm64]) []
+Inst libkrb5-3 [1.21.3-5] (1.21.3-5+deb13u1 Debian:13.7/stable, Debian-Security:13/stable-security [arm64]) []
+Inst libkrb5support0 [1.21.3-5] (1.21.3-5+deb13u1 Debian:13.7/stable, Debian-Security:13/stable-security [arm64]) [libk5crypto3:arm64 ]
+Inst libk5crypto3 [1.21.3-5] (1.21.3-5+deb13u1 Debian:13.7/stable, Debian-Security:13/stable-security [arm64])
+Inst libcom-err2 [1.47.2-3+b7] (1.47.2-3+b12 Debian:13.7/stable [arm64])
+Inst openssh-client [1:10.0p1-7] (1:10.0p1-7+deb13u4 Debian:13.7/stable [arm64])
+Inst libnghttp2-14 [1.64.0-1.1] (1.64.0-1.1+deb13u1 Debian:13.7/stable, Debian-Security:13/stable-security [arm64])
+Inst libssh2-1t64 [1.11.1-1] (1.11.1-1+deb13u2 Debian:13.7/stable [arm64])
+Inst curl [8.14.1-2+deb13u2] (8.14.1-2+deb13u5 Debian:13.7/stable [arm64]) []
+Inst libcurl4t64 [8.14.1-2+deb13u2] (8.14.1-2+deb13u5 Debian:13.7/stable [arm64])
+Inst libgcrypt20 [1.11.0-7] (1.11.0-7+deb13u1 Debian:13.7/stable, Debian-Security:13/stable-security [arm64])
+Inst gpgsm [2.4.7-21+deb13u1+b1] (2.4.7-21+deb13u1+b5 Debian:13.7/stable [arm64]) []
+Inst dirmngr [2.4.7-21+deb13u1+b1] (2.4.7-21+deb13u1+b5 Debian:13.7/stable [arm64]) []
+Inst gpg [2.4.7-21+deb13u1+b1] (2.4.7-21+deb13u1+b5 Debian:13.7/stable [arm64]) []
+Inst gpgconf [2.4.7-21+deb13u1+b1] (2.4.7-21+deb13u1+b5 Debian:13.7/stable [arm64]) [gpg-agent:arm64 ]
+Inst gpg-agent [2.4.7-21+deb13u1+b1] (2.4.7-21+deb13u1+b5 Debian:13.7/stable [arm64])
+Inst libtasn1-6 [4.20.0-2] (4.20.0-2+deb13u1 Debian:13.7/stable [arm64])
+Inst libgnutls30t64 [3.8.9-3+deb13u1] (3.8.9-3+deb13u4 Debian:13.7/stable, Debian-Security:13/stable-security [arm64])
+Inst libaprutil1t64 [1.6.3-3+b1] (1.6.3-3+deb13u1 Debian:13.7/stable, Debian-Security:13/stable-security [arm64])
+Inst libngtcp2-16 [1.11.0-1] (1.11.0-1+deb13u1 Debian:13.7/stable, Debian-Security:13/stable-security [arm64])
+Inst libngtcp2-crypto-gnutls8 [1.11.0-1] (1.11.0-1+deb13u1 Debian:13.7/stable, Debian-Security:13/stable-security [arm64])
+Inst libcurl3t64-gnutls [8.14.1-2+deb13u2] (8.14.1-2+deb13u5 Debian:13.7/stable [arm64])
+Inst openssl [3.5.4-1~deb13u2] (3.5.7-1~deb13u3 Debian-Security:13/stable-security [arm64])
+Conf libc6-dev (2.41-12+deb13u4 Debian:13.7/stable [arm64])
+Conf libc-dev-bin (2.41-12+deb13u4 Debian:13.7/stable [arm64])
+Conf linux-libc-dev (6.12.111-1 Debian-Security:13/stable-security [all])
+Conf libperl5.40 (5.40.1-6+deb13u1 Debian:13.7/stable [arm64])
+Conf perl (5.40.1-6+deb13u1 Debian:13.7/stable [arm64])
+Conf perl-modules-5.40 (5.40.1-6+deb13u1 Debian:13.7/stable [all])
+Conf mount (2.41.5-0+deb13u1 Debian:13.7/stable, Debian-Security:13/stable-security [arm64])
+Conf login (1:4.16.0-2+really2.41.5-0+deb13u1 Debian:13.7/stable, Debian-Security:13/stable-security [arm64])
+Conf libexpat1 (2.8.3-1~deb13u1 Debian:13.7/stable, Debian-Security:13/stable-security [arm64])
+Conf python3.13 (3.13.5-2+deb13u5 Debian:13.7/stable [arm64])
+Conf libpython3.13-stdlib (3.13.5-2+deb13u5 Debian:13.7/stable [arm64])
+Conf python3.13-minimal (3.13.5-2+deb13u5 Debian:13.7/stable [arm64])
+Conf libpython3.13-minimal (3.13.5-2+deb13u5 Debian:13.7/stable [arm64])
+Conf tzdata (2026c-0+deb13u1 Debian:13.7/stable [all])
+Conf libgssapi-krb5-2 (1.21.3-5+deb13u1 Debian:13.7/stable, Debian-Security:13/stable-security [arm64])
+Conf libkrb5-3 (1.21.3-5+deb13u1 Debian:13.7/stable, Debian-Security:13/stable-security [arm64])
+Conf libkrb5support0 (1.21.3-5+deb13u1 Debian:13.7/stable, Debian-Security:13/stable-security [arm64])
+Conf libk5crypto3 (1.21.3-5+deb13u1 Debian:13.7/stable, Debian-Security:13/stable-security [arm64])
+Conf libcom-err2 (1.47.2-3+b12 Debian:13.7/stable [arm64])
+Conf openssh-client (1:10.0p1-7+deb13u4 Debian:13.7/stable [arm64])
+Conf libnghttp2-14 (1.64.0-1.1+deb13u1 Debian:13.7/stable, Debian-Security:13/stable-security [arm64])
+Conf libssh2-1t64 (1.11.1-1+deb13u2 Debian:13.7/stable [arm64])
+Conf curl (8.14.1-2+deb13u5 Debian:13.7/stable [arm64])
+Conf libcurl4t64 (8.14.1-2+deb13u5 Debian:13.7/stable [arm64])
+Conf libgcrypt20 (1.11.0-7+deb13u1 Debian:13.7/stable, Debian-Security:13/stable-security [arm64])
+Conf gpgsm (2.4.7-21+deb13u1+b5 Debian:13.7/stable [arm64])
+Conf dirmngr (2.4.7-21+deb13u1+b5 Debian:13.7/stable [arm64])
+Conf gpg (2.4.7-21+deb13u1+b5 Debian:13.7/stable [arm64])
+Conf gpgconf (2.4.7-21+deb13u1+b5 Debian:13.7/stable [arm64])
+Conf gpg-agent (2.4.7-21+deb13u1+b5 Debian:13.7/stable [arm64])
+Conf libtasn1-6 (4.20.0-2+deb13u1 Debian:13.7/stable [arm64])
+Conf libgnutls30t64 (3.8.9-3+deb13u4 Debian:13.7/stable, Debian-Security:13/stable-security [arm64])
+Conf libaprutil1t64 (1.6.3-3+deb13u1 Debian:13.7/stable, Debian-Security:13/stable-security [arm64])
+Conf libngtcp2-16 (1.11.0-1+deb13u1 Debian:13.7/stable, Debian-Security:13/stable-security [arm64])
+Conf libngtcp2-crypto-gnutls8 (1.11.0-1+deb13u1 Debian:13.7/stable, Debian-Security:13/stable-security [arm64])
+Conf libcurl3t64-gnutls (8.14.1-2+deb13u5 Debian:13.7/stable [arm64])
+Conf openssl (3.5.7-1~deb13u3 Debian-Security:13/stable-security [arm64])

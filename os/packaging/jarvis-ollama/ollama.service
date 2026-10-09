@@ -1,0 +1,31 @@
+[Unit]
+Description=Ollama local model server (127.0.0.1 only)
+After=network-online.target
+Wants=network-online.target
+# The live session has its own RAM budget and no models; the installer runs
+# its own server against the target (plan gaps).
+ConditionKernelCommandLine=!boot=live
+
+[Service]
+Type=exec
+User=ollama
+Group=ollama
+SupplementaryGroups=render video
+Environment=OLLAMA_HOST=127.0.0.1:11434
+Environment=OLLAMA_MODELS=/var/lib/ollama/models
+Environment=HOME=/var/lib/ollama
+ExecStart=/usr/bin/ollama serve
+ExecStartPost=/usr/libexec/jarvis/ollama-wait-ready
+Restart=on-failure
+RestartSec=3
+StateDirectory=ollama
+StateDirectoryMode=0755
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/lib/ollama
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+
+[Install]
+WantedBy=multi-user.target

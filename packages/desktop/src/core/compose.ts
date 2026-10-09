@@ -201,6 +201,7 @@ import {
 } from "../completion-source.js";
 import {
   DEFAULT_CONFIG_PATH,
+  defaultConfigDir,
   DEFAULT_TERMINAL,
   mergeConfigInPlace,
   providerAgentListsEqual,
@@ -691,7 +692,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
       refresh: () => providers.refreshCapacity({ force: true }),
     },
   });
-  const favicons = createFaviconStore(join(homedir(), ".config/jarvis/favicons"));
+  const favicons = createFaviconStore(join(defaultConfigDir(), "favicons"));
 
   // Rebuilding a suspended tab is not always just reloading its URL. A
   // hosted app's sidecar may have been stopped underneath it by the reaper
@@ -751,7 +752,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
   // One code-server process per project, started lazily the first time
   // its editor is opened. Jarvis-managed profile directories, separate
   // from anywhere the user's own VS Code (if any) keeps its own settings.
-  const codeServerRoot = join(homedir(), ".config/jarvis/code-server");
+  const codeServerRoot = join(defaultConfigDir(), "code-server");
   const codeServer = createCodeServerManager({
     spawn: createRealCodeServerSpawner(env, platform),
     findFreePort,
@@ -770,7 +771,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
   // started lazily, reused, killed on quit. Each gets its own workspace
   // directory so a project's saved connections stay its own, and the
   // connections declared in jarvis.yaml are seeded into it at spawn.
-  const dbgateRoot = join(homedir(), ".config/jarvis/dbgate");
+  const dbgateRoot = join(defaultConfigDir(), "dbgate");
   const dbgate = createDbGateManager({
     spawn: createRealDbGateSpawner(env, platform),
     findFreePort,
@@ -900,9 +901,9 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
   // picks — and the integration has to be chosen for *that*, not for a
   // variable this process happened to inherit.
   const shell = platform === "win32" ? shellCommand(process.env, platform) : process.env["SHELL"];
-  const zdotdir = join(homedir(), ".config/jarvis/zdotdir");
-  const bashDir = join(homedir(), ".config/jarvis/bash");
-  const powerShellDir = join(homedir(), ".config/jarvis/powershell");
+  const zdotdir = join(defaultConfigDir(), "zdotdir");
+  const bashDir = join(defaultConfigDir(), "bash");
+  const powerShellDir = join(defaultConfigDir(), "powershell");
   await mkdir(zdotdir, { recursive: true }).catch(() => undefined);
   await mkdir(bashDir, { recursive: true }).catch(() => undefined);
   await mkdir(powerShellDir, { recursive: true }).catch(() => undefined);
@@ -977,7 +978,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
   });
   // The API tab. Requests are issued from here, in the main process, which
   // is what makes CORS irrelevant — see http-runner.ts.
-  const apiStore = createApiStore(join(homedir(), ".config/jarvis/api.json"));
+  const apiStore = createApiStore(join(defaultConfigDir(), "api.json"));
 
   /** Drives an OAuth2 authorization-code redirect through a Workspace tab:
    *  the app already has a browser, and sending the user to their system
@@ -1196,7 +1197,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     language: PRIMARY_LANGUAGE,
   });
   const bookmarks = createBookmarksHandlers({
-    store: createBookmarkStore(join(homedir(), ".config/jarvis/bookmarks.json")),
+    store: createBookmarkStore(join(defaultConfigDir(), "bookmarks.json")),
     favicons,
     requestFavicon: (project, url) => host.requestFavicon(project, url),
     language: PRIMARY_LANGUAGE,
@@ -1390,7 +1391,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
   // injected `platform` like everything else in this file
   // (platform-convention.test.ts).
   const remoteEnforceFileModes = platform !== "win32";
-  const remoteDir = join(homedir(), ".config/jarvis/remote");
+  const remoteDir = join(defaultConfigDir(), "remote");
 
   // Private per-device file staging (M9 Task 3) — a paired phone's
   // remote:uploadFile and remote:readJsonUpload alike, under the same

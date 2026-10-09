@@ -1,0 +1,14 @@
+#!/bin/sh
+# greetd runs the login screen as: with-keyboard cage -s -- jarvis-greeter.
+# cage takes its layout from XKB_DEFAULT_*; export the installed keyboard
+# (written by the installer) so the password is typed with the same layout
+# the person chose, and the KeyboardLabel shows (contracts §11.5).
+set -e
+keyboard=${GREETER_KEYBOARD_FILE:-/etc/default/keyboard}
+if [ -r "$keyboard" ]; then
+  # shellcheck disable=SC1090 # Installed keyboard settings, chosen at runtime.
+  . "$keyboard"
+  export XKB_DEFAULT_LAYOUT="${XKBLAYOUT:-us}"
+  export XKB_DEFAULT_VARIANT="${XKBVARIANT:-}"
+fi
+exec "$@"

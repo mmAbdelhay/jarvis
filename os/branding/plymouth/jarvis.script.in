@@ -1,0 +1,88 @@
+# @DISTRO_NAME@ boot splash: ring logo on the shell's dark background, and the
+# LUKS passphrase prompt styled like the login screen (design §7).
+# Install tests (os/iso/smoke/jarvis_smoke/screen.py) find the prompt by the
+# exact border colour of entry.png and count bullet.png pixels inside it:
+# draw both unscaled.
+
+Window.SetBackgroundTopColor(0.051, 0.063, 0.078);     # #0D1014
+Window.SetBackgroundBottomColor(0.043, 0.055, 0.071);  # #0B0E12
+
+global.screen_w = Window.GetWidth();
+global.screen_h = Window.GetHeight();
+global.max_bullets = 32;
+
+logo.image = Image("logo.png");
+logo.sprite = Sprite(logo.image);
+logo.sprite.SetX(screen_w / 2 - logo.image.GetWidth() / 2);
+logo.sprite.SetY(screen_h / 2 - logo.image.GetHeight() / 2 - 90);
+
+entry.image = Image("entry.png");
+entry.sprite = Sprite(entry.image);
+entry.x = Math.Int(screen_w / 2 - entry.image.GetWidth() / 2);
+entry.y = Math.Int(screen_h / 2 + 90);
+entry.sprite.SetPosition(entry.x, entry.y, 10);
+entry.sprite.SetOpacity(0);
+
+title.sprite = Sprite(Image.Text("Unlock @DISTRO_NAME@", 0.906, 0.918, 0.933, 1, "Sans 18"));
+title.sprite.SetPosition(screen_w / 2 - title.sprite.GetImage().GetWidth() / 2, entry.y - 56, 10);
+title.sprite.SetOpacity(0);
+
+hint.sprite = Sprite(Image.Text("Enter the disk passphrase", 0.604, 0.643, 0.694, 1, "Sans 12"));
+hint.sprite.SetPosition(screen_w / 2 - hint.sprite.GetImage().GetWidth() / 2, entry.y - 24, 10);
+hint.sprite.SetOpacity(0);
+
+bullet_image = Image("bullet.png");
+for (i = 0; i < max_bullets; i++) {
+  bullets[i] = Sprite(bullet_image);
+  bullets[i].SetPosition(entry.x + 16 + i * 14, entry.y + 18, 11);
+  bullets[i].SetOpacity(0);
+}
+
+message.sprite = Sprite();
+message.sprite.SetPosition(0, entry.y + 64, 10);
+
+fun show_prompt(opacity) {
+  entry.sprite.SetOpacity(opacity);
+  title.sprite.SetOpacity(opacity);
+  hint.sprite.SetOpacity(opacity);
+}
+
+fun password_callback(prompt, count) {
+  show_prompt(1);
+  for (i = 0; i < max_bullets; i++) {
+    if (i < count) bullets[i].SetOpacity(1);
+    else bullets[i].SetOpacity(0);
+  }
+}
+Plymouth.SetDisplayPasswordFunction(password_callback);
+
+fun normal_callback() {
+  show_prompt(0);
+  for (i = 0; i < max_bullets; i++) bullets[i].SetOpacity(0);
+}
+Plymouth.SetDisplayNormalFunction(normal_callback);
+
+fun ends_with_bad_password(text) {
+  # cryptroot: "cryptsetup: ERROR: <name>: cryptsetup failed, bad password or options?"
+  # Plymouth script strings only have CharAt and SubString: measure by hand.
+  needle = "bad password or options?";
+  i = 0;
+  while (text.CharAt(i) != "") i++;
+  n = 0;
+  while (needle.CharAt(n) != "") n++;
+  if (i < n) return 0;
+  return text.SubString(i - n, i) == needle;
+}
+
+fun message_callback(text) {
+  shown = text;
+  if (ends_with_bad_password(text)) shown = "That passphrase didn't work. Try again.";
+  message.sprite.SetImage(Image.Text(shown, 0.984, 0.573, 0.235, 1, "Sans 12"));  # warn #FB923C
+  message.sprite.SetX(screen_w / 2 - message.sprite.GetImage().GetWidth() / 2);
+}
+Plymouth.SetMessageFunction(message_callback);
+
+fun quit_callback() {
+  normal_callback();
+}
+Plymouth.SetQuitFunction(quit_callback);

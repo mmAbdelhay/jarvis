@@ -1,0 +1,144 @@
+#pragma once
+
+#include <QJsonObject>
+#include <functional>
+#include <QObject>
+#include <QStringList>
+#include <QVariantList>
+#include <QtQml/qqmlregistration.h>
+
+#include "AccountChoice.h"
+#include "BrainChoice.h"
+#include "DiskChoice.h"
+#include "InstallProgress.h"
+#include "LocaleChoice.h"
+
+class InstallerBackend;
+class LiveKeyboard;
+class PowerActions;
+
+// The installer flow (design: Installer.dc.html, spec §5.1). Seven steps;
+// Probe at start, Plan when leaving Brain, Execute only from Review's
+// Install button with the last plan's id. Leaving Review drops the plan and
+// calls nothing. Secrets leave only through Execute and are wiped once it
+// is accepted.
+class InstallerModel : public QObject {
+    Q_OBJECT
+    QML_ELEMENT
+    QML_UNCREATABLE("Created by main()")
+    Q_PROPERTY(int step READ step NOTIFY stepChanged)
+    Q_PROPERTY(QStringList stepLabels READ stepLabels NOTIFY languageChanged)
+    Q_PROPERTY(QString uiLanguage READ uiLanguage NOTIFY languageChanged)
+    Q_PROPERTY(QString distroName READ distroName NOTIFY languageChanged)
+    Q_PROPERTY(bool busy READ busy NOTIFY stateChanged)
+    Q_PROPERTY(bool probed READ probed NOTIFY stateChanged)
+    Q_PROPERTY(bool canContinue READ canContinue NOTIFY stateChanged)
+    Q_PROPERTY(QString blockText READ blockText NOTIFY stateChanged)
+    Q_PROPERTY(QString nextLabel READ nextLabel NOTIFY stateChanged)
+    Q_PROPERTY(QString nextVariant READ nextVariant NOTIFY stateChanged)
+    Q_PROPERTY(bool backVisible READ backVisible NOTIFY stateChanged)
+    Q_PROPERTY(QString refusalText READ refusalText NOTIFY stateChanged)
+    Q_PROPERTY(QString errorText READ errorText NOTIFY stateChanged)
+    Q_PROPERTY(bool canRetryProbe READ canRetryProbe NOTIFY stateChanged)
+    Q_PROPERTY(QStringList summary READ summary NOTIFY planChanged)
+    Q_PROPERTY(QStringList warnings READ warnings NOTIFY planChanged)
+    Q_PROPERTY(QVariantList diskAfter READ diskAfter NOTIFY planChanged)
+    Q_PROPERTY(LocaleChoice* locale READ locale CONSTANT)
+    Q_PROPERTY(DiskChoice* disk READ disk CONSTANT)
+    Q_PROPERTY(AccountChoice* account READ account CONSTANT)
+    Q_PROPERTY(BrainChoice* brain READ brain CONSTANT)
+    Q_PROPERTY(InstallProgress* progress READ progress CONSTANT)
+
+public:
+    enum Step { Welcome = 0, Disk, Account, Brain, Review, Installing, Done };
+    Q_ENUM(Step)
+
+    InstallerModel(InstallerBackend* backend, PowerActions* power, const QString& distroName,
+                   const QString& systemLocale, const QByteArray& systemTimezone, QObject* parent = nullptr);
+
+    int step() const { return m_step; }
+    QStringList stepLabels() const;
+    QString distroName() const { return m_distro; }
+    // The distro name in the UI language (M4 contracts §6.8; main.cpp sets it
+    // from jarvis::ui::localizedDistroName on every language switch).
+    void setDistroName(const QString& distro);
+    bool busy() const { return m_call != Call::None; }
+    bool probed() const { return m_probed; }
+    bool canContinue() const;
+    QString blockText() const;
+    QString nextLabel() const;
+    QString nextVariant() const { return m_step == Review ? QStringLiteral("approve") : QStringLiteral("primary"); }
+    bool backVisible() const { return !busy() && m_step >= Disk && m_step <= Review; }
+    QString refusalText() const { return m_refusal; }
+    QString errorText() const { return m_error; }
+    bool canRetryProbe() const { return m_step == Welcome && !m_probed && !busy() && !m_error.isEmpty(); }
+    QStringList summary() const { return m_summary; }
+    QStringList warnings() const { return m_warnings; }
+    QVariantList diskAfter() const { return m_diskAfter; }
+    LocaleChoice* locale() const { return m_locale; }
+    DiskChoice* disk() const { return m_disk; }
+    AccountChoice* account() const { return m_account; }
+    BrainChoice* brain() const { return m_brain; }
+    InstallProgress* progress() const { return m_progress; }
+
+    Q_INVOKABLE void start();
+    Q_INVOKABLE void next();
+    Q_INVOKABLE void back();
+    Q_INVOKABLE void goTo(int step);
+
+    using LanguageApplier = std::function<bool(const QString& code)>;
+    // Applies the Welcome language now and on every change (ar_* -> "ar", else "en").
+    void setLanguageApplier(LanguageApplier applier);
+    QString uiLanguage() const { return m_uiLanguage; }
+
+    // Optional (live session only): makes the session type with the chosen
+    // keyboard now and whenever it changes (contracts §11.5).
+    void setLiveKeyboard(LiveKeyboard* live);
+
+    QJsonObject choices() const; // contracts §1 Choices — never a secret
+    QString planId() const { return m_planId; }
+
+signals:
+    void stepChanged();
+    void stateChanged();
+    void planChanged();
+    void languageChanged();
+
+private:
+    enum class Call { None, Probe, Plan, Execute };
+
+    void followLocale();
+    void retranslate();
+    void setStep(int step);
+    void clearNotices();
+    void applyLiveKeyboard();
+    void clearPlan();
+    void onProbed(const QJsonObject& result);
+    void onPlanned(const QJsonObject& plan);
+    void onRefused(const QString& key, const QString& message);
+    void onExecuteAccepted();
+    void onCallFailed(const QString& method, const QString& message);
+
+    InstallerBackend* m_backend;
+    PowerActions* m_power;
+    QString m_distro;
+    LocaleChoice* m_locale;
+    DiskChoice* m_disk;
+    AccountChoice* m_account;
+    BrainChoice* m_brain;
+    InstallProgress* m_progress;
+    LanguageApplier m_languageApplier;
+    QString m_uiLanguage = QStringLiteral("en");
+    LiveKeyboard* m_liveKeyboard = nullptr;
+    QString m_liveApplied; // last keyboard handed to m_liveKeyboard
+
+    int m_step = Welcome;
+    Call m_call = Call::None;
+    bool m_probed = false;
+    bool m_uefi = false;
+    bool m_executeSent = false;
+    QString m_refusal, m_error;
+    QString m_planId;
+    QStringList m_summary, m_warnings;
+    QVariantList m_diskAfter;
+};

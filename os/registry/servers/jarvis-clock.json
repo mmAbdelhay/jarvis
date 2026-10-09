@@ -1,0 +1,10 @@
+{
+  "id": "jarvis-clock",
+  "name": "Clock",
+  "description": "Tell the time and run timers.",
+  "tier": "official",
+  "version": "0.1.0",
+  "artifact": { "runtime": "go-static" },
+  "permissions": { "network": false, "paths": [] },
+  "tools": [{ "name": "clock.now", "risk": "safe" }, { "name": "clock.timer", "risk": "safe" }]
+}

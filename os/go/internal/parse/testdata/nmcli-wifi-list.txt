@@ -1,0 +1,5 @@
+*:Home:82:WPA2
+ :Cafe\: Free WiFi:54:
+ :Home:40:WPA2
+ ::30:WPA2
+ :Office 5G:67:WPA2 WPA3

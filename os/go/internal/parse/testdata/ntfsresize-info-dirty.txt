@@ -1,0 +1,3 @@
+ntfsresize v2022.10.3 (libntfs-3g)
+ERROR: Volume is scheduled for check.
+Run chkdsk /f and please try again, or see option -f.

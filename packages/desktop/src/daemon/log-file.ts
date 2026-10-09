@@ -15,8 +15,9 @@
 //
 // No electron here (core/no-electron.test.ts).
 import { appendFileSync, chmodSync, mkdirSync, renameSync, statSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, posix, win32 } from "node:path";
 import { format } from "node:util";
+import { type ConfigDirEnv, jarvisConfigDir } from "./control/config-dir.js";
 
 export const MAX_LOG_BYTES = 5 * 1024 * 1024;
 
@@ -67,9 +68,15 @@ export type DaemonLog = {
   write(level: "info" | "error", message: string): void;
 };
 
-/** Where jarvisd logs: ~/.config/jarvis/logs/jarvisd.log. */
-export function daemonLogPath(home: string): string {
-  return join(home, ".config", "jarvis", "logs", "jarvisd.log");
+/** Where jarvisd logs: ~/.config/jarvis/logs/jarvisd.log (the config dir follows JARVIS_CONFIG_DIR). */
+export function daemonLogPath(
+  home: string,
+  env?: ConfigDirEnv,
+  platform?: NodeJS.Platform,
+): string {
+  // No platform: this process's own path flavour, as jarvisConfigDir.
+  const path = platform === undefined ? { join } : platform === "win32" ? win32 : posix;
+  return path.join(jarvisConfigDir({ home, env, platform }), "logs", "jarvisd.log");
 }
 export function createDaemonLog(deps: {
   path: string;

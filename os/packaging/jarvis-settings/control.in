@@ -1,0 +1,14 @@
+Package: jarvis-settings
+Version: @VERSION@
+Architecture: amd64
+Maintainer: Muhammad AbdElHay <mmAbdelhay@users.noreply.github.com>
+Installed-Size: @INSTALLED_SIZE@
+Depends: jarvis-helper (= @VERSION@), brightnessctl, wireplumber, wlsunset, bluez, power-profiles-daemon, wlr-randr, network-manager, udisks2, rfkill
+Section: admin
+Priority: optional
+Homepage: @HOME_URL@
+Description: @DISTRO_NAME@ settings tools (MCP server)
+ Brightness, volume, night light, Wi-Fi, Bluetooth, audio output, power
+ profile, display scale and keyboard layout for the Jarvis agent, plus user
+ accounts and removable drives. Reversible changes return the previous value; non-undoable actions return
+ undo: null.

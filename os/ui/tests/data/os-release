@@ -1,0 +1,4 @@
+PRETTY_NAME="Testix OS 0.2 (trixie)"
+NAME="Testix OS"
+ID=testix
+ID_LIKE=debian

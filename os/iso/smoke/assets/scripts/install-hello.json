@@ -1,0 +1,13 @@
+[
+  {
+    "expectPromptContains": "install hello",
+    "replies": [
+      {
+        "toolCalls": [
+          { "name": "pkg.install", "input": { "items": [{ "source": "apt", "id": "hello" }] } }
+        ]
+      },
+      { "text": "Installed hello from Debian." }
+    ]
+  }
+]

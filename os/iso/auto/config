@@ -1,0 +1,39 @@
+#!/bin/sh
+# live-build configuration for the live/installer ISO (M2 design §2, §7, §11).
+# `lb config` runs this from the build directory, where build.sh has copied
+# os/iso/bootappend and os/branding/brand.env; do not run it directly.
+# UEFI only: GRUB (Debian-signed, behind Microsoft-signed shim) is the only
+# bootloader; no BIOS/isolinux entry.
+set -e
+# shellcheck source=../../branding/brand.env
+. ./brand.env
+
+lb config noauto \
+  --mode debian \
+  --distribution trixie \
+  --architectures amd64 \
+  --linux-flavours amd64 \
+  --archive-areas "main contrib non-free-firmware" \
+  --mirror-bootstrap http://deb.debian.org/debian/ \
+  --mirror-chroot http://deb.debian.org/debian/ \
+  --mirror-binary http://deb.debian.org/debian/ \
+  --mirror-chroot-security http://deb.debian.org/debian-security/ \
+  --mirror-binary-security http://deb.debian.org/debian-security/ \
+  --security true \
+  --updates true \
+  --initsystem systemd \
+  --apt-recommends false \
+  --apt-indices true \
+  --cache true \
+  --cache-packages true \
+  --firmware-binary false \
+  --firmware-chroot false \
+  --memtest none \
+  --binary-images iso-hybrid \
+  --bootloaders grub-efi \
+  --uefi-secure-boot enable \
+  --iso-application "$DISTRO_NAME" \
+  --iso-publisher "$DISTRO_NAME" \
+  --iso-volume "$ISO_VOLUME" \
+  --bootappend-live "$(cat bootappend)" \
+  "${@}"

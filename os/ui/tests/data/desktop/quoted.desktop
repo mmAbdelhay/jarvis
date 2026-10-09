@@ -1,0 +1,4 @@
+[Desktop Entry]
+Type=Application
+Name=My App
+Exec="/opt/My App/run" --flag "a \\"b\\"" %F

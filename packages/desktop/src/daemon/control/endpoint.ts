@@ -1,5 +1,6 @@
 // Where the daemon's local control transport lives (Phase 2, task 2.4).
-// Everything sits in one per-user run dir, `~/.config/jarvis/run`: on Unix a
+// Everything sits in one per-user run dir, `~/.config/jarvis/run` (or
+// `$JARVIS_CONFIG_DIR/run`): on Unix a
 // 0700 directory owned by the user, on Windows under the user profile, whose
 // ACL already restricts it to its owner.
 //
@@ -10,6 +11,7 @@
 // derived from the user (the first design) let another local user create the
 // pipe first and pose as the daemon (task 20 review, C1).
 import { posix, win32 } from "node:path";
+import { type ConfigDirEnv, jarvisConfigDir } from "./config-dir.js";
 import type { ControlFs } from "./deps.js";
 
 export interface ControlPaths {
@@ -26,8 +28,13 @@ function pathFor(platform: NodeJS.Platform) {
   return platform === "win32" ? win32 : posix;
 }
 
-export function runDirectoryFor(options: { platform: NodeJS.Platform; home: string }): string {
-  return pathFor(options.platform).join(options.home, ".config", "jarvis", "run");
+/** `<config dir>/run`; the config dir follows JARVIS_CONFIG_DIR (see config-dir.ts). */
+export function runDirectoryFor(options: {
+  platform: NodeJS.Platform;
+  home: string;
+  env?: ConfigDirEnv;
+}): string {
+  return pathFor(options.platform).join(jarvisConfigDir(options), "run");
 }
 
 export function controlPaths(platform: NodeJS.Platform, runDirectory: string): ControlPaths {

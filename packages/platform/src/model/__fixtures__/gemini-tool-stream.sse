@@ -1,0 +1,6 @@
+data: {"candidates":[{"content":{"parts":[{"text":"Thinking about the network.","thought":true},{"text":"سأتحقق من الشبكة."}],"role":"model"},"index":0}],"usageMetadata":{"promptTokenCount":210,"totalTokenCount":210},"modelVersion":"gemini-2.5-flash","responseId":"r1"}
+
+data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"net_status","args":{}},"thoughtSignature":"CiQBVKhc7sig-1"},{"functionCall":{"name":"pkg.search","args":{"query":"vlc"}}}],"role":"model"},"index":0}],"usageMetadata":{"promptTokenCount":210,"totalTokenCount":210},"modelVersion":"gemini-2.5-flash","responseId":"r1"}
+
+data: {"candidates":[{"content":{"parts":[{"text":""}],"role":"model"},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":210,"candidatesTokenCount":31,"thoughtsTokenCount":12,"totalTokenCount":253},"modelVersion":"gemini-2.5-flash","responseId":"r1"}
+

@@ -19,6 +19,7 @@ import type {
   WorkflowsConfig,
 } from "@jarvis/platform";
 import { DB_GATE_ENGINES, isChatDriver } from "@jarvis/platform";
+import { jarvisConfigDir } from "./daemon/control/config-dir.js";
 import { PERSONAL_PROJECT } from "./personal.js";
 
 export function providerAgentListsEqual(
@@ -258,13 +259,22 @@ export type JarvisConfig = {
   sessionsDbPath: string;
 };
 
+// `~/.config/jarvis`, or JARVIS_CONFIG_DIR when set (Rafiq's Jarvis Workspace
+// wrapper, M4 contracts §6.16) — every file below lives under it.
+const CONFIG_DIR = jarvisConfigDir({ home: homedir() });
+
+/** The directory jarvis.yaml and Jarvis's own bookkeeping live in. */
+export function defaultConfigDir(): string {
+  return CONFIG_DIR;
+}
+
 // `~/.config/jarvis/sessions.db`, beside the config file. Not exposed as a
 // yaml setting (unlike brain.cwd or whisper paths) because the history
 // store is Jarvis's own bookkeeping, not something a user has a reason to
 // relocate — same reasoning DEFAULT_BRAIN_CWD documents for the brain's
 // isolation directory below.
 export function defaultSessionsDbPath(): string {
-  return join(homedir(), ".config/jarvis/sessions.db");
+  return join(CONFIG_DIR, "sessions.db");
 }
 
 // `~/.config/jarvis/sessions-scan.json`, beside the config file — the last
@@ -273,14 +283,14 @@ export function defaultSessionsDbPath(): string {
 // Refresh. Not a yaml setting, same reasoning as defaultSessionsDbPath()
 // above: it is Jarvis's own bookkeeping, not something to relocate.
 export function defaultSessionsScanPath(): string {
-  return join(homedir(), ".config/jarvis/sessions-scan.json");
+  return join(CONFIG_DIR, "sessions-scan.json");
 }
 
 // The always-read workflow directory, on top of whatever `workflows:`
 // names for the current project — every project gets these, which is why
 // it lives beside jarvis.yaml rather than under a project root.
 export function defaultWorkflowsDir(): string {
-  return join(homedir(), ".config/jarvis/workflows");
+  return join(CONFIG_DIR, "workflows");
 }
 
 const DEFAULT_SYSTEM_PROMPT = "You are Jarvis.";
@@ -303,14 +313,14 @@ const DEFAULT_ARABIC_VOICE = "Majed";
  */
 const DEFAULT_ENGINE = "piper";
 const DEFAULT_PIPER_BINARY = join(homedir(), ".local/bin/piper");
-const DEFAULT_PIPER_MODEL = join(homedir(), ".config/jarvis/voices/en-gb-alan-low.onnx");
-const DEFAULT_PIPER_ARABIC_MODEL = join(homedir(), ".config/jarvis/voices/ar_JO-kareem-low.onnx");
+const DEFAULT_PIPER_MODEL = join(CONFIG_DIR, "voices/en-gb-alan-low.onnx");
+const DEFAULT_PIPER_ARABIC_MODEL = join(CONFIG_DIR, "voices/ar_JO-kareem-low.onnx");
 
 // A directory with no `.claude` project config of its own — see the
 // isolation note on `BrainConfig.cwd` in @jarvis/platform. Headless SDK
 // sessions inherit hooks and skills from their cwd, so this must never
 // default to the repo or to `process.cwd()`.
-const DEFAULT_BRAIN_CWD = join(homedir(), ".config/jarvis/brain");
+const DEFAULT_BRAIN_CWD = join(CONFIG_DIR, "brain");
 
 const DEFAULT_WHISPER_BINARY_PATH = "~/.voicemode/services/whisper/build/bin/whisper-cli";
 // large-v3-turbo, not base: synthesised-speech testing of the spec's own
@@ -540,7 +550,7 @@ export function mergeConfigInPlace(
 /** Extracted so Settings (settings-io.ts, via main.ts) reads and writes the
  *  exact same file `loadConfig` reads at startup, rather than duplicating
  *  this path as a second literal that could drift from this one. */
-export const DEFAULT_CONFIG_PATH = join(homedir(), ".config/jarvis/jarvis.yaml");
+export const DEFAULT_CONFIG_PATH = join(CONFIG_DIR, "jarvis.yaml");
 
 /**
  * The file a machine that has never run Jarvis starts from.
@@ -1324,7 +1334,7 @@ function parseWorkflows(rawWorkflows: unknown, projects: Record<string, string>)
 const DEFAULT_HISTORY_PATH = join(homedir(), ".zsh_history");
 // Jarvis's own log lives with Jarvis's own bookkeeping, beside jarvis.yaml
 // — the same reasoning defaultSessionsDbPath() documents.
-const DEFAULT_COMMAND_LOG_PATH = join(homedir(), ".config/jarvis/terminal-commands.log");
+const DEFAULT_COMMAND_LOG_PATH = join(CONFIG_DIR, "terminal-commands.log");
 
 /**
  * The `terminal:` section. Every field has a default and the whole section

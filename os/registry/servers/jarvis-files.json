@@ -1,0 +1,10 @@
+{
+  "id": "jarvis-files",
+  "name": "Files",
+  "description": "Search your home folder and preview text files. Read-only; secrets in previews are redacted.",
+  "tier": "official",
+  "version": "0.1.0",
+  "artifact": { "runtime": "go-static" },
+  "permissions": { "network": false, "paths": [] },
+  "tools": [{ "name": "files.search", "risk": "safe" }, { "name": "files.preview", "risk": "safe" }]
+}

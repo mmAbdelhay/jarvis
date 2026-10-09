@@ -1,0 +1,6 @@
+BootCurrent: 0001
+Timeout: 0 seconds
+BootOrder: 0003,0001,0000
+Boot0000* Windows Boot Manager	HD(1,GPT,3ad20009-8b89-4e1d-be67-cda0ba7a7d8f,0x800,0x32000)/\EFI\Microsoft\Boot\bootmgfw.efi
+Boot0001* UEFI: USB Stick	PciRoot(0x0)/Pci(0x14,0x0)/USB(3,0)
+Boot0003* Rafiq	HD(5,GPT,0a1b2c3d-0000-4000-8000-000000000005,0x7e00800,0x100000)/\EFI\debian\shimx64.efi

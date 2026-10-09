@@ -281,6 +281,41 @@ the socket runs with the desktop's own origin.
   builder is a pure function of its inputs, tested on every OS; the service
   is re-installed when it names another binary (a moved app).
 
+**Jarvis OS runs a second jarvisd entry.** `daemon/os/os-daemon-main.ts` is
+`jarvisd` without the desktop core: the same control server, handshake, lock,
+run directory and lifecycle, serving only the Jarvis OS channels (`agent:*`,
+`provider:*`, `doctor:*`, `audit:list`, `updates:check`, `memory:*`,
+`registry:list`, defined in `@jarvis/wire`'s `os-control.ts`) through
+`daemon/os/os-binding.ts`. Behind them, `daemon/os/agent-service.ts` composes
+`@jarvis/core`'s `agent/` module (tool loop with the safety rules on every
+request, history fitted per request, safe calls four at a time, per-turn tool
+search; risk gate; network doctor; provider failover; memory service) with
+`@jarvis/platform/model` (Anthropic, OpenAI-compatible, Ollama and Gemini
+adapters, MCP stdio client, keyring, audit log) and `@jarvis/platform/store`
+(`node:sqlite` embedding cache, AES-GCM sealed memory store, loopback-only
+Ollama embedder). Providers are an ordered list in `jarvis.yaml`'s `os:`
+section, keys by id in the keyring. Add-on MCP servers registered in
+`~/.config/jarvis/mcp.d/` start as transient `systemd-run --user` services
+only when a sandbox probe proves the sandbox applies and their kept artifact
+and unpacked files still match the signed index (`registry-servers.ts`); the
+runtime dir and hidden home entries are out of their reach, and their tools'
+risk follows their tier. With `JARVIS_TOOL_PROFILE=readonly` (the Docker
+image) jarvisd offers only safe tools and reads provider keys from
+`JARVIS_PROVIDER_KEY_<ID>`. Its `sys:snapshot` push also carries pending
+updates (`updates-monitor.ts`: `updates.list` 2 min after start, then daily)
+and the local model's download state (`model-state-reader.ts`,
+`/var/lib/jarvis/model-state.json`). It runs on Linux only, is built by
+`pnpm --filter @jarvis/desktop build:daemon` into one esbuild bundle in
+`packages/desktop/dist-daemon/`, and never loads Electron, node-pty, a native
+module or the Agent SDK (`daemon/os/os-bundle-graph.test.ts`). The desktop
+app's `daemon-main.ts` and its orchestrator are untouched by it.
+
+**Rafiq M3 (brain).** jarvisd routes every control request through one router that knows whether the computer (a control connection) or a paired phone (the `@jarvis/remote` bridge, started inside jarvisd from `remote:` in jarvis.yaml) is asking; phones get only `agent:prompt/stop/confirm/undo`, `audit:list`, `memory:list`, the `voice:utterance` blob and the `agent:events`/`sys:snapshot` pushes, never approve password-tier items, and are audited `phone:<name>`. Approved setters and file operations leave an `undo` call (last 20, same host server and family only). Push-to-talk (`voice:utterance`) uses Jarvis's `stt.ts`/`piper.ts` through `@jarvis/platform/voice`; a short yes/no classifies approval or denial of the visible card only while unlocked; the shell sends `agent:confirm` with its ticks. `sys:setLocked` is accepted only from `/usr/bin/jarvis-lock` (peer program read from the kernel via `ss` and `/proc/<pid>/exe`); while locked no card is answered by anyone, and the state survives a jarvisd restart in `$XDG_RUNTIME_DIR/jarvis/lock-state.json`.
+
+Password-tier cards carry the secret `adminPassword`, verified by the helper for the calling user with pam_unix's `unix_chkpwd` (local accounts only, not a `jarvis-admin` PAM conversation; 3 wrong passwords lock the caller out for 5 minutes, and the helper stays running while a lockout holds); passwords never reach the model, logs or audit. Voice engines live under `/usr/lib/jarvis/voice/bin/`, and models under `/usr/share/jarvis/voice/`.
+
+jarvisd starts its host MCP servers with the graphical session's `WAYLAND_DISPLAY`, `DISPLAY` and `XDG_CURRENT_DESKTOP`, read from `systemctl --user show-environment` (labwc's autostart imports them), and restarts them before the next turn when those change, so `jarvis-apps` and `jarvis-settings` never keep a missing or stale display (`session-env.ts`). Super+L runs `jarvis-lock` directly rather than `loginctl lock-session`, because live boots run no `jarvis-idle`; the cost is that a crashed Super+L locker is not relaunched (threat model R6). Every M3 surface is in the [threat model](../os/threat-model.md) (M25–M35, R6, R7).
+
 See [Background daemon](../guide/background-daemon.md) for the user side.
 
 ## Remote security layers
@@ -512,3 +547,9 @@ To build on stock Electron instead, replace the `electron` dependency in
 `packages/desktop/package.json` and drop the `electronDist`, `electronVersion`
 and `afterPack` keys from `electron-builder.yml`. Everything except DRM
 playback behaves identically.
+
+### Rafiq M4: backup brain, Arabic, recipes (jarvisd)
+
+- **Backup brain.** `failover.ts` ends the provider chain with the catalog's backup model (`/usr/share/jarvis/models/catalog.json`, the one `role: "backup"` entry) on the fixed loopback Ollama. Any failure of the configured providers before a first event — network, auth, 4xx, nothing configured — moves the turn there; `provider:status` says `activeId: "backup"` and why. On the backup the tool loop offers and allows only the 19 simple tools (`backup.ts`) and stops after 8 steps; the first backup reply of a turn starts with a one-line notice. When Ollama lacks the backup model it counts as unreachable, so the shell still offers the network doctor.
+- **Languages.** `i18n.ts` decides the UI language (`os.language`, else `LANGUAGE`/`LANG`) and a turn's language (the prompt's, when it is clearly the other language). `messages.ts` keeps every user-visible string in `{en, ar}` tables; tsc refuses a missing key and `i18n-tables.test.ts` refuses empty or untranslated cells. Model-facing text stays English; the model is told which language to answer in. `jarvis.describe` gets `lang: "ar"` for Arabic turns (and is asked again without it by an older server). `ui:setLanguage` writes `os.language` and pushes `ui:language`.
+- **Recipes.** `recipes.run {id}` (card input `{id, items: [stepIndex]}`, batch on `items`) never reaches a server: `recipe-engine.ts` reads the recipe from `/usr/share/jarvis/recipes/`, checks the machine and each step tool (only `pkg.install`, `svc.restart`, `apps.set_default` from a built-in server, never password-tier), shows ONE card with an item per step, then runs the ticked steps in order through the registry and stops at the first failure. Each step is audited with its own result. Non-executing `note` steps are displayed on the card; Docker group membership remains a plain instruction. `requires.os` uses `/etc/os-release` ID, and `minRamGB` accepts at least 90% of the stated GiB.

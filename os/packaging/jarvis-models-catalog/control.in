@@ -1,0 +1,11 @@
+Package: jarvis-models-catalog
+Version: @VERSION@
+Architecture: all
+Maintainer: Muhammad AbdElHay <mmAbdelhay@users.noreply.github.com>
+Installed-Size: @INSTALLED_SIZE@
+Section: misc
+Priority: optional
+Homepage: @HOME_URL@
+Description: Curated local models for the Jarvis assistant on @DISTRO_NAME@
+ The tested list of Ollama models (tool calling verified) that the
+ installer and Jarvis offer, with their size and memory needs.

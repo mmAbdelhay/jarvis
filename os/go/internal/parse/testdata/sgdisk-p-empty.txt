@@ -1,0 +1,11 @@
+Creating new GPT entries in memory.
+Disk /dev/loop1: 33554432 sectors, 16.0 GiB
+Sector size (logical/physical): 512/512 bytes
+Disk identifier (GUID): 7264492B-30B0-4705-B901-5760B71A5469
+Partition table holds up to 128 entries
+Main partition table begins at sector 2 and ends at sector 33
+First usable sector is 34, last usable sector is 33554398
+Partitions will be aligned on 2048-sector boundaries
+Total free space is 33554365 sectors (16.0 GiB)
+
+Number  Start (sector)    End (sector)  Size       Code  Name

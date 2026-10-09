@@ -1,0 +1,38 @@
+{
+  "id": "docker",
+  "title": { "en": "Docker", "ar": "دوكر" },
+  "description": {
+    "en": "Docker Engine with Compose and Buildx from Debian. Docker commands need sudo until your account is in the docker group.",
+    "ar": "محرّك دوكر مع Compose وBuildx من مستودعات دبيان. تحتاج أوامر دوكر إلى sudo ما لم يُضَف حسابك إلى مجموعة docker."
+  },
+  "steps": [
+    {
+      "tool": "pkg.install",
+      "input": {
+        "items": [
+          { "source": "apt", "id": "docker.io" },
+          { "source": "apt", "id": "docker-compose" },
+          { "source": "apt", "id": "docker-buildx" }
+        ]
+      },
+      "title": {
+        "en": "Install Docker Engine, Compose and Buildx",
+        "ar": "تثبيت محرّك دوكر وCompose وBuildx"
+      }
+    },
+    {
+      "tool": "svc.restart",
+      "input": { "unit": "docker" },
+      "title": { "en": "Start the Docker service", "ar": "تشغيل خدمة دوكر" }
+    },
+    {
+      "tool": "note",
+      "input": {},
+      "title": {
+        "en": "To use Docker without sudo, run \"sudo usermod -aG docker $USER\", then sign out and back in.",
+        "ar": "لاستخدام دوكر دون sudo، نفّذ \"sudo usermod -aG docker $USER\" في الطرفية، ثم سجّل الخروج وأعد الدخول."
+      }
+    }
+  ],
+  "requires": { "os": "rafiq", "minRamGB": 4 }
+}

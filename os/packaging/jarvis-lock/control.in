@@ -1,0 +1,13 @@
+Package: jarvis-lock
+Version: @VERSION@
+Architecture: amd64
+Maintainer: Muhammad AbdElHay <mmAbdelhay@users.noreply.github.com>
+Installed-Size: @INSTALLED_SIZE@
+Depends: jarvis-ui (= @VERSION@), libpam-runtime, libpam-modules
+Section: x11
+Priority: optional
+Homepage: @HOME_URL@
+Description: @DISTRO_NAME@ lock screen
+ Locks the Wayland session (ext-session-lock-v1) and unlocks it with the
+ user's password through the PAM service jarvis-lock. While the screen is
+ locked, the Jarvis agent refuses to carry out approvals.

@@ -1,0 +1,809 @@
+# Rafiq distro (the OS around the Jarvis assistant): packages, the Secure
+# Boot live/installer ISO, QEMU smoke and install tests, the APT repo.
+# M1 design §9/§11, M2 design §9, §12, §13. Linux only, path-filtered. Every
+# job runs a script a developer can run locally: see os/iso/README.md.
+name: OS
+
+on:
+  pull_request:
+    paths:
+      - "os/**"
+      - "packages/core/**"
+      - "packages/platform/**"
+      - "packages/wire/**"
+      - "packages/cli/**"
+      - "packages/desktop/src/daemon/**"
+      - "packages/desktop/package.json"
+      - "packages/desktop/scripts/**"
+      - "packages/desktop/electron-builder.yml"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/os.yml"
+  push:
+    branches: [master]
+    tags: ["os-v*"]
+    paths:
+      - "os/**"
+      - "packages/core/**"
+      - "packages/platform/**"
+      - "packages/wire/**"
+      - "packages/cli/**"
+      - "packages/desktop/src/daemon/**"
+      - "packages/desktop/package.json"
+      - "packages/desktop/scripts/**"
+      - "packages/desktop/electron-builder.yml"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/os.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: os-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # One version for every .deb and the ISO of this run (packages depend on
+  # each other with (= version)); a tag os-vX.Y.Z builds X.Y.Z.
+  OS_VERSION: ${{ startsWith(github.ref, 'refs/tags/os-v') && github.ref_name || format('0.4.0~ci{0}', github.run_number) }}
+
+jobs:
+  checks:
+    name: os checks
+    runs-on: ubuntu-24.04
+    container: debian:trixie
+    steps:
+      # fonts-ibm-plex is in trixie contrib; the debian:trixie image lists main only.
+      - run: |
+          sed -i 's/^Components: main$/Components: main contrib/' /etc/apt/sources.list.d/debian.sources
+          apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+            git ca-certificates dpkg-dev shellcheck xorriso python3 python3-yaml gpg gpg-agent gpgv reprepro apt \
+            librsvg2-bin grub-common fonts-inter cmake gcc libc6-dev zstd file sbsigntool curl ntfs-3g busybox-static \
+            qt6-l10n-tools fontconfig fonts-ibm-plex fonts-noto-core desktop-file-utils
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - run: python3 os/branding/tools/name-lint.py
+      - run: os/branding/tests/run.sh
+      - run: os/packaging/tests/run.sh
+        env:
+          # Throwaway job container: the backup-model and font tests may dpkg -i.
+          JARVIS_DPKG_INSTALL_TESTS: "1"
+      - run: os/repo/tests/run.sh
+      - run: os/registry/tests/run.sh
+      - run: python3 -m unittest discover -s os/registry/tests -v
+      - run: python3 os/models/tools/voice.py validate
+      - run: os/iso/tests/run.sh
+      - run: python3 -m unittest discover -s os/models/tests -v
+      - run: python3 -m unittest discover -s os/models/tools/tests -v
+      - run: python3 -m unittest discover -s os/packaging/lib/tests -v
+      - run: python3 -m unittest discover -s os/recipes/tests -v
+      - run: python3 os/recipes/tools/recipes.py validate
+      # Every recipe package exists in Debian trixie / on Flathub (apt lists are fresh from the first step).
+      - run: python3 os/recipes/tools/check_sources.py
+      - run: python3 os/models/tools/backup_model.py check
+      - run: python3 -m unittest discover -s os/iso/smoke/tests -t os/iso/smoke -v
+      # Node 24 takes files or globs, not a bare directory ("Cannot find module").
+      - run: node --test os/iso/smoke/assets/*.test.mjs
+      - name: shellcheck
+        run: |
+          {
+            # tests/fixtures hold name-lint input data, not scripts.
+            git ls-files os/packaging os/iso os/branding os/repo os/registry os/models os/recipes | grep -v '/tests/fixtures/' | while read -r f; do
+              head -n1 "$f" | grep -qE '^#!.*(/|env )(ba)?sh' && echo "$f"
+            done
+          } | xargs shellcheck -x -S warning
+
+  build-go:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: os/go/go.mod
+          cache-dependency-path: os/go/go.sum
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends dpkg-dev dbus-daemon
+      - run: make -C os/go check test
+      - run: make -C os/go dist
+      - run: os/packaging/build.sh --out out/debs jarvis-pkg jarvis-diag jarvis-helper jarvis-installer-backend jarvis-model-fetch jarvis-settings jarvis-apps jarvis-wl
+      - run: sudo apt-get install -y -qq --no-install-recommends file gpg gpgv
+      # Official MCP servers (contracts §7 #8: make -C os/go registry) as registry artifacts.
+      - run: make -C os/go registry
+      - run: os/registry/package-official.sh --out out/registry
+      # The whole sign/verify chain on every run, with a throwaway key.
+      - name: Registry dry run (throwaway key, NOT FOR RELEASE)
+        run: |
+          fpr=$(os/repo/test-key.sh "$RUNNER_TEMP/regkey")
+          python3 os/registry/build_index.py --servers os/registry/servers --artifacts out/registry \
+            --out "$RUNNER_TEMP/regsite" --channel testing
+          os/registry/sign-index.sh --site "$RUNNER_TEMP/regsite" --channel testing \
+            --gnupghome "$RUNNER_TEMP/regkey" --sign-with "$fpr"
+          gpg --homedir "$RUNNER_TEMP/regkey" --export "$fpr" > "$RUNNER_TEMP/regkey.gpg"
+          os/registry/verify-index.sh --keyring "$RUNNER_TEMP/regkey.gpg" --site "$RUNNER_TEMP/regsite" --channel testing
+          rm -rf "$RUNNER_TEMP/regkey"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: registry-artifacts
+          path: out/registry/*.tar.gz
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: debs-go
+          path: out/debs/*.deb
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: go-dist
+          path: os/go/dist/
+          if-no-files-found: error
+
+  # Plan F Task 14: probe, plan, partition, encrypt and format real loop
+  # devices (Windows-like and blank disks). Root and loop devices: CI only
+  # (contracts §11.16).
+  loop-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: os/go/go.mod
+          cache-dependency-path: os/go/go.sum
+      - run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends gdisk ntfs-3g cryptsetup-bin dosfstools e2fsprogs fdisk
+      - name: go test -run TestLoop (root)
+        working-directory: os/go
+        run: |
+          go test -c -o "$RUNNER_TEMP/install.test" ./internal/install
+          cd internal/install # go test runs a package's tests in its directory
+          sudo env JARVIS_LOOP_TESTS=1 "$RUNNER_TEMP/install.test" -test.count=1 -test.v -test.run TestLoop | tee "$RUNNER_TEMP/loop.log"
+          ! grep -q -- '--- SKIP' "$RUNNER_TEMP/loop.log"
+
+  build-daemon:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends dpkg-dev
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm bootstrap --pty-only
+      - run: pnpm --filter @jarvis/desktop build:daemon
+      - run: pnpm --filter @jarvis/cli build
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/jarvis-build
+          key: node-${{ hashFiles('os/packaging/jarvisd/node.env') }}
+      - run: os/packaging/build.sh --out out/debs jarvisd jarvis-cli
+      - uses: actions/upload-artifact@v4
+        with:
+          name: debs-daemon
+          path: out/debs/*.deb
+          if-no-files-found: error
+
+  build-qt:
+    needs: build-go
+    runs-on: ubuntu-24.04
+    container: debian:trixie
+    steps:
+      - run: apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends git ca-certificates
+      - uses: actions/checkout@v4
+      # Plan E's build lists plus what packaging and node-pty's compile need.
+      - name: Install build dependencies
+        run: |
+          cat os/ui/deps/debian-build.txt os/shell/deps/debian-build.txt os/installer/deps/debian-build.txt \
+            os/greeter/deps/debian-build.txt os/lock/deps/debian-build.txt os/idle/deps/debian-build.txt \
+            os/classic/deps/debian-build.txt | grep -v '^[[:space:]]*#' | awk 'NF' | sort -u > /tmp/build-deps
+          DEBIAN_FRONTEND=noninteractive xargs -a /tmp/build-deps \
+            apt-get install -y -qq --no-install-recommends dpkg-dev xz-utils file python3 make qt6-l10n-tools
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm bootstrap --pty-only
+      - uses: actions/download-artifact@v4
+        with:
+          name: go-dist
+          path: os/go/dist
+      - run: chmod +x os/go/dist/usr/lib/jarvis/mcp/* os/go/dist/usr/libexec/jarvis/*
+      # Plan E's entry points: configure (prefix /usr), build, test, check install layout.
+      - run: os/ui/ci/test.sh
+      - run: |
+          export JARVIS_MCP_DIR="$GITHUB_WORKSPACE/os/go/dist/usr/lib/jarvis/mcp"
+          os/shell/ci/test.sh
+      - run: os/installer/ci/test.sh
+      - run: os/greeter/ci/test.sh
+      - run: os/lock/ci/test.sh
+      - run: os/idle/ci/test.sh
+      - run: os/classic/ci/test.sh
+      - run: os/packaging/build.sh --out out/debs jarvis-ui jarvis-shell jarvis-installer jarvis-greeter jarvis-lock jarvis-idle jarvis-classic jarvis-i18n
+      - uses: actions/upload-artifact@v4
+        with:
+          name: debs-qt
+          path: out/debs/*.deb
+          if-no-files-found: error
+
+  build-distro:
+    runs-on: ubuntu-24.04
+    container: debian:trixie
+    outputs:
+      keyring: ${{ steps.key.outputs.keyring }}
+    steps:
+      - run: |
+          apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+            git ca-certificates curl dpkg-dev gpg gpg-agent librsvg2-bin grub-common fonts-inter zstd file python3
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/jarvis-build
+          key: ollama-${{ hashFiles('os/packaging/jarvis-ollama/ollama.env') }}
+      # Real key: pushes to master and tags, once the owner committed it.
+      # Throwaway: pull requests, and until the key exists (contracts §7).
+      - id: key
+        run: |
+          if [ "${{ github.event_name }}" != pull_request ] && [ -f os/repo/keys/jarvis-archive-keyring.asc ]; then
+            echo "keyring=real" >> "$GITHUB_OUTPUT"
+          else
+            fpr=$(os/repo/test-key.sh "$RUNNER_TEMP/ci-apt-key")
+            echo "JARVIS_ARCHIVE_PUBKEY=$RUNNER_TEMP/ci-apt-key/pubkey.asc" >> "$GITHUB_ENV"
+            echo "keyring=throwaway" >> "$GITHUB_OUTPUT"
+            echo "Archive keyring: throwaway CI key $fpr (NOT FOR RELEASE)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      # jarvis.sources ships "Enabled: no" until the repo is published: only with
+      # the real key, the signing secret and a live trixie suite (else the ISO's
+      # chroot apt-get update fails on the missing Release file).
+      - id: aptrepo
+        env:
+          SIGN: ${{ secrets.JARVIS_APT_SIGNING_KEY }}
+        run: |
+          if [ "${{ steps.key.outputs.keyring }}" = real ] && [ -n "$SIGN" ] &&
+             curl -fsI https://mmabdelhay.github.io/jarvis-apt/dists/trixie/InRelease >/dev/null; then
+            echo "JARVIS_APT_REPO_ENABLED=1" >> "$GITHUB_ENV"
+            echo "APT source jarvis.sources: enabled" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "JARVIS_APT_REPO_ENABLED=0" >> "$GITHUB_ENV"
+            echo "APT source jarvis.sources: shipped disabled (repo not published yet, os/repo/README.md)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - run: os/packaging/build.sh --out out/debs jarvis-branding jarvis-models-catalog jarvis-archive-keyring jarvis-ollama jarvis-agent jarvis-session jarvis-fonts jarvis-recipes
+      - uses: actions/upload-artifact@v4
+        with:
+          name: debs-distro
+          path: out/debs/*.deb
+          if-no-files-found: error
+      - if: steps.key.outputs.keyring == 'throwaway'
+        run: tar -C "$RUNNER_TEMP" -czf "$GITHUB_WORKSPACE/ci-apt-key.tgz" ci-apt-key
+      - if: steps.key.outputs.keyring == 'throwaway'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-apt-key
+          path: ci-apt-key.tgz
+          retention-days: 1
+
+  i18n-gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      # M4 contracts §3: no en key without ar (or back), nothing unfinished.
+      - run: python3 os/packaging/lib/i18n_gate.py
+
+  build-backup-model:
+    runs-on: ubuntu-24.04
+    container: debian:trixie
+    timeout-minutes: 45
+    steps:
+      - run: |
+          apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+            git ca-certificates dpkg-dev python3 file xz-utils
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/jarvis-build/backup-model
+          key: backup-model-${{ hashFiles('os/models/backup-model.lock.json') }}
+      # M4 contracts §1: the pinned weights, verified byte for byte.
+      - run: os/packaging/build.sh --out out/debs jarvis-backup-model
+      - uses: actions/upload-artifact@v4
+        with:
+          name: debs-backup-model
+          path: out/debs/*.deb
+          if-no-files-found: error
+          compression-level: 0
+
+  backup-model-test:
+    needs: [build-distro, build-backup-model]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: debs-distro
+          path: ${{ runner.temp }}/debs
+      - uses: actions/download-artifact@v4
+        with:
+          name: debs-backup-model
+          path: ${{ runner.temp }}/debs
+      # Offline: the packaged model answers with a tool call, English and Arabic.
+      - run: os/packaging/backup/offline-chat.sh --debs "$RUNNER_TEMP/debs"
+
+  classic-session-test:
+    needs: build-distro
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: debs-distro
+          path: ${{ runner.temp }}/debs
+      # Headless labwc: automatic fallback, classic session, Super routing (contracts §2).
+      - run: os/iso/session/classic.sh --debs "$RUNNER_TEMP/debs" --out "$RUNNER_TEMP/classic"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: classic-session-test
+          path: ${{ runner.temp }}/classic/
+          if-no-files-found: warn
+
+  build-workspace:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      # Both bootstrap steps: node-pty compiled here and the Linux Electron build.
+      - run: pnpm bootstrap
+      - run: pnpm --filter @jarvis/desktop build
+      # M4 contracts §5: a directory build, not an AppImage (CLI override; electron-builder.yml is Plan Q's).
+      - run: pnpm --filter @jarvis/desktop exec electron-builder --linux dir --x64 --config electron-builder.yml
+      # dpkg-shlibdeps resolves Electron's libraries only when they are installed
+      # on the build host, so the build container has them; build-deb fails on
+      # any it cannot resolve.
+      - name: Package in Debian trixie
+        run: |
+          docker run --rm -e OS_VERSION -v "$GITHUB_WORKSPACE:/src" -w /src debian:trixie bash -euo pipefail -c '
+            apt-get update -qq
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends dpkg-dev file python3 zstd git ca-certificates \
+              libgtk-3-0t64 libnss3 libgbm1 libasound2t64 libxkbcommon0 libatspi2.0-0t64 libatk-bridge2.0-0t64 libcups2t64 \
+              libxcomposite1 libxdamage1 libxrandr2 >/dev/null
+            git config --global --add safe.directory /src
+            os/packaging/build.sh --out out/workspace jarvis-workspace'
+      # A fresh container has none of them: only the package's Depends can
+      # provide what ldd needs, so this proves Depends is complete.
+      - name: Install-test in a clean Debian trixie
+        run: |
+          docker run --rm -v "$GITHUB_WORKSPACE:/src:ro" -w /src debian:trixie bash -euo pipefail -c '
+            apt-get update -qq
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends ./out/workspace/jarvis-workspace_*_amd64.deb >/dev/null
+            missing=0
+            for f in /opt/jarvis-workspace/jarvis /opt/jarvis-workspace/chrome_crashpad_handler /opt/jarvis-workspace/*.so*; do
+              if ldd "$f" | grep "not found"; then echo "unresolved libraries in $f" >&2; missing=1; fi
+            done
+            exit $missing'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: workspace-deb
+          path: out/workspace/*.deb
+          if-no-files-found: error
+          compression-level: 0
+
+  build-voice:
+    runs-on: ubuntu-24.04
+    container: debian:trixie
+    timeout-minutes: 60
+    steps:
+      - run: |
+          apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+            git ca-certificates curl dpkg-dev cmake g++ make file python3 xz-utils
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/jarvis-build
+          key: voice-${{ hashFiles('os/models/voice.json', 'os/packaging/jarvis-voice-engines/engines.env', 'os/packaging/jarvis-voice-models/models.list') }}
+      # M3 contracts §4: models from the voice registry; engines from pinned upstream.
+      - run: os/packaging/build.sh --out out/debs jarvis-voice-engines jarvis-voice-models
+      - run: python3 os/models/tools/voice.py scan-debs out/debs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: debs-voice
+          path: out/debs/*.deb
+          if-no-files-found: error
+          compression-level: 0
+
+  voice-roundtrip:
+    needs: build-voice
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: debs-voice
+          path: ${{ runner.temp }}/debs
+      # Piper speaks, Whisper transcribes, per voice and model (design §2.4).
+      - run: os/packaging/voice/roundtrip.sh --debs "$RUNNER_TEMP/debs"
+
+  session-test:
+    needs: [build-qt, build-distro]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: debs-qt
+          path: ${{ runner.temp }}/debs
+      - uses: actions/download-artifact@v4
+        with:
+          name: debs-distro
+          path: ${{ runner.temp }}/debs
+      # Headless labwc: Super+L / Super+Space, PAM unlock, idle lock (contracts §3).
+      - run: os/iso/session/run.sh --debs "$RUNNER_TEMP/debs" --out "$RUNNER_TEMP/session"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: session-test
+          path: ${{ runner.temp }}/session/
+          if-no-files-found: warn
+
+  build-iso:
+    needs: [build-go, build-daemon, build-qt, build-distro, build-voice, build-backup-model, i18n-gate]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v4
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo mkdir -p /mnt/lb-work
+          df -h / /mnt
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: debs-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/iso/debs
+      - id: week
+        run: echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/lb-cache
+          key: lb-trixie-${{ hashFiles('os/iso/config/package-lists/**', 'os/iso/auto/config') }}-${{ steps.week.outputs.week }}
+          restore-keys: lb-trixie-
+      # M2.5 design §3.6: no shipped voice model may be non-redistributable.
+      - name: Voice-model license gate (.debs)
+        run: python3 os/models/tools/voice.py scan-debs "$RUNNER_TEMP/iso/debs"
+      - name: Build the ISO (privileged debian:trixie)
+        env:
+          JARVIS_RELEASE: ${{ startsWith(github.ref, 'refs/tags/os-v') && '1' || '0' }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/lb-cache"
+          sudo docker run --rm --privileged -e OS_VERSION -e JARVIS_RELEASE \
+            -v "$GITHUB_WORKSPACE:/src:ro" \
+            -v "$RUNNER_TEMP/iso:/out" \
+            -v "$RUNNER_TEMP/lb-cache:/cache" \
+            -v /mnt/lb-work:/work \
+            debian:trixie /src/os/iso/build.sh --debs /out/debs --out /out/dist --work /work/iso --cache /cache
+      - run: sudo chown -R "$(id -u):$(id -g)" "$RUNNER_TEMP/iso" "$RUNNER_TEMP/lb-cache"
+      - name: Surface build warnings
+        run: |
+          w="$RUNNER_TEMP/iso/dist/warnings.txt"
+          if [ -s "$w" ]; then
+            while IFS= read -r line; do echo "::warning title=ISO build::$line"; done < "$w"
+            { echo "### ISO build warnings"; echo; sed 's/^/- /' "$w"; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends xorriso sbsigntool
+      - run: os/iso/scripts/check-iso.sh "$RUNNER_TEMP"/iso/dist/*.iso
+      - uses: actions/upload-artifact@v4
+        with:
+          name: os-iso
+          path: |
+            ${{ runner.temp }}/iso/dist/*.iso
+            ${{ runner.temp }}/iso/dist/*.iso.sha256
+            ${{ runner.temp }}/iso/dist/*.iso.packages
+            ${{ runner.temp }}/iso/dist/build.log
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+  smoke-test:
+    needs: [build-iso, build-distro]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends qemu-system-x86 xorriso
+      - name: Enable KVM
+        id: kvm
+        run: |
+          if [ -e /dev/kvm ]; then
+            echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+            sudo udevadm control --reload-rules
+            sudo udevadm trigger --name-match=kvm
+          fi
+          if [ -w /dev/kvm ]; then accel=kvm; else accel=tcg; fi
+          echo "accel=$accel" >> "$GITHUB_OUTPUT"
+          echo "QEMU acceleration: **$accel**" >> "$GITHUB_STEP_SUMMARY"
+      # The ISO's keyring can verify the public repo only with the real key
+      # and once the Pages repo exists; otherwise keep apt off it in the test.
+      - id: apt
+        run: |
+          if [ "${{ needs.build-distro.outputs.keyring }}" = real ] &&
+             curl -fsI https://mmabdelhay.github.io/jarvis-apt/dists/trixie/InRelease >/dev/null; then
+            echo "flag=" >> "$GITHUB_OUTPUT"
+          else
+            echo "flag=--disable-jarvis-apt" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/download-artifact@v4
+        with:
+          name: os-iso
+          path: ${{ runner.temp }}/iso
+      - run: |
+          python3 os/iso/smoke/run_smoke.py \
+            --iso "$(ls "$RUNNER_TEMP"/iso/*.iso)" \
+            --out "$RUNNER_TEMP/smoke" \
+            --ram-fail-mb 600 \
+            --accel "${{ steps.kvm.outputs.accel }}" ${{ steps.apt.outputs.flag }}
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-results
+          path: ${{ runner.temp }}/smoke/
+          if-no-files-found: warn
+
+  install-test:
+    needs: [build-iso, build-qt, build-distro]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [erase, alongside, refusals, local-model]
+    name: install-test (${{ matrix.scenario }})
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends qemu-system-x86 ovmf xorriso gdisk ntfs-3g \
+            dosfstools util-linux gpg gpgv reprepro dpkg-dev
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+          sudo mkdir -p /mnt/jinst && sudo chown "$(id -u)" /mnt/jinst
+      - name: Enable KVM (install tests need KVM)
+        run: |
+          [ -e /dev/kvm ] || { echo "::error title=Install tests::install tests need KVM, this runner has no /dev/kvm"; exit 1; }
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
+      - uses: actions/download-artifact@v4
+        with:
+          name: os-iso
+          path: ${{ runner.temp }}/iso
+      - if: matrix.scenario == 'erase'
+        uses: actions/download-artifact@v4
+        with:
+          name: debs-qt
+          path: ${{ runner.temp }}/debs
+      - if: matrix.scenario == 'erase' && needs.build-distro.outputs.keyring == 'throwaway'
+        uses: actions/download-artifact@v4
+        with:
+          name: ci-apt-key
+          path: ${{ runner.temp }}
+      - name: Update test repo (erase only)
+        id: upd
+        if: matrix.scenario == 'erase'
+        env:
+          JARVIS_APT_SIGNING_KEY: ${{ needs.build-distro.outputs.keyring == 'real' && secrets.JARVIS_APT_SIGNING_KEY || '' }}
+        run: |
+          if [ "${{ needs.build-distro.outputs.keyring }}" = throwaway ]; then
+            tar -C "$RUNNER_TEMP" -xzf "$RUNNER_TEMP/ci-apt-key.tgz"
+          elif [ -n "$JARVIS_APT_SIGNING_KEY" ]; then
+            os/repo/import-key.sh "$RUNNER_TEMP/ci-apt-key" >/dev/null
+          else
+            echo "::warning title=Install tests::real archive key without JARVIS_APT_SIGNING_KEY: updates check skipped"
+            exit 0
+          fi
+          os/repo/tests/make-update-repo.sh "$RUNNER_TEMP/debs" "$RUNNER_TEMP/ci-apt-key" "$RUNNER_TEMP/update-site"
+          echo "flag=--update-repo $RUNNER_TEMP/update-site" >> "$GITHUB_OUTPUT"
+      - run: |
+          python3 os/iso/smoke/run_install.py --iso "$(ls "$RUNNER_TEMP"/iso/*.iso)" \
+            --out "$RUNNER_TEMP/install" --scenario ${{ matrix.scenario }} --accel kvm --work /mnt/jinst \
+            ${{ steps.upd.outputs.flag }}
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: install-${{ matrix.scenario }}
+          path: ${{ runner.temp }}/install/
+          if-no-files-found: warn
+
+  agent-install:
+    needs: [build-go, build-daemon, build-distro]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["debian:trixie", "ubuntu:24.04"]
+    name: agent-install (${{ matrix.image }})
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: debs-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/debs
+      # M2.5 criterion 10: apt install on stock Debian 13 / Ubuntu 24.04,
+      # chat + safe tool + terminal card with the fake provider, then purge.
+      - run: os/packaging/agent/install-test.sh --debs "$RUNNER_TEMP/debs" --image "${{ matrix.image }}" --level chat
+
+  docker-image:
+    needs: [build-go, build-daemon]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: debs-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/debs
+      - run: os/packaging/docker/build-image.sh --debs "$RUNNER_TEMP/debs" --tag jarvis-agent:ci
+      - run: os/packaging/docker/test-image.sh jarvis-agent:ci os/packaging/docker/fake-health.json
+      # The tested image is the one a tag publishes (docker-publish loads it).
+      - run: docker save jarvis-agent:ci | zstd -T0 -10 > "$RUNNER_TEMP/jarvis-agent-image.tar.zst"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: docker-image
+          path: ${{ runner.temp }}/jarvis-agent-image.tar.zst
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  docker-publish:
+    if: startsWith(github.ref, 'refs/tags/os-v')
+    needs: [docker-image, agent-install, smoke-test, install-test]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: docker-image
+          path: ${{ runner.temp }}
+      - run: zstd -dc "$RUNNER_TEMP/jarvis-agent-image.tar.zst" | docker load
+      - name: Push ghcr.io/mmabdelhay/jarvis-agent (version tag)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          ver=${OS_VERSION#os-v}
+          docker tag jarvis-agent:ci "ghcr.io/mmabdelhay/jarvis-agent:$ver"
+          docker push "ghcr.io/mmabdelhay/jarvis-agent:$ver"
+          docker logout ghcr.io
+          echo "Pushed ghcr.io/mmabdelhay/jarvis-agent:$ver" >> "$GITHUB_STEP_SUMMARY"
+
+  repo:
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/os-v'))
+    needs: [smoke-test, install-test, loop-tests, build-distro, agent-install, docker-image, session-test, voice-roundtrip, i18n-gate, backup-model-test, classic-session-test]
+    runs-on: ubuntu-24.04
+    container: debian:trixie
+    steps:
+      - name: Secrets present?
+        id: gate
+        env:
+          SIGN: ${{ secrets.JARVIS_APT_SIGNING_KEY }}
+          DEPLOY: ${{ secrets.JARVIS_APT_DEPLOY_KEY }}
+        run: |
+          if [ -z "$SIGN" ] || [ -z "$DEPLOY" ] || [ "${{ needs.build-distro.outputs.keyring }}" != real ]; then
+            echo "::warning title=APT repo::not published: needs JARVIS_APT_SIGNING_KEY, JARVIS_APT_DEPLOY_KEY and the committed public key (os/repo/README.md)"
+            echo "go=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "go=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.gate.outputs.go == 'true'
+        run: |
+          apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+            git ca-certificates openssh-client gpg gpg-agent gpgv reprepro dpkg-dev python3
+      - if: steps.gate.outputs.go == 'true'
+        uses: actions/checkout@v4
+      - if: steps.gate.outputs.go == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: debs-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/debs
+      - if: steps.gate.outputs.go == 'true'
+        name: Keep only .debs GitHub Pages can host (100 MB per file)
+        run: |
+          mkdir -p "$RUNNER_TEMP/too-big"
+          find "$RUNNER_TEMP/debs" -name '*.deb' -size +95M -print -exec mv {} "$RUNNER_TEMP/too-big/" \; |
+            while read -r f; do
+              echo "::warning title=APT repo::$(basename "$f") is over 95 MB and is not published (GitHub Pages limit; M4 Plan T gap 3)"
+            done
+      - if: steps.gate.outputs.go == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: registry-artifacts
+          path: ${{ runner.temp }}/registry
+      - if: steps.gate.outputs.go == 'true'
+        name: Build and publish
+        env:
+          JARVIS_RELEASE: ${{ startsWith(github.ref, 'refs/tags/os-v') && '1' || '0' }}
+          JARVIS_APT_SIGNING_KEY: ${{ secrets.JARVIS_APT_SIGNING_KEY }}
+          DEPLOY_KEY: ${{ secrets.JARVIS_APT_DEPLOY_KEY }}
+        run: |
+          suite=trixie-testing
+          case "$GITHUB_REF" in refs/tags/os-v*) suite=trixie ;; esac
+          fpr=$(os/repo/import-key.sh "$RUNNER_TEMP/gnupg")
+          install -m0600 /dev/null "$RUNNER_TEMP/deploy"; printf '%s\n' "$DEPLOY_KEY" > "$RUNNER_TEMP/deploy"
+          export GIT_SSH_COMMAND="ssh -i $RUNNER_TEMP/deploy -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+          # Only an empty remote (reachable, no branch) is a first publish; any other
+          # failure must stop the job, or publish.sh would wipe the other suite.
+          remote=git@github.com:mmAbdelhay/jarvis-apt.git
+          heads=$(git ls-remote --heads "$remote") || { echo "::error::cannot reach $remote"; exit 1; }
+          if [ -z "$heads" ]; then
+            mkdir -p "$RUNNER_TEMP/previous"
+          else
+            git clone -q --depth 1 "$remote" "$RUNNER_TEMP/previous"
+          fi
+          os/repo/build-repo.sh --suite "$suite" --debs "$RUNNER_TEMP/debs" --out "$RUNNER_TEMP/site" \
+            --gnupghome "$RUNNER_TEMP/gnupg" --sign-with "$fpr" --previous "$RUNNER_TEMP/previous"
+          # Tool registry (M2.5 contracts §3) next to the APT repo, same key.
+          channel=testing; regdir=registry-testing
+          if [ "$suite" = trixie ]; then channel=stable; regdir=registry; fi
+          gpg --homedir "$RUNNER_TEMP/gnupg" --dearmor < os/repo/keys/jarvis-archive-keyring.asc > "$RUNNER_TEMP/archive.gpg"
+          if [ -f "$RUNNER_TEMP/previous/$regdir/index.json" ]; then
+            # Never carry over (and re-sign) artifacts from an index we cannot verify.
+            os/registry/verify-index.sh --keyring "$RUNNER_TEMP/archive.gpg" --site "$RUNNER_TEMP/previous" --channel "$channel"
+          fi
+          python3 os/registry/build_index.py --servers os/registry/servers --artifacts "$RUNNER_TEMP/registry" \
+            --out "$RUNNER_TEMP/site" --channel "$channel" --previous "$RUNNER_TEMP/previous" --verify-remote
+          os/registry/sign-index.sh --site "$RUNNER_TEMP/site" --channel "$channel" \
+            --gnupghome "$RUNNER_TEMP/gnupg" --sign-with "$fpr"
+          os/registry/verify-index.sh --keyring "$RUNNER_TEMP/archive.gpg" --site "$RUNNER_TEMP/site" --channel "$channel"
+          echo "Registry **$channel** signed by $fpr" >> "$GITHUB_STEP_SUMMARY"
+          os/repo/publish.sh --site "$RUNNER_TEMP/site" --remote git@github.com:mmAbdelhay/jarvis-apt.git \
+            --message "$suite from ${GITHUB_SHA::12} (run $GITHUB_RUN_ID)"
+          rm -rf "$RUNNER_TEMP/gnupg" "$RUNNER_TEMP/deploy"
+          echo "Published **$suite** to https://mmabdelhay.github.io/jarvis-apt" >> "$GITHUB_STEP_SUMMARY"
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/os-v')
+    needs: [smoke-test, install-test, loop-tests, repo, agent-install, docker-publish, session-test, voice-roundtrip, i18n-gate, backup-model-test, classic-session-test, build-workspace]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag matches the brand version
+        run: |
+          . os/branding/brand.env
+          v=${GITHUB_REF_NAME#os-v}
+          [ "${v%.*}" = "$DISTRO_VERSION" ] || { echo "::error::tag $v is not $DISTRO_VERSION.x (os/branding/brand.env)"; exit 1; }
+      - uses: actions/download-artifact@v4
+        with:
+          name: os-iso
+          path: iso
+      - uses: actions/download-artifact@v4
+        with:
+          name: workspace-deb
+          path: workspace
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          . os/branding/brand.env
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft \
+            --title "$DISTRO_NAME ${GITHUB_REF_NAME#os-v}" \
+            --notes "Live/installer ISO built, smoke- and install-tested (Secure Boot) by run ${{ github.run_id }}. Agent image: ghcr.io/mmabdelhay/jarvis-agent:${GITHUB_REF_NAME#os-v}." \
+            iso/*.iso iso/*.iso.sha256 workspace/*.deb

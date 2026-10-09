@@ -1,0 +1,12 @@
+Package: jarvis-diag
+Version: @VERSION@
+Architecture: amd64
+Maintainer: Muhammad AbdElHay <mmAbdelhay@users.noreply.github.com>
+Installed-Size: @INSTALLED_SIZE@
+Depends: jarvis-helper (= @VERSION@), network-manager, systemd, iproute2, iputils-ping, rfkill, pciutils, usbutils
+Section: admin
+Priority: optional
+Homepage: https://github.com/mmAbdelhay/jarvis
+Description: Jarvis diagnosis tools (MCP server)
+ Health, logs, services, network and hardware information for the Jarvis
+ agent, with secrets redacted before any text leaves the process.

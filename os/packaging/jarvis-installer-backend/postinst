@@ -1,0 +1,12 @@
+#!/bin/sh
+# D-Bus activated (os.jarvis.Installer1); nothing to enable. On a running
+# system, reload systemd and the bus; both skip in the live-build chroot.
+set -e
+if [ "$1" = configure ]; then
+  if [ -d /run/systemd/system ]; then systemctl daemon-reload || true; fi
+  if [ -S /run/dbus/system_bus_socket ]; then
+    dbus-send --system --type=method_call --dest=org.freedesktop.DBus \
+      /org/freedesktop/DBus org.freedesktop.DBus.ReloadConfig >/dev/null 2>&1 || true
+  fi
+fi
+exit 0

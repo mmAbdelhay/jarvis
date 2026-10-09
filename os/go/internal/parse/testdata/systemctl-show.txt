@@ -1,0 +1,20 @@
+Id=crashy.service
+LoadState=loaded
+ActiveState=failed
+SubState=failed
+Result=exit-code
+StateChangeTimestamp=Tue 2026-10-07 09:12:44 UTC
+
+Id=docker.socket
+LoadState=loaded
+ActiveState=failed
+SubState=failed
+Result=service-start-limit-hit
+StateChangeTimestamp=Tue 2026-10-07 09:13:02 UTC
+
+Id=never-ran.service
+LoadState=not-found
+ActiveState=inactive
+SubState=dead
+Result=success
+StateChangeTimestamp=

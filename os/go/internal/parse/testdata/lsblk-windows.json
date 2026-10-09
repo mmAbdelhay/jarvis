@@ -1,0 +1,55 @@
+{
+   "blockdevices": [
+      {
+         "path": "/dev/loop1",
+         "pkname": null,
+         "type": "loop",
+         "size": 68719476736,
+         "model": null,
+         "rm": false,
+         "ro": false,
+         "pttype": null,
+         "log-sec": 512
+      },{
+         "path": "/dev/loop1p1",
+         "pkname": "loop1",
+         "type": "part",
+         "size": 104857600,
+         "model": null,
+         "rm": false,
+         "ro": false,
+         "pttype": null,
+         "log-sec": 512
+      },{
+         "path": "/dev/loop1p2",
+         "pkname": "loop1",
+         "type": "part",
+         "size": 16777216,
+         "model": null,
+         "rm": false,
+         "ro": false,
+         "pttype": null,
+         "log-sec": 512
+      },{
+         "path": "/dev/loop1p3",
+         "pkname": "loop1",
+         "type": "part",
+         "size": 67523034624,
+         "model": null,
+         "rm": false,
+         "ro": false,
+         "pttype": null,
+         "log-sec": 512
+      },{
+         "path": "/dev/loop1p4",
+         "pkname": "loop1",
+         "type": "part",
+         "size": 1073724928,
+         "model": null,
+         "rm": false,
+         "ro": false,
+         "pttype": null,
+         "log-sec": 512
+      }
+   ]
+}

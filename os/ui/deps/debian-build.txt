@@ -1,0 +1,21 @@
+# Build dependencies of jarvis-ui, jarvis-installer and jarvis-greeter on Debian 13. One per line.
+cmake
+ninja-build
+g++
+pkgconf
+qt6-base-dev
+qt6-declarative-dev
+# i18n (Rafiq M4 contracts §3): lupdate/lrelease and the CI gate scripts
+qt6-tools-dev
+qt6-l10n-tools
+python3
+# needed only to run the tests
+qml6-module-qttest
+qml6-module-qtquick
+qml6-module-qtquick-controls
+qml6-module-qtquick-templates
+qml6-module-qtquick-layouts
+qml6-module-qtquick-shapes
+qml6-module-qtquick-window
+qml6-module-qtqml-workerscript
+dbus-daemon

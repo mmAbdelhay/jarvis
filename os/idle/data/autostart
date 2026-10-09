@@ -1,0 +1,3 @@
+# jarvis-idle line for labwc's autostart (Plan P owns /etc/xdg/labwc/autostart).
+# Locks after idle.lockAfterMinutes (default 10), on lid close, before sleep and on Super+L.
+/usr/libexec/jarvis/jarvis-idle &

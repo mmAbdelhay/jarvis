@@ -1,0 +1,28 @@
+# The Wayland session (design §9): greetd autologin -> labwc -> jarvis-shell.
+greetd
+labwc
+foot
+xwayland
+qt6-wayland
+layer-shell-qt
+fonts-inter
+libgl1-mesa-dri
+pipewire
+pipewire-pulse
+wireplumber
+polkitd
+gnome-keyring
+# secret-tool, to inspect the keyring from the Ctrl+Alt+T terminal.
+libsecret-tools
+
+# Rafiq M3 runtime packages.
+brightnessctl
+wlsunset
+wlr-randr
+mako-notifier
+xdg-utils
+
+# M4 (contracts §2, §3): the classic desktop's file manager; Arabic fonts.
+pcmanfm-qt
+fonts-noto-core
+fonts-ibm-plex

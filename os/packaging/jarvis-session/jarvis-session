@@ -1,0 +1,22 @@
+#!/bin/sh
+# Wayland session entry (M4 contracts §2): the session files in
+# /usr/share/wayland-sessions run `jarvis-session full|classic`. It records
+# the mode for the labwc autostart and the Super-key dispatcher, clears the
+# fallback state of an earlier login, and starts labwc through the keyboard
+# wrapper. Test hook: JARVIS_LABWC.
+set -eu
+mode=${1:-full}
+case $mode in
+  full|classic) ;;
+  *) echo "jarvis-session: mode must be full or classic, not '$mode'" >&2; exit 2 ;;
+esac
+JARVIS_SESSION_MODE=$mode
+export JARVIS_SESSION_MODE
+state="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/jarvis"
+rm -f "$state/classic-fallback" "$state/shell-failures"
+labwc=${JARVIS_LABWC:-/usr/local/bin/labwc}
+[ -x "$labwc" ] || labwc=/usr/bin/labwc
+if [ "$mode" = classic ]; then
+  exec "$labwc" -C /etc/xdg/labwc-classic
+fi
+exec "$labwc"

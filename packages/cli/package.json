@@ -1,0 +1,17 @@
+{
+  "name": "@jarvis/cli",
+  "version": "0.3.0",
+  "private": true,
+  "description": "jarvis: the terminal client for jarvisd (Rafiq M2.5 contracts §5)",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@jarvis/wire": "workspace:*"
+  },
+  "devDependencies": {
+    "esbuild": "0.21.5"
+  }
+}

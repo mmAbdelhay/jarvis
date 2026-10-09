@@ -1,0 +1,21 @@
+#!/bin/sh
+# Arabic next to English (M4 contracts §3): the session takes its language
+# from LANG, so both locales are generated in the image; the installer copies
+# this root, so installed systems have them too. ar_EG is the assumed Arabic
+# locale (plan gap 11). Test hooks: LOCALE_ROOT, LOCALE_GEN, LOCALE_LIST.
+set -e
+gen=${LOCALE_ROOT:-}/etc/locale.gen
+for l in "en_US.UTF-8 UTF-8" "ar_EG.UTF-8 UTF-8"; do
+  if grep -qx "# *$l" "$gen" 2>/dev/null; then
+    sed -i "s/^# *$l\$/$l/" "$gen"
+  elif ! grep -qx "$l" "$gen" 2>/dev/null; then
+    echo "$l" >> "$gen"
+  fi
+done
+${LOCALE_GEN:-locale-gen} >/dev/null
+for l in ar_EG.utf8 en_US.utf8; do
+  if ! ${LOCALE_LIST:-locale -a} | grep -qix "$l"; then
+    echo "0400-locales: $l was not generated" >&2
+    exit 1
+  fi
+done

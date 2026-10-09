@@ -1,0 +1,13 @@
+Package: jarvis-agent
+Version: @VERSION@
+Architecture: all
+Maintainer: Muhammad AbdElHay <mmAbdelhay@users.noreply.github.com>
+Installed-Size: @INSTALLED_SIZE@
+Depends: jarvisd (= @VERSION@), jarvis-pkg (= @VERSION@), jarvis-diag (= @VERSION@), jarvis-helper (= @VERSION@), jarvis-cli (= @VERSION@), jarvis-archive-keyring (= @VERSION@)
+Section: admin
+Priority: optional
+Homepage: @HOME_URL@
+Description: Jarvis AI agent for Debian and Ubuntu, in the terminal
+ Installs the Jarvis brain (jarvisd), its package and diagnosis tools, the
+ privileged helper and the jarvis terminal client on an existing Debian 13
+ or Ubuntu 24.04 system. No desktop shell and no distribution branding.

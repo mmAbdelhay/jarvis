@@ -1,0 +1,7 @@
+ntfsresize v2022.10.3 (libntfs-3g)
+NTFS signature is missing.
+ERROR(22): Opening '/dev/loop1p4' as NTFS failed: Invalid argument
+The device '/dev/loop1p4' doesn't have a valid NTFS.
+Maybe you selected the wrong partition? Or the whole disk instead of a
+partition (e.g. /dev/hda, not /dev/hda1)? This error might also occur
+if the disk was incorrectly repartitioned (see the ntfsresize FAQ).

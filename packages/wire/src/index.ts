@@ -10,3 +10,7 @@ export * from "./render-chunk.js";
 export * from "./voice.js";
 export * from "./workspace-views.js";
 export * from "./transcript.js";
+export * from "./os-control.js";
+
+// The control parser accepts unknown values; select it explicitly over address.ts.
+export { isIpLiteral } from "./os-control.js";

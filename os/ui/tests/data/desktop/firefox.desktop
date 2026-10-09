@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Name=Firefox ESR
+Name[ar]=فايرفوكس
+Comment=Browse the web
+Comment[ar_EG]=تصفح الويب
+Exec=firefox-esr %u
+TryExec=/bin/sh
+Icon=firefox-esr
+Categories=Network;WebBrowser;
+Terminal=false
+
+[Desktop Action new-window]
+Name=New Window
+Exec=firefox-esr --new-window %u

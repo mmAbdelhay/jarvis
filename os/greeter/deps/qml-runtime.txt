@@ -1,0 +1,12 @@
+# QML import (or implicit dependency) -> Debian 13 package providing it at runtime.
+# ctest qml_imports_listed fails when a QML file imports a module missing here.
+QtQml                  qml6-module-qtqml
+QtQml.WorkerScript     qml6-module-qtqml-workerscript
+QtQuick                qml6-module-qtquick
+QtQuick.Window         qml6-module-qtquick-window
+QtQuick.Layouts        qml6-module-qtquick-layouts
+QtQuick.Shapes         qml6-module-qtquick-shapes
+QtQuick.Templates      qml6-module-qtquick-templates
+QtQuick.Controls       qml6-module-qtquick-controls
+QtQuick.Controls.Basic qml6-module-qtquick-controls
+Jarvis.UI              jarvis-ui

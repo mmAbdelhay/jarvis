@@ -1,6 +1,21 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi } from "vitest";
-import { createTerminalExplorer } from "./terminal-explorer.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createTerminalExplorer as create } from "./terminal-explorer.js";
+
+// Every view runs a poll interval (and may have a burst re-read pending)
+// until it is disposed. One left running outlives its test — and, on a slow
+// runner, the file: its re-read then lands after jsdom is torn down and
+// throws `document is not defined` as an unhandled rejection. So every view
+// a test makes is disposed after it, whether or not the test did so itself.
+const live: Array<ReturnType<typeof create>> = [];
+function createTerminalExplorer(...args: Parameters<typeof create>): ReturnType<typeof create> {
+  const view = create(...args);
+  live.push(view);
+  return view;
+}
+afterEach(() => {
+  for (const view of live.splice(0)) view.dispose();
+});
 
 const listing: Record<string, { name: string; directory: boolean }[]> = {
   "/proj": [
@@ -22,6 +37,29 @@ function explorer() {
 const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe("the terminal explorer", () => {
+  it("draws nothing from a listing that settles after dispose", async () => {
+    const host = document.createElement("div");
+    document.body.append(host);
+    let answer: (entries: { name: string; directory: boolean }[]) => void = () => {};
+    const list = vi.fn(
+      (_paneKey: string, _path: string) =>
+        new Promise<{ name: string; directory: boolean }[]>((resolve) => {
+          answer = resolve;
+        }),
+    );
+    const view = createTerminalExplorer(host, "", { list, choose: vi.fn() });
+    view.setRoot("tab-1", "/proj");
+    await settle();
+    expect(list).toHaveBeenCalledTimes(1);
+    view.dispose();
+    const made = vi.spyOn(document, "createElement");
+    answer(listing["/proj"] ?? []);
+    await settle();
+    expect(made).not.toHaveBeenCalled();
+    expect(view.element.querySelector(".file-tree-row")).toBeNull();
+    made.mockRestore();
+  });
+
   it("roots at the focused pane's directory", async () => {
     const { view, list } = explorer();
     view.setRoot("tab-1", "/proj");

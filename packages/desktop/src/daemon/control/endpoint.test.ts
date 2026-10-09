@@ -21,6 +21,19 @@ describe("runDirectoryFor", () => {
       "C:\\Users\\Me\\.config\\jarvis\\run",
     );
   });
+
+  it("follows JARVIS_CONFIG_DIR, so Jarvis Workspace never shares jarvisd's socket (M4 §6.16)", () => {
+    expect(
+      runDirectoryFor({
+        platform: "linux",
+        home: "/home/u",
+        env: { JARVIS_CONFIG_DIR: "/home/u/.config/jarvis-workspace" },
+      }),
+    ).toBe("/home/u/.config/jarvis-workspace/run");
+    expect(runDirectoryFor({ platform: "linux", home: "/home/u", env: {} })).toBe(
+      "/home/u/.config/jarvis/run",
+    );
+  });
 });
 
 describe("controlPaths", () => {

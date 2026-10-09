@@ -8,6 +8,7 @@
   "main": "dist/src/main.js",
   "scripts": {
     "build": "tsc -b ../../tsconfig.json && node scripts/build-stamp.mjs && node scripts/copy-vendor.mjs && pnpm --dir ../../apps/mobile export:web && node scripts/copy-web.mjs",
+    "build:daemon": "tsc -b ../../tsconfig.json && node scripts/build-stamp.mjs && node scripts/build-daemon.mjs",
     "start": "pnpm run build && node scripts/start.mjs",
     "package": "node scripts/package.mjs",
     "package:mac": "pnpm run build && electron-builder --mac --arm64 --config electron-builder.yml",
@@ -36,6 +37,7 @@
     "@types/markdown-it": "^14.2.0",
     "electron": "github:castlabs/electron-releases#v44.1.0+wvcus",
     "electron-builder": "^26.15.3",
+    "esbuild": "0.21.5",
     "markdown-it": "^15.0.1"
   }
 }

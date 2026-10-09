@@ -1,0 +1,64 @@
+{
+  "generatedFrom": "packages/desktop/src/daemon/control/{handshake,frames}.ts",
+  "protocolVersion": 1,
+  "maxFrameBytes": 16777216,
+  "maxHelloFrameBytes": 4096,
+  "proofs": [
+    {
+      "name": "sequential",
+      "secret": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "nonceC": "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
+      "nonceS": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+      "serverProof": "a6ee22b14072bf76d08764621a2cbcb0c0b495be8481fc3dec27e8c2c3e779e8",
+      "clientProof": "8335ba320d028c687dc2453d50a3a957a1fcdec2787cfd8d1f292a80436ac715"
+    },
+    {
+      "name": "filled",
+      "secret": "abababababababababababababababababababababababababababababababab",
+      "nonceC": "0101010101010101010101010101010101010101010101010101010101010101",
+      "nonceS": "fefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefe",
+      "serverProof": "53827c5970f587a17f776af5014ba3a5d71df6586e4f60548f3f354430f6e5a4",
+      "clientProof": "1dc0c381f356e3fb28b9c53457ba660d43735c389956c7bdd11a8b94cfbb5ee9"
+    }
+  ],
+  "jsonFrames": [
+    {
+      "value": {
+        "a": [],
+        "ch": "provider:list",
+        "id": 1,
+        "t": "req"
+      },
+      "hex": "0000002e007b2261223a5b5d2c226368223a2270726f76696465723a6c697374222c226964223a312c2274223a22726571227d"
+    },
+    {
+      "value": {
+        "a": [
+          {
+            "text": "héllo"
+          }
+        ],
+        "ch": "agent:prompt",
+        "id": 7,
+        "t": "req"
+      },
+      "hex": "0000003e007b2261223a5b7b2274657874223a2268c3a96c6c6f227d5d2c226368223a226167656e743a70726f6d7074222c226964223a372c2274223a22726571227d"
+    },
+    {
+      "value": {
+        "t": "res",
+        "id": 7,
+        "v": {
+          "turnId": "t1"
+        }
+      },
+      "hex": "00000026007b2274223a22726573222c226964223a372c2276223a7b227475726e4964223a227431227d7d"
+    }
+  ],
+  "binaryFrames": [
+    {
+      "bytes": "010203",
+      "hex": "0000000301010203"
+    }
+  ]
+}

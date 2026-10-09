@@ -1,0 +1,44 @@
+#!/bin/sh
+# Load the installed keyboard before the compositor reads its environment.
+set -e
+keyboard=${LABWC_KEYBOARD_FILE:-/etc/default/keyboard}
+if [ -r "$keyboard" ]; then
+  # shellcheck disable=SC1090 # Installed keyboard settings, chosen at runtime.
+  . "$keyboard"
+  export XKB_DEFAULT_LAYOUT="${XKBLAYOUT:-us}"
+  export XKB_DEFAULT_VARIANT="${XKBVARIANT:-}"
+fi
+
+# Hardware OpenGL needs a KMS driver Mesa accelerates. Without one (VMs
+# without virgl, simpledrm/efifb, BMC chips) Mesa falls back to llvmpipe,
+# which costs ~150 MB across labwc and the Qt clients for nothing: draw with
+# wlroots' pixman renderer and Qt Quick's software backend instead.
+# Test hook: LABWC_DRM_DIR (default /sys/class/drm).
+hardware_gl() {
+  for card in "${LABWC_DRM_DIR:-/sys/class/drm}"/card*; do
+    case ${card##*/} in *-*) continue ;; esac # connectors (card0-HDMI-A-1)
+    dev=$card/device
+    [ -e "$dev/driver" ] || continue
+    driver=$(basename "$(readlink -f "$dev/driver")")
+    if [ "$driver" = virtio-pci ]; then
+      # virtio-gpu has 3D only with virgl: feature bit 0 of its virtio device.
+      for vdev in "$dev"/virtio*; do
+        [ -r "$vdev/features" ] || continue
+        case $(cat "$vdev/features") in 1*) return 0 ;; esac
+      done
+      continue
+    fi
+    case $driver in
+      i915|xe|amdgpu|radeon|nouveau|nvidia|vmwgfx) return 0 ;;
+    esac
+  done
+  return 1
+}
+if ! hardware_gl; then
+  export WLR_RENDERER="${WLR_RENDERER:-pixman}"
+  export QT_QUICK_BACKEND="${QT_QUICK_BACKEND:-software}"
+fi
+
+# Merge user keyboard/environment and rc.xml settings over the system config
+# so the Wayland settings, renderer switch and session key binds survive.
+exec "${LABWC_BIN:-/usr/bin/labwc}" --merge-config "$@"
