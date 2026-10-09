@@ -141,6 +141,16 @@ test("paused: the right reason, after the event, within the limit", () => {
   assert.equal(isActive([{ type: "cu-state", active: false }]), false);
 });
 
+test("stopped: Take over (Super+Esc) ends the session in time", () => {
+  const log = [
+    { type: "cu-state", wall: 900, active: true, paused: null },
+    { type: "cu-state", wall: 1150, active: false, paused: null },
+  ];
+  assert.deepEqual(pausedProblems(log, "stopped", 1000, 200), []);
+  assert.match(pausedProblems(log, "stopped", 1000, 100).join(), /150 ms/);
+  assert.match(pausedProblems(log.slice(0, 1), "stopped", 800, 2000).join(), /no cu:state/);
+});
+
 test("readLog keeps JSON objects only", () => {
   assert.deepEqual(readLog('{"a":1}\nnoise\n3\nnull\n'), [{ a: 1 }]);
 });

@@ -224,6 +224,28 @@
           "text": "Stopped."
         }
       ]
+    },
+    {
+      "name": "takeover",
+      "expectPromptContains": "cu-takeover",
+      "steps": [
+        {
+          "call": "screen_look",
+          "input": {
+            "goal": "cu-takeover: hold the session",
+            "apps": ["${GIMP_APP}"]
+          }
+        },
+        {
+          "call": "screen_look",
+          "input": {},
+          "hold": 20,
+          "expectError": ["paused", "no-session"]
+        },
+        {
+          "text": "Stopped."
+        }
+      ]
     }
   ],
   "concerns": [

@@ -10,7 +10,7 @@
 //   cucheck no-leaks REPORT [--min-verified N]
 //   cucheck card LOG begin|consequential [--absent] [--title-has TEXT]
 //   cucheck active LOG
-//   cucheck paused LOG REASON --since MS [--within MS]
+//   cucheck paused LOG REASON --since MS [--within MS]   (REASON "stopped": the session ended)
 //   cucheck png FILE WIDTH HEIGHT
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
@@ -150,7 +150,8 @@ export function pausedProblems(events, reason, since, within) {
       e.type === "cu-state" &&
       typeof e.wall === "number" &&
       e.wall >= since &&
-      (e.paused === reason || (reason === "locked" && e.active === false)),
+      (e.paused === reason ||
+        ((reason === "locked" || reason === "stopped") && e.active === false)),
   );
   if (hit === undefined) return [`no cu:state with paused "${reason}" after ${since}`];
   return hit.wall - since <= within

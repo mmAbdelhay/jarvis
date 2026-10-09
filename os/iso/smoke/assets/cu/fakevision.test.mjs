@@ -454,7 +454,7 @@ test("fixture flows begin the way merged V does: screen_look {goal, apps}, never
   const script = JSON.parse(readFileSync(new URL("./cu-gimp.json", import.meta.url), "utf8"));
   assert.deepEqual(
     script.turns.map((t) => t.name),
-    ["off", "probe", "deny", "export", "excluded", "stuck", "lock", "physical"],
+    ["off", "probe", "deny", "export", "excluded", "stuck", "lock", "physical", "takeover"],
   );
   // V offers only the screen_* tools; cu.begin is the session card's hidden tool (screen-tools.ts).
   const modelTools = /^screen_(look|click|type|key|scroll|drag|done)$/;

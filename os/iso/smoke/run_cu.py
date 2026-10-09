@@ -109,6 +109,18 @@ def run_checks(run: Run, args: argparse.Namespace, qmp: Qmp, out: Path) -> int:
         sh(cu.stop(uid), 30)
 
     run.check("criterion 3: real pointer motion pauses Jarvis within 2 s", physical)
+
+    # Final review finding 4: the keyboard Take over is Super+Esc (labwc bind ->
+    # jarvis-session-key --cu-stop -> jarvis-shell -> cu:stop). The bound here is the
+    # serial-shell and QMP round trip, not the 200 ms target; that is not measured.
+    def takeover():
+        sh(cu.turn(uid, "takeover", "cu-takeover: hold the session", background=True))
+        sh(cu.wait_check(uid, f"active {cu.log('takeover')}", 90), 120)
+        t0 = int(sh("date +%s%3N").strip())
+        qmp.send_keys(["meta_l", "esc"])
+        sh(cu.wait_check(uid, f"paused {cu.log('takeover')} stopped --since {t0} --within 2000", 10), 30)
+
+    run.check("criterion 3: Super+Esc takes over (computer use stops) within 2 s", takeover)
     run.check("criterion 8: the audit log has the goal", lambda: sh(cu.AUDIT_HAS_GOAL))
     # No turn of this tier acts (export is stubbed, the others only look): a screen action in the
     # audit log can only appear once X14 restores the real export script.
