@@ -330,12 +330,31 @@ func TestCaptureBlanksWhenNonAllowedWindowSitsBetweenBaseAndAllowedDialog(t *tes
 			h.m.FocusChanged() // seen as an event only, never by a capture
 		}
 		h.d.focus("w5") // then an allowed dialog is raised over the browser
+		// The dialog becomes the base: it is raised (over the browser) and
+		// made fullscreen before any frame shows. If it cannot be made
+		// fullscreen, the frame stays black.
+		h.d.mu.Lock()
+		h.d.ignoreFullscreen = true
+		h.d.mu.Unlock()
 		r, err := h.m.Capture(proto.Capture{MaxEdge: 640})
 		if err != nil {
 			t.Fatal(err)
 		}
 		if _, _, c := decodePNG(t, r); c != [3]uint32{0, 0, 0} {
 			t.Fatalf("viaEvent=%v: window between base and dialog leaked: %v", viaEvent, c)
+		}
+		h.d.mu.Lock()
+		h.d.ignoreFullscreen = false
+		h.d.mu.Unlock()
+		r, err = h.m.Capture(proto.Capture{MaxEdge: 640})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !h.d.has("activate w5") || !h.d.has("fullscreen w5 true") {
+			t.Fatalf("the dialog must be raised and fullscreen before it is shown: %v", h.d.logged())
+		}
+		if _, _, c := decodePNG(t, r); c == [3]uint32{0, 0, 0} {
+			t.Fatal("a raised fullscreen dialog must be shown")
 		}
 		// Resume raises the base again, and frames come back.
 		h.d.focus("w3")
@@ -367,7 +386,8 @@ func TestResumeRaisesBaseAfterFocusHopsWhilePaused(t *testing.T) {
 	if err := h.m.Begin(proto.Begin{SessionID: "s1", AppIDs: []string{"gimp"}}); err != nil {
 		t.Fatal(err)
 	}
-	raised := h.d.count("activate w1") > before
+	// The base follows focus to the dialog (w5): resume raises it.
+	raised := h.d.count("activate w1") > before || h.d.has("activate w5")
 	r, err := h.m.Capture(proto.Capture{MaxEdge: 640})
 	if err != nil {
 		t.Fatal(err)

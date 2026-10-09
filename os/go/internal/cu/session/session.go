@@ -5,6 +5,13 @@
 //
 // Ruling U-1: labwc gives no window geometry, so the session keeps one
 // allowed window (the base) fullscreen and maps capture space onto it.
+//
+// Dialogs (final review, finding 1): the base follows keyboard focus. When
+// another window of an allowed app (an Export dialog, say) takes focus, the
+// next capture raises it and makes it fullscreen, so the frame shows the
+// window that receives input. Input is refused while the focused window is
+// not the base, and while the base differs from the one the last capture
+// showed: the model never acts on a window it has not seen.
 package session
 
 import (
@@ -82,8 +89,9 @@ const (
 type shot struct {
 	output                 string
 	outW, outH, capW, capH int
-	scale                  int  // wl_output.scale of the output (>= 1)
-	blanked                bool // the frame was blanked: pointer input must not target it
+	scale                  int    // wl_output.scale of the output (>= 1)
+	blanked                bool   // the frame was blanked: pointer input must not target it
+	baseID                 string // the base this frame showed
 }
 
 type state struct {
@@ -263,9 +271,15 @@ func (m *Manager) snapshot() (view, error) {
 	return v, nil
 }
 
-// pickBase chooses a base when there is none: the focused allowed window,
-// else the newest allowed one.
-func (m *Manager) pickBase(v *view) {
+// pickBase chooses the base: the focused allowed window (the base follows
+// focus to an allowed dialog), else the current base, else the newest
+// allowed window. It reports whether focus moved the base away from a
+// window that is still open: the new base must then be raised.
+func (m *Manager) pickBase(v *view) (moved bool) {
+	if v.focused != nil && m.allowed(*v.focused) && (v.base == nil || v.base.ID != v.focused.ID) {
+		moved = v.base != nil
+		v.base = v.focused
+	}
 	if v.base == nil {
 		if v.focused != nil && m.allowed(*v.focused) {
 			v.base = v.focused
@@ -289,6 +303,7 @@ func (m *Manager) pickBase(v *view) {
 	}
 	m.wIdx, m.wApps, m.wBase = m.s.index, m.s.apps, m.s.baseID
 	m.smu.Unlock()
+	return moved
 }
 
 // settle keeps the base fullscreen (and, at begin, focused) and waits up
@@ -298,7 +313,7 @@ func (m *Manager) settle(activate bool) (view, error) {
 	if err != nil {
 		return v, err
 	}
-	m.pickBase(&v)
+	moved := m.pickBase(&v) // a dialog is raised over the old fullscreen base
 	if v.base == nil {
 		return v, nil
 	}
@@ -307,7 +322,7 @@ func (m *Manager) settle(activate bool) (view, error) {
 	// At begin/resume the base is raised unless it already holds focus:
 	// focus hops while paused are not tracked (the user may have put a
 	// window that is not allowed between the base and an allowed dialog).
-	if activate && (v.focused == nil || v.focused.ID != v.base.ID || m.isTainted()) {
+	if moved || activate && (v.focused == nil || v.focused.ID != v.base.ID || m.isTainted()) {
 		if err := m.d.Desktop.Activate(v.base.ID); err != nil {
 			return v, err
 		}
@@ -324,7 +339,7 @@ func (m *Manager) settle(activate bool) (view, error) {
 		if v, err = m.snapshot(); err != nil {
 			return v, err
 		}
-		if v.base != nil && v.base.Fullscreen && (!activate || (focusedOK(v) && !m.isTainted())) {
+		if v.base != nil && v.base.Fullscreen && (!activate && !moved || (focusedOK(v) && !m.isTainted())) {
 			break
 		}
 		m.d.Sleep(fullscreenPoll)
@@ -408,8 +423,13 @@ func (m *Manager) End() {
 	m.s = nil
 }
 
+// visible: only the base can be on screen. It is fullscreen, it holds
+// keyboard focus (so it is raised), and nothing that is not allowed took
+// focus since. A focused allowed window that is not the base may be hidden
+// behind it, and showing the base would let keys reach an unseen window.
 func (m *Manager) visible(v view) bool {
-	return v.base != nil && v.base.Fullscreen && v.focused != nil && m.allowed(*v.focused) && !m.isTainted()
+	return v.base != nil && v.base.Fullscreen && v.focused != nil && v.focused.ID == v.base.ID &&
+		m.allowed(*v.focused) && !m.isTainted()
 }
 
 func (m *Manager) windowList(v view) []proto.Window {
@@ -521,6 +541,9 @@ func (m *Manager) Capture(p proto.Capture) (*proto.CaptureResult, error) {
 	sh := &shot{output: out.Name, outW: rgba.Bounds().Dx(), outH: rgba.Bounds().Dy(),
 		capW: small.Bounds().Dx(), capH: small.Bounds().Dy(),
 		scale: max(int(out.Scale), 1), blanked: blanked}
+	if v.base != nil {
+		sh.baseID = v.base.ID
+	}
 	clear(rgba.Pix)
 	if small != rgba {
 		clear(small.Pix)
