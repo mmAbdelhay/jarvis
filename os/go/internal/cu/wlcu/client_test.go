@@ -67,7 +67,7 @@ func TestToplevelsAndOutputs(t *testing.T) {
 		t.Fatal(err)
 	}
 	outs, err := c.Outputs()
-	if err != nil || len(outs) != 1 || outs[0] != (Output{Name: "HEADLESS-1", Width: 8, Height: 4}) {
+	if err != nil || len(outs) != 1 || outs[0] != (Output{Name: "HEADLESS-1", Width: 8, Height: 4, Scale: 1}) {
 		t.Fatalf("outputs %+v %v", outs, err)
 	}
 	tops, err := c.Toplevels()
