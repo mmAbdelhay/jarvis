@@ -4,12 +4,16 @@
 # from /etc/vconsole.conf (written by the installer) and compiles it with
 # libxkbcommon; Debian's plymouth hook copies neither that file nor the XKB
 # data, so without this Plymouth falls back to the console's US keymap.
+# Plymouth only applies the XKB layout to evdev keyboards (/dev/input/event*),
+# and initramfs-tools does not include the evdev module: force-load it.
 PREREQ=""
 prereqs() { echo "$PREREQ"; }
 case $1 in
 prereqs) prereqs; exit 0 ;;
 esac
 [ -r /etc/vconsole.conf ] && grep -q '^XKBLAYOUT=.' /etc/vconsole.conf || exit 0
+. /usr/share/initramfs-tools/hook-functions
+force_load evdev
 mkdir -p "$DESTDIR/etc" "$DESTDIR/usr/share/X11/xkb"
 cp /etc/vconsole.conf "$DESTDIR/etc/vconsole.conf"
 for d in rules keycodes symbols types compat; do

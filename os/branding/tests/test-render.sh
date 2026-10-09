@@ -15,7 +15,7 @@ check "wordmark carries the brand name" grep -q '>Rafiq<' "$r/usr/share/pixmaps/
 check "wordmark has no placeholder" bash -c "! grep -q '@DISTRO' '$r/usr/share/pixmaps/jarvis-wordmark.svg'"
 check "brand.json (M4 §6.8)" python3 -c 'import json,sys; d=json.load(open(sys.argv[1],encoding="utf-8")); assert d["name"]=={"en":"Rafiq","ar":"رفيق"}, d' "$r/usr/share/jarvis/brand.json"
 check "initramfs keyboard hook (contracts §11.5)" test -x "$r/usr/share/initramfs-tools/hooks/jarvis-keyboard"
-check "initramfs keyboard hook copies vconsole.conf and XKB data" bash -c "grep -q /etc/vconsole.conf '$r/usr/share/initramfs-tools/hooks/jarvis-keyboard' && grep -q /usr/share/X11/xkb '$r/usr/share/initramfs-tools/hooks/jarvis-keyboard'"
+check "initramfs keyboard hook copies vconsole.conf and XKB data" bash -c "grep -q /etc/vconsole.conf '$r/usr/share/initramfs-tools/hooks/jarvis-keyboard' && grep -q /usr/share/X11/xkb '$r/usr/share/initramfs-tools/hooks/jarvis-keyboard' && grep -q 'force_load evdev' '$r/usr/share/initramfs-tools/hooks/jarvis-keyboard'"
 check "wallpaper 4k" test "$(png_size "$r/usr/share/backgrounds/jarvis/wallpaper-3840x2160.png")" = "3840x2160"
 check "wallpaper 1080p" test "$(png_size "$r/usr/share/backgrounds/jarvis/wallpaper-1920x1080.png")" = "1920x1080"
 check "logo is the ring (two circles, no text)" bash -c "[ \$(grep -c '<circle' '$BRANDING_DIR/logo/jarvis-ring.svg') -ge 2 ] && ! grep -q '<text' '$BRANDING_DIR/logo/jarvis-ring.svg'"

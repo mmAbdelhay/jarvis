@@ -91,9 +91,10 @@ def keyboard_checks(layout: str) -> list[tuple[str, str]]:
     env = "tr '\\0' '\\n' < /proc/$pid/environ | grep -qx XKB_DEFAULT_LAYOUT=" + layout
     return [
         ("§11.5: /etc/default/keyboard has the chosen layout", f"grep -qx 'XKBLAYOUT=\"{layout}\"' /etc/default/keyboard"),
-        ("§11.5: the unlock prompt's layout is in the initramfs (vconsole.conf + XKB data for Plymouth)",
+        ("§11.5: the unlock prompt's layout is in the initramfs (vconsole.conf + XKB data + evdev for Plymouth)",
          f"grep -qx 'XKBLAYOUT={layout}' /etc/vconsole.conf && lsinitramfs /boot/initrd.img-$(uname -r) | grep -qx 'etc/vconsole.conf' && "
-         f"lsinitramfs /boot/initrd.img-$(uname -r) | grep -qx 'usr/share/X11/xkb/symbols/{layout}'"),
+         f"lsinitramfs /boot/initrd.img-$(uname -r) | grep -qx 'usr/share/X11/xkb/symbols/{layout}' && "
+         f"lsinitramfs /boot/initrd.img-$(uname -r) | grep -q '/evdev\\.ko'"),
         ("§11.5: the greeter's cage types with the chosen layout",
          f"for i in $(seq 90); do pid=$(pgrep -u _greetd -x cage | head -n1); [ -n \"$pid\" ] && break; sleep 1; done; "
          f"[ -n \"$pid\" ] && {env}"),
