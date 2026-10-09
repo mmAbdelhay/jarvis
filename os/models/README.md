@@ -65,7 +65,3 @@ and verified against registry manifests before merging:
 python3 os/models/tools/check_registry.py os/models/vision-candidates.json --fix
 python3 os/models/tools/check_registry.py os/models/vision-candidates.json
 ```
-
-No candidate has passing evidence yet; the catalog remains cloud-only for
-computer use. The initial candidate sizes are placeholders pending registry
-verification and must not be treated as verified download sizes.
