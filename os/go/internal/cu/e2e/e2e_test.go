@@ -1,5 +1,3 @@
-//go:build linux
-
 // Package e2e drives the real jarvis-cu binary against a real (headless)
 // labwc. Run via os/go/ci/cu-headless.sh; skipped elsewhere.
 package e2e
@@ -311,6 +309,9 @@ func TestComputerUseAgainstLabwc(t *testing.T) {
 		ev, ok := cl.event(2 * time.Second)
 		if !ok || ev.Reason != "excluded-focus" {
 			t.Fatalf("%+v %v", ev, ok)
+		}
+		if _, code := cl.do("capture", map[string]any{"maxEdge": 640}); code != "paused" {
+			t.Fatalf("capture after excluded focus: %q", code)
 		}
 		obs.Activate(appWindow(t, obs, "wev").ID)
 		time.Sleep(300 * time.Millisecond)

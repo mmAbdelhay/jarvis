@@ -127,3 +127,24 @@ func TestDescribeAt(t *testing.T) {
 		t.Fatal("nil hook must answer unknown")
 	}
 }
+
+func TestDescribeAtDividesByOutputScale(t *testing.T) {
+	h := newHarness(t)
+	h.d.outs[0].Scale = 2
+	var gx, gy int
+	h.m.d.DescribeAt = func(_ context.Context, _ string, x, y int) (string, string) {
+		gx, gy = x, y
+		return "button", "Save"
+	}
+	h.begin(t)
+	if _, err := h.m.Capture(proto.Capture{MaxEdge: 1280}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.m.Handle("describeAt", []byte(`{"x":320,"y":180}`)); err != nil {
+		t.Fatal(err)
+	}
+	// 320,180 in the screenshot is 640,360 output pixels, 320,180 logical at scale 2.
+	if gx != 320 || gy != 180 {
+		t.Fatalf("got %d,%d", gx, gy)
+	}
+}

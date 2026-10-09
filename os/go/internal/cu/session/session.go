@@ -82,6 +82,8 @@ const (
 type shot struct {
 	output                 string
 	outW, outH, capW, capH int
+	scale                  int  // wl_output.scale of the output (>= 1)
+	blanked                bool // the frame was blanked: pointer input must not target it
 }
 
 type state struct {
@@ -109,6 +111,14 @@ type Manager struct {
 	active bool
 	id     string
 	paused string
+
+	// Focus watch, mirrored from s so FocusChanged can run without opMu.
+	// tainted: a window that is not allowed took focus after the base was
+	// last focused, so it may sit above the base in the stack.
+	wIdx    *policy.AppIndex
+	wApps   []string
+	wBase   string
+	tainted bool
 }
 
 // New makes a Manager.
@@ -171,6 +181,11 @@ func (m *Manager) FocusChanged() {
 	running := m.active && m.paused == ""
 	m.smu.Unlock()
 	if running {
+		// Record a stacking change at once: the debounce below is longer
+		// than a quick focus hop (w3, then an allowed dialog).
+		if tops, err := m.d.Desktop.Toplevels(); err == nil {
+			m.noteFocus(tops)
+		}
 		m.d.After(focusDebounce, m.checkFocus)
 	}
 }
@@ -201,11 +216,41 @@ func (m *Manager) allowed(t wlcu.Toplevel) bool {
 	return m.s.index.Matches(t.AppID, m.s.apps)
 }
 
+// noteFocus keeps the tainted flag: set when a window that is not allowed
+// (or excluded) holds focus, cleared once the base itself is focused again.
+func (m *Manager) noteFocus(tops []wlcu.Toplevel) {
+	m.smu.Lock()
+	defer m.smu.Unlock()
+	if m.wIdx == nil || m.wBase == "" {
+		return
+	}
+	for _, t := range tops {
+		if !t.Focused {
+			continue
+		}
+		if t.ID == m.wBase {
+			m.tainted = false
+			return
+		}
+		if ex, _ := m.wIdx.Excluded(t.AppID); ex || !m.wIdx.Matches(t.AppID, m.wApps) {
+			m.tainted = true
+		}
+		return
+	}
+}
+
+func (m *Manager) isTainted() bool {
+	m.smu.Lock()
+	defer m.smu.Unlock()
+	return m.tainted
+}
+
 func (m *Manager) snapshot() (view, error) {
 	tops, err := m.d.Desktop.Toplevels()
 	if err != nil {
 		return view{}, err
 	}
+	m.noteFocus(tops)
 	v := view{tops: tops}
 	for i := range tops {
 		if tops[i].Focused {
@@ -237,6 +282,13 @@ func (m *Manager) pickBase(v *view) {
 	if v.base != nil {
 		m.s.baseID = v.base.ID
 	}
+	m.smu.Lock()
+	if m.wBase != m.s.baseID {
+		// A new base: unless it is focused, something may be above it.
+		m.tainted = v.base != nil && (v.focused == nil || v.focused.ID != v.base.ID)
+	}
+	m.wIdx, m.wApps, m.wBase = m.s.index, m.s.apps, m.s.baseID
+	m.smu.Unlock()
 }
 
 // settle keeps the base fullscreen (and, at begin, focused) and waits up
@@ -252,7 +304,10 @@ func (m *Manager) settle(activate bool) (view, error) {
 	}
 	focusedOK := func(v view) bool { return v.focused != nil && m.allowed(*v.focused) }
 	changed := false
-	if activate && !focusedOK(v) {
+	// At begin/resume the base is raised unless it already holds focus:
+	// focus hops while paused are not tracked (the user may have put a
+	// window that is not allowed between the base and an allowed dialog).
+	if activate && (v.focused == nil || v.focused.ID != v.base.ID || m.isTainted()) {
 		if err := m.d.Desktop.Activate(v.base.ID); err != nil {
 			return v, err
 		}
@@ -269,7 +324,7 @@ func (m *Manager) settle(activate bool) (view, error) {
 		if v, err = m.snapshot(); err != nil {
 			return v, err
 		}
-		if v.base != nil && v.base.Fullscreen && (!activate || focusedOK(v)) {
+		if v.base != nil && v.base.Fullscreen && (!activate || (focusedOK(v) && !m.isTainted())) {
 			break
 		}
 		m.d.Sleep(fullscreenPoll)
@@ -320,6 +375,9 @@ func (m *Manager) Begin(p proto.Begin) error {
 		if !active {
 			m.restore()
 			m.s = nil
+			m.smu.Lock()
+			m.wIdx, m.wApps, m.wBase, m.tainted = nil, nil, "", false
+			m.smu.Unlock()
 		}
 		return proto.Errorf(proto.CodeFailed, "could not prepare the app window: %v", err)
 	}
@@ -341,6 +399,7 @@ func (m *Manager) End() {
 	defer m.opMu.Unlock()
 	m.smu.Lock()
 	m.active, m.id, m.paused = false, "", ""
+	m.wIdx, m.wApps, m.wBase, m.tainted = nil, nil, "", false
 	m.smu.Unlock()
 	if m.s == nil {
 		return
@@ -350,7 +409,7 @@ func (m *Manager) End() {
 }
 
 func (m *Manager) visible(v view) bool {
-	return v.base != nil && v.base.Fullscreen && v.focused != nil && m.allowed(*v.focused)
+	return v.base != nil && v.base.Fullscreen && v.focused != nil && m.allowed(*v.focused) && !m.isTainted()
 }
 
 func (m *Manager) windowList(v view) []proto.Window {
@@ -453,13 +512,15 @@ func (m *Manager) Capture(p proto.Capture) (*proto.CaptureResult, error) {
 	v2, err2 := m.snapshot()
 	same := err2 == nil && v.base != nil && v2.base != nil && v2.base.ID == v.base.ID &&
 		v.focused != nil && v2.focused != nil && v2.focused.ID == v.focused.ID
-	if !matched || !same || !m.visible(v) || !m.visible(v2) {
+	blanked := !matched || !same || !m.visible(v) || !m.visible(v2)
+	if blanked {
 		img.Blank(rgba)
 	}
 	small, scale := img.Downscale(rgba, clampEdge(p.MaxEdge))
 	data, err := img.EncodePNG(small)
 	sh := &shot{output: out.Name, outW: rgba.Bounds().Dx(), outH: rgba.Bounds().Dy(),
-		capW: small.Bounds().Dx(), capH: small.Bounds().Dy()}
+		capW: small.Bounds().Dx(), capH: small.Bounds().Dy(),
+		scale: max(int(out.Scale), 1), blanked: blanked}
 	clear(rgba.Pix)
 	if small != rgba {
 		clear(small.Pix)

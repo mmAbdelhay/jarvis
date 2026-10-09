@@ -6,6 +6,7 @@ type outputState struct {
 	name          string
 	width, height int
 	transform     int32
+	scale         int32
 }
 
 // Output is one screen; Width/Height are the current mode in pixels
@@ -14,6 +15,8 @@ type Output struct {
 	Name          string
 	Width, Height int
 	Transform     int32
+	// Scale is wl_output.scale (0 when the compositor never said: treat as 1).
+	Scale int32
 }
 
 func (c *Client) outputEvent(obj uint32, op uint16, r *wl.Reader) {
@@ -37,6 +40,10 @@ func (c *Client) outputEvent(obj uint32, op uint16, r *wl.Reader) {
 		if flags&1 != 0 && w > 0 && h > 0 {
 			o.width, o.height = int(w), int(h)
 		}
+	case evOutputScale:
+		if s := int32(r.Uint()); s > 0 {
+			o.scale = s
+		}
 	case evOutputName:
 		if n := r.String(); n != "" {
 			o.name = n
@@ -54,7 +61,7 @@ func (c *Client) Outputs() ([]Output, error) {
 	out := []Output{}
 	for _, id := range c.outputOrder {
 		if o := c.outputs[id]; o.width > 0 {
-			out = append(out, Output{Name: o.name, Width: o.width, Height: o.height, Transform: o.transform})
+			out = append(out, Output{Name: o.name, Width: o.width, Height: o.height, Transform: o.transform, Scale: o.scale})
 		}
 	}
 	return out, nil

@@ -34,21 +34,27 @@ func TestExcluded(t *testing.T) {
 		"polkit-gnome-authentication-agent-1": true,
 		"lxqt-policykit-agent":                true,
 		"org.kde.polkit-kde-authentication-agent-1": true,
-		"pinentry-gnome3":     true,
-		"gcr-prompter":        true,
-		"org.kde.ksshaskpass": true,
-		"foot":                true,
-		"footclient":          true,
-		"Alacritty":           true,
-		"org.gnome.Console":   true,
-		"kgx":                 true,
-		"myterm":              true, // exec alias of a hidden TerminalEmulator entry
-		"my-term":             true,
-		"gimp":                false,
-		"gimp-2.10":           false,
-		"firefox":             false,
-		"org.mozilla.firefox": false,
-		"jarvisish-editor":    false, // only the "jarvis-" / "jarvis_" prefixes count
+		"pinentry-gnome3":                        true,
+		"gcr-prompter":                           true,
+		"org.kde.ksshaskpass":                    true,
+		"org.gnupg.pinentry-qt":                  true,
+		"org.gnupg.pinentry-qt5":                 true,
+		"lxqt-openssh-askpass":                   true,
+		"SshAskpass":                             true,
+		"org.freedesktop.keyring.SystemPrompter": true,
+		"org.kde.ksecretd":                       true,
+		"foot":                                   true,
+		"footclient":                             true,
+		"Alacritty":                              true,
+		"org.gnome.Console":                      true,
+		"kgx":                                    true,
+		"myterm":                                 true, // exec alias of a hidden TerminalEmulator entry
+		"my-term":                                true,
+		"gimp":                                   false,
+		"gimp-2.10":                              false,
+		"firefox":                                false,
+		"org.mozilla.firefox":                    false,
+		"jarvisish-editor":                       false, // only the "jarvis-" / "jarvis_" prefixes count
 	}
 	for id, want := range cases {
 		got, why := x.Excluded(id)

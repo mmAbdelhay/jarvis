@@ -106,10 +106,8 @@ func (p *Pointer) Close() error { return p.c.send(msg(p.id, opVPDestroy), nil) }
 // seat activity, fn(false) on the next activity. labwc counts virtual
 // devices as activity too; activity.Detector tells them apart.
 func (c *Client) WatchIdle(timeout time.Duration, fn func(idled bool)) (func(), error) {
-	ms := uint32(timeout.Milliseconds())
-	if ms == 0 {
-		ms = 1
-	}
+	// Clamp before converting to the protocol uint32 to avoid wrapping.
+	ms := uint32(max(1, min(timeout.Milliseconds(), int64(1<<32-1))))
 	c.mu.Lock()
 	id := c.newID(kindIdleNote)
 	c.idles[id] = fn

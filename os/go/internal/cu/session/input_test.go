@@ -255,3 +255,41 @@ func TestDragAlwaysReleases(t *testing.T) {
 		t.Fatalf("button left pressed: %v", h.d.logged())
 	}
 }
+
+func TestClickRefusesWhenTaintedByNonAllowedFocus(t *testing.T) {
+	h := ready(t)
+	// base (w1) -> firefox (w3) takes focus -> an allowed dialog takes focus.
+	h.d.focus("w3")
+	if _, err := h.m.snapshot(); err != nil { // the focus watch sees w3
+		t.Fatal(err)
+	}
+	h.d.mu.Lock()
+	h.d.tops = append(h.d.tops, wlcu.Toplevel{ID: "w4", AppID: "gimp", Title: "dialog", Outputs: []string{"HEADLESS-1"}})
+	h.d.mu.Unlock()
+	h.d.focus("w4")
+	for name, err := range map[string]error{
+		"click":  h.m.Click(proto.Click{X: f(10), Y: f(10)}),
+		"scroll": h.m.Scroll(proto.Scroll{X: f(10), Y: f(10), DY: 1}),
+		"drag":   h.m.Drag(proto.Drag{X1: f(1), Y1: f(1), X2: f(5), Y2: f(5)}),
+	} {
+		if code(err) != proto.CodeOutside {
+			t.Fatalf("%s: got %v", name, err)
+		}
+	}
+	if h.d.count("button") != 0 {
+		t.Fatal("input landed while tainted")
+	}
+}
+
+func TestPointerRefusedAgainstBlankedCapture(t *testing.T) {
+	h := newHarness(t)
+	h.begin(t)
+	h.d.set("w1", func(t *wlcu.Toplevel) { t.Outputs = []string{"HEADLESS-1", "HEADLESS-2"} }) // not matched: blanked
+	if _, err := h.m.Capture(proto.Capture{}); err != nil {
+		t.Fatal(err)
+	}
+	h.d.set("w1", func(t *wlcu.Toplevel) { t.Outputs = []string{"HEADLESS-1"} })
+	if got := code(h.m.Click(proto.Click{X: f(10), Y: f(10)})); got != proto.CodeOutside {
+		t.Fatalf("got %q", got)
+	}
+}

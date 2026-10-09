@@ -67,7 +67,7 @@ func TestToplevelsAndOutputs(t *testing.T) {
 		t.Fatal(err)
 	}
 	outs, err := c.Outputs()
-	if err != nil || len(outs) != 1 || outs[0] != (Output{Name: "HEADLESS-1", Width: 8, Height: 4}) {
+	if err != nil || len(outs) != 1 || outs[0] != (Output{Name: "HEADLESS-1", Width: 8, Height: 4, Scale: 1}) {
 		t.Fatalf("outputs %+v %v", outs, err)
 	}
 	tops, err := c.Toplevels()
@@ -355,4 +355,25 @@ func TestDefaultAllocator(t *testing.T) {
 	s.Mem[0] = 42
 	s.Close()
 	s.Close()
+}
+
+func TestTruncatedDisplayEventKillsTheClient(t *testing.T) {
+	f := newFake()
+	c, err := startFake(t, f, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// delete_id requires one uint32 argument; an empty payload is malformed.
+	f.emit(displayID, evDisplayDeleteID, nil)
+	select {
+	case <-c.Dead():
+	case <-time.After(time.Second):
+		t.Fatal("client accepted a truncated display event")
+	}
+	if !errors.Is(c.Err(), wl.ErrShort) {
+		t.Fatalf("want truncated arguments, got %v", c.Err())
+	}
+	if _, err := c.Outputs(); !errors.Is(err, wl.ErrShort) {
+		t.Fatalf("dead client answered: %v", err)
+	}
 }

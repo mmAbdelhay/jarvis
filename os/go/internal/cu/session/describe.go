@@ -54,7 +54,11 @@ func (m *Manager) DescribeAt(p proto.DescribeAt) (*proto.DescribeAtResult, error
 		return unknown, nil
 	}
 	// The base window is fullscreen on the captured output, so output
-	// pixels are window pixels (Ruling U-1).
+	// pixels are window pixels (Ruling U-1); AT-SPI wants logical pixels,
+	// so divide by the output scale.
+	if sh.scale > 1 {
+		ox, oy = ox/sh.scale, oy/sh.scale
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), describeTimeout)
 	defer cancel()
 	role, name := m.d.DescribeAt(ctx, v.base.Title, ox, oy)

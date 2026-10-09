@@ -84,7 +84,7 @@ func (c *Client) Capture(output string) (img.Frame, error) {
 	}
 	if o.transform != 0 {
 		c.mu.Unlock()
-		return img.Frame{}, ErrRotated
+		return img.Frame{}, fmt.Errorf("%w: %w", ErrRotated, &UnsupportedError{Missing: []string{"screen capture on transformed outputs"}})
 	}
 	frame := c.newID(kindFrame)
 	fs := &frameState{specsDone: make(chan struct{}), done: make(chan struct{})}
