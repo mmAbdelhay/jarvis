@@ -71,4 +71,36 @@ describe("docs/os/threat-model.md (design §3.2, criterion 2)", () => {
     for (const term of ["Super+L", "pam_faillock"]) expect(accepted, term).toContain(term);
     expect(parseThreatModel(DOC).mitigations.length).toBeGreaterThanOrEqual(35);
   });
+
+  it("covers computer use (Rafiq v1.1 contracts section 4.11, design section 5)", () => {
+    const mitigations = section(DOC, "Mitigations");
+    for (const term of [
+      "jarvis-cu",
+      "screenshot",
+      "fullscreen",
+      "password",
+      "describeFocused",
+      "Super+Esc",
+      "cu.sock",
+      "consent",
+    ]) {
+      expect(mitigations, term).toContain(term);
+    }
+    const accepted = section(DOC, "Accepted risks");
+    for (const term of [
+      "fail open",
+      "GTK4",
+      "NODE_OPTIONS",
+      "LD_PRELOAD",
+      "Take over",
+      "focus event",
+      "150 ms",
+      "200 characters",
+      "label",
+      "prompt injection",
+    ]) {
+      expect(accepted, term).toContain(term);
+    }
+    expect(parseThreatModel(DOC).mitigations.length).toBeGreaterThanOrEqual(44);
+  });
 });
