@@ -104,3 +104,49 @@ func TestHandleSignal(t *testing.T) {
 		t.Fatal("unrelated or malformed signals changed the focus")
 	}
 }
+
+type seedA11y struct {
+	fakeA11y
+	focus *Accessible
+	err   error
+}
+
+func (s *seedA11y) Focused(context.Context) (Accessible, bool, error) {
+	if s.err != nil {
+		return Accessible{}, false, s.err
+	}
+	if s.focus == nil {
+		return Accessible{}, false, nil
+	}
+	return *s.focus, true, nil
+}
+
+func TestPasswordFocusedSeedsFromTree(t *testing.T) {
+	pw := Accessible{":1.40", "/p"}
+	q := &seedA11y{fakeA11y: fakeA11y{
+		roles:  map[Accessible]uint32{pw: RolePasswordText},
+		states: map[Accessible][]uint32{pw: {1 << 12, 0}},
+	}, focus: &pw}
+	w := NewPasswordWatch(q)
+	if got, err := w.PasswordFocused(context.Background()); !got || err != nil {
+		t.Fatalf("password already focused at start must be seen: %v %v", got, err)
+	}
+}
+
+func TestPasswordFocusedUnseededRefuses(t *testing.T) {
+	q := &seedA11y{err: errors.New("tree unreadable")}
+	w := NewPasswordWatch(q)
+	if got, err := w.PasswordFocused(context.Background()); got || !errors.Is(err, ErrNoA11y) {
+		t.Fatalf("unseeded must refuse, got %v %v", got, err)
+	}
+	q.err = nil // nothing focused: now known
+	if got, err := w.PasswordFocused(context.Background()); got || err != nil {
+		t.Fatalf("seeded empty: %v %v", got, err)
+	}
+	q2 := &seedA11y{err: errors.New("x")}
+	w2 := NewPasswordWatch(q2)
+	w2.Focus(Accessible{":1.1", "/e"}, true) // an event also seeds
+	if _, err := w2.PasswordFocused(context.Background()); errors.Is(err, ErrNoA11y) {
+		t.Fatal("focus event should seed")
+	}
+}

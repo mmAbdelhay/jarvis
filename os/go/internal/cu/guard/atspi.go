@@ -29,16 +29,56 @@ type A11yQuery interface {
 	States(ctx context.Context, a Accessible) ([]uint32, error)
 }
 
-// PasswordWatch tracks the last focused accessible.
+// Seeder finds the currently focused accessible without waiting for an
+// event. found=false with a nil error means nothing has focus.
+type Seeder interface {
+	Focused(ctx context.Context) (a Accessible, found bool, err error)
+}
+
+// PasswordWatch tracks the last focused accessible. Until it has seen a
+// focus event or seeded itself from the live tree it does not know what has
+// focus, and PasswordFocused refuses (ErrNoA11y) rather than say "no".
 type PasswordWatch struct {
-	q    A11yQuery
-	mu   sync.Mutex
-	last *Accessible
-	live bool
+	q      A11yQuery
+	mu     sync.Mutex
+	last   *Accessible
+	live   bool
+	seeded bool
 }
 
 // NewPasswordWatch wraps a query (tests; StartPasswordWatch for the bus).
-func NewPasswordWatch(q A11yQuery) *PasswordWatch { return &PasswordWatch{q: q, live: true} }
+// A query that is also a Seeder starts unseeded.
+func NewPasswordWatch(q A11yQuery) *PasswordWatch {
+	_, canSeed := q.(Seeder)
+	return &PasswordWatch{q: q, live: true, seeded: !canSeed}
+}
+
+// seed asks the tree what has focus now. It reports whether the watch knows.
+func (w *PasswordWatch) seed(ctx context.Context) bool {
+	w.mu.Lock()
+	if w.seeded {
+		w.mu.Unlock()
+		return true
+	}
+	w.mu.Unlock()
+	sd, ok := w.q.(Seeder)
+	if !ok {
+		return false
+	}
+	a, found, err := sd.Focused(ctx)
+	if err != nil {
+		return false
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if !w.seeded { // a focus event may have arrived meanwhile; it wins
+		if found {
+			w.last = &a
+		}
+		w.seeded = true
+	}
+	return true
+}
 
 // Live reports whether focus events still arrive.
 func (w *PasswordWatch) Live() bool {
@@ -54,6 +94,7 @@ func (w *PasswordWatch) Live() bool {
 func (w *PasswordWatch) Focus(a Accessible, focused bool) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	w.seeded = true
 	if focused {
 		w.last = &a
 	} else if w.last != nil && *w.last == a {
@@ -76,6 +117,9 @@ func gone(err error) bool {
 // PasswordFocused reports whether a password field has keyboard focus.
 func (w *PasswordWatch) PasswordFocused(ctx context.Context) (bool, error) {
 	if !w.Live() {
+		return false, ErrNoA11y
+	}
+	if !w.seed(ctx) {
 		return false, ErrNoA11y
 	}
 	w.mu.Lock()
@@ -139,6 +183,79 @@ func (b busQuery) States(ctx context.Context, a Accessible) ([]uint32, error) {
 	return st, err
 }
 
+const (
+	seedMaxNodes = 4000
+	seedMaxDepth = 12
+)
+
+func (b busQuery) children(ctx context.Context, a Accessible) ([]Accessible, error) {
+	var kids [][]interface{}
+	err := b.conn.Object(a.Bus, a.Path).CallWithContext(ctx, "org.a11y.atspi.Accessible.GetChildren", 0).Store(&kids)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Accessible, 0, len(kids))
+	for _, k := range kids {
+		if len(k) != 2 {
+			continue
+		}
+		bus, ok1 := k[0].(string)
+		path, ok2 := k[1].(dbus.ObjectPath)
+		if ok1 && ok2 {
+			out = append(out, Accessible{Bus: bus, Path: path})
+		}
+	}
+	return out, nil
+}
+
+// Focused walks the accessibility tree from the registry root and returns the
+// first node in the focused state. An application that vanishes mid-walk is
+// skipped; a failure at the root, or a walk cut short by the node cap, is an
+// error so the caller keeps refusing instead of assuming nothing has focus.
+func (b busQuery) Focused(ctx context.Context) (Accessible, bool, error) {
+	type item struct {
+		a     Accessible
+		depth int
+	}
+	root := Accessible{Bus: "org.a11y.atspi.Registry", Path: "/org/a11y/atspi/accessible/root"}
+	apps, err := b.children(ctx, root)
+	if err != nil {
+		return Accessible{}, false, err
+	}
+	queue := make([]item, 0, len(apps))
+	for _, a := range apps {
+		queue = append(queue, item{a, 1})
+	}
+	for n := 0; len(queue) > 0; n++ {
+		if n >= seedMaxNodes {
+			return Accessible{}, false, errors.New("accessibility tree too large to search")
+		}
+		it := queue[0]
+		queue = queue[1:]
+		if st, err := b.States(ctx, it.a); err == nil {
+			if len(st) > 0 && st[0]&(1<<stateFocused) != 0 {
+				return it.a, true, nil
+			}
+		} else if !gone(err) {
+			if ctx.Err() != nil {
+				return Accessible{}, false, ctx.Err()
+			}
+			continue
+		}
+		if it.depth >= seedMaxDepth {
+			continue
+		}
+		kids, err := b.children(ctx, it.a)
+		if err != nil {
+			continue
+		}
+		for _, k := range kids {
+			queue = append(queue, item{k, it.depth + 1})
+		}
+	}
+	return Accessible{}, false, nil
+}
+
 // StartPasswordWatch turns accessibility on for toolkits that wait to be
 // asked (org.a11y.Status.IsEnabled), connects to the accessibility bus,
 // registers for focus events and starts tracking. The func closes it.
@@ -173,7 +290,7 @@ func StartPasswordWatch(ctx context.Context) (*PasswordWatch, func(), error) {
 		sess.Close()
 		return nil, nil, fmt.Errorf("%w: %v", ErrNoA11y, err)
 	}
-	w := &PasswordWatch{q: busQuery{conn}, live: true}
+	w := NewPasswordWatch(busQuery{conn}) // unseeded: refuses until it knows what has focus
 	ch := make(chan *dbus.Signal, 256)
 	conn.Signal(ch)
 	go func() {
