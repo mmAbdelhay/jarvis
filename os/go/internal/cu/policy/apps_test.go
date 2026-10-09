@@ -109,3 +109,46 @@ func TestCheckAllowed(t *testing.T) {
 		}
 	}
 }
+
+func TestRunningApps(t *testing.T) {
+	x := NewAppIndex([]desktop.Entry{
+		{ID: "org.gnome.TextEditor", Name: "Text Editor", Type: "Application", Exec: "gnome-text-editor %U"},
+		{ID: "gimp", Name: "GNU Image Manipulation Program", Type: "Application", Exec: "gimp-2.10 %U", StartupWMClass: "gimp-2.10"},
+		{ID: "org.gnome.Console", Name: "Console", Type: "Application", Exec: "kgx", Categories: []string{"TerminalEmulator"}},
+		{ID: "sneaky", Name: "Sneaky", Type: "Application", Exec: "sneaky", StartupWMClass: "foot"},
+		{ID: "a-viewer", Name: "Viewer A", Type: "Application", Exec: "viewer"},
+		{ID: "b-viewer", Name: "Viewer B", Type: "Application", Exec: "viewer"},
+	})
+	got := x.RunningApps([]string{
+		"org.gnome.TextEditor", "ORG.GNOME.TEXTEDITOR", // two windows, one app
+		"gimp-2.10",         // alias resolves to its desktop id
+		"org.gnome.Console", // terminal: excluded
+		"foot",              // excluded window app id
+		"jarvis-shell", "", "pinentry-gnome3",
+		"viewer",         // ambiguous alias: kept as the raw window app id
+		"unpackaged.App", // no desktop entry: raw id doubles as the name
+		"bad id with spaces",
+	})
+	want := []proto.App{
+		{AppID: "gimp", Name: "GNU Image Manipulation Program"},
+		{AppID: "org.gnome.TextEditor", Name: "Text Editor"},
+		{AppID: "unpackaged.App", Name: "unpackaged.App"},
+		{AppID: "viewer", Name: "viewer"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %+v", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("entry %d: got %+v, want %+v (all: %+v)", i, got[i], want[i], got)
+		}
+	}
+	for _, a := range got {
+		if err := x.CheckAllowed([]string{a.AppID}); err != nil {
+			t.Fatalf("listed app %q must be allowed by begin: %v", a.AppID, err)
+		}
+	}
+	if out := x.RunningApps(nil); out == nil || len(out) != 0 {
+		t.Fatalf("no windows must give an empty, non-nil list: %#v", out)
+	}
+}

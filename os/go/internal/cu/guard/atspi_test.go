@@ -250,3 +250,195 @@ func TestFocusedWalkNothingFocused(t *testing.T) {
 		t.Fatalf("nothing focused: %v %v", found, err)
 	}
 }
+
+// fakePoint is an accessibility tree with hit-testing for DescribeAt.
+type fakePoint struct {
+	*fakeTree
+	names   map[Accessible]string
+	roles   map[Accessible]string
+	hits    map[Accessible]Accessible // what each node reports at the point
+	hitErr  map[Accessible]error
+	nameErr map[Accessible]error
+	asked   []Accessible
+	lastX   int32
+	lastY   int32
+}
+
+func newFakePoint() *fakePoint {
+	return &fakePoint{fakeTree: newFakeTree(), names: map[Accessible]string{}, roles: map[Accessible]string{},
+		hits: map[Accessible]Accessible{}, hitErr: map[Accessible]error{}, nameErr: map[Accessible]error{}}
+}
+
+func (f *fakePoint) Name(_ context.Context, a Accessible) (string, error) {
+	if err := f.nameErr[a]; err != nil {
+		return "", err
+	}
+	return f.names[a], nil
+}
+
+func (f *fakePoint) RoleName(_ context.Context, a Accessible) (string, error) {
+	r, ok := f.roles[a]
+	if !ok {
+		return "", dbus.Error{Name: "org.freedesktop.DBus.Error.UnknownObject"}
+	}
+	return r, nil
+}
+
+func (f *fakePoint) atPoint(_ context.Context, a Accessible, x, y int32) (Accessible, bool, error) {
+	f.asked = append(f.asked, a)
+	f.lastX, f.lastY = x, y
+	if err := f.hitErr[a]; err != nil {
+		return Accessible{}, false, err
+	}
+	h, ok := f.hits[a]
+	return h, ok, nil
+}
+
+// window adds app > frame titled title and returns the frame.
+func (f *fakePoint) window(app, title string, active bool) Accessible {
+	ap := Accessible{app, "/org/a11y/atspi/accessible/root"}
+	fr := Accessible{app, dbus.ObjectPath("/frame/" + fmt.Sprint(len(f.kids[ap])))}
+	if !contains(f.kids[seedRoot], ap) {
+		f.kids[seedRoot] = append(f.kids[seedRoot], ap)
+	}
+	f.kids[ap] = append(f.kids[ap], fr)
+	f.names[fr] = title
+	f.roles[fr] = "frame"
+	if active {
+		f.states[fr] = []uint32{1 << stateActive}
+	}
+	return fr
+}
+
+func contains(xs []Accessible, a Accessible) bool {
+	for _, x := range xs {
+		if x == a {
+			return true
+		}
+	}
+	return false
+}
+
+func TestDescribeAtDescendsToDeepestHit(t *testing.T) {
+	f := newFakePoint()
+	f.window(":1.7", "Other", false)
+	fr := f.window(":1.8", "Untitled - Editor", true)
+	panel := Accessible{":1.8", "/panel"}
+	btn := Accessible{":1.8", "/save"}
+	f.hits[fr] = panel
+	f.hits[panel] = btn
+	f.roles[btn] = "push button"
+	f.names[btn] = "Save"
+	role, name := DescribeAt(context.Background(), f, "Untitled - Editor", 120, 40)
+	if role != "push button" || name != "Save" {
+		t.Fatalf("got %q %q", role, name)
+	}
+	if f.lastX != 120 || f.lastY != 40 {
+		t.Fatalf("window coordinates not passed through: %d,%d", f.lastX, f.lastY)
+	}
+}
+
+func TestDescribeAtUnknown(t *testing.T) {
+	timeout := errors.New("call timed out")
+	cases := map[string]func(f *fakePoint) string{
+		"no matching window": func(f *fakePoint) string {
+			fr := f.window(":1.8", "Editor", true)
+			f.hits[fr] = Accessible{":1.8", "/b"}
+			return "Browser"
+		},
+		"empty title": func(f *fakePoint) string {
+			f.window(":1.8", "", true)
+			return ""
+		},
+		"two windows, same title, none active": func(f *fakePoint) string {
+			a := f.window(":1.8", "Doc", false)
+			b := f.window(":1.9", "Doc", false)
+			f.hits[a] = Accessible{":1.8", "/x"}
+			f.hits[b] = Accessible{":1.9", "/x"}
+			f.roles[Accessible{":1.8", "/x"}] = "push button"
+			f.roles[Accessible{":1.9", "/x"}] = "push button"
+			return "Doc"
+		},
+		"nothing under the point": func(f *fakePoint) string {
+			f.window(":1.8", "Editor", true)
+			return "Editor"
+		},
+		"hit test fails": func(f *fakePoint) string {
+			fr := f.window(":1.8", "Editor", true)
+			f.hitErr[fr] = timeout
+			return "Editor"
+		},
+		"hit object vanished": func(f *fakePoint) string {
+			fr := f.window(":1.8", "Editor", true)
+			f.hits[fr] = Accessible{":1.8", "/gone"} // no role: UnknownObject
+			return "Editor"
+		},
+		"name read fails": func(f *fakePoint) string {
+			fr := f.window(":1.8", "Editor", true)
+			b := Accessible{":1.8", "/b"}
+			f.hits[fr] = b
+			f.roles[b] = "push button"
+			f.nameErr[b] = timeout
+			return "Editor"
+		},
+		"tree unreadable": func(f *fakePoint) string {
+			f.kidsErr[seedRoot] = timeout
+			return "Editor"
+		},
+		"hit loops": func(f *fakePoint) string {
+			fr := f.window(":1.8", "Editor", true)
+			a, b := Accessible{":1.8", "/a"}, Accessible{":1.8", "/b"}
+			f.hits[fr], f.hits[a], f.hits[b] = a, b, a
+			f.roles[a], f.roles[b] = "filler", "filler"
+			return "Editor"
+		},
+	}
+	for name, setup := range cases {
+		f := newFakePoint()
+		title := setup(f)
+		role, n := DescribeAt(context.Background(), f, title, 10, 10)
+		if role != RoleUnknown || n != "" {
+			t.Errorf("%s: got %q %q, want unknown", name, role, n)
+		}
+	}
+	var nilWatch *PasswordWatch
+	if role, _ := nilWatch.DescribeAt(context.Background(), "Editor", 1, 1); role != RoleUnknown {
+		t.Fatal("no watch must describe as unknown")
+	}
+	if role, _ := NewPasswordWatch(&fakeA11y{}).DescribeAt(context.Background(), "Editor", 1, 1); role != RoleUnknown {
+		t.Fatal("a query without hit-testing must describe as unknown")
+	}
+}
+
+func TestDescribeAtPrefersActiveWindowAndSkipsVanishedApps(t *testing.T) {
+	f := newFakePoint()
+	gone := Accessible{":1.5", "/org/a11y/atspi/accessible/root"}
+	f.kids[seedRoot] = append(f.kids[seedRoot], gone)
+	f.kidsErr[gone] = dbus.Error{Name: "org.freedesktop.DBus.Error.ServiceUnknown"}
+	f.window(":1.8", "Doc", false)
+	act := f.window(":1.9", "Doc", true)
+	b := Accessible{":1.9", "/b"}
+	f.hits[act] = b
+	f.roles[b] = "check box"
+	f.names[b] = "Remember me"
+	if role, name := DescribeAt(context.Background(), f, "Doc", 5, 5); role != "check box" || name != "Remember me" {
+		t.Fatalf("got %q %q", role, name)
+	}
+}
+
+func TestDescribeAtCapsName(t *testing.T) {
+	f := newFakePoint()
+	fr := f.window(":1.8", "Editor", true)
+	b := Accessible{":1.8", "/b"}
+	f.hits[fr] = b
+	f.roles[b] = "label"
+	long := ""
+	for i := 0; i < 500; i++ {
+		long += "ب"
+	}
+	f.names[b] = long + "\x00\n"
+	_, name := DescribeAt(context.Background(), f, "Editor", 1, 1)
+	if n := len([]rune(name)); n != maxDescribeName {
+		t.Fatalf("name not capped: %d runes", n)
+	}
+}

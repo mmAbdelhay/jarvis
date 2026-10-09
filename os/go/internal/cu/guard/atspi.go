@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
+	"unicode"
 
 	"github.com/godbus/dbus/v5"
 )
@@ -12,7 +14,10 @@ import (
 // RolePasswordText is ATSPI_ROLE_PASSWORD_TEXT.
 const RolePasswordText = 40
 
-const stateFocused = 12 // ATSPI_STATE_FOCUSED, bit in word 0
+const (
+	stateActive  = 1  // ATSPI_STATE_ACTIVE, bit in word 0
+	stateFocused = 12 // ATSPI_STATE_FOCUSED, bit in word 0
+)
 
 // ErrNoA11y: password fields cannot be checked right now.
 var ErrNoA11y = errors.New("cannot check for password fields (accessibility bus unavailable)")
@@ -183,6 +188,49 @@ func (b busQuery) States(ctx context.Context, a Accessible) ([]uint32, error) {
 	return st, err
 }
 
+func (b busQuery) RoleName(ctx context.Context, a Accessible) (string, error) {
+	var r string
+	err := b.conn.Object(a.Bus, a.Path).CallWithContext(ctx, "org.a11y.atspi.Accessible.GetRoleName", 0).Store(&r)
+	return r, err
+}
+
+func (b busQuery) Name(ctx context.Context, a Accessible) (string, error) {
+	var v dbus.Variant
+	err := b.conn.Object(a.Bus, a.Path).CallWithContext(ctx, "org.freedesktop.DBus.Properties.Get", 0,
+		"org.a11y.atspi.Accessible", "Name").Store(&v)
+	if err != nil {
+		return "", err
+	}
+	s, ok := v.Value().(string)
+	if !ok {
+		return "", errors.New("accessible name is not a string")
+	}
+	return s, nil
+}
+
+const nullPath = "/org/a11y/atspi/null"
+
+func (b busQuery) atPoint(ctx context.Context, a Accessible, x, y int32) (Accessible, bool, error) {
+	var ref []interface{}
+	err := b.conn.Object(a.Bus, a.Path).CallWithContext(ctx, "org.a11y.atspi.Component.GetAccessibleAtPoint", 0,
+		x, y, uint32(coordTypeWindow)).Store(&ref)
+	if err != nil {
+		return Accessible{}, false, err
+	}
+	if len(ref) != 2 {
+		return Accessible{}, false, errors.New("malformed accessible reference")
+	}
+	bus, ok1 := ref[0].(string)
+	path, ok2 := ref[1].(dbus.ObjectPath)
+	if !ok1 || !ok2 {
+		return Accessible{}, false, errors.New("malformed accessible reference")
+	}
+	if bus == "" || path == "" || path == nullPath {
+		return Accessible{}, false, nil
+	}
+	return Accessible{Bus: bus, Path: path}, true, nil
+}
+
 const (
 	seedMaxNodes = 4000
 	// Web content nests deep (app > frame > ... > document > sections >
@@ -281,6 +329,154 @@ func focusedWalk(ctx context.Context, t treeQuery) (Accessible, bool, error) {
 		}
 	}
 	return Accessible{}, false, nil
+}
+
+// RoleUnknown is DescribeAt's answer whenever the accessible cannot be found.
+const RoleUnknown = "unknown"
+
+const (
+	maxDescribeName  = 120 // runes; a label, never a document
+	maxDescribeDepth = 32  // hit-test descent steps
+	coordTypeWindow  = 1   // ATSPI_COORD_TYPE_WINDOW
+)
+
+// pointQuery is what DescribeAt needs from the bus.
+type pointQuery interface {
+	treeQuery
+	Name(ctx context.Context, a Accessible) (string, error)
+	RoleName(ctx context.Context, a Accessible) (string, error)
+	// atPoint hit-tests a's children at a window-relative point;
+	// found=false means no child is there.
+	atPoint(ctx context.Context, a Accessible, x, y int32) (Accessible, bool, error)
+}
+
+// DescribeAt names the accessible under a point of the window titled title
+// (contracts §4.2 describeAt). x, y are logical pixels relative to that
+// window's top-left corner: on Wayland apps do not know where their window
+// sits on screen, so AT-SPI screen coordinates are unreliable and only
+// window coordinates (ATSPI_COORD_TYPE_WINDOW) are used. The caller maps
+// capture-space points into the window (for the fullscreened base window
+// the two are the same). The window is found among the apps' top-level
+// accessibles by exact title; several matches are narrowed to the active
+// one. Any failure, ambiguity or empty hit answers (RoleUnknown, "").
+func DescribeAt(ctx context.Context, q pointQuery, title string, x, y int) (role, name string) {
+	if q == nil || title == "" || x < 0 || y < 0 || x > 1<<20 || y > 1<<20 {
+		return RoleUnknown, ""
+	}
+	frame, ok := findFrame(ctx, q, title)
+	if !ok {
+		return RoleUnknown, ""
+	}
+	cur := frame
+	seen := map[Accessible]bool{frame: true}
+	for i := 0; ; i++ {
+		if i >= maxDescribeDepth {
+			return RoleUnknown, ""
+		}
+		next, found, err := q.atPoint(ctx, cur, int32(x), int32(y))
+		if err != nil {
+			return RoleUnknown, ""
+		}
+		if !found || next == cur {
+			break
+		}
+		if seen[next] {
+			return RoleUnknown, ""
+		}
+		seen[next] = true
+		cur = next
+	}
+	if cur == frame {
+		return RoleUnknown, ""
+	}
+	r, err := q.RoleName(ctx, cur)
+	r = strings.TrimSpace(r)
+	if err != nil || r == "" {
+		return RoleUnknown, ""
+	}
+	n, err := q.Name(ctx, cur)
+	if err != nil {
+		return RoleUnknown, ""
+	}
+	return clean(r, maxDescribeName), clean(n, maxDescribeName)
+}
+
+// clean drops control characters and caps s at max runes.
+func clean(s string, max int) string {
+	var b strings.Builder
+	n := 0
+	for _, r := range s {
+		if n >= max {
+			break
+		}
+		if unicode.IsControl(r) || r == unicode.ReplacementChar {
+			continue
+		}
+		b.WriteRune(r)
+		n++
+	}
+	return strings.TrimSpace(b.String())
+}
+
+// findFrame looks one level below each app for the window titled title.
+func findFrame(ctx context.Context, q pointQuery, title string) (Accessible, bool) {
+	apps, err := q.children(ctx, seedRoot)
+	if err != nil {
+		return Accessible{}, false
+	}
+	var matches []Accessible
+	n := 0
+	for _, app := range apps {
+		wins, err := q.children(ctx, app)
+		if err != nil {
+			if gone(err) {
+				continue
+			}
+			return Accessible{}, false
+		}
+		for _, w := range wins {
+			if n++; n > seedMaxNodes || ctx.Err() != nil {
+				return Accessible{}, false
+			}
+			name, err := q.Name(ctx, w)
+			if err != nil {
+				if gone(err) {
+					continue
+				}
+				return Accessible{}, false
+			}
+			if name == title {
+				matches = append(matches, w)
+			}
+		}
+	}
+	if len(matches) > 1 {
+		var active []Accessible
+		for _, m := range matches {
+			st, err := q.States(ctx, m)
+			if err == nil && len(st) > 0 && st[0]&(1<<stateActive) != 0 {
+				active = append(active, m)
+			}
+		}
+		matches = active
+	}
+	if len(matches) != 1 {
+		return Accessible{}, false
+	}
+	return matches[0], true
+}
+
+// DescribeAt uses the watch's bus connection (see the package func). A
+// watch without a bus, or a dead one, answers (RoleUnknown, "").
+func (w *PasswordWatch) DescribeAt(ctx context.Context, title string, x, y int) (role, name string) {
+	if w == nil || !w.Live() {
+		return RoleUnknown, ""
+	}
+	pq, ok := w.q.(pointQuery)
+	if !ok {
+		return RoleUnknown, ""
+	}
+	return DescribeAt(ctx, pq, title, x, y)
 }
 
 // StartPasswordWatch turns accessibility on for toolkits that wait to be

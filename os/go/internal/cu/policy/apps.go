@@ -7,6 +7,7 @@ package policy
 import (
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/mmAbdelhay/jarvis/os/go/internal/cu/proto"
@@ -49,17 +50,21 @@ var launcherExecs = set("flatpak", "env", "sh", "bash", "dash", "python", "pytho
 
 // AppIndex knows which window app ids belong to which desktop ids.
 type AppIndex struct {
-	aliases   map[string][]string // lower(window app id) -> lower(desktop ids)
-	terminals map[string]bool     // lower ids/aliases of TerminalEmulator entries
+	aliases   map[string][]string      // lower(window app id) -> lower(desktop ids)
+	terminals map[string]bool          // lower ids/aliases of TerminalEmulator entries
+	entries   map[string]desktop.Entry // lower desktop id -> entry
 }
 
 // NewAppIndex indexes entries (use desktop.IndexAll so hidden terminals count).
 func NewAppIndex(entries []desktop.Entry) *AppIndex {
-	x := &AppIndex{aliases: map[string][]string{}, terminals: map[string]bool{}}
+	x := &AppIndex{aliases: map[string][]string{}, terminals: map[string]bool{}, entries: map[string]desktop.Entry{}}
 	for _, e := range entries {
 		id := strings.ToLower(strings.TrimSpace(e.ID))
 		if id == "" {
 			continue
+		}
+		if _, dup := x.entries[id]; !dup {
+			x.entries[id] = e
 		}
 		term := false
 		for _, c := range e.Categories {
@@ -170,4 +175,45 @@ func (x *AppIndex) CheckAllowed(ids []string) error {
 		}
 	}
 	return nil
+}
+
+// RunningApps builds the `apps` op answer (contracts §4.2) from the app ids
+// of the open windows: one entry per app, named from its desktop entry,
+// without titles or rectangles. A window app id resolves to its desktop id
+// directly or through a single alias; otherwise the raw app id is listed
+// (begin matches it as-is) and doubles as the name. Apps that begin would
+// refuse (excluded, malformed) are left out. Sorted by name.
+func (x *AppIndex) RunningApps(windowAppIDs []string) []proto.App {
+	out := []proto.App{}
+	seen := map[string]bool{}
+	for _, raw := range windowAppIDs {
+		a := strings.ToLower(strings.TrimSpace(raw))
+		if ex, _ := x.Excluded(a); ex {
+			continue
+		}
+		app := proto.App{AppID: strings.TrimSpace(raw), Name: strings.TrimSpace(raw)}
+		key := a
+		if e, ok := x.entries[a]; ok {
+			app, key = proto.App{AppID: e.ID, Name: e.Name}, a
+		} else if owners := x.aliases[a]; len(owners) == 1 {
+			e := x.entries[owners[0]]
+			app, key = proto.App{AppID: e.ID, Name: e.Name}, owners[0]
+		}
+		if app.Name == "" {
+			app.Name = app.AppID
+		}
+		if seen[key] || x.CheckAllowed([]string{app.AppID}) != nil {
+			continue
+		}
+		seen[key] = true
+		out = append(out, app)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		li, lj := strings.ToLower(out[i].Name), strings.ToLower(out[j].Name)
+		if li != lj {
+			return li < lj
+		}
+		return out[i].AppID < out[j].AppID
+	})
+	return out
 }
