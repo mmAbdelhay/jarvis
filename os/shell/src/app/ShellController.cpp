@@ -11,6 +11,15 @@ using namespace Qt::StringLiterals;
 
 namespace {
 constexpr int kMaxPromptLength = 8000; // contracts §3.1 agent:prompt
+
+// Rafiq v1.1 contracts §2: the session card has an item with tool "cu.begin".
+bool isComputerUseCard(const QJsonObject& card)
+{
+    for (const QJsonValue& item : card.value("items").toArray())
+        if (item.toObject().value("tool").toString() == u"cu.begin")
+            return true;
+    return false;
+}
 }
 
 ShellController::ShellController(ControlClient* client, QObject* parent)
@@ -29,6 +38,8 @@ ShellController::ShellController(ControlClient* client, QObject* parent)
     , m_voice(new VoiceModel(this))
     , m_pairing(new PairingModel(this))
     , m_phone(new PhoneModel(this))
+    , m_cu(new CuSessionModel(this))
+    , m_cuSettings(new CuSettingsModel(this))
     , m_launcher([](const QString& program) { return QProcess::startDetached(program, {}); })
     , m_daemonDownTimer(new QTimer(this))
 {
@@ -225,6 +236,31 @@ ShellController::ShellController(ControlClient* client, QObject* parent)
             setView(u"chat"_s);
     });
     connect(m_pairing, &PairingModel::answered, this, &ShellController::answerPairing);
+
+    // Rafiq v1.1 contracts §2: computer use.
+    connect(m_cu, &CuSessionModel::stopRequested, this, [this] {
+        request(u"cu:stop"_s, QJsonArray{}, [this](const ControlResult& r) { m_cu->applyRequestResult(r.ok, r.text); });
+    });
+    connect(m_cu, &CuSessionModel::resumeRequested, this, [this] {
+        request(u"cu:resume"_s, QJsonArray{}, [this](const ControlResult& r) { m_cu->applyRequestResult(r.ok, r.text); });
+    });
+    connect(m_cu, &CuSessionModel::runningChanged, this, [this] {
+        // jarvis-cu refuses input while the shell has focus (contracts §1):
+        // step aside when Jarvis (re)starts, unless a card still waits.
+        if (m_cu->running() && m_surfaceShown && !m_chatCard->active())
+            emit dismissRequested();
+    });
+    connect(m_cuSettings, &CuSettingsModel::consentRequested, this, [this](const QString& id) {
+        request(u"cu:consent"_s, QJsonArray{QJsonObject{{"providerId", id}}}, [this, id](const ControlResult& r) {
+            m_cuSettings->applyConsentResult(id, r.ok, r.code, r.text);
+        });
+    });
+    connect(m_cuSettings, &CuSettingsModel::setEnabledRequested, this, [this](const QString& id, bool enabled) {
+        request(u"cu:setEnabled"_s, QJsonArray{QJsonObject{{"providerId", id}, {"enabled", enabled}}},
+                [this, id, enabled](const ControlResult& r) {
+                    m_cuSettings->applyEnabledResult(id, enabled, r.ok, r.code, r.text);
+                });
+    });
 }
 
 void ShellController::request(const QString& channel, const QJsonArray& args,
@@ -320,6 +356,7 @@ void ShellController::refreshProviders()
             return;
         m_provider->loadList(r.value.toObject());
         m_providers->loadList(r.value.toObject());
+        m_cuSettings->loadList(r.value.toObject());
         if (!m_provider->hasActive() && m_view != u"doctor") // the doctor may run before any provider exists
             setView(u"setup"_s);
         else if (m_view == u"loading" || m_view == u"setup")
@@ -329,6 +366,7 @@ void ShellController::refreshProviders()
 
 void ShellController::onOpened()
 {
+    m_cu->connectionOpened(); // jarvisd re-pushes cu:state for a session still running
     setConnection(u"open"_s);
     refreshProviders();
     m_audit->refresh();
@@ -340,6 +378,7 @@ void ShellController::onClosed()
 {
     setConnection(u"reconnecting"_s);
     m_conversation->markInterrupted();
+    m_cu->connectionClosed();
     // Cards cannot be answered without a connection; jarvisd re-pushes every
     // open card on reconnect (§6.7). m_chatCardIds is kept so the eventual
     // card-closed still adds exactly one notice.
@@ -389,6 +428,11 @@ void ShellController::onPush(const QString& channel, const QJsonValue& payload)
             applyLanguage(lang.toString());
         return;
     }
+    if (channel == u"cu:state") {
+        if (payload.isObject())
+            m_cu->applyState(payload.toObject());
+        return;
+    }
     if (channel == u"sys:snapshot") {
         const QJsonObject snap = payload.toObject();
         m_system->applySnapshot(snap);
@@ -416,8 +460,11 @@ void ShellController::onAgentEvent(const QJsonObject& event)
             return; // a re-push of a card already shown (§6.7)
         const bool forDoctor = !card.value("turnId").isString() && (m_view == u"doctor" || m_doctor->active());
         CardModel* target = forDoctor ? m_doctorCard : m_chatCard;
-        if (target->load(card) && !forDoctor)
+        if (target->load(card) && !forDoctor) {
             m_chatCardIds.insert(target->cardId());
+            if (m_cu->active() || isComputerUseCard(card))
+                emit summonRequested();
+        }
         return;
     }
     if (type == u"card-closed") {
@@ -517,6 +564,9 @@ void ShellController::decide(CardModel* card, bool approve)
     const QJsonObject source = card->source();
     const QJsonObject payload = card->decision(approve);
     card->close();
+    // Back to the app Jarvis works in: the shell itself is never controllable.
+    if (m_cu->active() && card == m_chatCard)
+        emit dismissRequested();
     QPointer<CardModel> target(card);
     request(u"agent:confirm"_s, QJsonArray{payload}, [this, target, source](const ControlResult& r) {
         if (r.ok)
@@ -798,7 +848,7 @@ void ShellController::applyLanguage(const QString& code)
 void ShellController::refreshTranslatedText()
 {
     for (QAbstractListModel* model : std::initializer_list<QAbstractListModel*>{
-             m_chatCard, m_doctorCard, m_providers, m_registry, m_audit, m_memory, m_doctor}) {
+             m_chatCard, m_doctorCard, m_providers, m_registry, m_audit, m_memory, m_doctor, m_cu, m_cuSettings}) {
         if (const int rows = model->rowCount(); rows > 0)
             emit model->dataChanged(model->index(0), model->index(rows - 1));
     }
@@ -815,6 +865,8 @@ void ShellController::refreshTranslatedText()
     emit m_doctor->stateChanged();
     emit m_voice->changed();   // Plan O Task 7 VoiceModel
     emit m_pairing->changed(); // Plan O Task 10 PairingModel
+    emit m_cu->changed();
+    emit m_cuSettings->changed();
     emit bannerChanged();
     emit providerStatusChanged();
     emit updatesChanged();

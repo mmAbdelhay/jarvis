@@ -21,6 +21,8 @@
 #include "models/PairingModel.h"
 #include "models/PhoneModel.h"
 #include "models/RegistryModel.h"
+#include "models/CuSessionModel.h"
+#include "models/CuSettingsModel.h"
 
 class ControlClient;
 struct ControlResult;
@@ -48,6 +50,8 @@ class ShellController : public QObject {
     Q_PROPERTY(PairingModel* pairing READ pairing CONSTANT)
     Q_PROPERTY(PhoneModel* phone READ phone CONSTANT)
     Q_PROPERTY(RegistryModel* registry READ registry CONSTANT)
+    Q_PROPERTY(CuSessionModel* cu READ cu CONSTANT)
+    Q_PROPERTY(CuSettingsModel* cuSettings READ cuSettings CONSTANT)
     Q_PROPERTY(bool offerDoctor READ offerDoctor NOTIFY providerStatusChanged)
     Q_PROPERTY(QString view READ view NOTIFY viewChanged)
     Q_PROPERTY(QString connection READ connection NOTIFY connectionChanged)
@@ -92,6 +96,8 @@ public:
     VoiceModel* voice() const { return m_voice; }
     PairingModel* pairing() const { return m_pairing; }
     PhoneModel* phone() const { return m_phone; }
+    CuSessionModel* cu() const { return m_cu; }
+    CuSettingsModel* cuSettings() const { return m_cuSettings; }
     Q_INVOKABLE void pushToTalk();
     bool handleInstanceMessage(const QByteArray& message);
     Q_INVOKABLE void setSurfaceShown(bool shown) { m_surfaceShown = shown; }
@@ -144,6 +150,8 @@ signals:
     void providerStatusChanged();
     void bannerChanged();
     void dismissRequested();
+    // A computer-use card must be seen at once, above the app Jarvis works in.
+    void summonRequested();
     void composerFocusRequested();
     void updatesChanged();
     void lockedChanged();
@@ -190,6 +198,8 @@ private:
     VoiceModel* m_voice;
     PairingModel* m_pairing;
     PhoneModel* m_phone;
+    CuSessionModel* m_cu;
+    CuSettingsModel* m_cuSettings;
     bool m_surfaceShown = true;
     QString m_view = QStringLiteral("loading");
     QString m_connection = QStringLiteral("connecting");
