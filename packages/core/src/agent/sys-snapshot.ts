@@ -64,6 +64,18 @@ export function isLocalBaseUrl(baseUrl: string): boolean {
   return PRIVATE_V4.some((pattern) => pattern.test(host));
 }
 
+/** Loopback only (127.0.0.0/8, ::1, localhost). Screenshots leave the machine
+ *  for any other address, LAN included (contracts §4.8), so consent gates on this. */
+export function isLoopbackBaseUrl(baseUrl: string): boolean {
+  let host: string;
+  try {
+    host = new URL(baseUrl).hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  } catch {
+    return false;
+  }
+  return host === "localhost" || host === "::1" || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host);
+}
+
 export const NO_VOICE: VoiceAvailability = { available: false, stt: null, tts: null, speak: false };
 
 export const NO_UPDATES_YET: UpdatesSummary = { count: 0, security: 0, checkedAt: null };
