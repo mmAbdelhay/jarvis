@@ -91,6 +91,9 @@ def keyboard_checks(layout: str) -> list[tuple[str, str]]:
     env = "tr '\\0' '\\n' < /proc/$pid/environ | grep -qx XKB_DEFAULT_LAYOUT=" + layout
     return [
         ("§11.5: /etc/default/keyboard has the chosen layout", f"grep -qx 'XKBLAYOUT=\"{layout}\"' /etc/default/keyboard"),
+        ("§11.5: the unlock prompt's layout is in the initramfs (vconsole.conf + XKB data for Plymouth)",
+         f"grep -qx 'XKBLAYOUT={layout}' /etc/vconsole.conf && lsinitramfs /boot/initrd.img-$(uname -r) | grep -qx 'etc/vconsole.conf' && "
+         f"lsinitramfs /boot/initrd.img-$(uname -r) | grep -qx 'usr/share/X11/xkb/symbols/{layout}'"),
         ("§11.5: the greeter's cage types with the chosen layout",
          f"for i in $(seq 90); do pid=$(pgrep -u _greetd -x cage | head -n1); [ -n \"$pid\" ] && break; sleep 1; done; "
          f"[ -n \"$pid\" ] && {env}"),
@@ -298,10 +301,10 @@ def scenario_erase(args, run: Run, work: Path, out: Path, ovmf: firmware.Ovmf) -
             run.check(name, lambda c=command: run.sh(c, 200))
         run.check("GRUB menu hidden with no other OS (design §7)", lambda: run.sh("! grep -qx 'set timeout=3' /boot/grub/grub.cfg"))
         kb = keyboard_checks(ERASE_KEYBOARD)
-        for name, command in kb[:2]:
+        for name, command in kb[:3]:
             run.check(name, lambda c=command: run.sh(c, 120))
         greeter_login(run, m, ERASE_KEYBOARD)
-        for name, command in kb[2:]:
+        for name, command in kb[3:]:
             run.check(name, lambda c=command: run.sh(c, 60))
         if args.update_repo:
             import updates  # Task 17; imported lazily so Task 16 stands alone

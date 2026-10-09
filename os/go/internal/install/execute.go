@@ -743,6 +743,7 @@ func (j *job) configure(ctx context.Context) error {
 		func() error { return j.chroot(ctx, slow, "locale-gen") },
 		func() error { return j.write("/etc/default/locale", renderDefaultLocale(c.Locale), 0o644) },
 		func() error { return j.write("/etc/default/keyboard", renderKeyboard(c.Keyboard), 0o644) },
+		func() error { return j.write("/etc/vconsole.conf", renderVconsole(c.Keyboard), 0o644) },
 		func() error { return j.timezone(c.Timezone) },
 		func() error { return j.chroot(ctx, quick, "groupadd", "-f", "-r", "jarvis-admins") },
 		func() error { return j.chroot(ctx, quick, "groupadd", "-f", "-r", "netdev") },

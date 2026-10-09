@@ -290,6 +290,7 @@ func TestExecuteEraseEncryptLocalModel(t *testing.T) {
 		"/target/etc/locale.gen":                      "en_US.UTF-8 UTF-8\n",
 		"/target/etc/default/locale":                  "LANG=en_US.UTF-8\n",
 		"/target/etc/default/keyboard":                "XKBMODEL=\"pc105\"\nXKBLAYOUT=\"us\"\nXKBVARIANT=\"\"\nXKBOPTIONS=\"\"\nBACKSPACE=\"guess\"\n",
+		"/target/etc/vconsole.conf":                   "# Written by the Rafiq installer: the disk unlock prompt's keyboard.\nXKBLAYOUT=us\nXKBMODEL=pc105\nXKBVARIANT=\nXKBOPTIONS=\n",
 		"/target/etc/timezone":                        "Africa/Cairo\n",
 		"/target/etc/machine-id":                      "",
 		"/target/etc/greetd/config.toml":              packagedGreetd, // untouched without autologin

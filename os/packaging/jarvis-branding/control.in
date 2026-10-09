@@ -3,7 +3,7 @@ Version: @VERSION@
 Architecture: all
 Maintainer: Muhammad AbdElHay <mmAbdelhay@users.noreply.github.com>
 Installed-Size: @INSTALLED_SIZE@
-Depends: plymouth, plymouth-label, grub-common
+Depends: plymouth, plymouth-label, grub-common, xkb-data
 Section: misc
 Priority: optional
 Homepage: @HOME_URL@

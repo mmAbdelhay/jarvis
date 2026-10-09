@@ -35,6 +35,9 @@ func TestRenderers(t *testing.T) {
 	if got := renderFstab("r", "b", "e", ""); got != "# /etc/fstab: written by the Rafiq installer.\nUUID=r / ext4 errors=remount-ro 0 1\nUUID=b /boot ext4 defaults 0 2\nUUID=e /boot/efi vfat umask=0077 0 1\n/swapfile none swap sw 0 0\n" {
 		t.Fatalf("encrypted fstab = %q", got)
 	}
+	if got := renderVconsole("de(nodeadkeys)"); !strings.Contains(got, "\nXKBLAYOUT=de\nXKBMODEL=pc105\nXKBVARIANT=nodeadkeys\n") {
+		t.Fatalf("vconsole.conf = %q (Plymouth reads its layout from here)", got)
+	}
 	if got := renderKeyboard("us(intl)"); !strings.Contains(got, "XKBLAYOUT=\"us\"\nXKBVARIANT=\"intl\"\n") {
 		t.Fatalf("keyboard = %q", got)
 	}

@@ -38,6 +38,8 @@ svg2png "$here/logo/jarvis-ring.svg" 160 160 "$pt/logo.png"
 rsvg-convert "$here/plymouth/entry.svg" -o "$pt/entry.png"
 rsvg-convert "$here/plymouth/bullet.svg" -o "$pt/bullet.png"
 chmod 0644 "$pt"/*
+# The unlock prompt's keyboard layout in the initramfs (contracts §11.5).
+install -D -m0755 "$here/initramfs/jarvis-keyboard" "$out/usr/share/initramfs-tools/hooks/jarvis-keyboard"
 
 # GRUB theme and defaults (Task 4).
 need grub-mkfont grub-common

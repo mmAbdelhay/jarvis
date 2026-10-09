@@ -61,6 +61,17 @@ func renderKeyboard(kb string) string {
 	return fmt.Sprintf("XKBMODEL=\"pc105\"\nXKBLAYOUT=\"%s\"\nXKBVARIANT=\"%s\"\nXKBOPTIONS=\"\"\nBACKSPACE=\"guess\"\n", layout, variant)
 }
 
+// renderVconsole writes /etc/vconsole.conf with the same XKB layout:
+// Plymouth's unlock prompt reads its keyboard layout from this file only
+// (not /etc/default/keyboard) and compiles it with libxkbcommon; without it
+// Plymouth reads the console with the kernel's US keymap, so a passphrase
+// typed on another layout never matched (contracts §11.5). jarvis-branding's
+// initramfs hook copies it and the XKB data into the initramfs.
+func renderVconsole(kb string) string {
+	layout, variant, _ := strings.Cut(strings.TrimSuffix(kb, ")"), "(")
+	return fmt.Sprintf("# Written by the Rafiq installer: the disk unlock prompt's keyboard.\nXKBLAYOUT=%s\nXKBMODEL=pc105\nXKBVARIANT=%s\nXKBOPTIONS=\n", layout, variant)
+}
+
 // greetdAutologin edits the packaged /etc/greetd/config.toml (owned by
 // jarvis-greeter, Plan H): any [initial_session] section is removed (the
 // live ISO must never leave its own autologin behind), and with autologin
