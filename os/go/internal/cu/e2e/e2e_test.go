@@ -220,7 +220,7 @@ func TestComputerUseAgainstLabwc(t *testing.T) {
 	}
 	start(t, os.Getenv("JARVIS_CU_BIN"), "--socket", sock, "--peer-exe", self, "--peer-script", "", "--lock-exe", fakeLock)
 	obs := observer(t)
-	_, wevOut := start(t, "wev")
+	_, wevOut := start(t, "stdbuf", "-oL", "wev") // wev block-buffers stdout on a pipe
 	appWindow(t, obs, "wev")
 	cl := connect(t, sock)
 	cl.must("apps", nil) // Contracts §4: app discovery is allowed before begin.
@@ -250,6 +250,11 @@ func TestComputerUseAgainstLabwc(t *testing.T) {
 	t.Run("click lands in wev", func(t *testing.T) {
 		cl.t = t
 		cl.must("click", map[string]any{"x": capW / 2, "y": capH / 2})
+		t.Cleanup(func() {
+			if t.Failed() {
+				t.Logf("wev output:\n%s", wevOut.String())
+			}
+		})
 		waitFor(t, "button event", func() bool { return strings.Contains(wevOut.String(), "button: 272") })
 	})
 
@@ -336,6 +341,7 @@ func TestComputerUseAgainstLabwc(t *testing.T) {
 		})
 		time.Sleep(time.Second) // AT-SPI focus event
 		cl.must("begin", map[string]any{"sessionId": "pw", "appIds": []string{zid}})
+		t.Cleanup(func() { cl.t = t; cl.do("end", nil) }) // a failed assertion must not strand the session for later subtests
 		cl.must("capture", nil)
 		if _, code := cl.do("type", map[string]any{"text": "secret"}); code != "excluded" {
 			t.Fatalf("typing into a password field: %q", code)
