@@ -294,6 +294,154 @@
         </message>
     </context>
     <context>
+        <name>CuOverlay</name>
+        <message>
+            <source>Take over (Esc)</source>
+            <translation>تولَّ التحكم (Esc)</translation>
+        </message>
+        <message>
+            <source>Resume</source>
+            <translation>استئناف</translation>
+        </message>
+        <message>
+            <source>Stop</source>
+            <translation>إيقاف</translation>
+        </message>
+        <message>
+            <source>Screen control</source>
+            <translation>التحكم في الشاشة</translation>
+        </message>
+        <message>
+            <source>Steps</source>
+            <translation>الخطوات</translation>
+        </message>
+        <message>
+            <source>Screen control request failed.</source>
+            <translation>تعذّر تنفيذ طلب التحكم في الشاشة.</translation>
+        </message>
+    </context>
+    <context>
+        <name>CuOverlayWindow</name>
+        <message>
+            <source>Jarvis screen control</source>
+            <translation>تحكم جارفيس في الشاشة</translation>
+        </message>
+    </context>
+    <context>
+        <name>CuSessionModel</name>
+        <message>
+            <source>Couldn't stop Jarvis: %1</source>
+            <translation>تعذّر إيقاف جارفيس: %1</translation>
+        </message>
+        <message>
+            <source>Couldn't resume: %1</source>
+            <translation>تعذّر الاستئناف: %1</translation>
+        </message>
+        <message>
+            <source>, </source>
+            <translation>، </translation>
+        </message>
+        <message>
+            <source>Lost the connection to Jarvis. Reconnecting…</source>
+            <translation>انقطع الاتصال بجارفيس. جارٍ إعادة الاتصال…</translation>
+        </message>
+        <message>
+            <source>Paused · you have control</source>
+            <translation>متوقف مؤقتًا · التحكم لك</translation>
+        </message>
+        <message>
+            <source>Jarvis is controlling the screen · step %1 of %2</source>
+            <translation>جارفيس يتحكم في الشاشة · الخطوة %1 من %2</translation>
+        </message>
+        <message>
+            <source>You moved the mouse or typed.</source>
+            <translation>حرّكت الفأرة أو كتبت.</translation>
+        </message>
+        <message>
+            <source>You pressed Esc.</source>
+            <translation>ضغطت على Esc.</translation>
+        </message>
+        <message>
+            <source>A protected window has focus.</source>
+            <translation>نافذة محمية هي النشطة الآن.</translation>
+        </message>
+        <message>
+            <source>The screen locked.</source>
+            <translation>قُفلت الشاشة.</translation>
+        </message>
+        <message>
+            <source>Jarvis paused.</source>
+            <translation>أوقف جارفيس العمل مؤقتًا.</translation>
+        </message>
+        <message>
+            <source>Done</source>
+            <translation>تم</translation>
+        </message>
+        <message>
+            <source>Running</source>
+            <translation>قيد التنفيذ</translation>
+        </message>
+        <message>
+            <source>Failed</source>
+            <translation>فشل</translation>
+        </message>
+        <message>
+            <source>Waiting</source>
+            <translation>بانتظار الدور</translation>
+        </message>
+    </context>
+    <context>
+        <name>CuSettingsModel</name>
+        <message>
+            <source>This model can't see images, so it can't use the screen.</source>
+            <translation>هذا النموذج لا يرى الصور، لذا لا يستطيع استخدام الشاشة.</translation>
+        </message>
+        <message>
+            <source>Screenshots of the allowed windows go to %1.</source>
+            <translation>تُرسَل لقطات النوافذ المسموح بها إلى %1.</translation>
+        </message>
+        <message>
+            <source>Screenshots stay on this computer.</source>
+            <translation>تبقى لقطات الشاشة على هذا الحاسوب.</translation>
+        </message>
+        <message>
+            <source>a computer on your network</source>
+            <translation>حاسوب على شبكتك</translation>
+        </message>
+        <message>
+            <source>Jarvis apps, the shell and Settings</source>
+            <translation>تطبيقات جارفيس والواجهة والإعدادات</translation>
+        </message>
+        <message>
+            <source>Lock screen</source>
+            <translation>شاشة القفل</translation>
+        </message>
+        <message>
+            <source>Installer</source>
+            <translation>المثبّت</translation>
+        </message>
+        <message>
+            <source>Password and key prompts (polkit, keyrings, SSH)</source>
+            <translation>نوافذ كلمات المرور والمفاتيح (polkit وحلقات المفاتيح وSSH)</translation>
+        </message>
+        <message>
+            <source>Terminals</source>
+            <translation>الطرفيات</translation>
+        </message>
+        <message>
+            <source>Password fields in any app</source>
+            <translation>حقول كلمات المرور في أي تطبيق</translation>
+        </message>
+        <message>
+            <source>This version of Jarvis can't use the screen yet.</source>
+            <translation>لا يستطيع هذا الإصدار من جارفيس استخدام الشاشة بعد.</translation>
+        </message>
+        <message>
+            <source>Couldn't change computer use: %1</source>
+            <translation>تعذّر تغيير إعداد استخدام الحاسوب: %1</translation>
+        </message>
+    </context>
+    <context>
         <name>DoctorView</name>
         <message>
             <source>Can't reach the model: %1. Network doctor works without a model.</source>
@@ -956,6 +1104,13 @@
         </message>
     </context>
     <context>
+        <name>SettingsWindow</name>
+        <message>
+            <source>Jarvis Settings</source>
+            <translation>إعدادات جارفيس</translation>
+        </message>
+    </context>
+    <context>
         <name>SetupView</name>
         <message>
             <source>Jarvis</source>
@@ -1404,11 +1559,4 @@
             <translation>توقف مسجّل الميكروفون دون التقاط أي صوت.</translation>
         </message>
     </context>
-<context>
-    <name>SettingsWindow</name>
-    <message>
-        <source>Jarvis Settings</source>
-        <translation>إعدادات جارفيس</translation>
-    </message>
-</context>
 </TS>

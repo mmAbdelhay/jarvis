@@ -9,12 +9,18 @@
 #include "app/AppFont.h"
 #include "app/ShellController.h"
 #include "control/ControlClient.h"
+#include "models/CuSessionModel.h"
 
 Q_IMPORT_QML_PLUGIN(JarvisShellPlugin)
 
 class Setup : public QObject {
     Q_OBJECT
 public slots:
+    void applyCuRequestResult(CuSessionModel* session, bool ok, const QString& text)
+    {
+        session->applyRequestResult(ok, text);
+    }
+
     void applicationAvailable()
     {
         QStandardPaths::setTestModeEnabled(true);
@@ -38,6 +44,7 @@ public slots:
         QObject::connect(language, &jarvis::ui::LanguageManager::languageChanged, engine, &QQmlEngine::retranslate);
         shell->setLanguageApplier([language](const QString& code) { return language->setLanguage(code); }, language->language());
         engine->rootContext()->setContextProperty(QStringLiteral("testLanguage"), language);
+        engine->rootContext()->setContextProperty(QStringLiteral("testCuRequests"), this);
         engine->rootContext()->setContextProperty(QStringLiteral("testShell"), shell);
         // Separate controller for Settings connection lifecycle tests, so the
         // other views retain their never-connected controller.
