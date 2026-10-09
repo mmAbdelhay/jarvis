@@ -51,7 +51,7 @@ func TestDescribeAtWithoutAccessibility(t *testing.T) {
 
 func TestUnsupportedHandlerAllOps(t *testing.T) {
 	h := unsupportedHandler{why: "missing zwlr_screencopy_manager_v1"}
-	for _, op := range []string{"apps", "begin", "windows", "capture", "describeAt", "click", "type", "key", "scroll", "drag"} {
+	for _, op := range []string{"apps", "begin", "windows", "capture", "describeAt", "describeFocused", "click", "type", "key", "scroll", "drag"} {
 		if _, err := h.Handle(op, nil); proto.AsError(err).Code != proto.CodeUnsupported {
 			t.Fatalf("%s: %v", op, err)
 		}

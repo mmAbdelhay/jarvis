@@ -484,6 +484,50 @@ func (w *PasswordWatch) DescribeAt(ctx context.Context, title string, x, y int) 
 	return DescribeAt(ctx, pq, title, x, y)
 }
 
+// DescribeFocused names the accessible that has keyboard focus, but only
+// when it belongs to the same application as the window titled title (the
+// base) and still reports the focused state. V uses it before a key or a
+// typed Return/space: the control that would be activated, not the one the
+// model last clicked (final review, finding 3). Anything else answers
+// (RoleUnknown, ""), which V treats as "ask".
+func (w *PasswordWatch) DescribeFocused(ctx context.Context, title string) (role, name string) {
+	if w == nil || !w.Live() || title == "" || !w.seed(ctx) {
+		return RoleUnknown, ""
+	}
+	pq, ok := w.q.(pointQuery)
+	if !ok {
+		return RoleUnknown, ""
+	}
+	w.mu.Lock()
+	var last Accessible
+	has := w.last != nil
+	if has {
+		last = *w.last
+	}
+	w.mu.Unlock()
+	if !has {
+		return RoleUnknown, ""
+	}
+	st, err := pq.States(ctx, last)
+	if err != nil || len(st) == 0 || st[0]&(1<<stateFocused) == 0 {
+		return RoleUnknown, ""
+	}
+	frame, ok := findFrame(ctx, pq, title)
+	if !ok || frame.Bus != last.Bus {
+		return RoleUnknown, ""
+	}
+	r, err := pq.RoleName(ctx, last)
+	r = strings.TrimSpace(r)
+	if err != nil || r == "" {
+		return RoleUnknown, ""
+	}
+	n, err := pq.Name(ctx, last)
+	if err != nil {
+		return RoleUnknown, ""
+	}
+	return clean(r, maxDescribeName), clean(n, maxDescribeName)
+}
+
 // StartPasswordWatch turns accessibility on for toolkits that wait to be
 // asked (org.a11y.Status.IsEnabled), connects to the accessibility bus,
 // registers for focus events and starts tracking. The func closes it.

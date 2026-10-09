@@ -240,6 +240,10 @@ func TestComputerUseAgainstLabwc(t *testing.T) {
 		if role, ok := description["role"].(string); !ok || role == "" {
 			t.Fatal("describeAt missing role")
 		}
+		focused := cl.must("describeFocused", map[string]any{})
+		if role, ok := focused["role"].(string); !ok || role == "" {
+			t.Fatal("describeFocused missing role")
+		}
 		if capW > 640 || centre(t, d) == [3]uint32{0, 0, 0} {
 			t.Fatalf("%vx%v centre %v", capW, capH, centre(t, d))
 		}

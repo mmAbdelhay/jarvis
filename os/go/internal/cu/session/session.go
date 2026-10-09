@@ -69,9 +69,12 @@ type Deps struct {
 	// DescribeAt names the accessible at a point of the window titled
 	// title (window-relative logical pixels); nil answers "unknown".
 	DescribeAt func(ctx context.Context, title string, x, y int) (role, name string)
-	Push       func(proto.Event)
-	Sleep      func(time.Duration)
-	After      func(time.Duration, func())
+	// DescribeFocused names the accessible with keyboard focus when it
+	// belongs to the window titled title; nil answers "unknown".
+	DescribeFocused func(ctx context.Context, title string) (role, name string)
+	Push            func(proto.Event)
+	Sleep           func(time.Duration)
+	After           func(time.Duration, func())
 }
 
 // Limits (plan U Global Constraints).

@@ -67,3 +67,30 @@ func (m *Manager) DescribeAt(p proto.DescribeAt) (*proto.DescribeAtResult, error
 	}
 	return &proto.DescribeAtResult{Role: role, Name: name}, nil
 }
+
+// DescribeFocused names the control that has keyboard focus in the base, so
+// V can tell what a key or a typed Return/space would activate (final review,
+// finding 3). Like DescribeAt: no session or a paused one is an error; any
+// other failure answers role "unknown".
+func (m *Manager) DescribeFocused() (*proto.DescribeAtResult, error) {
+	unknown := &proto.DescribeAtResult{Role: "unknown"}
+	m.opMu.Lock()
+	defer m.opMu.Unlock()
+	if err := m.gateSession(); err != nil {
+		return nil, err
+	}
+	if _, err := m.gateInput(true); err != nil || m.d.DescribeFocused == nil {
+		return unknown, nil
+	}
+	v, err := m.snapshot()
+	if err != nil || v.base == nil || v.base.Title == "" {
+		return unknown, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), describeTimeout)
+	defer cancel()
+	role, name := m.d.DescribeFocused(ctx, v.base.Title)
+	if role == "" || role == "unknown" {
+		return unknown, nil
+	}
+	return &proto.DescribeAtResult{Role: role, Name: name}, nil
+}

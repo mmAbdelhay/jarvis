@@ -34,6 +34,12 @@ func (m *Manager) Handle(op string, line []byte) (any, error) {
 			return nil, err
 		}
 		return r, nil
+	case "describeFocused":
+		r, err := m.DescribeFocused()
+		if err != nil {
+			return nil, err
+		}
+		return r, nil
 	case "windows":
 		ws, err := m.Windows()
 		if err != nil {

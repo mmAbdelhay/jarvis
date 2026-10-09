@@ -148,3 +148,43 @@ func TestDescribeAtDividesByOutputScale(t *testing.T) {
 		t.Fatalf("got %d,%d", gx, gy)
 	}
 }
+
+func TestDescribeFocused(t *testing.T) {
+	h := newHarness(t)
+	var gotTitle string
+	h.m.d.DescribeFocused = func(_ context.Context, title string) (string, string) {
+		gotTitle = title
+		return "push button", "Delete"
+	}
+	req := []byte(`{"id":1,"op":"describeFocused"}`)
+	if _, err := h.m.Handle("describeFocused", req); code(err) != proto.CodeNoSession {
+		t.Fatalf("no session: %v", err)
+	}
+	h.begin(t)
+	if _, err := h.m.Capture(proto.Capture{}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := h.m.Handle("describeFocused", req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := data.(*proto.DescribeAtResult); r.Role != "push button" || r.Name != "Delete" || gotTitle != "beach.xcf" {
+		t.Fatalf("%+v %q", r, gotTitle)
+	}
+	// Focus on a window that is not the base: unknown, hook not called.
+	gotTitle = ""
+	h.d.focus("w3")
+	data, err = h.m.Handle("describeFocused", req)
+	if err != nil || data.(*proto.DescribeAtResult).Role != "unknown" || gotTitle != "" {
+		t.Fatalf("gate: %v %v %q", data, err, gotTitle)
+	}
+	h.d.focus("w1")
+	h.m.d.DescribeFocused = func(context.Context, string) (string, string) { return "", "" }
+	if data, _ := h.m.Handle("describeFocused", req); data.(*proto.DescribeAtResult).Role != "unknown" {
+		t.Fatal("empty role must answer unknown")
+	}
+	h.m.d.DescribeFocused = nil
+	if data, _ := h.m.Handle("describeFocused", req); data.(*proto.DescribeAtResult).Role != "unknown" {
+		t.Fatal("nil hook must answer unknown")
+	}
+}

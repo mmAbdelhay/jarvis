@@ -165,6 +165,15 @@ func (a *a11y) describe(ctx context.Context, title string, x, y int) (string, st
 	return w.DescribeAt(ctx, title, x, y)
 }
 
+// describeFocused shares the same connection.
+func (a *a11y) describeFocused(ctx context.Context, title string) (string, string) {
+	a.ensure()
+	a.mu.Lock()
+	w := a.w
+	a.mu.Unlock()
+	return w.DescribeFocused(ctx, title)
+}
+
 func run(o options) error {
 	ln, err := server.Listen(o.socket)
 	if err != nil {
@@ -199,12 +208,13 @@ func run(o options) error {
 			lock := guard.DefaultLockWatch(o.lockExes)
 			home, _ := os.UserHomeDir()
 			mgr := session.New(session.Deps{
-				Desktop:    &waylandDesktop{c: client, ptrs: map[string]*wlcu.Pointer{}},
-				Apps:       func() *policy.AppIndex { return policy.NewAppIndex(desktop.IndexAll(desktop.DefaultDirs(home))) },
-				Locked:     lock.Locked,
-				Password:   acc.check,
-				DescribeAt: acc.describe,
-				Activity:   det,
+				Desktop:         &waylandDesktop{c: client, ptrs: map[string]*wlcu.Pointer{}},
+				Apps:            func() *policy.AppIndex { return policy.NewAppIndex(desktop.IndexAll(desktop.DefaultDirs(home))) },
+				Locked:          lock.Locked,
+				Password:        acc.check,
+				DescribeAt:      acc.describe,
+				DescribeFocused: acc.describeFocused,
+				Activity:        det,
 				Push: func(ev proto.Event) {
 					if s := srvRef.Load(); s != nil {
 						go s.Push(ev) // never block the Wayland read loop on the socket
