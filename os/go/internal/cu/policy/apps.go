@@ -38,10 +38,13 @@ var builtinTerminals = set(
 	"guake", "tilda",
 )
 
-// credentialPrompts ask for passwords for the system or the keyring.
+// credentialPrompts ask for passwords for the system or the keyring. They
+// are matched as substrings of the lowercased window app id, because real
+// ids are often reverse-DNS (org.gnupg.pinentry-qt, lxqt-openssh-askpass)
+// or a bare WM class (SshAskpass).
 var credentialPrompts = []string{
-	"pinentry", "gcr-prompter", "org.gnome.keyring", "ssh-askpass", "ksshaskpass",
-	"org.kde.ksshaskpass", "kwallet", "org.kde.kwallet",
+	"pinentry", "askpass", "ssh-askpass", "sshaskpass", "gcr-prompter",
+	"keyring.systemprompter", "org.gnome.keyring", "kwallet", "ksecretd",
 }
 
 // launcherExecs start other programs; their basenames never alias an app.
@@ -121,7 +124,7 @@ func (x *AppIndex) Excluded(appID string) (bool, string) {
 		return true, "a system password prompt (polkit agent)"
 	}
 	for _, p := range credentialPrompts {
-		if strings.HasPrefix(a, p) {
+		if strings.Contains(a, p) {
 			return true, "a password prompt"
 		}
 	}
