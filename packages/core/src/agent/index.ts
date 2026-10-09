@@ -37,3 +37,4 @@ export * from "./cu-fake-client.js";
 export * from "./cu-text.js";
 export * from "./cu-session.js";
 export * from "./computer-use.js";
+export * from "./text-tools.js";
