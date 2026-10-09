@@ -11,7 +11,9 @@
 #include "Language.h"
 #include "app/AppFont.h"
 #include "app/ClassicRedirect.h"
+#include "app/CuOverlayManager.h"
 #include "app/ShellController.h"
+#include "app/ShellIdentity.h"
 #include "app/ShellSurface.h"
 #include "app/SingleInstance.h"
 #include "app/SettingsMode.h"
@@ -28,6 +30,8 @@ int main(int argc, char* argv[])
     QGuiApplication app(argc, argv);
     QGuiApplication::setApplicationName(u"jarvis-shell"_s);
     QGuiApplication::setApplicationVersion(QStringLiteral(JARVIS_SHELL_VERSION));
+    // Rafiq v1.1 contracts §1: jarvis-cu excludes the shell by this app_id.
+    jarvis::shell::applyShellIdentity();
 
     QCommandLineParser parser;
     parser.setApplicationDescription(u"The Jarvis OS shell."_s);
@@ -101,6 +105,12 @@ int main(int argc, char* argv[])
         });
     }
     ShellSurface surface(window, layerShell);
+    // Rafiq v1.1 design §2.3: border, pill and step panel while Jarvis controls the screen.
+    CuOverlayManager overlay(&engine, shell->cu(), layerShell);
+    QObject::connect(shell, &ShellController::summonRequested, &surface, [&surface, shell] {
+        surface.summon();
+        shell->setSurfaceShown(true);
+    });
     QObject::connect(&instance, &SingleInstance::messageReceived, &surface, [&surface, shell](const QByteArray& message) {
         surface.summon();
         shell->setSurfaceShown(true);

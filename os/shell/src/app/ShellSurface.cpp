@@ -1,5 +1,7 @@
 #include "app/ShellSurface.h"
 
+#include "app/ShellIdentity.h"
+
 #include <QQuickWindow>
 
 #ifdef JARVIS_HAVE_LAYERSHELL
@@ -17,7 +19,7 @@ ShellSurface::ShellSurface(QQuickWindow* window, bool layerShell, QObject* paren
     if (m_layerShell) {
         using LayerWindow = LayerShellQt::Window;
         LayerWindow* layer = LayerWindow::get(m_window);
-        layer->setScope(u"jarvis-shell"_s);
+        layer->setScope(jarvis::shell::shellLayerScope());
         layer->setLayer(LayerWindow::LayerBottom);
         layer->setAnchors(LayerWindow::Anchors(LayerWindow::AnchorTop | LayerWindow::AnchorBottom
                                                | LayerWindow::AnchorLeft | LayerWindow::AnchorRight));

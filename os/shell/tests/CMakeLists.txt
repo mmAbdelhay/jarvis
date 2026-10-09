@@ -19,6 +19,11 @@ foreach(source IN LISTS JARVIS_UNIT_TESTS)
   jarvis_add_cpp_test(${source} unit 60)
 endforeach()
 
+# The overlay manager loads Jarvis.Shell QML: link the plugin and find Jarvis.UI.
+target_link_libraries(tst_cuoverlaymanager PRIVATE jarvis_shell_coreplugin)
+target_compile_definitions(tst_cuoverlaymanager PRIVATE JARVIS_QML_DIR="${QT_QML_OUTPUT_DIRECTORY}")
+add_dependencies(tst_cuoverlaymanager jarvis_ui)
+
 file(GLOB JARVIS_INTEGRATION_TESTS CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/integration/tst_*.cpp)
 foreach(source IN LISTS JARVIS_INTEGRATION_TESTS)
   jarvis_add_cpp_test(${source} integration 180)
