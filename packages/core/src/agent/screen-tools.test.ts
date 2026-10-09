@@ -149,6 +149,14 @@ describe("parseKeyCombo", () => {
       "alt+tab",
       "alt+shift+tab",
       "alt+f2",
+      "alt+f3",
+      "alt+f4",
+      "alt+f12",
+      "alt+space",
+      "alt+left",
+      "alt+right",
+      "alt+up",
+      "alt+down",
       "ctrl+ctrl+s",
       "ctrl+",
       "",
@@ -170,6 +178,10 @@ describe("parseCuApps and protected apps", () => {
 
   it("never lets the shell, lock, installer, polkit, pinentry or a terminal be chosen", () => {
     for (const app of [
+      "jarvis",
+      "Jarvis",
+      "jarvis.desktop",
+      "com.jarvis.desktop",
       "jarvis-shell",
       "jarvis-lock",
       "jarvis-installer",

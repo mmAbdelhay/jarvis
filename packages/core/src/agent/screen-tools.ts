@@ -107,8 +107,9 @@ const NEVER_IDS: ReadonlySet<string> = new Set([
   "kwallet-query",
 ]);
 const NEVER_PATTERNS: readonly RegExp[] = [
-  /^jarvis-/,
+  /^jarvis($|[-.])/,
   /^os\.jarvis\./,
+  /^com\.jarvis\./,
   /^rafiq/,
   /kwallet/,
   /askpass/,
@@ -253,7 +254,10 @@ export function parseKeyCombo(
     return { ok: false, error: "ctrl+alt combinations are reserved for the system" };
   }
   const combo = [...["ctrl", "alt", "shift"].filter((m) => mods.has(m)), key].join("+");
-  if (FORBIDDEN_COMBOS.has(combo)) {
+  const altOnly = mods.size === 1 && mods.has("alt");
+  const altReserved =
+    altOnly && (key === "space" || /^(up|down|left|right)$/.test(key) || /^f([1-9]|1[0-2])$/.test(key));
+  if (altReserved || FORBIDDEN_COMBOS.has(combo)) {
     return {
       ok: false,
       error: `${combo} switches away from the allowed windows and may not be pressed`,
