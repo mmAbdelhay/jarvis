@@ -36,18 +36,25 @@ class CommandsTest(unittest.TestCase):
         names = {t["name"] for t in script["turns"]}
         self.assertTrue({"off", "export", "physical", "lock"} <= names)
         export = next(t for t in script["turns"] if t["name"] == "export")
-        # X10 reduced the export turn to a "blocked by U-1" stub (no clicks); the
-        # save-intent pin applies again as soon as the real script is back.
-        blocked = any("blocked" in s.get("input", {}).get("summary", "").lower() for s in export["steps"])
-        if not blocked:
-            self.assertTrue(any(s.get("input", {}).get("intent") == "save" for s in export["steps"]),
-                            "the export clicks with intent save (gap G7)")
         for turn in script["turns"]:
             for step in turn["steps"] + turn.get("onDenied", []):
                 self.assertTrue("text" in step or step["call"].startswith("screen_"), step)
         yaml_text = (ASSETS / "jarvis.yaml").read_text()
         self.assertIn("id: scripted, kind: ollama", yaml_text)
         self.assertIn(f"http://127.0.0.1:{cu.PORT}", yaml_text)
+
+
+    # The plan's unconditional pin (gap G7). cu-gimp.json's export turn is a
+    # "blocked by U-1" stub from X10, so this fails today; expectedFailure keeps
+    # the suite green without any text sniffing. Once X14 restores the real
+    # export script this becomes an unexpected success (a failure): then remove
+    # the decorator.
+    @unittest.expectedFailure
+    def test_export_clicks_with_save_intent(self):
+        script = json.loads((ASSETS / "cu-gimp.json").read_text())
+        export = next(t for t in script["turns"] if t["name"] == "export")
+        self.assertTrue(any(s.get("input", {}).get("intent") == "save" for s in export["steps"]),
+                        "the export clicks with intent save (gap G7)")
 
 
 class PpmTest(unittest.TestCase):
