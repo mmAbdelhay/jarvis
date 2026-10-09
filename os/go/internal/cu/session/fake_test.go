@@ -236,18 +236,28 @@ type harness struct {
 	locked bool
 	pw     bool
 	pwErr  error
+	frames map[string][2]int // FrameSize answers by title; {0,0} = unknown
 	mu     sync.Mutex
 	events []proto.Event
 }
 
 func newHarness(t *testing.T) *harness {
 	t.Helper()
-	h := &harness{d: newDesk(), act: &fakeActivity{}}
+	h := &harness{d: newDesk(), act: &fakeActivity{}, frames: map[string][2]int{}}
 	h.m = New(Deps{
 		Desktop:  h.d,
 		Apps:     func() *policy.AppIndex { return policy.NewAppIndex(nil) },
 		Locked:   func() bool { h.mu.Lock(); defer h.mu.Unlock(); return h.locked },
 		Password: func(context.Context) (bool, error) { h.mu.Lock(); defer h.mu.Unlock(); return h.pw, h.pwErr },
+		// By default every window really fills the 2560x1440 output.
+		FrameSize: func(_ context.Context, title string) (int, int, bool) {
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			if sz, ok := h.frames[title]; ok {
+				return sz[0], sz[1], sz[0] > 0
+			}
+			return 2560, 1440, true
+		},
 		Activity: h.act,
 		Push:     func(e proto.Event) { h.mu.Lock(); h.events = append(h.events, e); h.mu.Unlock() },
 		Sleep:    func(time.Duration) {},

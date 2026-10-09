@@ -117,6 +117,25 @@ func (w *waylandDesktop) Keyboard() (session.Keyboard, error) {
 	return w.kb, nil
 }
 
+// prime creates the keyboard (with a keymap) and one pointer per output.
+func (w *waylandDesktop) prime(logger *log.Logger) {
+	if kb, err := w.Keyboard(); err != nil {
+		logger.Printf("virtual keyboard: %v", err)
+	} else if err := kb.(*wlcu.Keyboard).Prime(); err != nil {
+		logger.Printf("virtual keyboard keymap: %v", err)
+	}
+	outs, err := w.c.Outputs()
+	if err != nil {
+		logger.Printf("outputs: %v", err)
+		return
+	}
+	for _, o := range outs {
+		if _, err := w.Pointer(o.Name); err != nil {
+			logger.Printf("virtual pointer on %s: %v", o.Name, err)
+		}
+	}
+}
+
 // a11y keeps one AT-SPI password watch, restarting it at most every 10 s.
 type a11y struct {
 	mu   sync.Mutex
@@ -166,6 +185,15 @@ func (a *a11y) describe(ctx context.Context, title string, x, y int) (string, st
 	return w.DescribeAt(ctx, title, x, y)
 }
 
+// frameSize shares the same connection.
+func (a *a11y) frameSize(ctx context.Context, title string) (int, int, bool) {
+	a.ensure()
+	a.mu.Lock()
+	w := a.w
+	a.mu.Unlock()
+	return w.FrameSize(ctx, title)
+}
+
 // describeFocused shares the same connection.
 func (a *a11y) describeFocused(ctx context.Context, title string) (string, string) {
 	a.ensure()
@@ -204,17 +232,19 @@ func run(o options) error {
 			if _, err := client.WatchIdle(50*time.Millisecond, det.Event); err != nil {
 				return err
 			}
+			desk := &waylandDesktop{c: client, ptrs: map[string]*wlcu.Pointer{}}
 			acc := &a11y{}
 			acc.ensure() // start tracking focus now, before the first session
 			lock := guard.DefaultLockWatch(o.lockExes)
 			home, _ := os.UserHomeDir()
 			mgr := session.New(session.Deps{
-				Desktop:         &waylandDesktop{c: client, ptrs: map[string]*wlcu.Pointer{}},
+				Desktop:         desk,
 				Apps:            func() *policy.AppIndex { return policy.NewAppIndex(desktop.IndexAll(desktop.DefaultDirs(home))) },
 				Locked:          lock.Locked,
 				Password:        acc.check,
 				DescribeAt:      acc.describe,
 				DescribeFocused: acc.describeFocused,
+				FrameSize:       acc.frameSize,
 				Activity:        det,
 				Push: func(ev proto.Event) {
 					if s := srvRef.Load(); s != nil {
@@ -223,6 +253,12 @@ func run(o options) error {
 				},
 			})
 			mgrRef.Store(mgr)
+			// Create the virtual keyboard and pointers now, at login, not at
+			// the first action: adding a seat device makes labwc resend the
+			// seat capabilities, and GTK3 apps then recreate their keyboard
+			// and get no keyboard focus until focus changes (seen with GIMP
+			// on labwc 0.8.3: every key of a session was dropped).
+			desk.prime(logger)
 			go lock.Poll(100*time.Millisecond, nil, mgr.LockedNow)
 			srv := server.New(ln, check, mgr, logger)
 			srvRef.Store(srv)

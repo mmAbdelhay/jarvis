@@ -144,9 +144,11 @@ func TestPasswordFocusedUnseededRefuses(t *testing.T) {
 	if got, err := w.PasswordFocused(context.Background()); got || err != nil {
 		t.Fatalf("seeded empty: %v %v", got, err)
 	}
-	q2 := &seedA11y{err: errors.New("x")}
+	e := Accessible{":1.1", "/e"}
+	q2 := &seedA11y{err: errors.New("x"), fakeA11y: fakeA11y{
+		roles: map[Accessible]uint32{e: 61}, states: map[Accessible][]uint32{e: {1 << 12}}}}
 	w2 := NewPasswordWatch(q2)
-	w2.Focus(Accessible{":1.1", "/e"}, true) // an event also seeds
+	w2.Focus(e, true) // an event also seeds (and the control still has focus: no walk)
 	if _, err := w2.PasswordFocused(context.Background()); errors.Is(err, ErrNoA11y) {
 		t.Fatal("focus event should seed")
 	}
@@ -440,5 +442,34 @@ func TestDescribeAtCapsName(t *testing.T) {
 	_, name := DescribeAt(context.Background(), f, "Editor", 1, 1)
 	if n := len([]rune(name)); n != maxDescribeName {
 		t.Fatalf("name not capped: %d runes", n)
+	}
+}
+
+// Labwc e2e (flaky 1 in 3 before): GTK4 sends the focus event late, so the
+// watch may know of no focused control, or of a stale one, when input comes.
+// It then walks the tree again instead of answering "no password".
+func TestPasswordFocusedRewalksWhenFocusIsUnknownOrStale(t *testing.T) {
+	pw := Accessible{":1.40", "/p"}
+	old := Accessible{":1.41", "/old"}
+	q := &seedA11y{fakeA11y: fakeA11y{
+		roles:  map[Accessible]uint32{pw: RolePasswordText, old: 61},
+		states: map[Accessible][]uint32{pw: {1 << 12, 0}, old: {0}},
+	}}
+	w := NewPasswordWatch(q)
+	if got, err := w.PasswordFocused(context.Background()); got || err != nil {
+		t.Fatalf("nothing focused yet: %v %v", got, err)
+	}
+	q.focus = &pw // the password field took focus; no event arrived
+	if got, err := w.PasswordFocused(context.Background()); !got || err != nil {
+		t.Fatalf("unknown focus must be looked up again: %v %v", got, err)
+	}
+	w.Focus(old, true) // a stale event: that control no longer has focus
+	if got, err := w.PasswordFocused(context.Background()); !got || err != nil {
+		t.Fatalf("stale focus must be looked up again: %v %v", got, err)
+	}
+	q.err = errors.New("tree unreadable")
+	w.Focus(old, true)
+	if _, err := w.PasswordFocused(context.Background()); !errors.Is(err, ErrNoA11y) {
+		t.Fatalf("a failed walk refuses: %v", err)
 	}
 }

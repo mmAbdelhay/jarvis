@@ -23,7 +23,8 @@ const (
 var symRe = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
 
 // BuildKeymap writes an XKB keymap with Shift_L/Control_L/Alt_L at
-// keycodes 9–11 and syms[i] at keycode 12+i, level 1.
+// keycodes 9–11 and syms[i] at keycode 12+i, level 1 (a lowercase letter
+// also has its capital at level 2).
 func BuildKeymap(syms []string) (string, error) {
 	if len(syms) > MaxSymsPerKeymap {
 		return "", fmt.Errorf("wlcu: %d keysyms do not fit one keymap", len(syms))
@@ -45,6 +46,13 @@ func BuildKeymap(syms []string) (string, error) {
 	b.WriteString("key <K10> { [ Control_L ] };\nmodifier_map Control { <K10> };\n")
 	b.WriteString("key <K11> { [ Alt_L ] };\nmodifier_map Mod1 { <K11> };\n")
 	for i, s := range syms {
+		// A lowercase ASCII letter gets its capital on the Shift level, as on
+		// a real keyboard: GTK3 accelerators such as GIMP's Shift+Ctrl+E only
+		// match when Shift turns e into E.
+		if len(s) == 1 && s[0] >= 'a' && s[0] <= 'z' {
+			fmt.Fprintf(&b, "key <K%d> { [ %s, %s ] };\n", kcFirst+i, s, strings.ToUpper(s))
+			continue
+		}
 		fmt.Fprintf(&b, "key <K%d> { [ %s ] };\n", kcFirst+i, s)
 	}
 	b.WriteString("};\n};\n")
@@ -178,6 +186,13 @@ func (k *Keyboard) Combo(mask uint32, keysym string) error {
 		return err
 	}
 	return k.tap(pos[keysym], mask)
+}
+
+// Prime uploads a keymap without pressing anything, so the keyboard is a
+// complete seat device from the start.
+func (k *Keyboard) Prime() error {
+	_, err := k.ensure([]string{"space"})
+	return err
 }
 
 // Close destroys the virtual keyboard.

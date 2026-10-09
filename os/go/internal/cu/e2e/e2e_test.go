@@ -152,6 +152,31 @@ func centre(t *testing.T, d map[string]any) [3]uint32 {
 	return [3]uint32{r >> 8, g >> 8, bb >> 8}
 }
 
+// baseCentre is the colour at the centre of the base's own area (the
+// "windows" rect of a capture): a fixed-size fullscreen window covers only
+// part of the output and the rest is masked black.
+func baseCentre(t *testing.T, d map[string]any) [3]uint32 {
+	t.Helper()
+	b, err := base64.StdEncoding.DecodeString(d["pngBase64"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := png.Decode(bytes.NewReader(b))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ws, _ := d["windows"].([]any)
+	for _, w := range ws {
+		r, _ := w.(map[string]any)
+		if bw, _ := r["w"].(float64); bw > 0 {
+			bh, _ := r["h"].(float64)
+			c, g, bb, _ := m.At(int(bw/2), int(bh/2)).RGBA()
+			return [3]uint32{c >> 8, g >> 8, bb >> 8}
+		}
+	}
+	return [3]uint32{0, 0, 0}
+}
+
 func start(t *testing.T, name string, args ...string) (*exec.Cmd, *lockedBuffer) {
 	t.Helper()
 	var out lockedBuffer
@@ -415,16 +440,52 @@ func TestComputerUseAgainstLabwc(t *testing.T) {
 			}
 			return false
 		})
-		if centre(t, d) == [3]uint32{0, 0, 0} {
+		if baseCentre(t, d) == [3]uint32{0, 0, 0} {
 			time.Sleep(300 * time.Millisecond) // the first frame may predate the resize
 			d = cl.must("capture", map[string]any{"maxEdge": 640})
 		}
-		if centre(t, d) == [3]uint32{0, 0, 0} {
+		if baseCentre(t, d) == [3]uint32{0, 0, 0} {
 			t.Fatal("the raised fullscreen dialog was not shown")
 		}
 		cl.must("key", map[string]any{"combo": "tab"})
 		cl.must("end", nil)
 	})
+
+	// Keys from the virtual keyboard must reach GTK apps, not only wev:
+	// zenity is GTK4. yad is GTK3 like GIMP: under headless labwc no GTK3
+	// app receives virtual-keyboard input, from jarvis-cu or from wtype
+	// (open issue, see README), so it runs only with JARVIS_CU_GTK3=1.
+	apps := []string{"zenity"}
+	if os.Getenv("JARVIS_CU_GTK3") == "1" {
+		apps = append(apps, "yad")
+	}
+	for _, app := range apps {
+		t.Run("typing reaches a GTK app "+app, func(t *testing.T) {
+			cl.t = t
+			cl.do("end", nil)
+			_, zOut := start(t, app, "--entry", "--text", "Name")
+			var zid string
+			waitFor(t, app+" entry", func() bool {
+				tops, _ := obs.Toplevels()
+				for _, x := range tops {
+					if strings.Contains(strings.ToLower(x.AppID), app) && x.Focused {
+						zid = x.AppID
+						return true
+					}
+				}
+				return false
+			})
+			time.Sleep(time.Second)
+			cl.must("begin", map[string]any{"sessionId": "gtk", "appIds": []string{zid}})
+			t.Cleanup(func() { cl.t = t; cl.do("end", nil) })
+			time.Sleep(300 * time.Millisecond)
+			cl.must("capture", nil)
+			cl.must("type", map[string]any{"text": "Ahmed Ali"})
+			cl.must("key", map[string]any{"combo": "Return"})
+			waitFor(t, app+" prints the typed text", func() bool { return strings.Contains(zOut.String(), "Ahmed Ali") })
+			cl.must("end", nil)
+		})
+	}
 
 	t.Run("lock pauses and ends", func(t *testing.T) {
 		cl.t = t

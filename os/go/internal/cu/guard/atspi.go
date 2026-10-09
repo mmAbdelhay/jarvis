@@ -135,6 +135,9 @@ func gone(err error) bool {
 }
 
 // PasswordFocused reports whether a password field has keyboard focus.
+// When the watch knows of no focused control, or the one it knows lost
+// focus (GTK4 sends its focus event late; an app without accessibility
+// sends none), it walks the tree again rather than answer "no".
 func (w *PasswordWatch) PasswordFocused(ctx context.Context) (bool, error) {
 	if !w.Live() {
 		return false, ErrNoA11y
@@ -149,39 +152,61 @@ func (w *PasswordWatch) PasswordFocused(ctx context.Context) (bool, error) {
 		last = *w.last
 	}
 	w.mu.Unlock()
-	if !has {
-		return false, nil
-	}
-	role, err := w.q.Role(ctx, last)
-	if err != nil {
-		if gone(err) {
-			w.Focus(last, false)
-			return false, nil
+	if has {
+		pw, focused, err := w.check(ctx, last)
+		if err != nil || focused {
+			return pw, err
 		}
-		return false, fmt.Errorf("%w: %v", ErrNoA11y, err)
 	}
-	if role != RolePasswordText && role != roleText && role != roleEntry {
-		return false, nil
-	}
-	states, err := w.q.States(ctx, last)
-	if err != nil {
-		if gone(err) {
-			w.Focus(last, false)
-			return false, nil
-		}
-		return false, fmt.Errorf("%w: %v", ErrNoA11y, err)
-	}
-	if len(states) == 0 || states[0]&(1<<stateFocused) == 0 {
-		return false, nil
-	}
-	if role == RolePasswordText {
-		return true, nil
-	}
-	lq, ok := w.q.(labelQuery)
+	sd, ok := w.q.(Seeder)
 	if !ok {
 		return false, nil
 	}
-	return labelledPassword(ctx, w.q, lq, last)
+	a, found, err := sd.Focused(ctx)
+	if err != nil {
+		return false, fmt.Errorf("%w: %v", ErrNoA11y, err)
+	}
+	if !found {
+		return false, nil
+	}
+	w.Focus(a, true)
+	pw, _, err := w.check(ctx, a)
+	return pw, err
+}
+
+// check reads one control: is it focused, and is it a password field.
+func (w *PasswordWatch) check(ctx context.Context, a Accessible) (password, focused bool, err error) {
+	role, err := w.q.Role(ctx, a)
+	if err != nil {
+		if gone(err) {
+			w.Focus(a, false)
+			return false, false, nil
+		}
+		return false, false, fmt.Errorf("%w: %v", ErrNoA11y, err)
+	}
+	states, err := w.q.States(ctx, a)
+	if err != nil {
+		if gone(err) {
+			w.Focus(a, false)
+			return false, false, nil
+		}
+		return false, false, fmt.Errorf("%w: %v", ErrNoA11y, err)
+	}
+	if len(states) == 0 || states[0]&(1<<stateFocused) == 0 {
+		return false, false, nil
+	}
+	switch role {
+	case RolePasswordText:
+		return true, true, nil
+	case roleText, roleEntry:
+		lq, ok := w.q.(labelQuery)
+		if !ok {
+			return false, true, nil
+		}
+		pw, err := labelledPassword(ctx, w.q, lq, a)
+		return pw, true, err
+	}
+	return false, true, nil
 }
 
 // labelQuery is what the GTK4 label heuristic needs from the bus.
@@ -695,6 +720,42 @@ func (w *PasswordWatch) DescribeFocused(ctx context.Context, title string) (role
 	return clean(r, maxDescribeName), clean(n, maxDescribeName)
 }
 
+// frameQuery measures a frame (FrameSize).
+type frameQuery interface {
+	pointQuery
+	extents(ctx context.Context, a Accessible) (x, y, w, h int32, err error)
+}
+
+func (b busQuery) extents(ctx context.Context, a Accessible) (x, y, w, h int32, err error) {
+	var r struct{ X, Y, W, H int32 }
+	err = b.conn.Object(a.Bus, a.Path).CallWithContext(ctx, "org.a11y.atspi.Component.GetExtents", 0,
+		uint32(coordTypeWindow)).Store(&r)
+	return r.X, r.Y, r.W, r.H, err
+}
+
+// FrameSize measures the window titled title (found as DescribeAt finds it)
+// in logical pixels. jarvis-cu uses it to keep only the area a fullscreen
+// window really covers: a window that does not resize leaves what is behind
+// it on screen. ok=false whenever it cannot tell.
+func (w *PasswordWatch) FrameSize(ctx context.Context, title string) (width, height int, ok bool) {
+	if w == nil || !w.Live() || title == "" {
+		return 0, 0, false
+	}
+	fq, isFrame := w.q.(frameQuery)
+	if !isFrame {
+		return 0, 0, false
+	}
+	frame, found := findFrame(ctx, fq, title)
+	if !found {
+		return 0, 0, false
+	}
+	_, _, fw, fh, err := fq.extents(ctx, frame)
+	if err != nil || fw <= 0 || fh <= 0 || fw > 1<<15 || fh > 1<<15 {
+		return 0, 0, false
+	}
+	return int(fw), int(fh), true
+}
+
 // StartPasswordWatch turns accessibility on for toolkits that wait to be
 // asked (org.a11y.Status.IsEnabled), connects to the accessibility bus,
 // registers for focus events and starts tracking. The func closes it.
@@ -746,4 +807,7 @@ func StartPasswordWatch(ctx context.Context) (*PasswordWatch, func(), error) {
 	}, nil
 }
 
-var _ labelQuery = busQuery{}
+var (
+	_ labelQuery = busQuery{}
+	_ frameQuery = busQuery{}
+)

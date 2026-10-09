@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"image"
 	"slices"
 	"sync"
 	"time"
@@ -75,9 +76,14 @@ type Deps struct {
 	// DescribeFocused names the accessible with keyboard focus when it
 	// belongs to the window titled title; nil answers "unknown".
 	DescribeFocused func(ctx context.Context, title string) (role, name string)
-	Push            func(proto.Event)
-	Sleep           func(time.Duration)
-	After           func(time.Duration, func())
+	// FrameSize measures the window titled title (logical pixels, from
+	// AT-SPI); ok=false when it cannot. A fullscreen window that does not
+	// resize leaves what is behind it on screen, so captures keep only its
+	// own area. nil: never known.
+	FrameSize func(ctx context.Context, title string) (w, h int, ok bool)
+	Push      func(proto.Event)
+	Sleep     func(time.Duration)
+	After     func(time.Duration, func())
 }
 
 // Limits (plan U Global Constraints).
@@ -90,6 +96,7 @@ const (
 	fullscreenPolls = 20
 	fullscreenPoll  = 50 * time.Millisecond
 	focusDebounce   = 250 * time.Millisecond
+	frameTimeout    = 500 * time.Millisecond
 )
 
 type shot struct {
@@ -98,12 +105,19 @@ type shot struct {
 	scale                  int    // wl_output.scale of the output (>= 1)
 	blanked                bool   // the frame was blanked: pointer input must not target it
 	baseID                 string // the base this frame showed
+	// keep is the base's own area in output pixels when it does not fill
+	// the output (everything else was masked); empty = the whole output.
+	keep image.Rectangle
+	// unseen: the base moved to a window that could not be measured, so the
+	// frame was blanked and no input may reach it.
+	unseen bool
 }
 
 type state struct {
 	apps         []string
 	index        *policy.AppIndex
 	baseID       string
+	firstBase    string // the base chosen at begin (trusted to fill the screen when unmeasurable)
 	fullscreened map[string]bool
 	ops          int
 	shot         *shot
@@ -300,6 +314,9 @@ func (m *Manager) pickBase(v *view) (moved bool) {
 	m.s.baseID = ""
 	if v.base != nil {
 		m.s.baseID = v.base.ID
+		if m.s.firstBase == "" {
+			m.s.firstBase = v.base.ID
+		}
 	}
 	m.smu.Lock()
 	if m.wBase != m.s.baseID {
@@ -444,8 +461,12 @@ func (m *Manager) windowList(v view) []proto.Window {
 		if w.Allowed {
 			w.Title = t.Title
 		}
-		if v.base != nil && t.ID == v.base.ID && t.Fullscreen && m.s.shot != nil {
-			w.W, w.H = m.s.shot.capW, m.s.shot.capH
+		if sh := m.s.shot; v.base != nil && t.ID == v.base.ID && t.Fullscreen && sh != nil && !sh.unseen {
+			w.W, w.H = sh.capW, sh.capH
+			if !sh.keep.Empty() {
+				w.W = sh.keep.Dx() * sh.capW / sh.outW
+				w.H = sh.keep.Dy() * sh.capH / sh.outH
+			}
 		}
 		out = append(out, w)
 	}
@@ -476,6 +497,33 @@ func clampEdge(n int) int {
 		return MaxMaxEdge
 	}
 	return n
+}
+
+// coverage says how much of the output the fullscreen base really covers.
+// A window that does not resize to the output (a fixed-size dialog) sits at
+// the output's top-left corner with whatever is behind it around it: keep
+// only its own area. A base that cannot be measured is trusted only when it
+// is the window chosen at begin (apps without accessibility fail open,
+// threat model); a base that focus moved to (a dialog) is blanked and no
+// input may reach it.
+func (m *Manager) coverage(base *wlcu.Toplevel, frame image.Rectangle, scale int) (keep image.Rectangle, blank, unseen bool) {
+	w, h, ok := 0, 0, false
+	if m.d.FrameSize != nil && base.Title != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), frameTimeout)
+		w, h, ok = m.d.FrameSize(ctx, base.Title)
+		cancel()
+	}
+	if !ok || w <= 0 || h <= 0 {
+		if base.ID == m.s.firstBase {
+			return image.Rectangle{}, false, false
+		}
+		return image.Rectangle{}, true, true
+	}
+	r := image.Rect(frame.Min.X, frame.Min.Y, frame.Min.X+w*scale, frame.Min.Y+h*scale).Intersect(frame)
+	if r == frame {
+		return image.Rectangle{}, false, false
+	}
+	return r, false, false
 }
 
 // outputOf picks the screen to copy. matched is true only when the base
@@ -538,14 +586,22 @@ func (m *Manager) Capture(p proto.Capture) (*proto.CaptureResult, error) {
 	same := err2 == nil && v.base != nil && v2.base != nil && v2.base.ID == v.base.ID &&
 		v.focused != nil && v2.focused != nil && v2.focused.ID == v.focused.ID
 	blanked := !matched || !same || !m.visible(v) || !m.visible(v2)
-	if blanked {
+	var keep image.Rectangle
+	unseen := false
+	if !blanked {
+		keep, blanked, unseen = m.coverage(v.base, rgba.Bounds(), max(int(out.Scale), 1))
+	}
+	switch {
+	case blanked:
 		img.Blank(rgba)
+	case !keep.Empty():
+		img.Mask(rgba, []image.Rectangle{keep})
 	}
 	small, scale := img.Downscale(rgba, clampEdge(p.MaxEdge))
 	data, err := img.EncodePNG(small)
 	sh := &shot{output: out.Name, outW: rgba.Bounds().Dx(), outH: rgba.Bounds().Dy(),
 		capW: small.Bounds().Dx(), capH: small.Bounds().Dy(),
-		scale: max(int(out.Scale), 1), blanked: blanked}
+		scale: max(int(out.Scale), 1), blanked: blanked, keep: keep, unseen: unseen}
 	if v.base != nil {
 		sh.baseID = v.base.ID
 	}

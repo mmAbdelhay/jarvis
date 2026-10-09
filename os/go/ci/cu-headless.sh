@@ -4,6 +4,7 @@
 #   ci/cu-headless.sh               build, then run (needs Go and Docker)
 #   ci/cu-headless.sh --build-only  build into $CU_E2E_DIR (dev Mac)
 #   ci/cu-headless.sh --run-only    run what is in $CU_E2E_DIR (Linux box / CI)
+#   CU_E2E_GIMP=1 ci/cu-headless.sh ...  run the real-GIMP export test instead
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 gomod="$(cd "$here/.." && pwd)"
@@ -19,4 +20,4 @@ if [ "$mode" != "--run-only" ]; then
   cp "$here/cu-headless-inner.sh" "$out/"
 fi
 [ "$mode" = "--build-only" ] && { echo "built into $out"; exit 0; }
-perl -e 'alarm 900; exec @ARGV' docker run --rm -v "$out:/work:ro" debian:trixie bash /work/cu-headless-inner.sh
+perl -e 'alarm 900; exec @ARGV' docker run --rm -e CU_E2E_GIMP="${CU_E2E_GIMP:-0}" -e CU_E2E_GTK3="${CU_E2E_GTK3:-0}" -v "$out:/work:ro" debian:trixie bash /work/cu-headless-inner.sh

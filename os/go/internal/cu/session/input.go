@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"image"
 	"math"
 	"time"
 
@@ -71,6 +72,9 @@ func (m *Manager) gateInput(keyboard bool) (*shot, error) {
 	if sh == nil {
 		return nil, proto.Errorf(proto.CodeFailed, "capture the screen before acting on it")
 	}
+	if sh.unseen {
+		return nil, proto.Errorf(proto.CodeOutside, "the window in front could not be measured, so Jarvis did not show it and will not act on it; close it or move focus back")
+	}
 	if sh.baseID != v.base.ID {
 		return nil, proto.Errorf(proto.CodeOutside, "the window in front changed since the last capture; capture again")
 	}
@@ -129,6 +133,9 @@ func (sh *shot) toOutput(x, y float64) (int, int, error) {
 	}
 	ox := min(int(math.Floor(x*float64(sh.outW)/float64(sh.capW))), sh.outW-1)
 	oy := min(int(math.Floor(y*float64(sh.outH)/float64(sh.capH))), sh.outH-1)
+	if !sh.keep.Empty() && !image.Pt(ox, oy).In(sh.keep) {
+		return 0, 0, proto.Errorf(proto.CodeOutside, "(%g, %g) is beside the window in front, outside the allowed area", x, y)
+	}
 	return ox, oy, nil
 }
 

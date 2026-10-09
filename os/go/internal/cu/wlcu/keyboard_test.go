@@ -125,7 +125,7 @@ func TestCombo(t *testing.T) {
 	if got := keyEvents(f); !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %v", got)
 	}
-	if !strings.Contains(f.keymaps[0], "key <K12> { [ s ] };") {
+	if !strings.Contains(f.keymaps[0], "key <K12> { [ s, S ] };") {
 		t.Fatal(f.keymaps[0])
 	}
 }
@@ -152,5 +152,21 @@ func TestTypeRejectsInvalidLaterBatchBeforeInput(t *testing.T) {
 	}
 	if got := keyEvents(f); len(got) != 0 {
 		t.Fatalf("invalid sequence sent %d keymap/input events", len(got))
+	}
+}
+
+// Real GIMP on labwc ignored ctrl+shift+e: with a one-level key, Shift left
+// the keysym at "e", and GTK3 accelerators written with a capital letter
+// never matched. A lowercase letter is a two-level key like on a real
+// keyboard, so Shift gives the capital (and is consumed).
+func TestBuildKeymapLettersHaveACapitalLevel(t *testing.T) {
+	km, err := BuildKeymap([]string{"e", "Return", "E", "U0627"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"key <K12> { [ e, E ] };", "key <K13> { [ Return ] };", "key <K14> { [ E ] };", "key <K15> { [ U0627 ] };"} {
+		if !strings.Contains(km, want) {
+			t.Fatalf("missing %q in\n%s", want, km)
+		}
 	}
 }
