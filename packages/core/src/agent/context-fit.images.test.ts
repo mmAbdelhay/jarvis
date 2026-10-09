@@ -42,4 +42,24 @@ describe("context fitting with screenshots", () => {
     const last = fitted[4];
     expect(last?.role === "tool" && last.results[0]?.image).toBeDefined();
   });
+
+  it("reserves the latest screenshot's token cost when cutting its text", () => {
+    const turn: ModelMessage[] = [
+      { role: "user", text: "go" },
+      { role: "assistant", text: "", toolCalls: [{ id: "a", name: "screen_look", input: {} }] },
+      {
+        role: "tool",
+        results: [
+          { callId: "a", name: "screen_look", content: "x".repeat(8_000), isError: false, image },
+        ],
+      },
+    ];
+    const fitted = fitHistory(turn, 2_400);
+    expect(fitted.reduce((sum, message) => sum + messageTokens(message), 0)).toBeLessThanOrEqual(
+      2_400,
+    );
+    const latest = fitted[2];
+    expect(latest?.role === "tool" && latest.results[0]?.image).toEqual(image);
+    expect(turn[2]?.role === "tool" && turn[2].results[0]?.content).toBe("x".repeat(8_000));
+  });
 });
