@@ -141,7 +141,7 @@ ColumnLayout {
                     font.pixelSize: Theme.fontSmall
                     elide: Text.ElideRight
                 }
-                ComboBox {
+                ThemedCombo {
                     objectName: "mount_" + modelData.path
                     implicitWidth: 150
                     model: root.disk.mountPoints

@@ -25,34 +25,15 @@ ColumnLayout {
         color: Theme.muted
         font.pixelSize: Theme.fontSmall
     }
-    ComboBox {
+    ThemedCombo {
         id: box
         Layout.fillWidth: true
-        implicitHeight: Theme.controlHeight
         model: root.model
         textRole: "text"
         valueRole: "value"
         onModelChanged: root.syncValue()
         onCountChanged: root.syncValue()
-        font.family: Theme.sans
-        font.pixelSize: Theme.fontSize
         Accessible.name: root.label
-        contentItem: Text {
-            leftPadding: 12
-            rightPadding: 12
-            horizontalAlignment: Text.AlignLeft
-            text: box.displayText
-            textFormat: Text.PlainText
-            font: box.font
-            color: Theme.text
-            verticalAlignment: Text.AlignVCenter
-            elide: Text.ElideRight
-        }
-        background: Rectangle {
-            radius: Theme.radiusControl
-            color: Theme.surface
-            border.color: box.activeFocus ? Theme.accentTintBorder : Theme.borderStrong
-        }
         onActivated: root.picked(currentValue)
     }
 }

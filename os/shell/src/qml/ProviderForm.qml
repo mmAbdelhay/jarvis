@@ -144,11 +144,10 @@ ColumnLayout {
             color: Theme.muted
             font.pixelSize: Theme.fontSmall
         }
-        ComboBox {
+        ThemedCombo {
             id: picker
             objectName: "modelPicker"
             Layout.fillWidth: true
-            implicitHeight: Theme.controlHeight
             model: root.provider.models
             enabled: count > 0
             displayText: root.provider.model.length > 0 ? root.provider.model : qsTr("Models load after the connection check")
