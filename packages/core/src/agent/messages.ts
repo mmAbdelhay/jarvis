@@ -156,6 +156,13 @@ const ACTIVITY_EN = {
   "disks.format_removable": "Formatting a drive",
   "recipes.list": "Reading setup recipes",
   "recipes.run": "Running a setup recipe",
+  "screen.look": "Looking at the screen",
+  "screen.click": "Clicking on the screen",
+  "screen.type": "Typing on the screen",
+  "screen.key": "Pressing keys",
+  "screen.scroll": "Scrolling",
+  "screen.drag": "Dragging on the screen",
+  "screen.done": "Finishing computer use",
 };
 
 const ACTIVITY_AR: Record<keyof typeof ACTIVITY_EN, string> = {
@@ -224,6 +231,13 @@ const ACTIVITY_AR: Record<keyof typeof ACTIVITY_EN, string> = {
   "disks.format_removable": "تهيئة قرص",
   "recipes.list": "قراءة وصفات الإعداد",
   "recipes.run": "تنفيذ وصفة إعداد",
+  "screen.look": "النظر إلى الشاشة",
+  "screen.click": "النقر على الشاشة",
+  "screen.type": "الكتابة على الشاشة",
+  "screen.key": "الضغط على المفاتيح",
+  "screen.scroll": "التمرير",
+  "screen.drag": "السحب على الشاشة",
+  "screen.done": "إنهاء استخدام الحاسوب",
 };
 
 export const TOOL_ACTIVITY: Localized<Readonly<Record<string, string>>> = {
