@@ -193,7 +193,7 @@ func sanitizeOp(op string) string {
 	}
 	b := []byte(op)
 	for i, ch := range b {
-		if !(ch >= 'a' && ch <= 'z' || ch == '-') {
+		if !(ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z' || ch == '-') {
 			b[i] = '?'
 		}
 	}
