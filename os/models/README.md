@@ -44,3 +44,28 @@ Tiers group models by hardware: `small` and `medium` run on CPU/modest RAM,
 only when you dispatch with the input `large_runner` set to the label of a big
 runner; otherwise the job emits a warning and skips them
 (`tools/matrix.py`).
+
+## Local vision model (computer use)
+
+`vision-candidates.json` lists local models that might see screenshots. The
+`vision-probe` job of `os-models.yml` (weekly, or `gh workflow run os-models.yml -f vision=true`)
+checks at Jarvis’s runtime context size (8,192 tokens) that Ollama reports
+the `vision` and `tools` capabilities and that the model clicks a red button in two of three 1280x800 screenshots, in pixel
+coordinates (`probe/vision-probe.test.ts`). Record results with
+`tools/vision_pick.py record --result vision-<id>.json --run-id <run>`;
+`tools/vision_pick.py apply` adds the smallest passing model that runs in 16 GB
+to `catalog.json` with `vision: true`. At most one; none if nothing passes.
+
+The recorder rejects passing results with missing capabilities, the wrong
+context size, or fewer than two hits across exactly three trials. A failed
+run replaces earlier passing evidence. Candidate sizes must be refreshed
+and verified against registry manifests before merging:
+
+```sh
+python3 os/models/tools/check_registry.py os/models/vision-candidates.json --fix
+python3 os/models/tools/check_registry.py os/models/vision-candidates.json
+```
+
+No candidate has passing evidence yet; the catalog remains cloud-only for
+computer use. The initial candidate sizes are placeholders pending registry
+verification and must not be treated as verified download sizes.
