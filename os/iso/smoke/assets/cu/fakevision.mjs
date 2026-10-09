@@ -12,6 +12,15 @@
 //
 //   node fakevision.mjs --script FILE --report FILE [--port 11500] [--host 127.0.0.1]
 //
+// Mask assertions: turn.mask defaults to {mode:"outside"}; step.mask overrides
+// it for images returned by that call. {mode:"all-black"} asserts every pixel
+// is black even with a fullscreen allowed rectangle or summary-only result.
+// {mode:"fixture",pngBase64:"..."} compares decoded dimensions and RGB pixels
+// before setting fullFrameChecked. Never set that flag from a script boolean.
+// X10/X11 must treat vacuous:true + ok:false as missing privacy evidence, not
+// a detected leak or a pass. Use controlled all-black captures or exact fixture
+// evidence before asserting all images ok. Summary-only results cannot supply
+// target geometry; outside targets then fail closed and record a problem.
 // Strings in the script may use ${NAME} for environment variables (HOME, GIMP_APP).
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -84,9 +93,12 @@ export function resolveTarget(target, windows) {
   if (target?.outside === true) {
     // U-1 redacts foreign rectangles and fills the capture with the allowed
     // window. In that case use a coordinate beyond every reported rectangle.
+    const allowed = windows.filter(w => w?.allowed === true &&
+      [w.x, w.y, w.w, w.h].every(Number.isFinite) && w.w > 0 && w.h > 0);
+    if (allowed.length === 0) return null;
     return foreignPoint(windows) ?? {
-      x: Math.max(0, ...windows.map((w) => Number(w.x) + Number(w.w))) + 4,
-      y: Math.max(0, ...windows.map((w) => Number(w.y) + Number(w.h))) + 4,
+      x: Math.max(0, ...allowed.map((w) => w.x + w.w)) + 4,
+      y: Math.max(0, ...allowed.map((w) => w.y + w.h)) + 4,
     };
   }
   if (typeof target?.window !== "string") return null;
@@ -113,12 +125,12 @@ export function createFakeVision(script, { env = process.env } = {}) {
 
   function inspect(messages, record) {
     let info = null;
-    for (const m of messages) {
+    for (const [messageIndex, m] of messages.entries()) {
       const data = resultBody(m?.content);
       if ((m?.role === "tool" || Array.isArray(m?.images)) && Array.isArray(data?.windows)) info = data;
       for (const b64 of Array.isArray(m?.images) ? m.images : []) {
         const digest = createHash("sha256").update(String(b64)).digest("hex");
-        const key = JSON.stringify([record === null ? "off" : report.turns.indexOf(record), digest, info?.windows]);
+        const key = JSON.stringify([record === null ? "off" : report.turns.indexOf(record), messageIndex, digest, info?.windows]);
         if (seen.has(key)) continue;
         seen.add(key);
         if (record === null) {
@@ -128,7 +140,29 @@ export function createFakeVision(script, { env = process.env } = {}) {
         const id = digest.slice(0, 16);
         try {
           const image = decodePng(Buffer.from(String(b64), "base64"));
-          record.images.push({ sha256: id, ...checkMask(image, info?.windows ?? [], { maxEdge: script.maxEdge ?? 1280 }) });
+          const mask = substitute(active.last?.mask ?? active.turn.mask ?? { mode: "outside" }, env);
+          const options = { maxEdge: script.maxEdge ?? 1280 };
+          let fixtureMatches = null;
+          if (mask.mode === "all-black") options.expectAllBlack = true;
+          else if (mask.mode === "fixture") {
+            const fixture = decodePng(Buffer.from(mask.pngBase64, "base64"));
+            fixtureMatches = fixture.width === image.width && fixture.height === image.height &&
+              Buffer.from(fixture.pixels).equals(Buffer.from(image.pixels));
+            options.fullFrameChecked = fixtureMatches;
+          } else if (mask.mode !== "outside") throw new Error(`unknown mask mode: ${mask.mode}`);
+          const checked = checkMask(image, info?.windows ?? [], options);
+          // Full-frame assertions do not require window metadata from V's
+          // text summary. Preserve all pixel/size failures; waive only the
+          // metadata prerequisite after an independent full-frame assertion.
+          if (mask.mode === "all-black" || fixtureMatches === true) {
+            checked.problems = checked.problems.filter(p => p !== "the capture's window list has no allowed window");
+            checked.ok = checked.problems.length === 0;
+          }
+          if (fixtureMatches === false) {
+            checked.ok = false;
+            checked.problems.push("full-frame fixture mismatch");
+          }
+          record.images.push({ sha256: id, maskMode: mask.mode, ...checked });
         } catch (error) {
           record.images.push({ sha256: id, ok: false, problems: [`undecodable screenshot: ${error.message}`] });
         }
@@ -185,6 +219,7 @@ export function createFakeVision(script, { env = process.env } = {}) {
         Object.assign(input, point);
       }
       record.input = input;
+      if (step.mask !== undefined) record.mask = step.mask;
       if (step.expectError !== undefined) record.expectError = [step.expectError].flat();
       active.last = record;
       return { call: { name: step.call, arguments: input }, holdMs: Math.round(Number(step.hold ?? 0) * 1000) };

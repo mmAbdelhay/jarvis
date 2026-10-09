@@ -67,98 +67,13 @@
           "input": {}
         },
         {
-          "call": "screen_key",
-          "input": {
-            "combo": "ctrl+shift+e"
-          }
-        },
-        {
-          "call": "screen_look",
-          "input": {}
-        },
-        {
-          "call": "screen_key",
-          "input": {
-            "combo": "ctrl+a"
-          },
-          "onlyIfWindow": "Export Image"
-        },
-        {
-          "call": "screen_type",
-          "input": {
-            "text": "${HOME}/Pictures/beach.png"
-          },
-          "onlyIfWindow": "Export Image"
-        },
-        {
-          "call": "screen_key",
-          "input": {
-            "combo": "Return"
-          }
-        },
-        {
-          "call": "screen_look",
-          "input": {}
-        },
-        {
-          "call": "screen_click",
-          "target": {
-            "window": "Export Image as PNG",
-            "from": "bottom-right",
-            "inset": [
-              46,
-              24
-            ]
-          },
-          "input": {
-            "button": "left",
-            "intent": "save"
-          }
-        },
-        {
-          "call": "screen_look",
-          "input": {}
-        },
-        {
           "call": "screen_done",
           "input": {
-            "summary": "Exported beach.png."
+            "summary": "Export blocked by U-1 dialog capture contract; U/V resolution required."
           }
         },
         {
-          "text": "Exported beach.png."
-        }
-      ],
-      "onDenied": [
-        {
-          "call": "screen_key",
-          "input": {
-            "combo": "Escape"
-          }
-        },
-        {
-          "call": "screen_look",
-          "input": {}
-        },
-        {
-          "call": "screen_key",
-          "input": {
-            "combo": "Escape"
-          },
-          "onlyIfWindow": "Export Image"
-        },
-        {
-          "call": "screen_look",
-          "input": {}
-        },
-        {
-          "call": "screen_done",
-          "input": {
-            "summary": "Export not approved."
-          }
-        },
-        {
-          "text": "Stopped: you did not approve the export."
+          "text": "Export blocked: U/V must resolve invisible dialog capture and input before approval or denial can be tested."
         }
       ]
     },
@@ -180,77 +95,13 @@
           "input": {}
         },
         {
-          "call": "screen_key",
-          "input": {
-            "combo": "ctrl+shift+e"
-          }
-        },
-        {
-          "call": "screen_look",
-          "input": {}
-        },
-        {
-          "call": "screen_key",
-          "input": {
-            "combo": "ctrl+a"
-          },
-          "onlyIfWindow": "Export Image"
-        },
-        {
-          "call": "screen_type",
-          "input": {
-            "text": "${HOME}/Pictures/beach.png"
-          },
-          "onlyIfWindow": "Export Image"
-        },
-        {
-          "call": "screen_key",
-          "input": {
-            "combo": "Return"
-          }
-        },
-        {
-          "call": "screen_look",
-          "input": {}
-        },
-        {
-          "call": "screen_click",
-          "target": {
-            "window": "Export Image as PNG",
-            "from": "bottom-right",
-            "inset": [
-              46,
-              24
-            ]
-          },
-          "input": {
-            "button": "left",
-            "intent": "save"
-          }
-        },
-        {
-          "call": "screen_look",
-          "input": {}
-        },
-        {
-          "call": "screen_key",
-          "input": {
-            "combo": "Return"
-          },
-          "onlyIfWindow": "Export Image as PNG"
-        },
-        {
-          "call": "screen_look",
-          "input": {}
-        },
-        {
           "call": "screen_done",
           "input": {
-            "summary": "Exported beach.png to Pictures."
+            "summary": "Export blocked by U-1 dialog capture contract; U/V resolution required."
           }
         },
         {
-          "text": "Done: beach.png is in Pictures."
+          "text": "Export blocked: U/V must resolve invisible dialog capture and input before approval or denial can be tested."
         }
       ]
     },
@@ -287,7 +138,10 @@
         {
           "text": "I cannot type while a terminal has focus."
         }
-      ]
+      ],
+      "mask": {
+        "mode": "all-black"
+      }
     },
     {
       "name": "stuck",
@@ -433,5 +287,9 @@
         }
       ]
     }
+  ],
+  "concerns": [
+    "Escalation to U/V: contracts §4 U-1 makes only the original allowed GIMP toplevel fullscreen. Export Image and Export Image as PNG are separate toplevels: their titles/rectangles are redacted and their focus makes captures all black. X cannot locate or verify their save buttons via screen.look. U/V must agree a safe visible, focusable dialog capture/input contract before X10/X11 can test Review Focus 4 (deny leaves no file; approve writes PNG). These turns are blocked and do not claim consequential-card or export coverage.",
+    "X10/X11: ordinary fullscreen screenshots have vacuous:true and ok:false because there are no foreign pixels to inspect. This means missing mask evidence, not a leak. Require a controlled all-black capture (turn.mask or step.mask mode all-black), or a known full-frame fixture (mode fixture with pngBase64) before asserting ok. Excluded-focus captures must be all black. Summary-only screen.look cannot provide outside-target geometry."
   ]
 }

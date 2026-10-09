@@ -206,7 +206,7 @@ test("U-1: fullscreen images fail closed rather than claiming mask evidence", ()
   assert.equal(core.report.turns[0].images[0].ok, false);
 });
 
-test("fixture flows use cu.begin before capture, including denial cleanup", () => {
+test("fixture flows use cu.begin before capture, with explicit blocked export coverage", () => {
   const script = JSON.parse(readFileSync(new URL("./cu-gimp.json", import.meta.url), "utf8"));
   assert.deepEqual(script.turns.map((t) => t.name), ["off", "probe", "deny", "export", "excluded", "stuck", "lock", "physical"]);
   for (const turn of script.turns.filter((t) => t.name !== "off")) {
@@ -216,8 +216,8 @@ test("fixture flows use cu.begin before capture, including denial cleanup", () =
     assert.equal(turn.steps[1].call, "screen_look", turn.name);
     assert.deepEqual(turn.steps[1].input, {});
   }
-  assert.ok(script.turns.find((t) => t.name === "deny").onDenied.some((s) => s.call === "screen_done"));
-  assert.ok(script.turns.find((t) => t.name === "export").steps.some((s) => s.call === "screen_click" && s.input.intent === "save"));
+  assert.ok(script.turns.find((t) => t.name === "deny").steps.some((s) => s.call === "screen_done"));
+  assert.match(script.turns.find((t) => t.name === "export").steps.at(-1).text, /blocked/);
 });
 
 test("fixture creation accepts quotes in the output directory without evaluating them", () => {
@@ -256,4 +256,61 @@ test("checks each screenshot against its own capture metadata", () => {
   c.ask();
   assert.equal(core.report.turns[0].images.length, 2);
   assert.ok(core.report.turns[0].images.every((i) => i.ok));
+});
+
+test('outside target without an allowed rectangle records a problem instead of clicking', () => {
+  assert.equal(resolveTarget({ outside: true }, []), null);
+  assert.equal(resolveTarget({ outside: true }, [{ ...TERM, w: 0, h: 0 }]), null);
+  const core = createFakeVision({ turns: [{ name: 't', expectPromptContains: 'cu-unknown', steps: [
+    { call: 'screen_look' }, { call: 'screen_click', target: { outside: true } }, { text: 'done' },
+  ] }] });
+  const c = conversation(core, 'cu-unknown');
+  c.ask();
+  c.add(called('screen_look', {}), { role: 'tool', content: 'Fullscreen GIMP.' },
+    { role: 'user', images: [masked([GIMP]).toString('base64')] });
+  assert.deepEqual(c.ask(), { text: 'done' });
+  assert.match(core.report.turns[0].steps[1].problem, /no click target/);
+});
+
+test('per-step all-black mode checks repeated bytes again and detects focus leaks', () => {
+  const core = createFakeVision({ turns: [{ name: 't', expectPromptContains: 'cu-black', steps: [
+    { call: 'screen_look' }, { call: 'screen_look', mask: { mode: 'all-black' } }, { text: 'done' },
+  ] }] });
+  const c = conversation(core, 'cu-black');
+  const full = { ...GIMP, x: 0, y: 0, w: 100, h: 60 };
+  c.ask(); c.add(called('screen_look', {}), ...lookResult([full]));
+  c.ask(); c.add(called('screen_look', {}), ...lookResult([full])); c.ask();
+  const images = core.report.turns[0].images;
+  assert.equal(images.length, 2);
+  assert.equal(images[1].ok, false);
+  assert.ok(images[1].leakedPixels > 0);
+});
+
+test('turn all-black mode passes with summary-only screen.look', () => {
+  const core = createFakeVision({ turns: [{ name: 't', expectPromptContains: 'cu-black', mask: { mode: 'all-black' },
+    steps: [{ call: 'screen_look' }, { text: 'done' }] }] });
+  const c = conversation(core, 'cu-black'); c.ask();
+  c.add(called('screen_look', {}), { role: 'tool', content: 'Allowed window is not focused.' },
+    { role: 'user', images: [encodePng(100, 60, () => [0, 0, 0]).toString('base64')] }); c.ask();
+  assert.equal(core.report.turns[0].images[0].ok, true);
+});
+
+test('fixture mode proves full-frame pixels and rejects a changed fixture', () => {
+  const fixture = masked([{ ...GIMP, x: 0, y: 0, w: 100, h: 60 }]).toString('base64');
+  for (const [png, expected] of [[Buffer.from(fixture, 'base64'), true], [encodePng(100, 60, () => [1, 2, 3]), false]]) {
+    const core = createFakeVision({ turns: [{ name: 't', expectPromptContains: 'cu-fixture',
+      mask: { mode: 'fixture', pngBase64: fixture }, steps: [{ call: 'screen_look' }, { text: 'done' }] }] });
+    const c = conversation(core, 'cu-fixture'); c.ask();
+    c.add(called('screen_look', {}), ...lookResult([{ ...GIMP, x: 0, y: 0, w: 100, h: 60 }], png)); c.ask();
+    assert.equal(core.report.turns[0].images[0].ok, expected);
+  }
+});
+
+test('U-1 export fixtures explicitly escalate invisible dialogs without claiming an export', () => {
+  const script = JSON.parse(readFileSync(new URL('./cu-gimp.json', import.meta.url), 'utf8'));
+  assert.match(script.concerns.join('\n'), /U\/V/);
+  for (const turn of script.turns.filter(t => ['deny', 'export'].includes(t.name))) {
+    assert.ok(!turn.steps.some(s => s.onlyIfWindow || s.target?.window?.includes('Export Image')));
+    assert.match(turn.steps.at(-1).text, /blocked/i);
+  }
 });
