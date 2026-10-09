@@ -82,6 +82,8 @@ const (
 type shot struct {
 	output                 string
 	outW, outH, capW, capH int
+	scale                  int  // wl_output.scale of the output (>= 1)
+	blanked                bool // the frame was blanked: pointer input must not target it
 }
 
 type state struct {
@@ -510,13 +512,15 @@ func (m *Manager) Capture(p proto.Capture) (*proto.CaptureResult, error) {
 	v2, err2 := m.snapshot()
 	same := err2 == nil && v.base != nil && v2.base != nil && v2.base.ID == v.base.ID &&
 		v.focused != nil && v2.focused != nil && v2.focused.ID == v.focused.ID
-	if !matched || !same || !m.visible(v) || !m.visible(v2) {
+	blanked := !matched || !same || !m.visible(v) || !m.visible(v2)
+	if blanked {
 		img.Blank(rgba)
 	}
 	small, scale := img.Downscale(rgba, clampEdge(p.MaxEdge))
 	data, err := img.EncodePNG(small)
 	sh := &shot{output: out.Name, outW: rgba.Bounds().Dx(), outH: rgba.Bounds().Dy(),
-		capW: small.Bounds().Dx(), capH: small.Bounds().Dy()}
+		capW: small.Bounds().Dx(), capH: small.Bounds().Dy(),
+		scale: max(int(out.Scale), 1), blanked: blanked}
 	clear(rgba.Pix)
 	if small != rgba {
 		clear(small.Pix)

@@ -39,6 +39,9 @@ func (m *Manager) focusOK(v view) error {
 	if !m.allowed(*v.focused) {
 		return proto.Errorf(proto.CodeOutside, "the focused window (%s) is not one of the allowed apps", v.focused.AppID)
 	}
+	if m.isTainted() {
+		return proto.Errorf(proto.CodeOutside, "a window that is not allowed took focus and may still be on top; capture again")
+	}
 	if v.base == nil || !v.base.Fullscreen {
 		return proto.Errorf(proto.CodeOutside, "no allowed window fills the screen; capture again")
 	}
@@ -64,6 +67,9 @@ func (m *Manager) gateInput(keyboard bool) (*shot, error) {
 	sh := m.s.shot
 	if sh == nil {
 		return nil, proto.Errorf(proto.CodeFailed, "capture the screen before acting on it")
+	}
+	if !keyboard && sh.blanked {
+		return nil, proto.Errorf(proto.CodeOutside, "the last screenshot was blank, so Jarvis cannot aim; capture again")
 	}
 	outs, err := m.d.Desktop.Outputs()
 	if err != nil {
