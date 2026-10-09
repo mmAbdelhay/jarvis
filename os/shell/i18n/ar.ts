@@ -357,6 +357,57 @@
         </message>
     </context>
     <context>
+        <name>CuSettingsModel</name>
+        <message>
+            <source>This model can't see images, so it can't use the screen.</source>
+            <translation>هذا النموذج لا يرى الصور، لذا لا يستطيع استخدام الشاشة.</translation>
+        </message>
+        <message>
+            <source>Screenshots of the allowed windows go to %1.</source>
+            <translation>تُرسَل لقطات النوافذ المسموح بها إلى %1.</translation>
+        </message>
+        <message>
+            <source>Screenshots stay on this computer.</source>
+            <translation>تبقى لقطات الشاشة على هذا الحاسوب.</translation>
+        </message>
+        <message>
+            <source>a computer on your network</source>
+            <translation>حاسوب على شبكتك</translation>
+        </message>
+        <message>
+            <source>The Jarvis shell and Settings</source>
+            <translation>واجهة جارفيس والإعدادات</translation>
+        </message>
+        <message>
+            <source>Lock screen</source>
+            <translation>شاشة القفل</translation>
+        </message>
+        <message>
+            <source>Installer</source>
+            <translation>المثبّت</translation>
+        </message>
+        <message>
+            <source>Password prompts (polkit)</source>
+            <translation>نوافذ طلب كلمة المرور (polkit)</translation>
+        </message>
+        <message>
+            <source>Terminals</source>
+            <translation>الطرفيات</translation>
+        </message>
+        <message>
+            <source>Password fields in any app</source>
+            <translation>حقول كلمات المرور في أي تطبيق</translation>
+        </message>
+        <message>
+            <source>This version of Jarvis can't use the screen yet.</source>
+            <translation>لا يستطيع هذا الإصدار من جارفيس استخدام الشاشة بعد.</translation>
+        </message>
+        <message>
+            <source>Couldn't change computer use: %1</source>
+            <translation>تعذّر تغيير إعداد استخدام الحاسوب: %1</translation>
+        </message>
+    </context>
+    <context>
         <name>DoctorView</name>
         <message>
             <source>Can't reach the model: %1. Network doctor works without a model.</source>

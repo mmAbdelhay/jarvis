@@ -353,6 +353,57 @@
         </message>
     </context>
     <context>
+        <name>CuSettingsModel</name>
+        <message>
+            <source>This model can't see images, so it can't use the screen.</source>
+            <translation>This model can't see images, so it can't use the screen.</translation>
+        </message>
+        <message>
+            <source>Screenshots of the allowed windows go to %1.</source>
+            <translation>Screenshots of the allowed windows go to %1.</translation>
+        </message>
+        <message>
+            <source>Screenshots stay on this computer.</source>
+            <translation>Screenshots stay on this computer.</translation>
+        </message>
+        <message>
+            <source>a computer on your network</source>
+            <translation>a computer on your network</translation>
+        </message>
+        <message>
+            <source>The Jarvis shell and Settings</source>
+            <translation>The Jarvis shell and Settings</translation>
+        </message>
+        <message>
+            <source>Lock screen</source>
+            <translation>Lock screen</translation>
+        </message>
+        <message>
+            <source>Installer</source>
+            <translation>Installer</translation>
+        </message>
+        <message>
+            <source>Password prompts (polkit)</source>
+            <translation>Password prompts (polkit)</translation>
+        </message>
+        <message>
+            <source>Terminals</source>
+            <translation>Terminals</translation>
+        </message>
+        <message>
+            <source>Password fields in any app</source>
+            <translation>Password fields in any app</translation>
+        </message>
+        <message>
+            <source>This version of Jarvis can't use the screen yet.</source>
+            <translation>This version of Jarvis can't use the screen yet.</translation>
+        </message>
+        <message>
+            <source>Couldn't change computer use: %1</source>
+            <translation>Couldn't change computer use: %1</translation>
+        </message>
+    </context>
+    <context>
         <name>DoctorView</name>
         <message>
             <source>Can't reach the model: %1. Network doctor works without a model.</source>
