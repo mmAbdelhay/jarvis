@@ -1,5 +1,3 @@
-//go:build linux
-
 // Package e2e drives the real jarvis-cu binary against a real (headless)
 // labwc. Run via os/go/ci/cu-headless.sh; skipped elsewhere.
 package e2e
@@ -10,6 +8,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/color"
 	"image/png"
 	"net"
 	"os"
@@ -312,6 +312,9 @@ func TestComputerUseAgainstLabwc(t *testing.T) {
 		if !ok || ev.Reason != "excluded-focus" {
 			t.Fatalf("%+v %v", ev, ok)
 		}
+		if !blankCapture(t, cl.must("capture", map[string]any{"maxEdge": 640})) {
+			t.Fatal("excluded terminal focus exposed capture pixels")
+		}
 		obs.Activate(appWindow(t, obs, "wev").ID)
 		time.Sleep(300 * time.Millisecond)
 		cl.must("begin", map[string]any{"sessionId": "e2e", "appIds": []string{"wev"}})
@@ -378,4 +381,51 @@ func TestComputerUseAgainstLabwc(t *testing.T) {
 		cl.c.Close()
 		waitFor(t, "unfullscreen", func() bool { return !appWindow(t, obs, "wev").Fullscreen })
 	})
+}
+
+// A black centre alone does not prove that private content elsewhere is hidden.
+func TestBlankCaptureChecksEveryPixel(t *testing.T) {
+	m := image.NewRGBA(image.Rect(0, 0, 3, 3))
+	for _, tc := range []struct {
+		name   string
+		colour color.RGBA
+		want   bool
+	}{
+		{"black frame", color.RGBA{A: 255}, true},
+		{"visible corner", color.RGBA{R: 255, A: 255}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m.SetRGBA(0, 0, tc.colour)
+			var b bytes.Buffer
+			if err := png.Encode(&b, m); err != nil {
+				t.Fatal(err)
+			}
+			d := map[string]any{"pngBase64": base64.StdEncoding.EncodeToString(b.Bytes())}
+			if got := blankCapture(t, d); got != tc.want {
+				t.Fatalf("blank=%v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func blankCapture(t *testing.T, d map[string]any) bool {
+	t.Helper()
+	b, err := base64.StdEncoding.DecodeString(d["pngBase64"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := png.Decode(bytes.NewReader(b))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bounds := m.Bounds()
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			r, g, b, _ := m.At(x, y).RGBA()
+			if r != 0 || g != 0 || b != 0 {
+				return false
+			}
+		}
+	}
+	return true
 }
