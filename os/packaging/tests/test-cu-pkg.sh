@@ -21,7 +21,7 @@ check "no maintainer scripts: never enabled for every user (the autostart starts
 
 u=$d/jarvis-cu.service
 check "unit runs the contract binary" grep -qx 'ExecStart=/usr/libexec/jarvis/jarvis-cu' "$u"
-for line in 'UMask=0077' 'NoNewPrivileges=yes' 'RestrictAddressFamilies=AF_UNIX' 'Restart=on-failure' \
+for line in 'UMask=0077' 'NoNewPrivileges=yes' 'RestrictAddressFamilies=AF_UNIX AF_NETLINK' 'Restart=on-failure' \
   'ConditionEnvironment=WAYLAND_DISPLAY' 'LockPersonality=yes' 'RestrictNamespaces=yes'; do
   check "unit: $line" grep -qx "$line" "$u"
 done
