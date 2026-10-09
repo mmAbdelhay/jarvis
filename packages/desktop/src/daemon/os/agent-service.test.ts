@@ -767,6 +767,7 @@ describe("provider list and failover (M2.5 contracts §1-§2, design §3.5)", ()
           baseUrl: "http://127.0.0.1:11434",
           model: "qwen3:8b",
           hasKey: false,
+          vision: false,
         },
         {
           id: "work",
@@ -774,6 +775,7 @@ describe("provider list and failover (M2.5 contracts §1-§2, design §3.5)", ()
           baseUrl: "https://api.anthropic.com",
           model: "claude-sonnet-5-5",
           hasKey: true,
+          vision: true,
         },
       ],
       activeId: "local",

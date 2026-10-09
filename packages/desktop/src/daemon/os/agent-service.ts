@@ -6,6 +6,7 @@
 //
 // No electron here (core/no-electron.test.ts).
 import {
+  modelSupportsVision,
   AGENT_TEXT,
   BACKUP_BASE_URL,
   BACKUP_PROVIDER_ID,
@@ -135,6 +136,8 @@ export type OsAgentDeps = {
   /** M4 §1: the catalog's backup model tag (backup-model.ts readBackupTag);
    *  null or absent: no backup. Read at start and after provider:save. */
   readBackupTag?(): Promise<string | null>;
+  readVisionTags?(): Promise<ReadonlySet<string>>;
+  readOllamaVision?(baseUrl: string, model: string): Promise<boolean>;
   /** Add-on servers from mcp.d (registry-servers.ts); none when absent. */
   registryServers?: { load(): Promise<LoadedRegistry> };
   /** Calls onChange when mcp.d changes; returns a stop function. */
@@ -251,6 +254,11 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
     log: deps.log,
   });
   let backupTag: string | null = null;
+  let visionTags: ReadonlySet<string> = new Set();
+  const ollamaVision = new Set<string>();
+  const visionOf = (entry: ProviderEntry): boolean =>
+    modelSupportsVision(entry.kind, entry.model, visionTags) ||
+    (entry.kind === "ollama" && ollamaVision.has(entry.id));
   /** The backup as a provider entry (fixed loopback URL, M4 §1). */
   function backupEntry(): ProviderEntry | null {
     return backupTag === null
@@ -535,6 +543,23 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
       brain = emptyBrain();
     }
     if (brain.language !== null) uiLanguage = brain.language;
+    visionTags = new Set();
+    ollamaVision.clear();
+    try {
+      visionTags = (await deps.readVisionTags?.()) ?? new Set();
+    } catch {
+      deps.log("[vision] catalog unavailable");
+    }
+    await Promise.all(
+      brain.providers.map(async (entry) => {
+        if (entry.kind !== "ollama" || visionOf(entry)) return;
+        try {
+          if (await deps.readOllamaVision?.(entry.baseUrl, entry.model)) ollamaVision.add(entry.id);
+        } catch {
+          deps.log("[vision] capabilities unavailable");
+        }
+      }),
+    );
     failover = undefined;
     // JARVIS_FAKE_PROVIDER replaces the configured providers entirely (contracts §6 #11).
     if (deps.fakeScript !== undefined) {
@@ -812,6 +837,7 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
           baseUrl: entry.baseUrl,
           model: entry.model,
           hasKey: await hasProviderKey(entry, keyStores()),
+          vision: visionOf(entry),
         })),
       );
       return {

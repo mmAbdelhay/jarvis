@@ -62,6 +62,7 @@ import {
 } from "../log-file.js";
 import { loadRecipeFiles, parseOsReleaseId } from "./recipe-files.js";
 import { createOsAgent } from "./agent-service.js";
+import { readVisionTags, readOllamaVision } from "./catalog-vision.js";
 import { readBackupTag } from "./backup-model.js";
 import { createEnvKeyStore, takeEnvProviderKeys } from "./provider-keys.js";
 import { createMemoryBackendOpener } from "./memory-backend.js";
@@ -363,6 +364,9 @@ async function main(argv: readonly string[]): Promise<void> {
     ...(readonlyProfile
       ? {}
       : {
+          readVisionTags: () =>
+            readVisionTags(MODEL_CATALOG_PATH, (path) => readFile(path, "utf8"), info),
+          readOllamaVision: (baseUrl, model) => readOllamaVision(baseUrl, model, fetch),
           readBackupTag: () =>
             readBackupTag(MODEL_CATALOG_PATH, (path) => readFile(path, "utf8"), info),
         }),

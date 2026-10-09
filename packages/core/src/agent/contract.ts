@@ -13,7 +13,7 @@ export type ProviderConfig = {
 export type ProviderDraft = { kind: ProviderKind; baseUrl: string; model: string; apiKey?: string };
 export type ProbeResult = { ok: boolean; supportsTools: boolean; models: string[]; error?: string };
 /** The provider:status push. Not "ProviderStatus": core already exports one. */
-export type ProviderListEntry = ProviderConfig & { id: string };
+export type ProviderListEntry = ProviderConfig & { id: string; vision: boolean };
 export type ProviderDraftEntry = ProviderDraft & { id: string };
 export type ProviderListResult = {
   providers: ProviderListEntry[];
