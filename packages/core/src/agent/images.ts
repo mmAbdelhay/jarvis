@@ -4,7 +4,7 @@
 // Every request keeps only the newest screenshot (older ones become a short
 // note), and a screenshot is counted as a fixed token cost, never as the
 // length of its base64. Pure.
-import type { ModelMessage, ModelToolResult } from "./types.js";
+import type { ModelMessage, ModelProvider, ModelToolResult } from "./types.js";
 
 /** What one ≤1280-px screenshot costs in context (Anthropic: w*h/750 ≈ 1 400). */
 export const IMAGE_TOKENS = 1_600;
@@ -40,4 +40,40 @@ export function keepLatestImages(messages: readonly ModelMessage[], keep = 1): M
     out[i] = { role: "tool", results };
   }
   return out;
+}
+
+export const IMAGE_WITHHELD = "[Screenshot withheld: this model may not see the screen.]";
+
+export function hasImages(messages: readonly ModelMessage[]): boolean {
+  return messages.some((m) => m.role === "tool" && m.results.some((r) => r.image !== undefined));
+}
+
+/** A copy with no image anywhere (history kept after a turn, memory, other providers). */
+export function stripImages(
+  messages: readonly ModelMessage[],
+  note: string = IMAGE_DROPPED,
+): ModelMessage[] {
+  return messages.map((message) =>
+    message.role === "tool" && message.results.some((r) => r.image !== undefined)
+      ? { role: "tool", results: message.results.map((r) => withoutImage(r, note)) }
+      : message,
+  );
+}
+
+/** Design §2.6: a screenshot reaches only a provider allowed to see the
+ *  screen (enabled, vision, local or consented), asked at every request so a
+ *  mid-turn failover can never carry one to another provider. */
+export function withImagePolicy(
+  provider: ModelProvider,
+  allowImages: () => boolean,
+): ModelProvider {
+  return {
+    chat(request) {
+      if (!hasImages(request.messages) || allowImages()) return provider.chat(request);
+      return provider.chat({ ...request, messages: stripImages(request.messages, IMAGE_WITHHELD) });
+    },
+    probe: () => provider.probe(),
+    listModels: (signal) => provider.listModels(signal),
+    reachable: (signal) => provider.reachable(signal),
+  };
 }
