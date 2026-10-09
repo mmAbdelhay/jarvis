@@ -160,7 +160,7 @@ void CuSettingsModel::acceptConsent()
 
 void CuSettingsModel::declineConsent()
 {
-    if (m_consentId.isEmpty())
+    if (m_consentId.isEmpty() || m_busy) // a request already in flight cannot be taken back
         return;
     m_consentId.clear();
     emit changed();

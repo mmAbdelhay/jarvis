@@ -133,6 +133,7 @@ ColumnLayout {
                     objectName: "cuConsentCancel"
                     variant: "quiet"
                     text: qsTr("Cancel")
+                    enabled: !root.settings.busy
                     onClicked: root.settings.declineConsent()
                 }
                 ActionButton {

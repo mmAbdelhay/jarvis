@@ -206,6 +206,19 @@ private slots:
         QVERIFY(!role(m, u"work"_s, CuSettingsModel::EnabledRole).toBool());
     }
 
+    void declineIsIgnoredWhileConsentInFlight()
+    {
+        CuSettingsModel m;
+        m.loadList(list());
+        QSignalSpy enables(&m, &CuSettingsModel::setEnabledRequested);
+        m.setEnabled(rowOf(m, u"work"_s), true);
+        m.acceptConsent();
+        m.declineConsent(); // too late: the request is already out
+        QCOMPARE(m.consentProviderId(), u"work"_s);
+        m.applyConsentResult(u"work"_s, true, QString(), QString());
+        QCOMPARE(enables.size(), 1);
+    }
+
     void consentFailureEnablesNothing()
     {
         CuSettingsModel m;
