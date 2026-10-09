@@ -29,4 +29,4 @@ install -m0755 "$inc/usr/local/bin/labwc" /usr/local/bin/labwc
 chown tester /out
 install -d -m0700 -o tester -g tester /tmp/xdg-tester
 exec runuser -u tester -- env HOME=/home/tester XDG_RUNTIME_DIR=/tmp/xdg-tester LANG=C.UTF-8 \
-  dbus-run-session -- bash /src/os/iso/cu/session.sh
+  CU_FAIL_ON_BLOCKED="${CU_FAIL_ON_BLOCKED:-0}" dbus-run-session -- bash /src/os/iso/cu/session.sh

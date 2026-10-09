@@ -21,6 +21,8 @@ mkdir -p "$out"; out=$(cd "$out" && pwd)
 for p in jarvisd jarvis-pkg jarvis-diag jarvis-helper jarvis-cu jarvis-i18n jarvis-ui jarvis-lock jarvis-session; do
   compgen -G "$debs/${p}_*.deb" >/dev/null || { echo "run.sh: no $p .deb in $debs" >&2; exit 1; }
 done
+# CU_FAIL_ON_BLOCKED=1 (the release gate) makes session.sh fail on BLOCKED criteria.
 exec docker run --rm --platform linux/amd64 -e DEBIAN_FRONTEND=noninteractive \
+  -e CU_FAIL_ON_BLOCKED="${CU_FAIL_ON_BLOCKED:-0}" \
   -v "$repo:/src:ro" -v "$debs:/debs:ro" -v "$out:/out" \
   debian:trixie bash /src/os/iso/cu/in-container.sh

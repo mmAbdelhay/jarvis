@@ -46,6 +46,10 @@ PY
 # final line and fails under CU_FAIL_ON_BLOCKED=1; CI shows them as a warning.
 check "BLOCKED criteria are counted and not reported as 'all passed'" bash -c \
   'grep -q "blocked_n=\$((blocked_n + 1))" "$1" && grep -q "CU_FAIL_ON_BLOCKED" "$1" && grep -q "NOT verified" "$1"' _ "$h/session.sh"
+check "run.sh forwards CU_FAIL_ON_BLOCKED into the container" \
+  grep -qF -- '-e CU_FAIL_ON_BLOCKED="${CU_FAIL_ON_BLOCKED:-0}"' "$h/run.sh"
+check "in-container.sh keeps CU_FAIL_ON_BLOCKED for the tester session" \
+  grep -qF 'CU_FAIL_ON_BLOCKED="${CU_FAIL_ON_BLOCKED:-0}"' "$h/in-container.sh"
 check "CI surfaces BLOCKED results" grep -q "BLOCKED" "$ISO_DIR/../../.github/workflows/os.yml"
 # Merged U/V pause semantics (session.go checkFocus, computer-use.ts waitForResume): a
 # terminal taking focus pauses the session and jarvisd holds every later call until
