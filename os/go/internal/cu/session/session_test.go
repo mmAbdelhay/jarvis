@@ -317,3 +317,37 @@ func TestCaptureBlanksWhenFocusChangesDuringCopy(t *testing.T) {
 		t.Fatalf("unblanked %v", c)
 	}
 }
+
+func TestCaptureBlanksWhenNonAllowedWindowSitsBetweenBaseAndAllowedDialog(t *testing.T) {
+	{
+		// The compositor reports every focus change via FocusChanged.
+		viaEvent := true
+		h := newHarness(t)
+		h.begin(t)
+		h.d.tops = append(h.d.tops, wlcu.Toplevel{ID: "w5", AppID: "gimp", Title: "Export", Outputs: []string{"HEADLESS-1"}})
+		h.d.focus("w3") // a browser raises itself over the base
+		if viaEvent {
+			h.m.FocusChanged() // seen as an event only, never by a capture
+		}
+		h.d.focus("w5") // then an allowed dialog is raised over the browser
+		r, err := h.m.Capture(proto.Capture{MaxEdge: 640})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, _, c := decodePNG(t, r); c != [3]uint32{0, 0, 0} {
+			t.Fatalf("viaEvent=%v: window between base and dialog leaked: %v", viaEvent, c)
+		}
+		// Resume raises the base again, and frames come back.
+		h.d.focus("w3")
+		if err := h.m.Begin(proto.Begin{SessionID: "s1", AppIDs: []string{"gimp"}}); err != nil {
+			t.Fatal(err)
+		}
+		r, err = h.m.Capture(proto.Capture{MaxEdge: 640})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, _, c := decodePNG(t, r); c == [3]uint32{0, 0, 0} {
+			t.Fatal("after the base was raised again the frame must show")
+		}
+	}
+}
