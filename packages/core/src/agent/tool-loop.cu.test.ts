@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import type { ComputerUse, CuCallResult } from "./computer-use.js";
 import type { AgentEvent } from "./contract.js";
+import { ELIDED_TOOL_OUTPUT } from "./context-fit.js";
 import { CU_IDLE_STATE } from "./cu-session.js";
 import { hasImages, IMAGE_DROPPED } from "./images.js";
 import { AGENT_TEXT } from "./messages.js";
@@ -176,5 +177,36 @@ describe("screen calls in the tool loop (v1.1 §2)", () => {
     const three = await loopDeps(low, { computerUse: fakeCu(), maxSteps: () => 5 });
     expect((await runTurn(three.deps, request())).reason).toBe("step-limit");
     expect(low.requests.length).toBeGreaterThan(20);
+  });
+
+  it("fits history after dropping old screenshots, so a small context keeps the user turn and the newest image", async () => {
+    const provider = scripted([
+      [call("a", "screen_look"), done],
+      [call("b", "screen_look"), done],
+      [call("c", "screen_look"), done],
+      [call("d", "screen_look"), done],
+      [call("e", "screen_click", { x: 1, y: 1, target: "File" }), done],
+      [{ type: "text", delta: "ok" }, done],
+    ]);
+    const { deps } = await loopDeps(provider, { computerUse: fakeCu(), contextTokens: 8_192 });
+    await runTurn(deps, {
+      ...request("export beach.xcf as PNG"),
+      history: [
+        { role: "user", text: "earlier question" },
+        { role: "assistant", text: "earlier answer", toolCalls: [] },
+      ],
+    });
+    const last = provider.requests[5] as ModelChatRequest;
+    expect(last.messages.some((m) => m.role === "user" && m.text === "earlier question")).toBe(
+      true,
+    );
+    expect(toolResults(last).map((r) => r.image?.dataBase64)).toEqual([
+      undefined,
+      undefined,
+      undefined,
+      "PNG4",
+      undefined,
+    ]);
+    expect(toolResults(last).some((r) => r.content === ELIDED_TOOL_OUTPUT)).toBe(false);
   });
 });

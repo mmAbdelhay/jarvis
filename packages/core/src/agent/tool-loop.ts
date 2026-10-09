@@ -395,7 +395,7 @@ async function reportStepLimit(
       deps,
       {
         system: context.system,
-        messages: keepLatestImages(fitHistory(context.messages, context.budget)),
+        messages: fitHistory(keepLatestImages(context.messages), context.budget),
         tools: [],
         final: true,
         signal: context.signal,
@@ -495,7 +495,7 @@ export async function runTurn(deps: ToolLoopDeps, request: TurnRequest): Promise
       }
       const reply = await streamReply(
         deps,
-        { system, messages: keepLatestImages(fitHistory(messages, budget)), tools, signal },
+        { system, messages: fitHistory(keepLatestImages(messages), budget), tools, signal },
         turnId,
         readProfile,
       );
