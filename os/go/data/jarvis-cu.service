@@ -1,0 +1,20 @@
+# Installed to /usr/lib/systemd/user/jarvis-cu.service (Rafiq v1.1
+# contracts §1). Not enabled for any target: labwc autostart starts it
+# (`systemctl --user start jarvis-cu.service`) after importing
+# WAYLAND_DISPLAY (M3 contracts §5.14), so it only runs in a Wayland
+# session. It needs no network; AF_UNIX only.
+[Unit]
+Description=Jarvis computer-use helper
+PartOf=graphical-session.target
+
+[Service]
+Type=exec
+ExecStart=/usr/libexec/jarvis/jarvis-cu
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictRealtime=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX
