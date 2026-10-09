@@ -294,6 +294,69 @@
         </message>
     </context>
     <context>
+        <name>CuSessionModel</name>
+        <message>
+            <source>Couldn't stop Jarvis: %1</source>
+            <translation>تعذّر إيقاف جارفيس: %1</translation>
+        </message>
+        <message>
+            <source>Couldn't resume: %1</source>
+            <translation>تعذّر الاستئناف: %1</translation>
+        </message>
+        <message>
+            <source>, </source>
+            <translation>، </translation>
+        </message>
+        <message>
+            <source>Lost the connection to Jarvis. Reconnecting…</source>
+            <translation>انقطع الاتصال بجارفيس. جارٍ إعادة الاتصال…</translation>
+        </message>
+        <message>
+            <source>Paused · you have control</source>
+            <translation>متوقف مؤقتًا · التحكم لك</translation>
+        </message>
+        <message>
+            <source>Jarvis is controlling the screen · step %1 of %2</source>
+            <translation>جارفيس يتحكم في الشاشة · الخطوة %1 من %2</translation>
+        </message>
+        <message>
+            <source>You moved the mouse or typed.</source>
+            <translation>حرّكت الفأرة أو كتبت.</translation>
+        </message>
+        <message>
+            <source>You pressed Esc.</source>
+            <translation>ضغطت على Esc.</translation>
+        </message>
+        <message>
+            <source>A protected window has focus.</source>
+            <translation>نافذة محمية هي النشطة الآن.</translation>
+        </message>
+        <message>
+            <source>The screen locked.</source>
+            <translation>قُفلت الشاشة.</translation>
+        </message>
+        <message>
+            <source>Jarvis paused.</source>
+            <translation>أوقف جارفيس العمل مؤقتًا.</translation>
+        </message>
+        <message>
+            <source>Done</source>
+            <translation>تم</translation>
+        </message>
+        <message>
+            <source>Running</source>
+            <translation>قيد التنفيذ</translation>
+        </message>
+        <message>
+            <source>Failed</source>
+            <translation>فشل</translation>
+        </message>
+        <message>
+            <source>Waiting</source>
+            <translation>بانتظار الدور</translation>
+        </message>
+    </context>
+    <context>
         <name>DoctorView</name>
         <message>
             <source>Can't reach the model: %1. Network doctor works without a model.</source>
@@ -956,6 +1019,13 @@
         </message>
     </context>
     <context>
+        <name>SettingsWindow</name>
+        <message>
+            <source>Jarvis Settings</source>
+            <translation>إعدادات جارفيس</translation>
+        </message>
+    </context>
+    <context>
         <name>SetupView</name>
         <message>
             <source>Jarvis</source>
@@ -1404,11 +1474,4 @@
             <translation>توقف مسجّل الميكروفون دون التقاط أي صوت.</translation>
         </message>
     </context>
-<context>
-    <name>SettingsWindow</name>
-    <message>
-        <source>Jarvis Settings</source>
-        <translation>إعدادات جارفيس</translation>
-    </message>
-</context>
 </TS>

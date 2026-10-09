@@ -290,6 +290,69 @@
         </message>
     </context>
     <context>
+        <name>CuSessionModel</name>
+        <message>
+            <source>Couldn't stop Jarvis: %1</source>
+            <translation>Couldn't stop Jarvis: %1</translation>
+        </message>
+        <message>
+            <source>Couldn't resume: %1</source>
+            <translation>Couldn't resume: %1</translation>
+        </message>
+        <message>
+            <source>, </source>
+            <translation>, </translation>
+        </message>
+        <message>
+            <source>Lost the connection to Jarvis. Reconnecting…</source>
+            <translation>Lost the connection to Jarvis. Reconnecting…</translation>
+        </message>
+        <message>
+            <source>Paused · you have control</source>
+            <translation>Paused · you have control</translation>
+        </message>
+        <message>
+            <source>Jarvis is controlling the screen · step %1 of %2</source>
+            <translation>Jarvis is controlling the screen · step %1 of %2</translation>
+        </message>
+        <message>
+            <source>You moved the mouse or typed.</source>
+            <translation>You moved the mouse or typed.</translation>
+        </message>
+        <message>
+            <source>You pressed Esc.</source>
+            <translation>You pressed Esc.</translation>
+        </message>
+        <message>
+            <source>A protected window has focus.</source>
+            <translation>A protected window has focus.</translation>
+        </message>
+        <message>
+            <source>The screen locked.</source>
+            <translation>The screen locked.</translation>
+        </message>
+        <message>
+            <source>Jarvis paused.</source>
+            <translation>Jarvis paused.</translation>
+        </message>
+        <message>
+            <source>Done</source>
+            <translation>Done</translation>
+        </message>
+        <message>
+            <source>Running</source>
+            <translation>Running</translation>
+        </message>
+        <message>
+            <source>Failed</source>
+            <translation>Failed</translation>
+        </message>
+        <message>
+            <source>Waiting</source>
+            <translation>Waiting</translation>
+        </message>
+    </context>
+    <context>
         <name>DoctorView</name>
         <message>
             <source>Can't reach the model: %1. Network doctor works without a model.</source>
@@ -952,6 +1015,13 @@
         </message>
     </context>
     <context>
+        <name>SettingsWindow</name>
+        <message>
+            <source>Jarvis Settings</source>
+            <translation>Jarvis Settings</translation>
+        </message>
+    </context>
+    <context>
         <name>SetupView</name>
         <message>
             <source>Jarvis</source>
@@ -1392,11 +1462,4 @@
             <translation>The microphone recorder stopped without any audio.</translation>
         </message>
     </context>
-<context>
-    <name>SettingsWindow</name>
-    <message>
-        <source>Jarvis Settings</source>
-        <translation>Jarvis Settings</translation>
-    </message>
-</context>
 </TS>
