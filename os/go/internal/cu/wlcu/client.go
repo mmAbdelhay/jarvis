@@ -478,5 +478,3 @@ func (c *Client) dispatch(m wl.Message) error {
 	}
 	return r.Err()
 }
-
-func (c *Client) idleEvent(obj uint32, op uint16) {}
