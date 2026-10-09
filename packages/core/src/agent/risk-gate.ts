@@ -18,6 +18,7 @@ import {
   type ConfirmAnswer,
 } from "./contract.js";
 import type { CardDescription, RegisteredTool } from "./tool-registry.js";
+import { CU_BEGIN_TOOL, SCREEN_TOOL_NAMES } from "./screen-tools.js";
 import { type ToolOutcome, isRecord } from "./types.js";
 
 /** Card items the caller computed (a recipe: one item per step, M4 §4). Like
@@ -70,6 +71,12 @@ export class GateError extends Error {
  *  may never approve a password-tier item (design §3.3 ruling). */
 export type ConfirmFrom = { via: AuditVia; allowPassword: boolean };
 export const LOCAL_CONFIRM: ConfirmFrom = { via: "desktop", allowPassword: true };
+/** v1.1 ruling: computer use needs someone at the screen, so its cards are
+ *  approved on the computer only (like password-tier items). */
+export const LOCAL_ONLY_CARD_TOOLS: ReadonlySet<string> = new Set([
+  CU_BEGIN_TOOL,
+  ...SCREEN_TOOL_NAMES,
+]);
 
 /** A ticked call that ran and returned ok (agent-service keeps undo steps from it). */
 export type GateRan = {
@@ -447,6 +454,13 @@ export function createRiskGate(deps: RiskGateDeps): RiskGate {
         [...ticked].some((id) => items.get(id)?.risk === "password")
       ) {
         throw new GateError(text().passwordNotFromPhone, "forbidden");
+      }
+      if (
+        answer.approve &&
+        !from.allowPassword &&
+        [...ticked].some((id) => LOCAL_ONLY_CARD_TOOLS.has(items.get(id)?.tool ?? ""))
+      ) {
+        throw new GateError(text().computerUseNotFromPhone, "forbidden");
       }
       entry.settle(
         answer.approve && ticked.size > 0
