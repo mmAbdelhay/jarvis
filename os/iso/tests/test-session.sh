@@ -134,4 +134,36 @@ check "empty variant clears inherited variant" check_keyboard_default
 check "labwc merges user config over ours" \
   grep -Fq 'exec "${LABWC_BIN:-/usr/bin/labwc}" --merge-config "$@"' "$keyboard_session"
 
+# Without a GPU Mesa accelerates, labwc and the Qt clients draw in software
+# (pixman, Qt Quick software) instead of llvmpipe: idle RAM, criterion 2.
+printf '#!/bin/sh\nprintf "%%s:%%s\\n" "${WLR_RENDERER:-}" "${QT_QUICK_BACKEND:-}"\n' > "$tmp/keyboard/renderer"
+chmod +x "$tmp/keyboard/renderer"
+fake_card() { # fake_card ROOT CARD DRIVER [VIRTIO_FEATURES]
+  mkdir -p "$1/devices/$2" "$1/drivers/$3" "$1/drm/$2"
+  ln -s "$1/drivers/$3" "$1/devices/$2/driver"
+  ln -s "$1/devices/$2" "$1/drm/$2/device"
+  if [ -n "${4:-}" ]; then mkdir -p "$1/devices/$2/virtio1"; printf '%s\n' "$4" > "$1/devices/$2/virtio1/features"; fi
+}
+renderer_for() { # renderer_for ROOT -> "WLR_RENDERER:QT_QUICK_BACKEND"
+  env -u WLR_RENDERER -u QT_QUICK_BACKEND LABWC_DRM_DIR="$1/drm" LABWC_KEYBOARD_FILE=/nonexistent \
+    LABWC_BIN="$tmp/keyboard/renderer" sh "$keyboard_session"
+}
+fake_card "$tmp/gl-none" card0 virtio-pci 0000000100000000
+mkdir -p "$tmp/gl-none/drm/card0-Virtual-1"
+check "virtio-gpu without virgl draws in software (pixman, Qt Quick software)" \
+  test "$(renderer_for "$tmp/gl-none")" = 'pixman:software'
+fake_card "$tmp/gl-virgl" card0 virtio-pci 1000000100000000
+check "virtio-gpu with virgl keeps hardware GL" test "$(renderer_for "$tmp/gl-virgl")" = ':'
+fake_card "$tmp/gl-simple" card0 simpledrm
+check "simpledrm draws in software" test "$(renderer_for "$tmp/gl-simple")" = 'pixman:software'
+fake_card "$tmp/gl-hybrid" card0 simpledrm
+fake_card "$tmp/gl-hybrid" card1 i915
+check "an Intel GPU keeps hardware GL" test "$(renderer_for "$tmp/gl-hybrid")" = ':'
+fake_card "$tmp/gl-amd" card1 amdgpu
+check "an AMD GPU keeps hardware GL" test "$(renderer_for "$tmp/gl-amd")" = ':'
+mkdir -p "$tmp/gl-empty/drm"
+check "no DRM card draws in software" test "$(renderer_for "$tmp/gl-empty")" = 'pixman:software'
+check "an explicit renderer choice wins" test "$(LABWC_DRM_DIR="$tmp/gl-none/drm" LABWC_KEYBOARD_FILE=/nonexistent \
+  LABWC_BIN="$tmp/keyboard/renderer" WLR_RENDERER=gles2 QT_QUICK_BACKEND=rhi sh "$keyboard_session")" = 'gles2:rhi'
+
 finish
