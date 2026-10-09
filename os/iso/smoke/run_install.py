@@ -64,6 +64,25 @@ def target_checks(b: dict[str, str]) -> list[tuple[str, str]]:
     ]
 
 
+def boot_checks() -> list[tuple[str, str]]:
+    """M2 contracts §12: an encrypted install boots from a separate,
+    unencrypted ext4 /boot labelled "Rafiq boot" (Debian's signed GRUB cannot
+    read the argon2id LUKS2 root); the kernel and initramfs live there and
+    the passphrase is asked by Plymouth in the initramfs."""
+    src = "$(findmnt -no SOURCE /boot)"
+    return [
+        ("§12: /boot is a separate unencrypted ext4 partition labelled 'Rafiq boot'",
+         f"findmnt -no FSTYPE /boot | grep -qx ext4 && case \"{src}\" in /dev/mapper/*) exit 1;; esac && "
+         f"[ \"$(blkid -s LABEL -o value {src})\" = 'Rafiq boot' ] && [ \"$(lsblk -no TYPE {src})\" = part ]"),
+        ("§12: fstab mounts /boot by UUID; /boot holds the kernel and initramfs; GRUB reads it",
+         "grep -Eq '^UUID=[0-9a-f-]+ /boot ext4 ' /etc/fstab && ls /boot/vmlinuz-* /boot/initrd.img-* >/dev/null && "
+         "test -s /boot/grub/grub.cfg && ! grep -q '^GRUB_ENABLE_CRYPTODISK=y' /etc/default/grub /etc/default/grub.d/*.cfg 2>/dev/null"),
+        ("§12: the initramfs carries cryptsetup and asks for the passphrase (crypttab unchanged)",
+         "grep -Eq '^jarvis-root UUID=[0-9a-f-]+ none luks,discard,initramfs,tries=0$' /etc/crypttab && "
+         "lsinitramfs /boot/initrd.img-$(uname -r) | grep -q 'cryptsetup'"),
+    ]
+
+
 def keyboard_checks(layout: str) -> list[tuple[str, str]]:
     """contracts §11.5, in order: the file (before login), the greeter's cage
     (before login) and a child of the user's labwc (after login: labwc
@@ -275,7 +294,7 @@ def scenario_erase(args, run: Run, work: Path, out: Path, ovmf: firmware.Ovmf) -
         run.shell = m.serial
         if not unlock(run, m, wrong_first=True, layout=ERASE_KEYBOARD):
             return
-        for name, command in target_checks(b):
+        for name, command in target_checks(b) + boot_checks():
             run.check(name, lambda c=command: run.sh(c, 200))
         run.check("GRUB menu hidden with no other OS (design §7)", lambda: run.sh("! grep -qx 'set timeout=3' /boot/grub/grub.cfg"))
         kb = keyboard_checks(ERASE_KEYBOARD)
@@ -297,7 +316,9 @@ def scenario_alongside(args, run: Run, work: Path, out: Path, ovmf: firmware.Ovm
     ntfs_before = {p.number: p for p in disks.partitions(win)}[3]
     vars_path = firmware.make_vars(ovmf, work / "vars.fd")
     assets = build_assets(work)
-    given = 32 * GIB  # at least MinRootBytes (30 GiB): Windows' ESP is reused
+    # At least MinRootBytes (30 GiB) + the 1 GiB unencrypted /boot of an
+    # encrypted install (contracts §12); Windows' ESP is reused.
+    given = 32 * GIB
     with Machine("live", live_vm(args, work, (win,), vars_path, ovmf, assets, "live"), out) as m:
         run.shell = m.serial
         if not live_session(run, m):
@@ -320,6 +341,9 @@ def scenario_alongside(args, run: Run, work: Path, out: Path, ovmf: firmware.Ovm
         if not unlock(run, m, wrong_first=False):
             return
         run.check("criterion 1: Secure Boot still enabled", lambda: run.sh("mokutil --sb-state | grep -qx 'SecureBoot enabled'"))
+        run.check("criterion 2: root is on the unlocked LUKS device", lambda: run.sh("findmnt -no SOURCE / | grep -q '^/dev/mapper/'"))
+        for name, command in boot_checks():
+            run.check(name, lambda c=command: run.sh(c, 120))
         run.check("criterion 3: GRUB lists Windows and the brand, 3 s menu", lambda: run.sh(
             "grep -q \"menuentry 'Windows Boot Manager\" /boot/grub/grub.cfg && "
             f"grep -q \"menuentry '{b['DISTRO_NAME']}\" /boot/grub/grub.cfg && grep -qx 'set timeout=3' /boot/grub/grub.cfg"))
@@ -378,6 +402,8 @@ def scenario_local_model(args, run: Run, work: Path, out: Path, ovmf: firmware.O
         run.shell = m.serial
         if not unlock(run, m, wrong_first=False):
             return
+        for name, command in boot_checks():
+            run.check(name, lambda c=command: run.sh(c, 120))
         checks = model_checks(flow.USER)
         for name, command in checks[:2]:
             run.check(name, lambda c=command: run.sh(c, 1900))

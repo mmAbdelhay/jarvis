@@ -11,10 +11,17 @@ import (
 
 const mapperName = "jarvis-root"
 
-func renderFstab(rootUUID, espUUID, swapUUID string) string {
+// bootLabel names the separate /boot: its ext4 label and GPT name.
+const bootLabel = "Rafiq boot"
+
+// renderFstab: bootUUID "" means no separate /boot (unencrypted installs).
+func renderFstab(rootUUID, bootUUID, espUUID, swapUUID string) string {
 	var b strings.Builder
 	b.WriteString("# /etc/fstab: written by the Rafiq installer.\n")
 	fmt.Fprintf(&b, "UUID=%s / ext4 errors=remount-ro 0 1\n", rootUUID)
+	if bootUUID != "" {
+		fmt.Fprintf(&b, "UUID=%s /boot ext4 defaults 0 2\n", bootUUID)
+	}
 	fmt.Fprintf(&b, "UUID=%s /boot/efi vfat umask=0077 0 1\n", espUUID)
 	if swapUUID != "" {
 		fmt.Fprintf(&b, "UUID=%s none swap sw 0 0\n", swapUUID)

@@ -78,6 +78,7 @@ const nvmeSgdisk = "Disk /dev/nvme0n1: 500118192 sectors, 238.5 GiB\nSector size
 func targetTree(t *testing.T, root string) {
 	put(t, root, "/dev/nvme0n1p1", "")
 	put(t, root, "/dev/nvme0n1p2", "")
+	put(t, root, "/dev/nvme0n1p3", "")
 	put(t, root, "/proc/mounts", "/dev/sdb1 /run/live/medium iso9660 ro 0 0\n")
 	put(t, root, "/proc/swaps", "Filename Type Size Used Priority\n")
 	put(t, root, "/target/swapfile", "")
@@ -181,21 +182,26 @@ func eraseScript(t *testing.T, h *harness) {
 	h.run.on(execx.OK(nvmeSgdisk), "sgdisk", "-p", "/dev/nvme0n1").
 		ok("sgdisk", "--zap-all", "/dev/nvme0n1").
 		ok("sgdisk", "--new=1:2048:1050623", "--typecode=1:ef00", "--change-name=1:EFI system partition",
-			"--new=2:1050624:500118158", "--typecode=2:8309", "--change-name=2:Rafiq", "/dev/nvme0n1").
+			"--new=2:1050624:3147775", "--typecode=2:8300", "--change-name=2:Rafiq boot",
+			"--new=3:3147776:500118158", "--typecode=3:8309", "--change-name=3:Rafiq", "/dev/nvme0n1").
 		ok("partx", "-u", "/dev/nvme0n1").
 		ok("udevadm", "settle", "--timeout=30").
-		ok("wipefs", "--all", "/dev/nvme0n1p2").
-		ok("cryptsetup", "luksFormat", "--type", "luks2", "--pbkdf", "argon2id", "--batch-mode", "--key-file=-", "/dev/nvme0n1p2").
-		ok("cryptsetup", "open", "--type", "luks2", "--key-file=-", "/dev/nvme0n1p2", "jarvis-root").
+		ok("wipefs", "--all", "/dev/nvme0n1p3").
+		ok("cryptsetup", "luksFormat", "--type", "luks2", "--pbkdf", "argon2id", "--batch-mode", "--key-file=-", "/dev/nvme0n1p3").
+		ok("cryptsetup", "open", "--type", "luks2", "--key-file=-", "/dev/nvme0n1p3", "jarvis-root").
 		ok("mkfs.ext4", "-F", "-q", "-L", "jarvis-root", "/dev/mapper/jarvis-root").
+		ok("wipefs", "--all", "/dev/nvme0n1p2").
+		ok("mkfs.ext4", "-F", "-q", "-L", "Rafiq boot", "/dev/nvme0n1p2").
 		ok("mkfs.vfat", "-F", "32", "-n", "EFI", "/dev/nvme0n1p1").
 		ok("mount", "/dev/mapper/jarvis-root", "/target").
+		ok("mount", "/dev/nvme0n1p2", "/target/boot").
 		ok("mount", "/dev/nvme0n1p1", "/target/boot/efi").
 		ok("fallocate", "-l", "2147483648", "/target/swapfile").
 		ok("mkswap", "/target/swapfile").
 		on(execx.OK("a9dbc795-04e8-4e28-aea5-a308cf08820b\n"), append(strings.Fields(uuidArgs), "/dev/mapper/jarvis-root")...).
 		on(execx.OK("6968-B22C\n"), append(strings.Fields(uuidArgs), "/dev/nvme0n1p1")...).
-		on(execx.OK("dc3595e8-0075-459c-8ae6-70871177a5d6\n"), append(strings.Fields(uuidArgs), "/dev/nvme0n1p2")...).
+		on(execx.OK("0b7e5a51-3c1d-4f0e-9a37-6a1f0c2d9e11\n"), append(strings.Fields(uuidArgs), "/dev/nvme0n1p2")...).
+		on(execx.OK("dc3595e8-0075-459c-8ae6-70871177a5d6\n"), append(strings.Fields(uuidArgs), "/dev/nvme0n1p3")...).
 		ok("unsquashfs", "-f", "-n", "-d", "/target", "/run/live/medium/live/filesystem.squashfs").
 		ok("mount", "--bind", "/dev", "/target/dev").
 		ok("mount", "--bind", "/dev/pts", "/target/dev/pts").
@@ -277,7 +283,7 @@ func TestExecuteEraseEncryptLocalModel(t *testing.T) {
 
 	// Files, byte for byte.
 	want := map[string]string{
-		"/target/etc/fstab":                           "# /etc/fstab: written by the Rafiq installer.\nUUID=a9dbc795-04e8-4e28-aea5-a308cf08820b / ext4 errors=remount-ro 0 1\nUUID=6968-B22C /boot/efi vfat umask=0077 0 1\n/swapfile none swap sw 0 0\n",
+		"/target/etc/fstab":                           "# /etc/fstab: written by the Rafiq installer.\nUUID=a9dbc795-04e8-4e28-aea5-a308cf08820b / ext4 errors=remount-ro 0 1\nUUID=0b7e5a51-3c1d-4f0e-9a37-6a1f0c2d9e11 /boot ext4 defaults 0 2\nUUID=6968-B22C /boot/efi vfat umask=0077 0 1\n/swapfile none swap sw 0 0\n",
 		"/target/etc/crypttab":                        "# <target name> <source device> <key file> <options>\njarvis-root UUID=dc3595e8-0075-459c-8ae6-70871177a5d6 none luks,discard,initramfs,tries=0\n",
 		"/target/etc/cryptsetup-initramfs/conf-hook":  cryptsetupConfHook,
 		"/target/etc/hostname":                        "ada-laptop\n",
@@ -422,11 +428,12 @@ func TestExecuteFailureCleansUp(t *testing.T) {
 	h.run.on(execx.OK(nvmeSgdisk), "sgdisk", "-p", "/dev/nvme0n1").
 		ok("sgdisk", "--zap-all", "/dev/nvme0n1").
 		ok("sgdisk", "--new=1:2048:1050623", "--typecode=1:ef00", "--change-name=1:EFI system partition",
-			"--new=2:1050624:500118158", "--typecode=2:8309", "--change-name=2:Rafiq", "/dev/nvme0n1").
+			"--new=2:1050624:3147775", "--typecode=2:8300", "--change-name=2:Rafiq boot",
+			"--new=3:3147776:500118158", "--typecode=3:8309", "--change-name=3:Rafiq", "/dev/nvme0n1").
 		ok("partx", "-u", "/dev/nvme0n1").ok("udevadm", "settle", "--timeout=30").
-		ok("wipefs", "--all", "/dev/nvme0n1p2").
-		ok("cryptsetup", "luksFormat", "--type", "luks2", "--pbkdf", "argon2id", "--batch-mode", "--key-file=-", "/dev/nvme0n1p2").
-		ok("cryptsetup", "open", "--type", "luks2", "--key-file=-", "/dev/nvme0n1p2", "jarvis-root").
+		ok("wipefs", "--all", "/dev/nvme0n1p3").
+		ok("cryptsetup", "luksFormat", "--type", "luks2", "--pbkdf", "argon2id", "--batch-mode", "--key-file=-", "/dev/nvme0n1p3").
+		ok("cryptsetup", "open", "--type", "luks2", "--key-file=-", "/dev/nvme0n1p3", "jarvis-root").
 		on(execx.Exit(1, "mkfs.ext4: Device size reported to be zero."), "mkfs.ext4", "-F", "-q", "-L", "jarvis-root", "/dev/mapper/jarvis-root").
 		ok("cryptsetup", "close", "jarvis-root")
 	Execute(context.Background(), h.deps, erasePlan(t), secrets(), &Gate{})
@@ -477,7 +484,8 @@ func TestShrinkAndCreateArgsKeepWindowsIdentity(t *testing.T) {
 	}
 	got = createArgs(pl.Layout)
 	want = []string{"--new=5:53997568:55046143", "--typecode=5:ef00", "--change-name=5:EFI system partition",
-		"--new=6:55046144:132120575", "--typecode=6:8309", "--change-name=6:Rafiq", "/dev/loop1"}
+		"--new=6:55046144:57143295", "--typecode=6:8300", "--change-name=6:Rafiq boot",
+		"--new=7:57143296:132120575", "--typecode=7:8309", "--change-name=7:Rafiq", "/dev/loop1"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("create\n got %q\nwant %q", got, want)
 	}
@@ -491,6 +499,7 @@ func TestExecuteAlongsidePartitionStep(t *testing.T) {
 	}
 	put(t, h.root, "/dev/loop1p5", "")
 	put(t, h.root, "/dev/loop1p6", "")
+	put(t, h.root, "/dev/loop1p7", "")
 	h.run.ok("sgdisk", "--backup=/run/jarvis-installer/gpt-backup.bin", "/dev/loop1").
 		ok("ntfsresize", "--no-action", "--no-progress-bar", "--size", "27524071424", "/dev/loop1p3").
 		ok("ntfsresize", "--no-progress-bar", "--size", "27524071424", "/dev/loop1p3").
@@ -572,16 +581,36 @@ func TestDryRunListsTheDiskCommandsWithoutSecrets(t *testing.T) {
 		"ntfsresize --no-action --no-progress-bar --size 27524071424 /dev/loop1p3",
 		`ntfsresize --no-progress-bar --size 27524071424 /dev/loop1p3 <<< "y\n"`,
 		`sgdisk --delete=3 --new=3:239616:53997567 --typecode=3:EBD0A0A2-B9E5-4433-87C0-68B6B72699C7 --partition-guid=3:A73A742F-A408-4A07-88A7-C7983F8CEEE3 "--change-name=3:Basic data partition" --attributes=3:=:0000000000000000 /dev/loop1`,
-		`sgdisk --new=5:53997568:55046143 --typecode=5:ef00 "--change-name=5:EFI system partition" --new=6:55046144:132120575 --typecode=6:8309 --change-name=6:Rafiq /dev/loop1`,
+		`sgdisk --new=5:53997568:55046143 --typecode=5:ef00 "--change-name=5:EFI system partition" --new=6:55046144:57143295 --typecode=6:8300 "--change-name=6:Rafiq boot" --new=7:57143296:132120575 --typecode=7:8309 --change-name=7:Rafiq /dev/loop1`,
 		"partx -u /dev/loop1",
-		"wipefs --all /dev/loop1p6",
-		"cryptsetup luksFormat --type luks2 --pbkdf argon2id --batch-mode --key-file=- /dev/loop1p6 <<< <passphrase>",
-		"cryptsetup open --type luks2 --key-file=- /dev/loop1p6 jarvis-root <<< <passphrase>",
+		"wipefs --all /dev/loop1p7",
+		"cryptsetup luksFormat --type luks2 --pbkdf argon2id --batch-mode --key-file=- /dev/loop1p7 <<< <passphrase>",
+		"cryptsetup open --type luks2 --key-file=- /dev/loop1p7 jarvis-root <<< <passphrase>",
 		"mkfs.ext4 -F -q -L jarvis-root /dev/mapper/jarvis-root",
+		"wipefs --all /dev/loop1p6",
+		`mkfs.ext4 -F -q -L "Rafiq boot" /dev/loop1p6`,
 		"mkfs.vfat -F 32 -n EFI /dev/loop1p5",
 	}
 	if got := DryRun(pl); !reflect.DeepEqual(got, want) {
 		t.Fatalf("got\n%s", strings.Join(got, "\n"))
+	}
+	// Manual + encryption: the table is untouched; the chosen /boot is formatted.
+	c := choices("manual", "/dev/loop1")
+	c.Brain = Brain{Kind: "cloud"}
+	c.Disk.Manual = []ManualEntry{{"/dev/loop1p3", "/", true}, {"/dev/loop1p1", "/boot/efi", false}, {"/dev/loop1p4", "/boot", true}}
+	if pl, err = MakePlan(c, probe(encryptedManualDisk()), "p"); err != nil {
+		t.Fatal(err)
+	}
+	want = []string{
+		"wipefs --all /dev/loop1p3",
+		"cryptsetup luksFormat --type luks2 --pbkdf argon2id --batch-mode --key-file=- /dev/loop1p3 <<< <passphrase>",
+		"cryptsetup open --type luks2 --key-file=- /dev/loop1p3 jarvis-root <<< <passphrase>",
+		"mkfs.ext4 -F -q -L jarvis-root /dev/mapper/jarvis-root",
+		"wipefs --all /dev/loop1p4",
+		`mkfs.ext4 -F -q -L "Rafiq boot" /dev/loop1p4`,
+	}
+	if got := DryRun(pl); !reflect.DeepEqual(got, want) {
+		t.Fatalf("manual got\n%s", strings.Join(got, "\n"))
 	}
 }
 

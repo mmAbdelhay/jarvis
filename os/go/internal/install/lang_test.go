@@ -34,7 +34,7 @@ func TestPlanInArabic(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := pl.Public.Summary
-	if len(s) != 8 || !strings.HasPrefix(s[0], i18n.RLM+"مسح القرص") || !strings.Contains(s[1], "مشفّرًا") || !strings.Contains(s[6], "جارفيس") {
+	if len(s) != 9 || !strings.HasPrefix(s[0], i18n.RLM+"مسح القرص") || !strings.Contains(s[1], "مشفّرًا") || !strings.Contains(s[2], iso("/boot")) || !strings.Contains(s[7], "جارفيس") {
 		t.Fatalf("summary = %q", s)
 	}
 	for _, line := range append(append([]string{}, s...), pl.Public.Warnings...) {
@@ -45,7 +45,7 @@ func TestPlanInArabic(t *testing.T) {
 	if pl.Public.Steps[0].Title != "تجهيز القرص" || pl.Public.Steps[len(pl.Public.Steps)-1].Title != "تنزيل عقل جارفيس" {
 		t.Fatalf("steps = %+v", pl.Public.Steps)
 	}
-	if pl.Public.DiskAfter[1].Label != "رفيق" {
+	if len(pl.Public.DiskAfter) != 3 || pl.Public.DiskAfter[1].Label != "إقلاع رفيق" || pl.Public.DiskAfter[2].Label != "رفيق" {
 		t.Fatalf("diskAfter = %+v", pl.Public.DiskAfter)
 	}
 	if !strings.Contains(pl.Public.Warnings[0], "تثبيت") {

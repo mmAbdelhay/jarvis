@@ -259,6 +259,14 @@
             <source>Choose where to install %1.</source>
             <translation>اختر مكان تثبيت %1.</translation>
         </message>
+        <message>
+            <source>A separate /boot partition is only used with encryption. Set it to Not used.</source>
+            <translation>لا يُستخدم قسم /boot منفصل إلا مع التشفير. اضبطه على «غير مستخدم».</translation>
+        </message>
+        <message>
+            <source>Choose a partition of at least 500 MB for /boot, not the EFI system partition.</source>
+            <translation>اختر قسمًا بحجم 500 ميغابايت على الأقل للمسار /boot، وليس قسم نظام EFI.</translation>
+        </message>
     </context>
     <context>
         <name>DiskScreen</name>
@@ -295,8 +303,8 @@
             <translation>تهيئة</translation>
         </message>
         <message>
-            <source>Manual mode makes no partition-table changes. / must be formatted; /boot/efi must be an existing EF00 partition of at least 300 MB. Encrypted installs use a swapfile, with no swap partition. LVM and RAID are not offered.</source>
-            <translation>لا يُجري الوضع اليدوي أي تغيير على جدول الأقسام. يجب تهيئة / ، ويجب أن يكون /boot/efi قسم EF00 موجودًا بحجم 300 ميغابايت على الأقل. تستخدم عمليات التثبيت المشفّرة ملف تبديل دون قسم تبديل. لا يتوفر LVM ولا RAID.</translation>
+            <source>Manual mode makes no partition-table changes. / must be formatted; /boot/efi must be an existing EF00 partition of at least 300 MB. Encrypted installs also need a separate, unencrypted /boot partition of at least 500 MB, which is formatted, and use a swapfile, with no swap partition. LVM and RAID are not offered.</source>
+            <translation>لا يُجري الوضع اليدوي أي تغيير على جدول الأقسام. يجب تهيئة / ، ويجب أن يكون /boot/efi قسم EF00 موجودًا بحجم 300 ميغابايت على الأقل. تحتاج عمليات التثبيت المشفّرة أيضًا إلى قسم /boot منفصل غير مشفّر بحجم 500 ميغابايت على الأقل، تُجرى تهيئته، وتستخدم ملف تبديل دون قسم تبديل. لا يتوفر LVM ولا RAID.</translation>
         </message>
         <message>
             <source>Encrypt %1 (recommended). You'll type a passphrase at every start.</source>
@@ -434,6 +442,10 @@
         <message>
             <source>The installer can't go ahead with these choices.</source>
             <translation>لا يستطيع المثبّت المتابعة بهذه الخيارات.</translation>
+        </message>
+        <message>
+            <source>Encrypted installs need a separate, unencrypted partition for /boot (at least 500 MB). Choose one, or turn encryption off.</source>
+            <translation>تحتاج عمليات التثبيت المشفّرة إلى قسم منفصل غير مشفّر للمسار /boot (بحجم 500 ميغابايت على الأقل). اختر قسمًا، أو أوقف التشفير.</translation>
         </message>
     </context>
     <context>

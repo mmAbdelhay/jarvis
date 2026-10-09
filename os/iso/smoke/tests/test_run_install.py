@@ -31,6 +31,13 @@ class RunInstallTest(unittest.TestCase):
         for needle in ("criterion 7", "model-state", "ollama", "jarvis.yaml"):
             self.assertIn(needle, names)
 
+    def test_boot_checks_cover_the_separate_boot(self):
+        cmds = dict(run_install.boot_checks())
+        joined = " ".join(cmds.values())
+        for needle in ("Rafiq boot", "/etc/fstab", "/etc/crypttab", "lsinitramfs", "/dev/mapper/"):
+            self.assertIn(needle, joined)
+        self.assertTrue(all("\n" not in c for c in cmds.values()), "serial shell takes one line per command")
+
     def test_refusals_cover_every_windows_state(self):
         self.assertEqual(run_install.REFUSALS, {"hibernated": "ntfs-hibernated", "bitlocker": "ntfs-bitlocker", "dirty": "ntfs-dirty"})
 

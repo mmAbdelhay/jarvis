@@ -198,7 +198,7 @@ QJsonArray modelsThatFit(const QJsonObject& probe, qint64 targetBytes)
 QStringList refusalKeys()
 {
     return {u"no-uefi"_s, u"disk-too-small"_s, u"ntfs-bitlocker"_s, u"ntfs-hibernated"_s, u"ntfs-dirty"_s,
-            u"alongside-too-small"_s, u"manual-missing-root"_s, u"manual-missing-esp"_s, u"model-does-not-fit"_s,
+            u"alongside-too-small"_s, u"manual-missing-root"_s, u"manual-missing-esp"_s, u"manual-missing-boot"_s, u"model-does-not-fit"_s,
             u"live-medium"_s, u"alongside-no-windows"_s};
 }
 
@@ -234,6 +234,8 @@ QString refusalText(const QString& key, const QString& backendText, const QStrin
         return QCoreApplication::translate("InstallRules", "Choose a partition for / (the system).");
     if (key == u"manual-missing-esp")
         return QCoreApplication::translate("InstallRules", "Choose an EFI system partition for /boot/efi.");
+    if (key == u"manual-missing-boot")
+        return QCoreApplication::translate("InstallRules", "Encrypted installs need a separate, unencrypted partition for /boot (at least 500 MB). Choose one, or turn encryption off.");
     if (key == u"model-does-not-fit")
         return QCoreApplication::translate("InstallRules", "The chosen model doesn't fit in the space for %1. Pick a smaller model or give %1 more space.").arg(distro);
     return backendText.isEmpty() ? QCoreApplication::translate("InstallRules", "The installer can't go ahead with these choices.") : backendText;

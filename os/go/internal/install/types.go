@@ -96,7 +96,7 @@ type ProbeResult struct {
 // ManualEntry is one row of the Manual table editor.
 type ManualEntry struct {
 	Partition string `json:"partition"`
-	Mount     string `json:"mount"` // "/" | "/boot/efi" | "swap"
+	Mount     string `json:"mount"` // "/" | "/boot" | "/boot/efi" | "swap"
 	Format    bool   `json:"format"`
 }
 
@@ -284,6 +284,7 @@ const (
 	RefuseAlongsideSmall  = "alongside-too-small"
 	RefuseManualNoRoot    = "manual-missing-root"
 	RefuseManualNoESP     = "manual-missing-esp"
+	RefuseManualNoBoot    = "manual-missing-boot" // encrypted manual install without a separate /boot (M2 contracts §12)
 	RefuseModelDoesNotFit = "model-does-not-fit"
 	RefuseAlongsideNoWin  = "alongside-no-windows"
 	RefuseLiveMedium      = "live-medium"

@@ -28,8 +28,12 @@ func TestRenderers(t *testing.T) {
 	if got := renderCrypttab("u-1"); !strings.HasSuffix(got, "jarvis-root UUID=u-1 none luks,discard,initramfs,tries=0\n") {
 		t.Fatalf("crypttab = %q (tries=0: never an emergency shell)", got)
 	}
-	if got := renderFstab("r", "e", "s"); got != "# /etc/fstab: written by the Rafiq installer.\nUUID=r / ext4 errors=remount-ro 0 1\nUUID=e /boot/efi vfat umask=0077 0 1\nUUID=s none swap sw 0 0\n/swapfile none swap sw 0 0\n" {
+	if got := renderFstab("r", "", "e", "s"); got != "# /etc/fstab: written by the Rafiq installer.\nUUID=r / ext4 errors=remount-ro 0 1\nUUID=e /boot/efi vfat umask=0077 0 1\nUUID=s none swap sw 0 0\n/swapfile none swap sw 0 0\n" {
 		t.Fatalf("fstab = %q", got)
+	}
+	// Encrypted: the separate /boot is mounted before /boot/efi (fstab order).
+	if got := renderFstab("r", "b", "e", ""); got != "# /etc/fstab: written by the Rafiq installer.\nUUID=r / ext4 errors=remount-ro 0 1\nUUID=b /boot ext4 defaults 0 2\nUUID=e /boot/efi vfat umask=0077 0 1\n/swapfile none swap sw 0 0\n" {
+		t.Fatalf("encrypted fstab = %q", got)
 	}
 	if got := renderKeyboard("us(intl)"); !strings.Contains(got, "XKBLAYOUT=\"us\"\nXKBVARIANT=\"intl\"\n") {
 		t.Fatalf("keyboard = %q", got)

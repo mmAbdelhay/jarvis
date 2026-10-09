@@ -15,8 +15,10 @@ DiskChoice::DiskChoice(const QString& distro, QObject* parent)
 
 qint64 DiskChoice::minAlongside() const
 {
-    const qint64 minimum = std::max(m_minRoot, currentDisk().value("alongsideBounds").toObject().value("minBytes").toInteger());
-    return ((minimum + GB - 1) / GB) * GB; // minRootBytes rounded up to whole GB
+    // The backend's minBytes has no /boot in it; encryption adds one (M2 contracts §12).
+    const qint64 minimum = std::max(m_minRoot, currentDisk().value("alongsideBounds").toObject().value("minBytes").toInteger()) +
+                           (m_encrypt ? kBootBytes : 0);
+    return ((minimum + GB - 1) / GB) * GB; // rounded up to whole GB
 }
 
 QJsonObject DiskChoice::currentDisk() const
@@ -163,6 +165,8 @@ void DiskChoice::setEncrypt(bool encrypt)
     if (encrypt == m_encrypt)
         return;
     m_encrypt = encrypt;
+    if (m_windows) // the minimum moves by the /boot partition
+        m_alongside = std::clamp(m_alongside, minAlongside(), std::max(minAlongside(), (jarvis::installer::alongsideMaxBytes(*m_windows) / GB) * GB));
     emit changed();
 }
 
@@ -210,7 +214,7 @@ QVariantList DiskChoice::manualRows() const
 
 QStringList DiskChoice::mountPoints() const
 {
-    return {QString(), u"/"_s, u"/boot/efi"_s, u"swap"_s};
+    return {QString(), u"/"_s, u"/boot"_s, u"/boot/efi"_s, u"swap"_s};
 }
 
 void DiskChoice::setManualMount(const QString& partition, const QString& mount)
@@ -227,14 +231,14 @@ void DiskChoice::setManualMount(const QString& partition, const QString& mount)
                 other.format = false;
             }
     row->mount = mount;
-    row->format = mount == u"/" || mount == u"swap";
+    row->format = mount == u"/" || mount == u"/boot" || mount == u"swap";
     emit changed();
 }
 
 void DiskChoice::setManualFormat(const QString& partition, bool format)
 {
     auto row = std::find_if(m_manual.begin(), m_manual.end(), [&](const ManualRow& r) { return r.path == partition; });
-    if (row == m_manual.end() || row->mount.isEmpty() || (row->mount == u"/" && !format) || row->format == format)
+    if (row == m_manual.end() || row->mount.isEmpty() || ((row->mount == u"/" || row->mount == u"/boot") && !format) || row->format == format)
         return;
     row->format = format;
     emit changed();
@@ -249,11 +253,17 @@ QString DiskChoice::manualProblem() const
         return refusalText(u"manual-missing-root"_s, {}, m_distro);
     if (!has(u"/boot/efi"_s))
         return refusalText(u"manual-missing-esp"_s, {}, m_distro);
+    if (m_encrypt && !has(u"/boot"_s))
+        return refusalText(u"manual-missing-boot"_s, {}, m_distro);
     for (const ManualRow& row : m_manual) {
         if (row.mount == u"/" && !row.format)
             return tr("The system partition must be formatted.");
         if (row.mount == u"/boot/efi" && (row.path != currentDisk().value("esp").toString() || row.sizeBytes < 300000000))
             return tr("Choose an existing EFI system partition of at least 300 MB.");
+        if (row.mount == u"/boot" && !m_encrypt)
+            return tr("A separate /boot partition is only used with encryption. Set it to Not used.");
+        if (row.mount == u"/boot" && (row.sizeBytes < kBootMinBytes || row.path == currentDisk().value("esp").toString()))
+            return tr("Choose a partition of at least 500 MB for /boot, not the EFI system partition.");
         if (row.mount == u"swap" && m_encrypt)
             return tr("Encrypted installs use a swapfile instead of a swap partition.");
     }

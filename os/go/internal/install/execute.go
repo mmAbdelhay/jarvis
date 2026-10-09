@@ -139,6 +139,7 @@ type job struct {
 	mounted  bool   // /target is mounted
 	rootUUID string
 	espUUID  string
+	bootUUID string // the separate /boot, encrypted installs only
 	luksUUID string
 	swapUUID string
 	user     parse.PasswdEntry
@@ -417,6 +418,9 @@ func DryRun(pl Planned) []string {
 		root = MapperPath
 	}
 	out = append(out, "mkfs.ext4 -F -q -L jarvis-root "+root)
+	if b := lay.Boot; b != nil {
+		out = append(out, "wipefs --all "+b.Path, "mkfs.ext4 -F -q -L "+strconv.Quote(bootLabel)+" "+b.Path)
+	}
 	if lay.ESP.Format {
 		out = append(out, "mkfs.vfat -F 32 -n EFI "+lay.ESP.Path)
 	}
@@ -477,6 +481,9 @@ func createArgs(lay Layout) []string {
 	if lay.ESP.Create {
 		add(lay.ESP, codeESP, "EFI system partition")
 	}
+	if lay.Boot != nil && lay.Boot.Create {
+		add(*lay.Boot, codeLinuxFS, bootLabel)
+	}
 	code := codeLinuxRoot
 	if lay.Encrypt {
 		code = codeLUKS
@@ -488,7 +495,7 @@ func createArgs(lay Layout) []string {
 func (j *job) waitNodes(ctx context.Context, lay Layout) error {
 	deadline := time.Now().Add(30 * time.Second)
 	for {
-		if j.d.Files.Exists(lay.Root.Path) && j.d.Files.Exists(lay.ESP.Path) {
+		if j.d.Files.Exists(lay.Root.Path) && j.d.Files.Exists(lay.ESP.Path) && (lay.Boot == nil || j.d.Files.Exists(lay.Boot.Path)) {
 			return nil
 		}
 		if time.Now().After(deadline) {
@@ -544,6 +551,14 @@ func (j *job) format(ctx context.Context) error {
 	if err := j.must(ctx, slow, "mkfs.ext4", "-F", "-q", "-L", "jarvis-root", j.rootDev); err != nil {
 		return err
 	}
+	if b := lay.Boot; b != nil {
+		if err := j.must(ctx, quick, "wipefs", "--all", b.Path); err != nil {
+			return err
+		}
+		if err := j.must(ctx, quick, "mkfs.ext4", "-F", "-q", "-L", bootLabel, b.Path); err != nil {
+			return err
+		}
+	}
 	if lay.ESP.Format {
 		if err := j.must(ctx, quick, "mkfs.vfat", "-F", "32", "-n", "EFI", lay.ESP.Path); err != nil {
 			return err
@@ -561,6 +576,16 @@ func (j *job) format(ctx context.Context) error {
 		return err
 	}
 	j.mounted = true
+	// /boot is mounted before the copy so the kernel and initramfs land on
+	// the unencrypted partition GRUB can read.
+	if b := lay.Boot; b != nil {
+		if err := j.d.Files.MkdirAll(Target+"/boot", 0o755); err != nil {
+			return err
+		}
+		if err := j.must(ctx, quick, "mount", b.Path, Target+"/boot"); err != nil {
+			return err
+		}
+	}
 	if err := j.d.Files.MkdirAll(Target+"/boot/efi", 0o755); err != nil {
 		return err
 	}
@@ -582,6 +607,11 @@ func (j *job) format(ctx context.Context) error {
 	}
 	if j.espUUID, err = j.uuid(ctx, lay.ESP.Path); err != nil {
 		return err
+	}
+	if lay.Boot != nil {
+		if j.bootUUID, err = j.uuid(ctx, lay.Boot.Path); err != nil {
+			return err
+		}
 	}
 	if lay.Encrypt {
 		if j.luksUUID, err = j.uuid(ctx, lay.Root.Path); err != nil {
@@ -692,7 +722,9 @@ func (j *job) configure(ctx context.Context) error {
 	c, lay := j.pl.Choices, j.pl.Layout
 	steps := []func() error{
 		func() error { return j.write("/etc/machine-id", "", 0o444) },
-		func() error { return j.write("/etc/fstab", renderFstab(j.rootUUID, j.espUUID, j.swapUUID), 0o644) },
+		func() error {
+			return j.write("/etc/fstab", renderFstab(j.rootUUID, j.bootUUID, j.espUUID, j.swapUUID), 0o644)
+		},
 		func() error {
 			if !lay.Encrypt {
 				return nil

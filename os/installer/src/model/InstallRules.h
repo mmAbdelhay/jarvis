@@ -18,6 +18,10 @@ inline constexpr qint64 kMinSystemBytes = 30 * GiB;       // fallback when Probe
 inline constexpr qint64 kSystemReserveBytes = 20 * GiB;   // kept free beside a local model
 inline constexpr qint64 kWindowsHeadroomBytes = 10 * GiB; // left to Windows beyond ntfsresize's minimum
 inline constexpr qint64 kSliderStepBytes = GB;
+// Encrypted installs get a separate unencrypted /boot (M2 contracts §12):
+// erase and alongside create one of kBootBytes; a manual one needs kBootMinBytes.
+inline constexpr qint64 kBootBytes = GiB;
+inline constexpr qint64 kBootMinBytes = 500 * 1000 * 1000;
 
 QString formatSize(qint64 bytes);
 

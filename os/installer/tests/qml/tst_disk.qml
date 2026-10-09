@@ -32,6 +32,7 @@ TestCase {
         verify(limits.indexOf("EF00") >= 0)
         verify(limits.indexOf("300 MB") >= 0)
         verify(limits.indexOf("swapfile") >= 0)
+        verify(limits.indexOf("unencrypted /boot") >= 0)
     }
 
     function test_titleAndDescription() {

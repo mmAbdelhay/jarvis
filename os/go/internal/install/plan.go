@@ -17,6 +17,8 @@ const (
 
 	ESPSizeBytes         = 512 * MiB      // a new EFI system partition
 	ESPReuseMinBytes     = 300_000_000    // an existing ESP this big is shared (design §5.2)
+	BootSizeBytes        = 1 * GiB        // a new unencrypted /boot, encrypted installs only (M2 contracts §12)
+	BootMinBytes         = 500_000_000    // a manual /boot this small holds two kernels and their initramfs
 	MinRootBytes         = 32212254720    // 30 GiB: system, swap file, room to update (ProbeResult.minRootBytes)
 	InstalledBytes       = 10_000_000_000 // what the copied system plus swap use, for "stays free"
 	SwapFileBytes        = 2 * GiB        // design §5.2
@@ -31,6 +33,7 @@ const (
 	codeESP           = "ef00"
 	codeLUKS          = "8309"
 	codeLinuxRoot     = "8304" // Linux x86-64 root (/)
+	codeLinuxFS       = "8300" // Linux file system: the unencrypted /boot
 )
 
 // Part is one partition the install creates, formats or reuses.
@@ -53,12 +56,17 @@ type Shrink struct {
 // Layout is the exact disk work, computed once by MakePlan and executed
 // verbatim. Execute never recomputes geometry.
 type Layout struct {
-	Mode         string
-	Disk         string
-	SectorBytes  int64
-	Wipe         bool // erase: zap the partition table
-	Shrink       *Shrink
-	ESP          Part
+	Mode        string
+	Disk        string
+	SectorBytes int64
+	Wipe        bool // erase: zap the partition table
+	Shrink      *Shrink
+	ESP         Part
+	// Boot is the separate unencrypted /boot (ext4, label "Rafiq boot"):
+	// with encryption only, nil without (M2 contracts §12). Debian's signed
+	// GRUB cannot read an argon2id LUKS2 root, so the kernel and initramfs
+	// live here and the passphrase is asked by Plymouth in the initramfs.
+	Boot         *Part
 	Root         Part
 	Swap         *Part // manual swap partition, never with encryption
 	Encrypt      bool
@@ -114,9 +122,9 @@ func MakePlan(c Choices, p ProbeResult, planID string) (Planned, error) {
 	)
 	switch c.Disk.Mode {
 	case "erase":
-		lay, err = planErase(x, *disk)
+		lay, err = planErase(x, *disk, c.Encrypt)
 	case "alongside":
-		lay, err = planAlongside(x, *disk, *c.Disk.AlongsideSizeBytes)
+		lay, err = planAlongside(x, *disk, *c.Disk.AlongsideSizeBytes, c.Encrypt)
 	case "manual":
 		lay, err = planManual(x, *disk, c.Disk.Manual, c.Encrypt)
 	default:
@@ -197,21 +205,31 @@ func PartPath(disk string, n int) string {
 	return fmt.Sprintf("%s%d", disk, n)
 }
 
-func planErase(x tr, d Disk) (Layout, error) {
+// planErase: ESP (1), with encryption an unencrypted /boot (2), then the
+// Rafiq root filling the rest of the disk.
+func planErase(x tr, d Disk, encrypt bool) (Layout, error) {
 	a := alignSectors(d)
 	espSec := ESPSizeBytes / d.SectorBytes
-	esp := Part{Number: 1, Create: true, Format: true, Start: a, End: a + espSec - 1}
-	root := Part{Number: 2, Create: true, Format: true, Start: a + espSec, End: d.LastUsable}
-	if root.End <= root.Start {
-		return Layout{}, &Refusal{RefuseDiskTooSmall, x.f(x.t.DiskTooSmall, d.Path, human(MinRootBytes+ESPSizeBytes))}
+	need := int64(MinRootBytes + ESPSizeBytes)
+	esp := Part{Path: PartPath(d.Path, 1), Number: 1, Create: true, Format: true, Start: a, End: a + espSec - 1, Bytes: espSec * d.SectorBytes}
+	lay := Layout{Mode: "erase", Disk: d.Path, SectorBytes: d.SectorBytes, Wipe: true, ESP: esp, FallbackBoot: true}
+	next, n := esp.End+1, 2
+	if encrypt {
+		bootSec := BootSizeBytes / d.SectorBytes
+		lay.Boot = &Part{Path: PartPath(d.Path, n), Number: n, Create: true, Format: true, Start: next, End: next + bootSec - 1, Bytes: bootSec * d.SectorBytes}
+		need += BootSizeBytes
+		next, n = lay.Boot.End+1, n+1
 	}
-	esp.Path, root.Path = PartPath(d.Path, 1), PartPath(d.Path, 2)
-	esp.Bytes = espSec * d.SectorBytes
+	root := Part{Path: PartPath(d.Path, n), Number: n, Create: true, Format: true, Start: next, End: d.LastUsable}
+	if root.End <= root.Start {
+		return Layout{}, &Refusal{RefuseDiskTooSmall, x.f(x.t.DiskTooSmall, d.Path, human(need))}
+	}
 	root.Bytes = (root.End - root.Start + 1) * d.SectorBytes
 	if root.Bytes < MinRootBytes {
-		return Layout{}, &Refusal{RefuseDiskTooSmall, x.f(x.t.DiskTooSmall, d.Path, human(MinRootBytes+ESPSizeBytes))}
+		return Layout{}, &Refusal{RefuseDiskTooSmall, x.f(x.t.DiskTooSmall, d.Path, human(need))}
 	}
-	return Layout{Mode: "erase", Disk: d.Path, SectorBytes: d.SectorBytes, Wipe: true, ESP: esp, Root: root, FallbackBoot: true}, nil
+	lay.Root = root
+	return lay, nil
 }
 
 // windowsPartition is the largest Basic-data partition holding NTFS or
@@ -257,8 +275,9 @@ func freeNumbers(d Disk, n int) []int {
 }
 
 // planAlongside shrinks Windows' partition from its end only (its start
-// sector never moves) and puts Rafiq in the space that frees.
-func planAlongside(x tr, d Disk, jarvisBytes int64) (Layout, error) {
+// sector never moves) and puts Rafiq in the space that frees: a new ESP if
+// Windows' is too small to share, with encryption a 1 GiB /boot, then root.
+func planAlongside(x tr, d Disk, jarvisBytes int64, encrypt bool) (Layout, error) {
 	win := windowsPartition(d)
 	if !d.GPT || win == nil {
 		return Layout{}, &Refusal{RefuseAlongsideNoWin, x.t.NoWindows}
@@ -278,6 +297,9 @@ func planAlongside(x tr, d Disk, jarvisBytes int64) (Layout, error) {
 	need := int64(MinRootBytes)
 	if esp == nil {
 		need += ESPSizeBytes
+	}
+	if encrypt {
+		need += BootSizeBytes
 	}
 	tooSmall := &Refusal{RefuseAlongsideSmall, x.f(x.t.AlongsideTooSmall, human(need), human(win.NTFS.MinSizeBytes))}
 	newBytes := win.SizeBytes - jarvisBytes
@@ -308,8 +330,15 @@ func planAlongside(x tr, d Disk, jarvisBytes int64) (Layout, error) {
 	newBytes = (newEnd - win.Start + 1) * s
 	lay := Layout{Mode: "alongside", Disk: d.Path, SectorBytes: s, DualBoot: true,
 		Shrink: &Shrink{Part: *win, NewBytes: newBytes, NewEnd: newEnd}}
-	nums := freeNumbers(d, 2)
-	if len(nums) < 2 {
+	want := 1
+	if esp == nil {
+		want++
+	}
+	if encrypt {
+		want++
+	}
+	nums := freeNumbers(d, want)
+	if len(nums) < want {
 		return Layout{}, tooSmall
 	}
 	rootStart := regionStart
@@ -320,6 +349,13 @@ func planAlongside(x tr, d Disk, jarvisBytes int64) (Layout, error) {
 		lay.ESP = Part{Path: PartPath(d.Path, nums[0]), Number: nums[0], Create: true, Format: true,
 			Start: regionStart, End: regionStart + espSec - 1, Bytes: espSec * s}
 		rootStart = regionStart + espSec
+		nums = nums[1:]
+	}
+	if encrypt {
+		bootSec := BootSizeBytes / s
+		lay.Boot = &Part{Path: PartPath(d.Path, nums[0]), Number: nums[0], Create: true, Format: true,
+			Start: rootStart, End: rootStart + bootSec - 1, Bytes: bootSec * s}
+		rootStart += bootSec
 		nums = nums[1:]
 	}
 	lay.Root = Part{Path: PartPath(d.Path, nums[0]), Number: nums[0], Create: true, Format: true,
@@ -337,7 +373,7 @@ func planManual(x tr, d Disk, entries []ManualEntry, encrypt bool) (Layout, erro
 	lay := Layout{Mode: "manual", Disk: d.Path, SectorBytes: d.SectorBytes}
 	seenPart, seenMount := map[string]bool{}, map[string]bool{}
 	var haveRoot, haveESP bool
-	var espPart Partition
+	var espPart, bootPart Partition
 	for _, e := range entries {
 		p, ok := byPath[e.Partition]
 		if !ok {
@@ -356,6 +392,15 @@ func planManual(x tr, d Disk, entries []ManualEntry, encrypt bool) (Layout, erro
 			lay.Root, haveRoot = part, true
 		case "/boot/efi":
 			lay.ESP, haveESP, espPart = part, true, p
+		case "/boot":
+			if !encrypt {
+				return Layout{}, invalidf("a separate /boot is only used with encryption")
+			}
+			if !e.Format {
+				return Layout{}, invalidf("the /boot partition must be formatted")
+			}
+			b := part
+			lay.Boot, bootPart = &b, p
 		case "swap":
 			if encrypt {
 				return Layout{}, invalidf("a swap partition cannot be used with encryption; Rafiq uses an encrypted swap file instead")
@@ -366,7 +411,7 @@ func planManual(x tr, d Disk, entries []ManualEntry, encrypt bool) (Layout, erro
 			sw := part
 			lay.Swap = &sw
 		default:
-			return Layout{}, invalidf("mount must be /, /boot/efi or swap")
+			return Layout{}, invalidf("mount must be /, /boot, /boot/efi or swap")
 		}
 	}
 	if !haveRoot {
@@ -377,6 +422,12 @@ func planManual(x tr, d Disk, entries []ManualEntry, encrypt bool) (Layout, erro
 	}
 	if espPart.TypeGUID != espTypeGUID || espPart.SizeBytes < ESPReuseMinBytes || (!lay.ESP.Format && espPart.FS != "vfat") {
 		return Layout{}, &Refusal{RefuseManualNoESP, x.f(x.t.ManualSmallESP, espPart.Path, human(ESPReuseMinBytes))}
+	}
+	if encrypt && lay.Boot == nil {
+		return Layout{}, &Refusal{RefuseManualNoBoot, x.t.ManualNoBoot}
+	}
+	if lay.Boot != nil && (bootPart.SizeBytes < BootMinBytes || bootPart.TypeGUID == espTypeGUID) {
+		return Layout{}, &Refusal{RefuseManualNoBoot, x.f(x.t.ManualSmallBoot, bootPart.Path, human(BootMinBytes))}
 	}
 	for _, p := range d.Partitions {
 		if !seenPart[p.Path] && p.TypeGUID == basicDataTypeGUID && (p.FS == "ntfs" || p.FS == "BitLocker") {
@@ -401,7 +452,7 @@ func summary(x tr, c Choices, d Disk, lay Layout, model *catalog.Model, online b
 		out = append(out, x.f(x.t.EraseDisk, name, human(d.SizeBytes), d.Path),
 			x.f(x.t.EraseCreate, human(lay.ESP.Bytes), human(lay.Root.Bytes), enc))
 	case "alongside":
-		out = append(out, x.f(x.t.AlongsideShrink, human(lay.Shrink.Part.SizeBytes), human(lay.Shrink.NewBytes), human(lay.Root.Bytes+espIfNew(lay)), enc))
+		out = append(out, x.f(x.t.AlongsideShrink, human(lay.Shrink.Part.SizeBytes), human(lay.Shrink.NewBytes), human(lay.Root.Bytes+espIfNew(lay)+bootIfNew(lay)), enc))
 		if lay.ESP.Create {
 			out = append(out, x.f(x.t.ESPCreate, human(lay.ESP.Bytes)))
 		} else {
@@ -420,6 +471,13 @@ func summary(x tr, c Choices, d Disk, lay Layout, model *catalog.Model, online b
 			} else {
 				out = append(out, x.f(x.t.ManualSwapKeep, lay.Swap.Path))
 			}
+		}
+	}
+	if b := lay.Boot; b != nil {
+		if b.Create {
+			out = append(out, x.f(x.t.BootCreate, human(b.Bytes)))
+		} else {
+			out = append(out, x.f(x.t.ManualBootFormat, b.Path, human(b.Bytes)))
 		}
 	}
 	if lay.Encrypt {
@@ -455,6 +513,13 @@ func summary(x tr, c Choices, d Disk, lay Layout, model *catalog.Model, online b
 func espIfNew(lay Layout) int64 {
 	if lay.ESP.Create {
 		return lay.ESP.Bytes
+	}
+	return 0
+}
+
+func bootIfNew(lay Layout) int64 {
+	if lay.Boot != nil && lay.Boot.Create {
+		return lay.Boot.Bytes
 	}
 	return 0
 }
@@ -520,6 +585,8 @@ func diskAfter(x tr, d Disk, lay Layout) []DiskAfter {
 				r.Label, r.Encrypted = x.t.LabelJarvis, lay.Encrypt
 			case p.Path == lay.ESP.Path:
 				r.Label = x.t.LabelESP
+			case lay.Boot != nil && p.Path == lay.Boot.Path:
+				r.Label = x.t.LabelBoot
 			case lay.Swap != nil && p.Path == lay.Swap.Path:
 				r.Label = x.t.LabelSwap
 			}
@@ -528,6 +595,9 @@ func diskAfter(x tr, d Disk, lay Layout) []DiskAfter {
 	}
 	if lay.ESP.Create {
 		rows = append(rows, row{lay.ESP.Start, DiskAfter{x.t.LabelESP, lay.ESP.Bytes, false}})
+	}
+	if lay.Boot != nil && lay.Boot.Create {
+		rows = append(rows, row{lay.Boot.Start, DiskAfter{x.t.LabelBoot, lay.Boot.Bytes, false}})
 	}
 	if lay.Root.Create {
 		rows = append(rows, row{lay.Root.Start, DiskAfter{x.t.LabelJarvis, lay.Root.Bytes, lay.Encrypt}})

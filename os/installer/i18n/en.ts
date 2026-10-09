@@ -259,6 +259,14 @@
             <source>Choose where to install %1.</source>
             <translation>Choose where to install %1.</translation>
         </message>
+        <message>
+            <source>A separate /boot partition is only used with encryption. Set it to Not used.</source>
+            <translation>A separate /boot partition is only used with encryption. Set it to Not used.</translation>
+        </message>
+        <message>
+            <source>Choose a partition of at least 500 MB for /boot, not the EFI system partition.</source>
+            <translation>Choose a partition of at least 500 MB for /boot, not the EFI system partition.</translation>
+        </message>
     </context>
     <context>
         <name>DiskScreen</name>
@@ -295,8 +303,8 @@
             <translation>Format</translation>
         </message>
         <message>
-            <source>Manual mode makes no partition-table changes. / must be formatted; /boot/efi must be an existing EF00 partition of at least 300 MB. Encrypted installs use a swapfile, with no swap partition. LVM and RAID are not offered.</source>
-            <translation>Manual mode makes no partition-table changes. / must be formatted; /boot/efi must be an existing EF00 partition of at least 300 MB. Encrypted installs use a swapfile, with no swap partition. LVM and RAID are not offered.</translation>
+            <source>Manual mode makes no partition-table changes. / must be formatted; /boot/efi must be an existing EF00 partition of at least 300 MB. Encrypted installs also need a separate, unencrypted /boot partition of at least 500 MB, which is formatted, and use a swapfile, with no swap partition. LVM and RAID are not offered.</source>
+            <translation>Manual mode makes no partition-table changes. / must be formatted; /boot/efi must be an existing EF00 partition of at least 300 MB. Encrypted installs also need a separate, unencrypted /boot partition of at least 500 MB, which is formatted, and use a swapfile, with no swap partition. LVM and RAID are not offered.</translation>
         </message>
         <message>
             <source>Encrypt %1 (recommended). You'll type a passphrase at every start.</source>
@@ -434,6 +442,10 @@
         <message>
             <source>The installer can't go ahead with these choices.</source>
             <translation>The installer can't go ahead with these choices.</translation>
+        </message>
+        <message>
+            <source>Encrypted installs need a separate, unencrypted partition for /boot (at least 500 MB). Choose one, or turn encryption off.</source>
+            <translation>Encrypted installs need a separate, unencrypted partition for /boot (at least 500 MB). Choose one, or turn encryption off.</translation>
         </message>
     </context>
     <context>

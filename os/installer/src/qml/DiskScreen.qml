@@ -162,7 +162,7 @@ ColumnLayout {
         Text {
             Layout.fillWidth: true
             objectName: "manualLimits"
-            text: qsTr("Manual mode makes no partition-table changes. / must be formatted; /boot/efi must be an existing EF00 partition of at least 300 MB. Encrypted installs use a swapfile, with no swap partition. LVM and RAID are not offered.")
+            text: qsTr("Manual mode makes no partition-table changes. / must be formatted; /boot/efi must be an existing EF00 partition of at least 300 MB. Encrypted installs also need a separate, unencrypted /boot partition of at least 500 MB, which is formatted, and use a swapfile, with no swap partition. LVM and RAID are not offered.")
             color: Theme.mutedSoft
             font.pixelSize: Theme.fontSmall
             wrapMode: Text.Wrap

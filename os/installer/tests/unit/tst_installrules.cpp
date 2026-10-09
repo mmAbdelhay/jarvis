@@ -185,7 +185,8 @@ private slots:
 
     void refusals()
     {
-        QCOMPARE(refusalKeys().size(), 11);
+        QCOMPARE(refusalKeys().size(), 12);
+        QVERIFY(refusalKeys().contains(u"manual-missing-boot"_s));
         QVERIFY(refusalText(u"live-medium"_s, {}, u"Rafiq"_s).contains(u"USB stick"_s));
         QCOMPARE(splitRefusal(u"live-medium: That is the boot stick."_s).first, u"live-medium"_s);
         QCOMPARE(splitRefusal(u"ntfs-dirty: Volume is dirty"_s), (std::pair{u"ntfs-dirty"_s, u"Volume is dirty"_s}));

@@ -62,19 +62,21 @@ func TestPlanEraseExact(t *testing.T) {
 	}
 	wantLayout := Layout{Mode: "erase", Disk: "/dev/nvme0n1", SectorBytes: 512, Wipe: true, Encrypt: true, FallbackBoot: true,
 		ESP:  Part{Path: "/dev/nvme0n1p1", Number: 1, Create: true, Format: true, Start: 2048, End: 1050623, Bytes: 536870912},
-		Root: Part{Path: "/dev/nvme0n1p2", Number: 2, Create: true, Format: true, Start: 1050624, End: 500118158, Bytes: 255522577920}}
+		Boot: &Part{Path: "/dev/nvme0n1p2", Number: 2, Create: true, Format: true, Start: 1050624, End: 3147775, Bytes: 1073741824},
+		Root: Part{Path: "/dev/nvme0n1p3", Number: 3, Create: true, Format: true, Start: 3147776, End: 500118158, Bytes: 254448836096}}
 	if !reflect.DeepEqual(pl.Layout, wantLayout) {
 		t.Fatalf("layout\n got %+v\nwant %+v", pl.Layout, wantLayout)
 	}
 	wantSummary := []string{
 		"Erase the whole disk Samsung SSD 980 (256 GB, /dev/nvme0n1). Everything on it is deleted.",
-		"Create a 537 MB boot partition (EFI) and a 256 GB encrypted Rafiq partition.",
+		"Create a 537 MB boot partition (EFI) and a 254 GB encrypted Rafiq partition.",
+		"Create a 1.1 GB start-up partition (/boot) for Rafiq. It is not encrypted: it holds only the programs that ask for your passphrase.",
 		"Encryption is on: you type a passphrase each time the computer starts.",
 		"Language en_US.UTF-8, keyboard us, time zone Africa/Cairo.",
 		`Your account: Ada Lovelace (ada) on the computer "ada-laptop".`,
 		"Asks for your password at the login screen.",
 		"Jarvis thinks on this computer with Qwen3 4B (2.6 GB download).",
-		"About 243 GB stays free for your files.",
+		"About 242 GB stays free for your files.",
 	}
 	if !reflect.DeepEqual(pl.Public.Summary, wantSummary) {
 		t.Fatalf("summary\n got %q\nwant %q", pl.Public.Summary, wantSummary)
@@ -86,11 +88,33 @@ func TestPlanEraseExact(t *testing.T) {
 	if strings.Join(ids, ",") != "partition,encrypt,format,copy,configure,bootloader,model" {
 		t.Fatalf("steps = %v", ids)
 	}
-	if !reflect.DeepEqual(pl.Public.DiskAfter, []DiskAfter{{"EFI boot", 536870912, false}, {"Rafiq", 255522577920, true}}) {
+	if !reflect.DeepEqual(pl.Public.DiskAfter, []DiskAfter{{"EFI boot", 536870912, false}, {"Rafiq boot", 1073741824, false}, {"Rafiq", 254448836096, true}}) {
 		t.Fatalf("diskAfter = %+v", pl.Public.DiskAfter)
 	}
 	if len(pl.Public.Warnings) != 2 || !strings.Contains(pl.Public.Warnings[1], "/dev/nvme0n1") || pl.Public.PlanID != "p1" {
 		t.Fatalf("warnings = %q", pl.Public.Warnings)
+	}
+}
+
+// Without encryption there is no separate /boot: ESP and root only.
+func TestPlanEraseUnencryptedHasNoBoot(t *testing.T) {
+	c := choices("erase", "/dev/nvme0n1")
+	c.Encrypt = false
+	pl, err := MakePlan(c, probe(emptyDisk()), "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantLayout := Layout{Mode: "erase", Disk: "/dev/nvme0n1", SectorBytes: 512, Wipe: true, FallbackBoot: true,
+		ESP:  Part{Path: "/dev/nvme0n1p1", Number: 1, Create: true, Format: true, Start: 2048, End: 1050623, Bytes: 536870912},
+		Root: Part{Path: "/dev/nvme0n1p2", Number: 2, Create: true, Format: true, Start: 1050624, End: 500118158, Bytes: 255522577920}}
+	if !reflect.DeepEqual(pl.Layout, wantLayout) {
+		t.Fatalf("layout\n got %+v\nwant %+v", pl.Layout, wantLayout)
+	}
+	if pl.Public.Summary[1] != "Create a 537 MB boot partition (EFI) and a 256 GB Rafiq partition." || strings.Contains(strings.Join(pl.Public.Summary, "\n"), "/boot)") {
+		t.Fatalf("summary = %q", pl.Public.Summary)
+	}
+	if !reflect.DeepEqual(pl.Public.DiskAfter, []DiskAfter{{"EFI boot", 536870912, false}, {"Rafiq", 255522577920, false}}) {
+		t.Fatalf("diskAfter = %+v", pl.Public.DiskAfter)
 	}
 }
 
@@ -106,19 +130,23 @@ func TestPlanAlongsideNewESPExact(t *testing.T) {
 	if l.ESP != (Part{Path: "/dev/loop1p5", Number: 5, Create: true, Format: true, Start: 53997568, End: 55046143, Bytes: 536870912}) {
 		t.Fatalf("esp = %+v", l.ESP)
 	}
+	if l.Boot == nil || *l.Boot != (Part{Path: "/dev/loop1p6", Number: 6, Create: true, Format: true, Start: 55046144, End: 57143295, Bytes: 1073741824}) {
+		t.Fatalf("boot = %+v", l.Boot)
+	}
 	// Ends one sector before the Recovery partition, which is never touched.
-	if l.Root != (Part{Path: "/dev/loop1p6", Number: 6, Create: true, Format: true, Start: 55046144, End: 132120575, Bytes: 39462109184}) {
+	if l.Root != (Part{Path: "/dev/loop1p7", Number: 7, Create: true, Format: true, Start: 57143296, End: 132120575, Bytes: 38388367360}) {
 		t.Fatalf("root = %+v", l.Root)
 	}
 	if !l.DualBoot || l.Wipe || l.FallbackBoot {
 		t.Fatalf("flags = %+v", l)
 	}
 	if pl.Public.Summary[0] != "Shrink Windows from 68 GB to 28 GB, create 40 GB encrypted Rafiq." ||
-		pl.Public.Summary[1] != "Create a new 537 MB boot partition (EFI)." {
-		t.Fatalf("summary = %q", pl.Public.Summary[:2])
+		pl.Public.Summary[1] != "Create a new 537 MB boot partition (EFI)." ||
+		!strings.HasPrefix(pl.Public.Summary[2], "Create a 1.1 GB start-up partition (/boot) for Rafiq.") {
+		t.Fatalf("summary = %q", pl.Public.Summary[:3])
 	}
 	want := []DiskAfter{{"EFI boot", 104857600, false}, {"Microsoft reserved partition", 16777216, false}, {"Windows", 27524071424, false},
-		{"EFI boot", 536870912, false}, {"Rafiq", 39462109184, true}, {"Recovery", 1073724928, false}}
+		{"EFI boot", 536870912, false}, {"Rafiq boot", 1073741824, false}, {"Rafiq", 38388367360, true}, {"Recovery", 1073724928, false}}
 	if !reflect.DeepEqual(pl.Public.DiskAfter, want) {
 		t.Fatalf("diskAfter\n got %+v\nwant %+v", pl.Public.DiskAfter, want)
 	}
@@ -137,11 +165,77 @@ func TestPlanAlongsideReusesABigESP(t *testing.T) {
 	if pl.Layout.ESP != (Part{Path: "/dev/loop1p1", Number: 1, Bytes: 314572800}) {
 		t.Fatalf("esp = %+v", pl.Layout.ESP)
 	}
-	if r := pl.Layout.Root; r.Number != 5 || r.Start != 53997568 || r.End != 132120575 {
+	if b := pl.Layout.Boot; b == nil || b.Number != 5 || b.Start != 53997568 || b.End != 56094719 {
+		t.Fatalf("boot = %+v", b)
+	}
+	if r := pl.Layout.Root; r.Number != 6 || r.Start != 56094720 || r.End != 132120575 {
 		t.Fatalf("root = %+v", r)
 	}
 	if pl.Public.Summary[1] != "Use the existing boot partition /dev/loop1p1, shared with Windows." {
 		t.Fatalf("summary = %q", pl.Public.Summary[1])
+	}
+}
+
+func TestPlanAlongsideUnencryptedHasNoBoot(t *testing.T) {
+	c := choices("alongside", "/dev/loop1")
+	c.Encrypt = false
+	pl, err := MakePlan(c, probe(windowsDisk()), "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pl.Layout.Boot != nil || pl.Layout.Root != (Part{Path: "/dev/loop1p6", Number: 6, Create: true, Format: true, Start: 55046144, End: 132120575, Bytes: 39462109184}) {
+		t.Fatalf("layout = %+v", pl.Layout)
+	}
+}
+
+// Encryption needs 1 GiB more: a size that fits without it is refused with it.
+func TestPlanAlongsideBootNeedsRoom(t *testing.T) {
+	c := choices("alongside", "/dev/loop1")
+	c.Brain = Brain{Kind: "cloud"}
+	c.Disk.AlongsideSizeBytes = i64(MinRootBytes + ESPSizeBytes + 512*MiB)
+	if _, err := MakePlan(c, probe(windowsDisk()), "p"); refusal(t, err) != RefuseAlongsideSmall {
+		t.Fatalf("encrypted: %v", err)
+	}
+	c.Encrypt = false
+	if _, err := MakePlan(c, probe(windowsDisk()), "p"); err != nil {
+		t.Fatalf("unencrypted: %v", err)
+	}
+	c.Encrypt = true
+	c.Disk.AlongsideSizeBytes = i64(MinRootBytes + ESPSizeBytes + BootSizeBytes)
+	if _, err := MakePlan(c, probe(windowsDisk()), "p"); err != nil {
+		t.Fatalf("encrypted, exactly enough: %v", err)
+	}
+}
+
+// encryptedManualDisk has a 300 MiB ESP to share and a 1 GB Linux
+// partition (the old Recovery slot) to use as /boot.
+func encryptedManualDisk() Disk {
+	d := windowsDisk()
+	d.Partitions[0].SizeBytes = 314572800
+	d.Partitions[3].TypeGUID, d.Partitions[3].FS, d.Partitions[3].NTFS = "0fc63daf-8483-4772-8e79-3d69d8477de4", "ext4", nil
+	return d
+}
+
+func TestPlanManualEncryptedUsesTheChosenBoot(t *testing.T) {
+	c := choices("manual", "/dev/loop1")
+	c.Brain = Brain{Kind: "cloud"}
+	c.Disk.Manual = []ManualEntry{{"/dev/loop1p3", "/", true}, {"/dev/loop1p1", "/boot/efi", false}, {"/dev/loop1p4", "/boot", true}}
+	pl, err := MakePlan(c, probe(encryptedManualDisk()), "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	l := pl.Layout
+	if l.Boot == nil || *l.Boot != (Part{Path: "/dev/loop1p4", Number: 4, Format: true, Bytes: 1073724928}) || l.Root.Path != "/dev/loop1p3" || !l.Encrypt {
+		t.Fatalf("layout = %+v boot %+v", l, l.Boot)
+	}
+	if got := strings.Join(pl.Public.Summary, "\n"); !strings.Contains(got, "Format /dev/loop1p4 (1.1 GB) as Rafiq's start-up partition (/boot). It is not encrypted.") {
+		t.Fatalf("summary = %s", got)
+	}
+	if pl.Public.DiskAfter[3] != (DiskAfter{"Rafiq boot", 1073724928, false}) || pl.Public.DiskAfter[2] != (DiskAfter{"Rafiq", 67523034624, true}) {
+		t.Fatalf("diskAfter = %+v", pl.Public.DiskAfter)
+	}
+	if pl.Public.Steps[0].StepID != "encrypt" {
+		t.Fatalf("steps = %+v", pl.Public.Steps)
 	}
 }
 
@@ -151,8 +245,14 @@ func TestPlanAlongsideReusesABigESP(t *testing.T) {
 func TestPlanAlongsideNeverMovesWindowsAndNeverOverlaps(t *testing.T) {
 	d := windowsDisk()
 	win := d.Partitions[2]
-	for j := int64(30_000_000_000); j <= win.SizeBytes; j += 377_000_017 {
+	for k := int64(0); k <= 2*(win.SizeBytes-30_000_000_000); k += 377_000_017 {
+		enc := k <= win.SizeBytes-30_000_000_000
+		j := 30_000_000_000 + k
+		if !enc {
+			j -= win.SizeBytes - 30_000_000_000
+		}
 		c := choices("alongside", "/dev/loop1")
+		c.Encrypt = enc
 		c.Disk.AlongsideSizeBytes = i64(j)
 		c.Brain = Brain{Kind: "cloud"}
 		pl, err := MakePlan(c, probe(d), "p")
@@ -173,7 +273,17 @@ func TestPlanAlongsideNeverMovesWindowsAndNeverOverlaps(t *testing.T) {
 		if l.Shrink.NewBytes < win.NTFS.MinSizeBytes {
 			t.Fatalf("J=%d: Windows below its minimum", j)
 		}
-		for _, p := range []Part{l.ESP, l.Root} {
+		parts := []Part{l.ESP, l.Root}
+		if (l.Boot != nil) != enc {
+			t.Fatalf("J=%d: a separate /boot exactly when encrypted", j)
+		}
+		if l.Boot != nil {
+			parts = append(parts, *l.Boot)
+			if l.Boot.End+1 != l.Root.Start || l.Boot.Start <= l.ESP.End && l.ESP.Create {
+				t.Fatalf("J=%d: /boot must sit between the ESP and root: %+v", j, l)
+			}
+		}
+		for _, p := range parts {
 			if p.Create && (p.Start <= l.Shrink.NewEnd || p.End >= d.Partitions[3].Start || p.Start%2048 != 0) {
 				t.Fatalf("J=%d: %+v overlaps or is unaligned", j, p)
 			}
@@ -253,8 +363,19 @@ func TestPlanRefusals(t *testing.T) {
 			c.Disk.Manual = []ManualEntry{{"/dev/loop1p3", "/", true}, {"/dev/loop1p1", "/boot/efi", false}}
 			return c
 		}, probe(windowsDisk()), RefuseManualNoESP},
+		{"manual encrypted without /boot", func() Choices {
+			c := choices("manual", "/dev/loop1")
+			c.Disk.Manual = []ManualEntry{{"/dev/loop1p3", "/", true}, {"/dev/loop1p1", "/boot/efi", false}}
+			return c
+		}, probe(encryptedManualDisk()), RefuseManualNoBoot},
+		{"manual /boot too small", func() Choices {
+			c := choices("manual", "/dev/loop1")
+			c.Disk.Manual = []ManualEntry{{"/dev/loop1p3", "/", true}, {"/dev/loop1p1", "/boot/efi", false}, {"/dev/loop1p2", "/boot", true}}
+			return c
+		}, probe(encryptedManualDisk()), RefuseManualNoBoot},
 		{"manual root too small", func() Choices {
 			d := choices("manual", "/dev/loop1")
+			d.Encrypt = false
 			d.Disk.Manual = []ManualEntry{{"/dev/loop1p4", "/", true}, {"/dev/loop1p1", "/boot/efi", true}}
 			return d
 		}, func() ProbeResult { d := windowsDisk(); d.Partitions[0].SizeBytes = 314572800; return probe(d) }(), RefuseDiskTooSmall},
@@ -316,6 +437,7 @@ func TestPlanInvalidInput(t *testing.T) {
 		"root not formatted":   {{"/dev/loop1p3", "/", false}, {"/dev/loop1p1", "/boot/efi", false}},
 		"same partition twice": {{"/dev/loop1p3", "/", true}, {"/dev/loop1p3", "/boot/efi", true}},
 		"swap with encryption": {{"/dev/loop1p3", "/", true}, {"/dev/loop1p1", "/boot/efi", false}, {"/dev/loop1p4", "swap", true}},
+		"/boot not formatted":  {{"/dev/loop1p3", "/", true}, {"/dev/loop1p1", "/boot/efi", false}, {"/dev/loop1p4", "/boot", false}},
 		"bad mount":            {{"/dev/loop1p3", "/home", true}},
 		"foreign partition":    {{"/dev/sda1", "/", true}},
 	} {
@@ -330,6 +452,18 @@ func TestPlanInvalidInput(t *testing.T) {
 				t.Fatalf("err = %v, want InvalidError", err)
 			}
 		})
+	}
+}
+
+func TestPlanManualUnencryptedRefusesASeparateBoot(t *testing.T) {
+	c := choices("manual", "/dev/loop1")
+	c.Encrypt = false
+	c.Brain = Brain{Kind: "cloud"}
+	c.Disk.Manual = []ManualEntry{{"/dev/loop1p3", "/", true}, {"/dev/loop1p1", "/boot/efi", false}, {"/dev/loop1p4", "/boot", true}}
+	_, err := MakePlan(c, probe(encryptedManualDisk()), "p")
+	var inv *InvalidError
+	if !errors.As(err, &inv) {
+		t.Fatalf("err = %v, want InvalidError (no separate /boot without encryption)", err)
 	}
 }
 
