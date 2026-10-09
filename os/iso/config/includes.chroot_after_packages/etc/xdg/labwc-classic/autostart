@@ -13,6 +13,10 @@ fi
 systemctl --user import-environment WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP >/dev/null 2>&1 || true
 dbus-update-activation-environment --systemd WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP >/dev/null 2>&1 || true
 
+# A full-session jarvis-cu may outlive its logout; it must never attach to this
+# compositor, which has no overlay (Rafiq v1.1 Plan X, Task 5).
+systemctl --user stop jarvis-cu.service >/dev/null 2>&1 || true
+
 # Desktop notifications (M2.5 §7 #15).
 mako &
 

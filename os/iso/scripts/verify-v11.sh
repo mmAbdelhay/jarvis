@@ -24,7 +24,7 @@ if [ -f "$unit" ]; then
       seen++; n = split($2, families, " "); unix = 0
       for (i = 1; i <= n; i++) {
         if (families[i] == "AF_UNIX") unix = 1
-        else if (families[i] != "AF_NETLINK") unsafe = 1
+        else unsafe = 1
       }
       if (!unix) unsafe = 1
     }
@@ -40,8 +40,16 @@ for d in etc/systemd/user usr/lib/systemd/user; do
 done
 line='if [ -r /usr/share/jarvis-cu/labwc/autostart ]; then . /usr/share/jarvis-cu/labwc/autostart; fi'
 grep -qxF "$line" "$c/etc/xdg/labwc/autostart" 2>/dev/null || problems+=("labwc autostart does not start jarvis-cu")
+awk -v helper="$line" '
+  /^[[:space:]]*systemctl --user import-environment / && /WAYLAND_DISPLAY/ {imported = 1}
+  $0 == helper {seen = 1; if (!imported) unsafe = 1}
+  END {exit !(seen && !unsafe)}' "$c/etc/xdg/labwc/autostart" 2>/dev/null ||
+  problems+=("labwc must import WAYLAND_DISPLAY before starting jarvis-cu (contracts §4.6)")
 [ -f "$c/usr/share/jarvis-cu/labwc/autostart" ] || problems+=("jarvis-cu's autostart fragment is missing")
-if grep -q jarvis-cu "$c/etc/xdg/labwc-classic/autostart" 2>/dev/null; then
+if awk '
+  /^[[:space:]]*#/ {next}
+  /jarvis-cu/ && !/^[[:space:]]*systemctl --user stop jarvis-cu[.]service([[:space:]]|$)/ {found = 1}
+  END {exit !found}' "$c/etc/xdg/labwc-classic/autostart" 2>/dev/null; then
   problems+=("the classic session starts jarvis-cu, but it has no overlay to show or stop computer use")
 fi
 grep -q 'jarvis-cu.service' "$c/usr/libexec/jarvis/jarvis-shell-guard" 2>/dev/null ||

@@ -153,3 +153,38 @@ test("usage errors exit 64", async () => {
   assert.equal(await main(["cu-enable"]), 64);
   assert.equal(await main(["cu", "--text", "x", "--begin", "maybe"]), 64);
 });
+
+// This session boundary lets lifecycle tests run without a listening socket.
+test("a timed-out computer-use run never answers late cards", async () => {
+  let pushEvent;
+  const calls = [];
+  const session = {
+    onPush(listener) { pushEvent = listener; },
+    async invoke(ch, a) {
+      calls.push({ ch, a });
+      return ch === "agent:prompt" ? { turnId: "t1" } : null;
+    },
+  };
+  const lines = [];
+  const result = await runComputerUse(session, { text: "x", timeoutMs: 10, log: (e) => lines.push(e) });
+  assert.equal(result.code, 2);
+  assert.equal(result.reason, "timeout");
+  const count = lines.length;
+  pushEvent("agent:events", { type: "card", card: card("late", "t1", item("b", "cu.begin", "Begin")) });
+  assert.deepEqual(calls.map((c) => c.ch), ["agent:prompt"]);
+  assert.equal(lines.length, count);
+  assert.deepEqual(result.cards, []);
+});
+
+test("connection failure during a computer-use prompt returns exit 2", async () => {
+  const session = {
+    onPush() {},
+    async invoke() {
+      throw Object.assign(new Error("control connection closed"), { code: "ECONNRESET" });
+    },
+  };
+  const result = await runComputerUse(session, { text: "x", timeoutMs: 100 });
+  assert.equal(result.code, 2);
+  assert.equal(result.reason, "connect");
+  assert.equal(result.error, "control connection closed");
+});

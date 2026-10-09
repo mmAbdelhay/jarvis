@@ -1,10 +1,9 @@
 # Jarvis computer use helper (v1.1 contracts §1). A user service started by
 # the full session's labwc autostart once WAYLAND_DISPLAY is imported; never
 # enabled for every user (no [Install]). It only ever talks over Unix sockets
-# (Wayland, D-Bus for AT-SPI, its own control socket). AF_NETLINK is allowed
-# because the peer check runs `ss -xpH`, which reads Unix peer inodes over
-# NETLINK_SOCK_DIAG (the seccomp filter is inherited by the child). Netlink is
-# not network egress: with no AF_INET/AF_INET6 a screenshot cannot leave.
+# (Wayland, D-Bus for AT-SPI, its own control socket), so AF_UNIX is the only
+# address family: the helper cannot open a network socket at all. Its peer
+# check is SO_PEERCRED plus /proc, not `ss`, so it needs no netlink either.
 [Unit]
 Description=Jarvis computer use helper (allowed windows only)
 ConditionEnvironment=WAYLAND_DISPLAY
@@ -20,7 +19,7 @@ Restart=on-failure
 RestartSec=2
 UMask=0077
 NoNewPrivileges=yes
-RestrictAddressFamilies=AF_UNIX AF_NETLINK
+RestrictAddressFamilies=AF_UNIX
 LockPersonality=yes
 RestrictNamespaces=yes
 RestrictRealtime=yes

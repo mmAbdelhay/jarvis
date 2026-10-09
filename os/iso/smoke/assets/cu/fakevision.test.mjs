@@ -137,6 +137,52 @@ test("counts screenshots sent in a turn without screen tools", () => {
   assert.deepEqual(core.report.turns[0].toolsOffered, ["pkg_search"]);
 });
 
+test('counts historical screenshots resent without screen tools on each request', () => {
+  const core = createFakeVision({ turns: [
+    { name: 'probe', expectPromptContains: 'cu-probe', steps: [{ call: 'screen_look' }, { text: 'done' }] },
+    { name: 'off', expectPromptContains: 'cu-off', steps: [{ text: 'off' }] },
+  ] });
+  const messages = [{ role: 'user', content: 'cu-probe: look' }];
+  core.chat({ messages, tools: SCREEN });
+  messages.push(called('screen_look', {}), ...lookResult([GIMP, TERM]));
+  core.chat({ messages, tools: SCREEN });
+  assert.equal(core.report.imagesOutsideComputerUse, 0);
+  messages.push({ role: 'assistant', content: 'done' }, { role: 'user', content: 'cu-off: look' });
+  core.chat({ messages, tools: [{ function: { name: 'pkg_search' } }] });
+  assert.equal(core.report.imagesOutsideComputerUse, 1);
+  core.chat({ messages });
+  assert.equal(core.report.imagesOutsideComputerUse, 2);
+});
+
+test('tool-less title requests quoting a call script leave the active turn intact', () => {
+  const core = createFakeVision({ turns: [{ name: 'x', expectPromptContains: 'cu-x', steps: [
+    { call: 'screen_look' }, { call: 'screen_key', input: { combo: 'Return' } }, { text: 'done' },
+  ] }] });
+  assert.deepEqual(core.chat({ messages: [{ role: 'user', content: 'Title for: cu-x go' }] }), { text: 'ok' });
+  assert.equal(core.report.turns.length, 0);
+  const c = conversation(core, 'cu-x go');
+  c.ask();
+  assert.deepEqual(core.chat({ messages: [{ role: 'user', content: 'Title for: cu-x go' }] }), { text: 'ok' });
+  assert.equal(core.report.turns.length, 1);
+  c.add(called('screen_look', {}), ...lookResult([GIMP]));
+  assert.deepEqual(c.ask().call, { name: 'screen_key', arguments: { combo: 'Return' } });
+  assert.equal(core.report.turns[0].steps[0].result.received, true);
+});
+
+test('a tool-less text-only script preserves an in-progress active turn', () => {
+  const core = createFakeVision({ turns: [
+    { name: 'x', expectPromptContains: 'cu-x', steps: [{ call: 'screen_look' }, { text: 'done' }] },
+    { name: 'off', expectPromptContains: 'cu-off', steps: [{ text: 'off' }] },
+  ] });
+  const c = conversation(core, 'cu-x go');
+  c.ask();
+  assert.deepEqual(core.chat({ messages: [{ role: 'user', content: 'cu-off' }] }), { text: 'off' });
+  c.add(called('screen_look', {}), ...lookResult([GIMP]));
+  assert.deepEqual(c.ask(), { text: 'done' });
+  assert.deepEqual(core.report.turns.map(t => t.name), ['x', 'off']);
+  assert.equal(core.report.turns[0].steps[0].result.received, true);
+});
+
 test("reads tool results the way jarvisd writes them", () => {
   assert.deepEqual(resultBody(`ERROR: ${fenced("screen.click", { error: { code: "paused" } })}`), { error: { code: "paused" } });
   assert.equal(errorCode("ERROR: excluded: a terminal has focus"), "excluded");
@@ -371,4 +417,56 @@ test('U-1 export fixtures explicitly escalate invisible dialogs without claiming
     assert.ok(!turn.steps.some(s => s.onlyIfWindow || s.target?.window?.includes('Export Image')));
     assert.match(turn.steps.at(-1).text, /blocked/i);
   }
+});
+
+test('summary-only capture invalidates earlier target geometry', () => {
+  const core = createFakeVision({ turns: [{ name: 't', expectPromptContains: 'cu-summary', steps: [
+    { call: 'screen_look' }, { call: 'screen_look' },
+    { call: 'screen_click', target: { window: 'beach' } }, { text: 'done' },
+  ] }] });
+  const c = conversation(core, 'cu-summary');
+  c.ask(); c.add(called('screen_look', {}), ...lookResult([GIMP]));
+  c.ask(); c.add(called('screen_look', {}),
+    { role: 'tool', tool_name: 'screen_look', content: 'Allowed window is not focused.' },
+    { role: 'user', images: [encodePng(100, 60, () => [0, 0, 0]).toString('base64')] });
+  assert.deepEqual(c.ask(), { text: 'done' });
+  assert.match(core.report.turns[0].steps[2].problem, /no click target/);
+});
+
+test('scripted off turn runs even when no tools are offered', () => {
+  const script = JSON.parse(readFileSync(new URL('./cu-gimp.json', import.meta.url), 'utf8'));
+  const core = createFakeVision(script);
+  const reply = conversation(core, 'cu-off: can you see my screen?', []).ask();
+  assert.match(reply.text, /computer use is off/);
+  assert.equal(core.report.turns[0].name, 'off');
+  assert.equal(core.report.turns[0].finished, true);
+});
+
+test('summary-only capture cannot pass a mask using earlier rectangles', () => {
+  const core = createFakeVision({ turns: [{ name: 't', expectPromptContains: 'cu-summary', steps: [
+    { call: 'screen_look' }, { call: 'screen_look' }, { text: 'done' },
+  ] }] });
+  const c = conversation(core, 'cu-summary');
+  c.ask(); c.add(called('screen_look', {}), ...lookResult([GIMP]));
+  c.ask(); c.add(called('screen_look', {}),
+    { role: 'tool', tool_name: 'screen_look', content: 'GIMP is visible.' },
+    { role: 'user', images: [masked([GIMP]).toString('base64')] });
+  c.ask();
+  assert.equal(core.report.turns[0].images[1].ok, false);
+  assert.ok(core.report.turns[0].images[1].problems.some(p => /no allowed window/.test(p)));
+});
+
+test('a new turn does not recheck historical images under its mask policy', () => {
+  const core = createFakeVision({ turns: [
+    { name: 'a', expectPromptContains: 'cu-a', steps: [{ call: 'screen_look' }, { text: 'A' }] },
+    { name: 'b', expectPromptContains: 'cu-b', mask: { mode: 'all-black' },
+      steps: [{ call: 'screen_look' }, { text: 'B' }] },
+  ] });
+  const c = conversation(core, 'cu-a');
+  c.ask(); c.add(called('screen_look', {}), ...lookResult([GIMP, TERM]));
+  c.ask(); c.add({ role: 'assistant', content: 'A' }, { role: 'user', content: 'cu-b' });
+  c.ask(); c.add(called('screen_look', {}), ...lookResult([GIMP, TERM], encodePng(100, 60, () => [0, 0, 0])));
+  c.ask();
+  assert.equal(core.report.turns[1].images.length, 1);
+  assert.equal(core.report.turns[1].images[0].ok, true);
 });

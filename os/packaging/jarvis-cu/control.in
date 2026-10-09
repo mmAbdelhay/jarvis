@@ -3,7 +3,7 @@ Version: @VERSION@
 Architecture: amd64
 Maintainer: Muhammad AbdElHay <mmAbdelhay@users.noreply.github.com>
 Installed-Size: @INSTALLED_SIZE@
-Depends: systemd, iproute2, at-spi2-core
+Depends: systemd, at-spi2-core
 Section: x11
 Priority: optional
 Homepage: @HOME_URL@

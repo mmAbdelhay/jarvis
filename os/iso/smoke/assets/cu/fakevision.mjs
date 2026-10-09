@@ -112,6 +112,9 @@ export function windowsIn(messages) {
     if (m?.role !== "tool" && !(Array.isArray(m?.images) && m.images.length > 0)) continue;
     const body = captureOf(m.content);
     if (body !== null) return body;
+    // Section 4 permits a text-only summary. Never reuse geometry from a
+    // capture preceding that summary (or from before a new user turn).
+    if (m?.tool_name === "screen_look") return null;
   }
   return null;
 }
@@ -154,10 +157,11 @@ export function createFakeVision(script, { env = process.env } = {}) {
     let info = null;
     for (const [messageIndex, m] of messages.entries()) {
       const data = captureOf(m?.content);
+      if (m?.role === "tool" && m.tool_name === "screen_look") info = null;
       if ((m?.role === "tool" || Array.isArray(m?.images)) && data !== null) info = data;
       for (const b64 of Array.isArray(m?.images) ? m.images : []) {
         const digest = createHash("sha256").update(String(b64)).digest("hex");
-        const key = JSON.stringify([record === null ? "off" : report.turns.indexOf(record), messageIndex, digest, info?.windows]);
+        const key = JSON.stringify([record === null ? `off:${report.requests}` : report.turns.indexOf(record), messageIndex, digest, info?.windows]);
         if (seen.has(key)) continue;
         seen.add(key);
         if (record === null) {
@@ -262,14 +266,20 @@ export function createFakeVision(script, { env = process.env } = {}) {
       .map((t) => t?.function?.name)
       .filter((n) => typeof n === "string");
     if (tools.length === 1 && tools[0] === "ping") return { call: { name: "ping", arguments: {} } };
-    if (tools.length === 0) {
-      inspect(messages, null);
-      return { text: "ok" };
-    }
     const prompts = messages.filter(isPrompt);
     const prompt = String(prompts.at(-1)?.content ?? "");
+    const turn = script.turns.find((t) => prompt.includes(t.expectPromptContains));
+    const currentMessages = messages.slice(Math.max(0, messages.findLastIndex(isPrompt)));
+    if (tools.length === 0) {
+      inspect(messages, null);
+      if (turn === undefined || turn.steps.some((step) => step.call !== undefined)) return { text: "ok" };
+      // Text-only scripts (the off turn) can answer without taking over an
+      // in-progress screen turn, including its pending tool result.
+      report.turns.push({ name: turn.name, prompt: prompt.slice(0, 200), toolsOffered: tools,
+        steps: [], images: [], denied: false, finished: true });
+      return { text: substitute(turn.steps.find((step) => step.text !== undefined)?.text ?? "Done.", env) };
+    }
     if (active === null || active.promptCount !== prompts.length || active.prompt !== prompt) {
-      const turn = script.turns.find((t) => prompt.includes(t.expectPromptContains));
       if (turn === undefined) {
         active = null;
         report.unexpected.push(prompt.slice(0, 200));
@@ -281,13 +291,13 @@ export function createFakeVision(script, { env = process.env } = {}) {
       active = { turn, record, steps: turn.steps, cursor: 0, prompt, promptCount: prompts.length, last: null, branched: false };
     }
     const screen = tools.some((n) => n.startsWith("screen_"));
-    const info = windowsIn(messages);
-    inspect(messages, screen ? active.record : null);
+    const info = windowsIn(currentMessages);
+    inspect(screen ? currentMessages : messages, screen ? active.record : null);
     let lastAssistant = -1;
-    messages.forEach((m, i) => {
+    currentMessages.forEach((m, i) => {
       if (m?.role === "assistant") lastAssistant = i;
     });
-    absorb(messages.slice(lastAssistant + 1));
+    absorb(currentMessages.slice(lastAssistant + 1));
     return next(Array.isArray(info?.windows) ? info.windows : []);
   }
 

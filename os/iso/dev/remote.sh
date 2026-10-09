@@ -35,8 +35,13 @@ run rsync -az --delete --exclude .git --exclude node_modules --exclude '/out/' \
   --exclude '/remote-out/' --exclude '/.superpowers/' --exclude 'os/*/build/' \
   --exclude 'os/go/dist/' "$repo/" "$box:rafiq-build/v11/src/"
 if [ ${#artifacts[@]} -gt 0 ]; then
-  local_artifacts=$(mktemp -d)
-  trap 'rm -rf "$local_artifacts"' EXIT
+  if [ "$dry" = 1 ]; then
+    local_artifacts='/tmp/rafiq-remote-artifacts.DRY-RUN'
+    run mktemp -d
+  else
+    local_artifacts=$(mktemp -d)
+    trap 'rm -rf "$local_artifacts"' EXIT
+  fi
   for a in "${artifacts[@]}"; do run gh run download "$run_id" -n "$a" -D "$local_artifacts"; done
   run ssh -o BatchMode=yes "$box" 'rm -rf ~/rafiq-build/v11/artifacts && mkdir -p ~/rafiq-build/v11/artifacts'
   run rsync -az "$local_artifacts/" "$box:rafiq-build/v11/artifacts/"

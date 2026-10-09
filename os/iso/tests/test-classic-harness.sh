@@ -16,8 +16,8 @@ for f in rc.xml environment autostart; do
 done
 check "does not build the classic config itself" bash -c "! grep -q 'os/classic/data' '$h/in-container-classic.sh'"
 check "classic autostart is the ISO autostart with the classic line" bash -c '
-  diff <(grep -v "^#" "$1/etc/xdg/labwc/autostart" | grep -v "jarvis-session/labwc/autostart") \
-       <(grep -v "^#" "$1/etc/xdg/labwc-classic/autostart" | grep -v "jarvis-shell-loop &")' _ "$incdir"
+  diff <(grep -v "^#" "$1/etc/xdg/labwc/autostart" | grep -v "jarvis-session/labwc/autostart" | grep -v "jarvis-cu/labwc/autostart") \
+       <(grep -v "^#" "$1/etc/xdg/labwc-classic/autostart" | grep -v "jarvis-shell-loop &" | grep -v "stop jarvis-cu.service")' _ "$incdir"
 check "classic autostart matches Plan R's classic line" bash -c '
   grep -qxF "$(grep -v "^#" "$1/os/classic/data/labwc/autostart")" "$2/etc/xdg/labwc-classic/autostart"' _ "$REPO_ROOT" "$incdir"
 check "classic environment is the ISO environment" cmp -s "$incdir/etc/xdg/labwc/environment" "$incdir/etc/xdg/labwc-classic/environment"

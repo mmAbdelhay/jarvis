@@ -65,4 +65,9 @@ describe("vision probe fixture", () => {
     expect(verdict([true, false, false])).toBe("failed");
     expect(verdict([])).toBe("failed");
   });
+
+  it("requires exactly three completed trials before passing", () => {
+    expect(verdict([true, true])).toBe("failed");
+    expect(verdict([true, true, false, false])).toBe("failed");
+  });
 });

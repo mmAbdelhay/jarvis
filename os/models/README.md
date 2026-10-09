@@ -56,9 +56,15 @@ coordinates (`probe/vision-probe.test.ts`). Record results with
 `tools/vision_pick.py apply` adds the smallest passing model that runs in 16 GB
 to `catalog.json` with `vision: true`. At most one; none if nothing passes.
 
+All current candidates are untested, so no local vision model is enabled:
+computer use remains cloud-only until passing CI artifacts are recorded.
+
 The recorder rejects passing results with missing capabilities, the wrong
 context size, or fewer than two hits across exactly three trials. A failed
-run replaces earlier passing evidence. Candidate sizes must be refreshed
+run replaces earlier passing evidence. CPU-capable candidates must fit within
+75% of their declared RAM, as required by the catalog. Direct `apply` refuses
+GPU-only candidates because the candidate format has no VRAM metadata.
+Candidate sizes must be refreshed
 and verified against registry manifests before merging:
 
 ```sh

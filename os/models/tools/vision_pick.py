@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Local vision model for computer use (v1.1 contracts §3): "add at most one
+"""Local vision model for computer use (v1.1 contracts §4.12): "add at most one
 vision-capable local model if a tool-calling + vision probe passes (else none
 in v1.1, cloud-only)".
 
@@ -59,6 +59,9 @@ def check(candidates: dict) -> list[str]:
             p.append(f"{where}: minRamGB must be an integer 4-512")
         if c["tier"] not in TIERS:
             p.append(f"{where}: tier must be one of {TIERS}")
+        if (type(c["sizeBytes"]) is int and type(c["minRamGB"]) is int
+                and c["tier"] != "gpu" and c["sizeBytes"] > c["minRamGB"] * 1024**3 * 3 // 4):
+            p.append(f"{where}: model is larger than 75% of minRamGB")
         if not isinstance(c["languages"], list) or not c["languages"] or not all(
                 isinstance(lang, str) and re.fullmatch(r"[a-z]{2,3}(-[A-Z]{2})?", lang)
                 for lang in c["languages"]):
@@ -127,13 +130,15 @@ def apply(catalog: dict, candidate: dict) -> dict:
     problems = check({"version": 1, "models": [candidate]})
     if problems:
         raise ValueError("; ".join(problems))
+    if candidate["tier"] == "gpu":
+        raise ValueError("vision candidates have no minVramGB; cannot apply a GPU-only model")
     if any(m["id"] == candidate["id"] or m["ollamaTag"] == candidate["ollamaTag"]
            for m in catalog["models"]):
         raise ValueError("candidate identity already exists in the catalog")
     if candidate["probe"]["status"] != "passed":
         raise ValueError(f"{candidate['ollamaTag']} has no passed vision probe")
     if any(m.get("vision") is True for m in catalog["models"]):
-        raise ValueError("the catalog already has a local vision model (at most one, v1.1 contracts §3)")
+        raise ValueError("the catalog already has a local vision model (at most one, v1.1 contracts §4.12)")
     entry = {
         "id": candidate["id"], "ollamaTag": candidate["ollamaTag"], "displayName": candidate["displayName"],
         "sizeBytes": candidate["sizeBytes"], "minRamGB": candidate["minRamGB"], "minVramGB": None,

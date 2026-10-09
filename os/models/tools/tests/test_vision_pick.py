@@ -152,6 +152,23 @@ class VisionPickTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             vision_pick.apply(catalog, cand("x:1", 8, 3 << 30, "untested", "small"))
 
+    def test_candidate_size_must_fit_its_declared_ram(self):
+        fits = {"version": 1, "models": [cand("fits:1", 8, 6 << 30)]}
+        self.assertEqual(vision_pick.check(fits), [])
+        too_big = {"version": 1, "models": [cand("oversized:1", 8, (6 << 30) + 1, "passed")]}
+        self.assertNotEqual(vision_pick.check(too_big), [])
+        with self.assertRaises(ValueError):
+            vision_pick.pick(too_big)
+        with self.assertRaises(ValueError):
+            vision_pick.apply(json.loads(CATALOG.read_text()), too_big["models"][0])
+
+    def test_apply_refuses_gpu_candidate_without_catalog_vram(self):
+        catalog = json.loads(CATALOG.read_text())
+        c = cand("gpu:1", 16, 6 << 30, "passed", "gpu")
+        self.assertIsNone(vision_pick.pick({"version": 1, "models": [c]}))
+        with self.assertRaises(ValueError):
+            vision_pick.apply(catalog, c)
+
 
 if __name__ == "__main__":
     unittest.main()
