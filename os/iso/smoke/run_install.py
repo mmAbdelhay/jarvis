@@ -66,18 +66,19 @@ def target_checks(b: dict[str, str]) -> list[tuple[str, str]]:
 
 def boot_checks() -> list[tuple[str, str]]:
     """M2 contracts §12: an encrypted install boots from a separate,
-    unencrypted ext4 /boot labelled "Rafiq boot" (Debian's signed GRUB cannot
+    unencrypted ext4 /boot labelled "$DISTRO_NAME boot" (Debian's signed GRUB cannot
     read the argon2id LUKS2 root); the kernel and initramfs live there and
     the passphrase is asked by Plymouth in the initramfs."""
+    label = f"{brand(BRAND_ENV)['DISTRO_NAME']} boot"
     src = "$(findmnt -no SOURCE /boot)"
     # The serial shell answers seconds after the unlock, while systemd is
     # still mounting the fstab entries: wait for local-fs.target first (a
     # failed /boot mount leaves it inactive, so the checks still fail).
     mounted = "for i in $(seq 90); do systemctl is-active -q local-fs.target && break; sleep 1; done; "
     return [
-        ("§12: /boot is a separate unencrypted ext4 partition labelled 'Rafiq boot'",
+        (f"§12: /boot is a separate unencrypted ext4 partition labelled '{label}'",
          f"{mounted}findmnt -no FSTYPE /boot | grep -qx ext4 && case \"{src}\" in /dev/mapper/*) exit 1;; esac && "
-         f"[ \"$(blkid -s LABEL -o value {src})\" = 'Rafiq boot' ] && [ \"$(lsblk -no TYPE {src})\" = part ]"),
+         f"[ \"$(blkid -s LABEL -o value {src})\" = '{label}' ] && [ \"$(lsblk -no TYPE {src})\" = part ]"),
         ("§12: fstab mounts /boot by UUID; /boot holds the kernel and initramfs; GRUB reads it",
          "grep -Eq '^UUID=[0-9a-f-]+ /boot ext4 ' /etc/fstab && ls /boot/vmlinuz-* /boot/initrd.img-* >/dev/null && "
          "test -s /boot/grub/grub.cfg && ! grep -q '^GRUB_ENABLE_CRYPTODISK=y' /etc/default/grub /etc/default/grub.d/*.cfg 2>/dev/null"),
