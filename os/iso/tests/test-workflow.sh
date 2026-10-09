@@ -95,7 +95,6 @@ PY
 for j in i18n-gate build-backup-model backup-model-test classic-session-test build-workspace; do
   check "job $j" grep -qw "$j" <<<"$jobs"
 done
-check "M4 CI version" grep -qF "'0.4.0~ci{0}'" "$wf"
 check "electron-builder.yml triggers the workflow" grep -qF '"packages/desktop/electron-builder.yml"' "$wf"
 check "M4 wiring" python3 - "$wf" <<'PY'
 import sys, yaml
@@ -146,5 +145,32 @@ for s in ('= real ]', '[ -n "$SIGN" ]', "jarvis-apt/dists/trixie/InRelease",
     assert s in gate["run"], s
 build = next(i for i, s in enumerate(steps) if "build.sh" in s.get("run", "") and "jarvis-archive-keyring" in s.get("run", ""))
 assert ids.index("aptrepo") < build, "the gate must run before the keyring package is built"
+PY
+# --- Rafiq v1.1 Plan X ---
+for j in changes cu-test cu-kvm-test; do check "job $j" grep -qw "$j" <<<"$jobs"; done
+check "v1.1 CI version" grep -qF "'0.5.0~ci{0}'" "$wf"
+check "v1.1 wiring" python3 - "$wf" <<'PY'
+import sys, yaml
+w = yaml.safe_load(open(sys.argv[1]))
+j = w["jobs"]
+d = lambda n: yaml.safe_dump(j[n], width=1000)
+needs = lambda n: {j[n]["needs"]} if isinstance(j[n]["needs"], str) else set(j[n]["needs"])
+assert "jarvis-wl jarvis-cu" in d("build-go")
+assert "os/iso/smoke/assets/cu/*.test.mjs" in d("checks")
+assert "cu_changes.py" in d("changes") and "fetch-depth: 0" in d("changes")
+assert "cu" in j["changes"]["outputs"]
+for n in ("cu-test", "cu-kvm-test"):
+    assert "needs.changes.outputs.cu == 'true'" in j[n]["if"], n
+    assert "changes" in needs(n), n
+    assert "--privileged" not in d(n), n
+assert {"build-go", "build-daemon", "build-qt", "build-distro"} <= needs("cu-test")
+assert "os/iso/cu/run.sh" in d("cu-test")
+for a in ("debs-go", "debs-daemon", "debs-qt", "debs-distro"):
+    assert a in d("cu-test"), a
+assert "pattern: debs-*" not in d("cu-test"), "the voice and backup-model debs are not needed"
+assert {"build-iso", "build-distro"} <= needs("cu-kvm-test") and "run_cu.py" in d("cu-kvm-test")
+assert "computer-use tests need KVM" in d("cu-kvm-test")
+for n in ("repo", "release"):
+    assert {"cu-test", "cu-kvm-test"} <= needs(n), n
 PY
 finish

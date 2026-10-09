@@ -45,7 +45,7 @@ permissions:
 env:
   # One version for every .deb and the ISO of this run (packages depend on
   # each other with (= version)); a tag os-vX.Y.Z builds X.Y.Z.
-  OS_VERSION: ${{ startsWith(github.ref, 'refs/tags/os-v') && github.ref_name || format('0.4.0~ci{0}', github.run_number) }}
+  OS_VERSION: ${{ startsWith(github.ref, 'refs/tags/os-v') && github.ref_name || format('0.5.0~ci{0}', github.run_number) }}
 
 jobs:
   checks:
@@ -86,7 +86,7 @@ jobs:
       - run: python3 os/models/tools/backup_model.py check
       - run: python3 -m unittest discover -s os/iso/smoke/tests -t os/iso/smoke -v
       # Node 24 takes files or globs, not a bare directory ("Cannot find module").
-      - run: node --test os/iso/smoke/assets/*.test.mjs
+      - run: node --test os/iso/smoke/assets/*.test.mjs os/iso/smoke/assets/cu/*.test.mjs
       - name: shellcheck
         run: |
           {
@@ -107,7 +107,7 @@ jobs:
       - run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends dpkg-dev dbus-daemon
       - run: make -C os/go check test
       - run: make -C os/go dist
-      - run: os/packaging/build.sh --out out/debs jarvis-pkg jarvis-diag jarvis-helper jarvis-installer-backend jarvis-model-fetch jarvis-settings jarvis-apps jarvis-wl
+      - run: os/packaging/build.sh --out out/debs jarvis-pkg jarvis-diag jarvis-helper jarvis-installer-backend jarvis-model-fetch jarvis-settings jarvis-apps jarvis-wl jarvis-cu
       - run: sudo apt-get install -y -qq --no-install-recommends file gpg gpgv
       # Official MCP servers (contracts §7 #8: make -C os/go registry) as registry artifacts.
       - run: make -C os/go registry
@@ -350,6 +350,95 @@ jobs:
         with:
           name: classic-session-test
           path: ${{ runner.temp }}/classic/
+          if-no-files-found: warn
+
+  # v1.1: does this change touch the computer-use path? (job-level path
+  # filter; the GUI tests below install GIMP and boot the ISO under KVM).
+  changes:
+    runs-on: ubuntu-24.04
+    outputs:
+      cu: ${{ steps.cu.outputs.cu }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: cu
+        run: |
+          if [ "${{ github.event_name }}" = pull_request ]; then
+            echo "cu=$(python3 os/iso/smoke/jarvis_smoke/cu_changes.py --base "origin/${{ github.base_ref }}")" >> "$GITHUB_OUTPUT"
+          else
+            echo "cu=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  # v1.1 criteria that need no physical input: headless labwc in an
+  # unprivileged debian:trixie container with the real packages, GIMP and a
+  # scripted vision model (os/iso/cu/run.sh).
+  cu-test:
+    needs: [changes, build-go, build-daemon, build-qt, build-distro]
+    if: needs.changes.outputs.cu == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: debs-go
+          path: ${{ runner.temp }}/debs
+      - uses: actions/download-artifact@v4
+        with:
+          name: debs-daemon
+          path: ${{ runner.temp }}/debs
+      - uses: actions/download-artifact@v4
+        with:
+          name: debs-qt
+          path: ${{ runner.temp }}/debs
+      - uses: actions/download-artifact@v4
+        with:
+          name: debs-distro
+          path: ${{ runner.temp }}/debs
+      - run: os/iso/cu/run.sh --debs "$RUNNER_TEMP/debs" --out "$RUNNER_TEMP/cu"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cu-test
+          path: ${{ runner.temp }}/cu/
+          if-no-files-found: warn
+
+  # v1.1 in the release ISO under KVM: the systemd-started helper, the overlay
+  # border, real (QMP usb-tablet) pointer input, Super+L (os/iso/smoke/run_cu.py).
+  cu-kvm-test:
+    needs: [changes, build-iso, build-distro]
+    if: needs.changes.outputs.cu == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends qemu-system-x86 xorriso
+      - name: Enable KVM (computer-use tests need KVM)
+        run: |
+          [ -e /dev/kvm ] || { echo "::error title=Computer-use KVM test::computer-use tests need KVM, this runner has no /dev/kvm"; exit 1; }
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
+      - id: apt
+        run: |
+          if [ "${{ needs.build-distro.outputs.keyring }}" = real ] &&
+             curl -fsI https://mmabdelhay.github.io/jarvis-apt/dists/trixie/InRelease >/dev/null; then
+            echo "flag=" >> "$GITHUB_OUTPUT"
+          else
+            echo "flag=--disable-jarvis-apt" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/download-artifact@v4
+        with:
+          name: os-iso
+          path: ${{ runner.temp }}/iso
+      - run: |
+          python3 os/iso/smoke/run_cu.py --iso "$(ls "$RUNNER_TEMP"/iso/*.iso)" \
+            --out "$RUNNER_TEMP/cu-kvm" --accel kvm ${{ steps.apt.outputs.flag }}
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cu-kvm-test
+          path: ${{ runner.temp }}/cu-kvm/
           if-no-files-found: warn
 
   build-workspace:
@@ -694,7 +783,7 @@ jobs:
 
   repo:
     if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/os-v'))
-    needs: [smoke-test, install-test, loop-tests, build-distro, agent-install, docker-image, session-test, voice-roundtrip, i18n-gate, backup-model-test, classic-session-test]
+    needs: [smoke-test, install-test, loop-tests, build-distro, agent-install, docker-image, session-test, voice-roundtrip, i18n-gate, backup-model-test, classic-session-test, cu-test, cu-kvm-test]
     runs-on: ubuntu-24.04
     container: debian:trixie
     steps:
@@ -779,7 +868,7 @@ jobs:
 
   release:
     if: startsWith(github.ref, 'refs/tags/os-v')
-    needs: [smoke-test, install-test, loop-tests, repo, agent-install, docker-publish, session-test, voice-roundtrip, i18n-gate, backup-model-test, classic-session-test, build-workspace]
+    needs: [smoke-test, install-test, loop-tests, repo, agent-install, docker-publish, session-test, voice-roundtrip, i18n-gate, backup-model-test, classic-session-test, cu-test, cu-kvm-test, build-workspace]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
