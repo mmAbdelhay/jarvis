@@ -13,6 +13,10 @@ fi
 systemctl --user import-environment WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP >/dev/null 2>&1 || true
 dbus-update-activation-environment --systemd WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP >/dev/null 2>&1 || true
 
+# Computer use helper (v1.1 contracts §1): a user service that needs the
+# WAYLAND_DISPLAY imported above; full session only (see the fragment).
+if [ -r /usr/share/jarvis-cu/labwc/autostart ]; then . /usr/share/jarvis-cu/labwc/autostart; fi
+
 # Desktop notifications (M2.5 §7 #15).
 mako &
 
