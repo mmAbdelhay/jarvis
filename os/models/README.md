@@ -71,3 +71,14 @@ and verified against registry manifests before merging:
 python3 os/models/tools/check_registry.py os/models/vision-candidates.json --fix
 python3 os/models/tools/check_registry.py os/models/vision-candidates.json
 ```
+
+## Account CLIs (`accounts.json`, Plan Y)
+
+The official CLIs Jarvis installs per user when someone signs in with an account
+(Claude, ChatGPT, Google, GitHub Copilot). Exact versions and npm `sha512`
+integrity, plus the linux-x64 platform package each CLI downloads. jarvisd
+refuses an install whose lockfile integrity differs, then runs
+`npm audit signatures`. Re-pin with
+`python3 os/models/tools/accounts_pin.py <account> <version> --write`
+(versions younger than 7 days are refused), then run Task 23's live tests
+(`docs/os/accounts.md`) before merging.
