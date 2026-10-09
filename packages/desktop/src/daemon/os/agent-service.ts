@@ -56,6 +56,7 @@ import {
   createFailoverProvider,
   type FailoverProvider,
   isLocalBaseUrl,
+  isLoopbackBaseUrl,
   type ProviderListResult,
   type ProviderSaveRequest,
   type ProviderSaveResult,
@@ -478,7 +479,10 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
     if (entry === null || entry.id === BACKUP_PROVIDER_ID) return CU_MODEL_TEXT.notEnabled;
     if (brain.computerUse.enabled[entry.id] !== true) return CU_MODEL_TEXT.notEnabled;
     if (!visionOf(entry)) return CU_MODEL_TEXT.noVision;
-    if (!isLocalBaseUrl(entry.baseUrl) && brain.computerUse.cloudConsent[entry.id] === undefined) {
+    if (
+      !isLoopbackBaseUrl(entry.baseUrl) &&
+      brain.computerUse.cloudConsent[entry.id] === undefined
+    ) {
       return CU_MODEL_TEXT.noConsent;
     }
     return null;

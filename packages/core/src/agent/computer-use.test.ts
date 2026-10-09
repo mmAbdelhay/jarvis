@@ -282,6 +282,29 @@ describe("computer-use runner (contracts §2)", () => {
     expect((await cu.run(CLICK, { x: 1, y: 1, target: "Canvas" }, ctx())).isError).toBe(false);
   });
 
+  it("a pause and resume while no action is waiting still forces a fresh look before a click", async () => {
+    const { cu, fake, ctx } = setup();
+    await cu.run(LOOK, START, ctx());
+    fake.pause("physical-input");
+    await cu.resume();
+    const result = await cu.run(CLICK, { x: 1, y: 1, target: "Canvas" }, ctx());
+    expect(result).toEqual({ text: CU_MODEL_TEXT.lookFirst, isError: true });
+    expect(fake.calls.some((c) => c.op === "click")).toBe(false);
+  });
+
+  it("asks before Enter when the clicked control is a message field, whatever target the model typed", async () => {
+    const { cu, fake, cards, ctx } = setup();
+    fake.client.describeAt = async () => ({ role: "text", name: "Type a message" });
+    await cu.run(LOOK, START, ctx());
+    await cu.run(CLICK, { x: 3, y: 4, target: "Notes" }, ctx());
+    await cu.run(TYPE, { text: "send me money", target: "Notes" }, ctx());
+    await cu.run(KEY, { combo: "enter" }, ctx());
+    expect(cards.at(-1)?.items[0]).toMatchObject({
+      tool: "screen.key",
+      title: "Press enter: this sends something",
+    });
+  });
+
   it("cu:stop while paused ends the session", async () => {
     const { cu, fake, ctx } = setup();
     await cu.run(LOOK, START, ctx());

@@ -109,6 +109,17 @@ describe("detectConsequence", () => {
     expect(detectConsequence({ kind: "key", combo: "enter" })).toBeUndefined();
   });
 
+  it("a typed newline into a message field is a send", () => {
+    expect(detectConsequence({ kind: "type", text: "hi\n", target: "Message" })?.intent).toBe(
+      "send",
+    );
+    expect(detectConsequence({ kind: "type", text: "a\nb", target: "اكتب رسالة" })?.intent).toBe(
+      "send",
+    );
+    expect(detectConsequence({ kind: "type", text: "hi", target: "Message" })).toBeUndefined();
+    expect(detectConsequence({ kind: "type", text: "a\nb", target: "Notes" })).toBeUndefined();
+  });
+
   it("drags onto a trash are deletes", () => {
     expect(
       detectConsequence({ kind: "drag", x1: 1, y1: 1, x2: 2, y2: 2, target: "Trash" })?.intent,

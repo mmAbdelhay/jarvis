@@ -4,6 +4,7 @@ import {
   buildSysSnapshot,
   NO_VOICE,
   isLocalBaseUrl,
+  isLoopbackBaseUrl,
   parseFailedUnitNames,
   parseSysHealth,
 } from "./sys-snapshot.js";
@@ -147,6 +148,32 @@ describe("isLocalBaseUrl", () => {
       "nonsense",
     ]) {
       expect(isLocalBaseUrl(url), url).toBe(false);
+    }
+  });
+});
+
+describe("isLoopbackBaseUrl", () => {
+  it("is true only for loopback, not LAN", () => {
+    for (const url of [
+      "http://localhost:11434",
+      "http://127.0.0.1:1",
+      "http://127.1.2.3",
+      "http://[::1]:11434",
+    ]) {
+      expect(isLoopbackBaseUrl(url), url).toBe(true);
+    }
+    for (const url of [
+      "http://192.168.1.20:11434",
+      "http://10.0.0.2",
+      "http://172.20.0.5",
+      "http://169.254.1.1",
+      "http://[fd00::5]",
+      "http://[fe80::1]",
+      "http://ollama.local:11434",
+      "https://api.openai.com/v1",
+      "nonsense",
+    ]) {
+      expect(isLoopbackBaseUrl(url), url).toBe(false);
     }
   });
 });

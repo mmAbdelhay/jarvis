@@ -167,6 +167,7 @@ export function createComputerUse(deps: ComputerUseDeps): ComputerUse {
   let bounds: CaptureBounds | null = null;
   let needsLook = true;
   let lastTyped: string | undefined;
+  let focusedDescribed: DescribedTarget | undefined;
   let lastPause: CuPauseReason = "physical-input";
   let lastState: CuState = CU_IDLE_STATE;
   const waiters = new Set<(how: "resumed" | "stopped") => void>();
@@ -191,6 +192,7 @@ export function createComputerUse(deps: ComputerUseDeps): ComputerUse {
     bounds = null;
     needsLook = true;
     lastTyped = undefined;
+    focusedDescribed = undefined;
     for (const wake of [...waiters]) wake("stopped");
     lastState = ending.end(why);
     deps.emitState(lastState);
@@ -217,6 +219,7 @@ export function createComputerUse(deps: ComputerUseDeps): ComputerUse {
       return;
     }
     lastPause = reason;
+    needsLook = true;
     session.pause(reason);
     emit();
   });
@@ -258,6 +261,7 @@ export function createComputerUse(deps: ComputerUseDeps): ComputerUse {
         return refuse(CU_MODEL_TEXT.excluded);
       case "paused":
         if (session !== undefined) {
+          needsLook = true;
           session.pause(lastPause);
           emit();
         }
@@ -445,6 +449,7 @@ export function createComputerUse(deps: ComputerUseDeps): ComputerUse {
     const described = await describePoint(action);
     const finding = detectConsequence(action, {
       ...(lastTyped === undefined ? {} : { lastTypedTarget: lastTyped }),
+      ...(focusedDescribed === undefined ? {} : { focusedDescribed }),
       ...(described === undefined ? {} : { described }),
     });
     const audited = cuAuditInput(action);
@@ -507,6 +512,8 @@ export function createComputerUse(deps: ComputerUseDeps): ComputerUse {
     }
     lastTyped =
       action.kind === "type" ? action.target : action.kind === "key" ? lastTyped : undefined;
+    if (action.kind === "click") focusedDescribed = described;
+    else if (action.kind !== "type" && action.kind !== "key") focusedDescribed = undefined;
     if (session !== current) return refuse(CU_MODEL_TEXT.stoppedByUser);
     current.finishStep(index, outcome.ok);
     emit();
@@ -583,6 +590,7 @@ export function createComputerUse(deps: ComputerUseDeps): ComputerUse {
         await endSession("helper");
         return;
       }
+      needsLook = true;
       current.resume();
       emit();
       for (const wake of [...waiters]) wake("resumed");

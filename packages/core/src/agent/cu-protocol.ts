@@ -88,10 +88,10 @@ const finite = (value: unknown): value is number =>
 function parseWindow(raw: unknown): CuWindow | undefined {
   if (!isRecord(raw)) return undefined;
   const { windowId, appId, title, x, y, w, h, focused, allowed } = raw;
-  if (typeof windowId !== "string" && typeof windowId !== "number") return undefined;
+  if (!(typeof windowId === "string" && windowId.length > 0) && !finite(windowId)) return undefined;
   if (typeof appId !== "string" || appId.length > 256 || typeof title !== "string")
     return undefined;
-  if (!finite(x) || !finite(y) || !finite(w) || !finite(h)) return undefined;
+  if (!finite(x) || !finite(y) || !finite(w) || !finite(h) || w < 0 || h < 0) return undefined;
   if (typeof focused !== "boolean" || typeof allowed !== "boolean") return undefined;
   return {
     windowId: String(windowId),

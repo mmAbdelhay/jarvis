@@ -104,3 +104,28 @@ it("keeps the session app selection fixed when the caller changes its array", ()
   expect(s.state().apps).toEqual(["org.gimp.GIMP"]);
   expect(s.apps).toEqual(["org.gimp.GIMP"]);
 });
+
+it("never allows a configured cap to exceed 50 actions", () => {
+  const s = start(100);
+  for (let i = 0; i < 50; i++) expect(s.startStep("Click")).toBe(i);
+  expect(s.startStep("Click")).toBe("cap");
+  expect(s.state().maxSteps).toBe(50);
+});
+
+it("keeps termination final and does not duplicate its explanation", () => {
+  const s = start();
+  s.startStep("Click");
+  const final = s.end("stuck");
+  expect(s.end("stuck")).toEqual(final);
+  expect(s.startStep("Another click")).toBe("cap");
+  s.pause("physical-input");
+  s.markStep(0, "running");
+  s.finishStep(0, true);
+  expect(s.state()).toEqual(final);
+});
+
+it("falls back to the contract cap for invalid configured limits", () => {
+  for (const limit of [NaN, Infinity, -1, 0, 1.5]) {
+    expect(start(limit).state().maxSteps).toBe(50);
+  }
+});

@@ -24,6 +24,7 @@ describe("modelSupportsVision", () => {
       "gpt-4o-mini",
       "gpt-4.1",
       "gpt-5",
+      "gpt-5.1",
       "o3",
       "o4-mini",
       "qwen/qwen2.5-vl-72b-instruct",
@@ -57,6 +58,43 @@ describe("modelSupportsVision", () => {
     for (const m of ["llava:7b", "gemma3:4b", "qwen3:8b", "gemma3:1b"]) {
       expect(modelSupportsVision("ollama", m), m).toBe(false);
     }
+  });
+
+  it("does not infer cloud vision from lookalike names or arbitrary vision labels", () => {
+    for (const model of [
+      "not-gpt-4o",
+      "gpt-50",
+      "gpt-4.10",
+      "custom-vision-text",
+      "my-llava-text",
+    ]) {
+      expect(modelSupportsVision("openai-compatible", model), model).toBe(false);
+    }
+  });
+
+  it("requires a numeric Claude generation", () => {
+    for (const model of ["claude-30", "claude-sonnet-unknown", "claude-haiku-text"]) {
+      expect(modelSupportsVision("anthropic", model), model).toBe(false);
+    }
+  });
+
+  it("requires a numeric Gemini generation", () => {
+    expect(modelSupportsVision("gemini", "gemini-text-custom")).toBe(false);
+  });
+
+  it.each([
+    "o1-mini",
+    "o1-preview",
+    "o3-mini",
+    "openai/o3-mini-2025-01-31",
+    "gpt-4o-audio-preview",
+    "gpt-4o-mini-audio-preview",
+    "gpt-4o-realtime-preview",
+    "gpt-4o-mini-transcribe",
+    "gpt-4o-mini-tts",
+    "google/gemma-3-1b-it",
+  ])("excludes text and audio variants from the vision table: %s", (model) => {
+    expect(modelSupportsVision("openai-compatible", model)).toBe(false);
   });
 
   it("normalises Ollama tags", () => {

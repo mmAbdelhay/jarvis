@@ -140,3 +140,28 @@ it("bounds untrusted window and image payloads", () => {
     ).toThrow(CuClientError);
   }
 });
+
+it("drops invalid window identifiers and negative dimensions while retaining hidden windows", () => {
+  expect(
+    parseCuWindows([
+      { ...window, windowId: Infinity },
+      { ...window, windowId: NaN },
+      { ...window, windowId: "" },
+      { ...window, w: -1 },
+      { ...window, h: -1 },
+      { ...window, title: "", w: 0, h: 0, focused: false, allowed: false },
+    ]),
+  ).toEqual([{ ...window, windowId: "7", title: "", w: 0, h: 0, focused: false, allowed: false }]);
+});
+
+it("uses natural Arabic count labels for singular, dual and plural values", () => {
+  for (const count of [1, 2, 3, 11, 50]) {
+    expect(CU_TEXT.ar.stepType("اسم الملف", count)).toBe(
+      `كتابة نص في «اسم الملف» (عدد الأحرف: ${count})`,
+    );
+    expect(CU_TEXT.ar.cap(count)).toBe(`توقف: بلغ الحد الأقصى لعدد الإجراءات (${count}).`);
+    expect(CU_TEXT.ar.endTitle(count)).toBe(
+      `انتهى استخدام جارفيس للحاسوب (عدد الإجراءات: ${count})`,
+    );
+  }
+});

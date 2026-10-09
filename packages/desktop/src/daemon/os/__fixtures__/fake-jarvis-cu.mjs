@@ -1,8 +1,9 @@
 // packages/desktop/src/daemon/os/__fixtures__/fake-jarvis-cu.mjs
-// A protocol-faithful stand-in for jarvis-cu (Rafiq v1.1 contracts §1) for
+// A protocol-faithful stand-in for jarvis-cu (Rafiq v1.1 contracts §4) for
 // e2e tests: listens on argv[2], answers NDJSON requests, and appends each
 // op name (never a payload) to argv[3]. One allowed window, fullscreen at (0,0)
 // of a 1280x800 capture; clicks outside it are refused with "outside".
+// A private overlay surface at (300,20) is excluded even inside that window.
 import { appendFileSync, chmodSync } from "node:fs";
 import { createServer } from "node:net";
 
@@ -55,6 +56,7 @@ function answer(request) {
       if (session === null) return refuse("no-session", "begin first");
       if (request.x < 0 || request.y < 0 || request.x >= 1280 || request.y >= 800)
         return refuse("outside", "not in an allowed window");
+      if (request.x === 300 && request.y === 20) return refuse("excluded", "excluded surface");
       return { ok: true, data: null };
     case "type":
     case "key":

@@ -42,7 +42,14 @@ function cutToTokens(text: string, maxTokens: number): string {
 
 function cutToolMessage(message: ModelMessage, maxTokens: number): ModelMessage {
   if (message.role !== "tool") return message;
-  const each = Math.max(1, Math.floor((maxTokens - PER_MESSAGE_TOKENS) / message.results.length));
+  const imageTokens = message.results.reduce(
+    (sum, result) => sum + (result.image === undefined ? 0 : IMAGE_TOKENS),
+    0,
+  );
+  const each = Math.max(
+    1,
+    Math.floor((maxTokens - PER_MESSAGE_TOKENS - imageTokens) / message.results.length),
+  );
   return {
     role: "tool",
     results: message.results.map((result) => ({

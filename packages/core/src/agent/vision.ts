@@ -6,11 +6,16 @@
 // to a text-only model, a false "false" only greys the feature out. Pure.
 import type { ProviderKind } from "./contract.js";
 
-const ANTHROPIC_VISION = /^claude-(3|opus|sonnet|haiku|[4-9])/;
-const ANTHROPIC_TEXT_ONLY = /^claude-3-5-haiku/;
+const ANTHROPIC_VISION = /^claude-(?:[3-9]|(?:opus|sonnet|haiku)-[4-9])(?:[-.]|$)/;
+const ANTHROPIC_TEXT_ONLY = /^claude-3-5-haiku(?:-|$)/;
+// Match a family at the start of the model name, allowing registry namespaces.
+// A generic "vision" label or a family substring is not capability evidence.
 const OPENAI_VISION =
-  /(gpt-4o|gpt-4\.1|gpt-4-turbo|gpt-4-vision|gpt-5|chatgpt-4o|(^|\/)o[134](-|$)|vision|[-_.]vl([-_.:]|$)|llava|pixtral|gemma-?3|llama-?4|qwen-vl|qvq|minicpm-v|internvl|grok-(2-vision|4))/;
-const GEMINI_VISION = /(^|\/)gemini-(?!embedding)/;
+  /^(?:[^/]+\/)*(?:gpt-4o|gpt-4\.1|gpt-4-turbo|gpt-4-vision|gpt-5(?:\.[0-9]+)?|chatgpt-4o|o[134]|qwen[0-9.]*-vl|qwen-vl|llava|pixtral|gemma-?3|llama-?4|qvq|minicpm-v|internvl[0-9.]*|grok-(?:2-vision|4))(?:[-_:]|$)/;
+// These variants do not accept images despite sharing a vision-family prefix.
+const OPENAI_NO_IMAGES =
+  /^(?:[^/]+\/)*(?:o1-(?:mini|preview)|o3-mini|gpt-4o(?:-mini)?-(?:audio|realtime|transcribe|tts)|gemma-?3[-_:](?:1b|270m))(?:[-_:]|$)/;
+const GEMINI_VISION = /^(?:models\/)?gemini-[0-9]+(?:[.-]|$)/;
 
 export function normalizeOllamaTag(tag: string): string {
   const lower = tag.trim().toLowerCase();
@@ -28,7 +33,7 @@ export function modelSupportsVision(
     case "anthropic":
       return ANTHROPIC_VISION.test(name) && !ANTHROPIC_TEXT_ONLY.test(name);
     case "openai-compatible":
-      return OPENAI_VISION.test(name);
+      return OPENAI_VISION.test(name) && !OPENAI_NO_IMAGES.test(name);
     case "gemini":
       return GEMINI_VISION.test(name);
     case "ollama":

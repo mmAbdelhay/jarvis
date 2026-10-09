@@ -162,6 +162,15 @@ function isSendField(target: string): boolean {
   return SEND_FIELDS.some((word) => hasPhrase(labelTokens, word));
 }
 
+// The field the keyboard goes to: the model's target text OR the accessible
+// name of the control last clicked (so a lying target cannot hide a chat box).
+function isSendFieldOf(target: string | undefined, focused: DescribedTarget | undefined): boolean {
+  if (target !== undefined && isSendField(target)) return true;
+  if (focused === undefined || focused.role === "unknown") return false;
+  const name = focused.name?.trim() ?? "";
+  return name !== "" && isSendField(name);
+}
+
 // Contracts section 4 #2: the model's text alone is not trusted, but it is not
 // ignored either. When jarvis-cu's describeAt names the control under the
 // pointer, that accessible name is read first and wins when it names a
@@ -189,7 +198,11 @@ function targetIntent(
  */
 export function detectConsequence(
   action: ScreenAction,
-  context: { lastTypedTarget?: string; described?: DescribedTarget } = {},
+  context: {
+    lastTypedTarget?: string;
+    described?: DescribedTarget;
+    focusedDescribed?: DescribedTarget;
+  } = {},
 ): ConsequenceFinding | undefined {
   switch (action.kind) {
     case "click": {
@@ -211,9 +224,15 @@ export function detectConsequence(
       if (known !== undefined) return { intent: known, source: "key" };
       if (
         SUBMIT_KEYS.has(action.combo) &&
-        context.lastTypedTarget !== undefined &&
-        isSendField(context.lastTypedTarget)
+        isSendFieldOf(context.lastTypedTarget, context.focusedDescribed)
       ) {
+        return { intent: "send", source: "key" };
+      }
+      return undefined;
+    }
+    case "type": {
+      // A typed newline presses Return; in a message field that sends.
+      if (action.text.includes("\n") && isSendFieldOf(action.target, context.focusedDescribed)) {
         return { intent: "send", source: "key" };
       }
       return undefined;
