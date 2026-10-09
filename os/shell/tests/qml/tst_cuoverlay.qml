@@ -76,9 +76,10 @@ TestCase {
         const steps = findChild(c.overlay, "cuSteps")
         compare(steps.count, 3)
         const title = findChild(c.overlay, "cuStepTitle_1")
-        compare(title.text, "Running")
+        compare(title.text, "Step 2")
+        compare(findChild(c.overlay, "cuStepStatus_1").text, "Running")
         compare(title.textFormat, Text.PlainText)
-        compare(findChild(c.overlay, "cuStep_1").Accessible.name, "Running")
+        compare(findChild(c.overlay, "cuStep_1").Accessible.name, "Running: Step 2")
     }
 
     function test_nullSessionHidesChrome() {
@@ -97,7 +98,7 @@ TestCase {
         waitForRendering(c.overlay)
         compare(findChild(c.overlay, "cuGoal").text, "Screen control")
         compare(findChild(c.overlay, "cuApps").text, "")
-        compare(findChild(c.overlay, "cuStepTitle_0").text, "Failed")
+        compare(findChild(c.overlay, "cuStepTitle_0").text, "Step 1")
         compare(findChild(c.overlay, "cuError").text, "")
     }
 
@@ -195,6 +196,23 @@ TestCase {
         compare(c.overlay.inputRects[1].x, panel.x)
         compare(findChild(c.overlay, "cuStatus").text, "جارفيس يتحكم في الشاشة · الخطوة 2 من 50")
         compare(findChild(c.overlay, "cuTakeOver").text, "تولَّ التحكم (Esc)")
+        compare(findChild(c.overlay, "cuStepTitle_1").text, "الخطوة 2")
+        compare(findChild(c.overlay, "cuStepStatus_1").text, "قيد التنفيذ")
+        compare(findChild(c.overlay, "cuStep_1").Accessible.name, "قيد التنفيذ: الخطوة 2")
         compare(findChild(c.overlay, "cuApps").text, "")
     }
+    function test_pausedStopAsksToStop() {
+        const c = make(state({paused: "locked"}))
+        const stops = createTemporaryObject(spyComponent, testCase, {target: c.session, signalName: "stopRequested"})
+        mouseClick(findChild(c.overlay, "cuStop"))
+        compare(stops.count, 1)
+        verify(!findChild(c.overlay, "cuStop").enabled)
+    }
+
+    function test_unknownPauseNeverShowsPrivateReason() {
+        const c = make(state({paused: "secret pause reason"}))
+        compare(findChild(c.overlay, "cuDetail").text, "Jarvis paused.")
+        compare(findChild(c.overlay, "cuStep_0").Accessible.name, "Done: Step 1")
+    }
+
 }
