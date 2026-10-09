@@ -50,6 +50,8 @@ export type CuDescription = { role: string; name?: string };
 export interface CuClient {
   apps(): Promise<CuApp[]>;
   describeAt(x: number, y: number): Promise<CuDescription>;
+  /** The control with keyboard focus in the base window, or role "unknown". */
+  describeFocused(): Promise<CuDescription>;
   begin(sessionId: string, appIds: readonly string[]): Promise<void>;
   windows(): Promise<CuWindow[]>;
   capture(maxEdge: number): Promise<CuCapture>;

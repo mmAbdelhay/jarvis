@@ -56,6 +56,10 @@ export function createFakeCuClient(
       await op("describeAt", x, y);
       return { role: "unknown" };
     },
+    describeFocused: async () => {
+      await op("describeFocused");
+      return { role: "unknown" };
+    },
     begin: (sessionId, appIds) => op("begin", sessionId, [...appIds]),
     windows: async () => {
       await op("windows");

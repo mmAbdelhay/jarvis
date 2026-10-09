@@ -16,7 +16,48 @@ const KEY_CONSEQUENCES: Readonly<Record<string, CuConsequence>> = {
   "shift+delete": "delete",
   "ctrl+enter": "send",
 };
-const SUBMIT_KEYS: ReadonlySet<string> = new Set(["enter", "ctrl+enter"]);
+// Final review finding 3: these press whatever has keyboard focus.
+const ACTIVATE_KEYS: ReadonlySet<string> = new Set([
+  "enter",
+  "shift+enter",
+  "space",
+  "shift+space",
+]);
+const ENTER_KEYS: ReadonlySet<string> = new Set(["enter", "shift+enter"]);
+// Roles whose Enter/Space/Delete edit text instead of pressing something.
+const TEXT_ROLES: ReadonlySet<string> = new Set([
+  "text",
+  "entry",
+  "password text",
+  "paragraph",
+  "document text",
+  "editbar",
+  "spin button",
+  "terminal",
+]);
+// Keys that keep keyboard focus inside a text field (caret moves and edits).
+const TEXT_EDIT_KEYS: ReadonlySet<string> = new Set([
+  "backspace",
+  "delete",
+  "home",
+  "end",
+  "left",
+  "right",
+  "shift+home",
+  "shift+end",
+  "shift+left",
+  "shift+right",
+  "ctrl+a",
+  "ctrl+c",
+  "ctrl+v",
+  "ctrl+x",
+  "ctrl+z",
+  "ctrl+y",
+  "ctrl+shift+z",
+  "ctrl+left",
+  "ctrl+right",
+  "ctrl+backspace",
+]);
 
 // Checked in this order: the first family with a matching phrase wins.
 const LABELS: readonly (readonly [CuConsequence, readonly string[]])[] = [
@@ -29,7 +70,10 @@ const LABELS: readonly (readonly [CuConsequence, readonly string[]])[] = [
       "checkout",
       "check out",
       "place order",
+      "place your order",
+      "complete order",
       "order now",
+      "payment",
       "subscribe",
       "donate",
       "شراء",
@@ -162,8 +206,48 @@ function isSendField(target: string): boolean {
   return SEND_FIELDS.some((word) => hasPhrase(labelTokens, word));
 }
 
+function known(focused: DescribedTarget | undefined): focused is DescribedTarget {
+  return focused !== undefined && focused.role !== "unknown";
+}
+
+function isTextRole(focused: DescribedTarget | undefined): boolean {
+  return known(focused) && TEXT_ROLES.has(focused.role.trim().toLowerCase());
+}
+
+/**
+ * What still has keyboard focus after `combo` was pressed, as far as V can
+ * tell without asking again: a text field survives caret moves and edits;
+ * any other key (Tab, arrows in a list, Enter, Escape, shortcuts) may move
+ * focus, so the control is forgotten.
+ */
+export function focusAfterKey(
+  combo: string,
+  focused: DescribedTarget | undefined,
+): DescribedTarget | undefined {
+  return isTextRole(focused) && TEXT_EDIT_KEYS.has(combo) ? focused : undefined;
+}
+
+// Enter or Space (key, or typed newline/space) presses the focused control.
+// Unknown focus asks (it may be a default button); a text field only sends
+// when it is a message field; any other control asks when its accessible
+// name names a consequence.
+function activation(
+  enter: boolean,
+  target: string | undefined,
+  focused: DescribedTarget | undefined,
+  unknownAsks: boolean,
+): ConsequenceFinding | undefined {
+  if (!known(focused)) return unknownAsks ? { intent: "submit", source: "key" } : undefined;
+  if (isTextRole(focused)) {
+    return enter && isSendFieldOf(target, focused) ? { intent: "send", source: "key" } : undefined;
+  }
+  const name = focused.name?.trim() ?? "";
+  const intent = name === "" ? undefined : labelIntent(name);
+  return intent === undefined ? undefined : { intent, source: "key" };
+}
+
 // The field the keyboard goes to: the model's target text OR the accessible
-// name of the control last clicked (so a lying target cannot hide a chat box).
+// name of the focused control (so a lying target cannot hide a chat box).
 function isSendFieldOf(target: string | undefined, focused: DescribedTarget | undefined): boolean {
   if (target !== undefined && isSendField(target)) return true;
   if (focused === undefined || focused.role === "unknown") return false;
@@ -218,24 +302,26 @@ export function detectConsequence(
     }
     case "key": {
       if (action.intent !== undefined) return { intent: action.intent, source: "declared" };
-      const known = Object.hasOwn(KEY_CONSEQUENCES, action.combo)
+      const shortcut = Object.hasOwn(KEY_CONSEQUENCES, action.combo)
         ? KEY_CONSEQUENCES[action.combo]
         : undefined;
-      if (known !== undefined) return { intent: known, source: "key" };
-      if (
-        SUBMIT_KEYS.has(action.combo) &&
-        isSendFieldOf(context.lastTypedTarget, context.focusedDescribed)
-      ) {
-        return { intent: "send", source: "key" };
+      if (shortcut !== undefined) return { intent: shortcut, source: "key" };
+      if (action.combo === "delete" && !isTextRole(context.focusedDescribed)) {
+        return { intent: "delete", source: "key" };
+      }
+      if (ACTIVATE_KEYS.has(action.combo)) {
+        const enter = ENTER_KEYS.has(action.combo);
+        return activation(enter, context.lastTypedTarget, context.focusedDescribed, true);
       }
       return undefined;
     }
     case "type": {
-      // A typed newline presses Return; in a message field that sends.
-      if (action.text.includes("\n") && isSendFieldOf(action.target, context.focusedDescribed)) {
-        return { intent: "send", source: "key" };
-      }
-      return undefined;
+      // A typed newline presses Return, a typed space presses Space. With
+      // the focus unknown only a newline asks: a space in an app without
+      // accessibility is a recorded residual risk (threat model).
+      const enter = action.text.includes("\n");
+      if (!enter && !action.text.includes(" ")) return undefined;
+      return activation(enter, action.target, context.focusedDescribed, enter);
     }
     default:
       return undefined;

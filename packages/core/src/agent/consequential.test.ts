@@ -1,6 +1,6 @@
 // packages/core/src/agent/consequential.test.ts
 import { describe, expect, it } from "vitest";
-import { detectConsequence, labelIntent, normalizeLabel } from "./consequential.js";
+import { detectConsequence, focusAfterKey, labelIntent, normalizeLabel } from "./consequential.js";
 import type { ScreenAction } from "./screen-tools.js";
 
 const click = (
@@ -96,28 +96,112 @@ describe("detectConsequence", () => {
     expect(detectConsequence({ kind: "key", combo: "tab" })).toBeUndefined();
   });
 
+  const field = { role: "text", name: "File name" };
+  const chat = { role: "entry", name: "Type a message" };
+
   it("Enter after typing into a message field is a send", () => {
     expect(
-      detectConsequence({ kind: "key", combo: "enter" }, { lastTypedTarget: "Message" })?.intent,
+      detectConsequence(
+        { kind: "key", combo: "enter" },
+        { lastTypedTarget: "Message", focusedDescribed: { role: "text" } },
+      )?.intent,
     ).toBe("send");
     expect(
-      detectConsequence({ kind: "key", combo: "enter" }, { lastTypedTarget: "اكتب رسالة" })?.intent,
+      detectConsequence(
+        { kind: "key", combo: "enter" },
+        { lastTypedTarget: "اكتب رسالة", focusedDescribed: { role: "text" } },
+      )?.intent,
     ).toBe("send");
     expect(
-      detectConsequence({ kind: "key", combo: "enter" }, { lastTypedTarget: "File name" }),
+      detectConsequence({ kind: "key", combo: "enter" }, { focusedDescribed: chat })?.intent,
+    ).toBe("send");
+    expect(
+      detectConsequence(
+        { kind: "key", combo: "enter" },
+        { lastTypedTarget: "File name", focusedDescribed: field },
+      ),
     ).toBeUndefined();
-    expect(detectConsequence({ kind: "key", combo: "enter" })).toBeUndefined();
   });
 
   it("a typed newline into a message field is a send", () => {
-    expect(detectConsequence({ kind: "type", text: "hi\n", target: "Message" })?.intent).toBe(
+    const text = { focusedDescribed: { role: "text" } };
+    expect(detectConsequence({ kind: "type", text: "hi\n", target: "Message" }, text)?.intent).toBe(
       "send",
     );
-    expect(detectConsequence({ kind: "type", text: "a\nb", target: "اكتب رسالة" })?.intent).toBe(
-      "send",
+    expect(
+      detectConsequence({ kind: "type", text: "a\nb", target: "اكتب رسالة" }, text)?.intent,
+    ).toBe("send");
+    expect(
+      detectConsequence({ kind: "type", text: "hi", target: "Message" }, text),
+    ).toBeUndefined();
+    expect(
+      detectConsequence({ kind: "type", text: "a\nb", target: "Notes" }, text),
+    ).toBeUndefined();
+  });
+
+  // Final review finding 3: Enter or Space activates whatever has keyboard
+  // focus. click a field -> Tab -> Enter must not press a focused Delete or
+  // Buy button without a card.
+  it("Enter or Space on an unknown focus asks", () => {
+    for (const combo of ["enter", "space", "shift+enter", "shift+space"]) {
+      expect(detectConsequence({ kind: "key", combo })).toEqual({
+        intent: "submit",
+        source: "key",
+      });
+      expect(
+        detectConsequence({ kind: "key", combo }, { focusedDescribed: { role: "unknown" } }),
+      ).toEqual({ intent: "submit", source: "key" });
+    }
+    expect(
+      detectConsequence({ kind: "key", combo: "enter" }, { lastTypedTarget: "File name" }),
+    ).toEqual({ intent: "submit", source: "key" });
+    expect(detectConsequence({ kind: "type", text: "ok\n", target: "File name" })).toEqual({
+      intent: "submit",
+      source: "key",
+    });
+  });
+
+  it("Enter or Space on a focused consequential button asks with its intent", () => {
+    const del = { focusedDescribed: { role: "push button", name: "Delete" } };
+    const buy = { focusedDescribed: { role: "push button", name: "Place your order" } };
+    expect(detectConsequence({ kind: "key", combo: "enter" }, del)?.intent).toBe("delete");
+    expect(detectConsequence({ kind: "key", combo: "space" }, del)?.intent).toBe("delete");
+    expect(detectConsequence({ kind: "key", combo: "enter" }, buy)?.intent).toBe("buy");
+    // A typed space or newline presses the focused button too.
+    expect(detectConsequence({ kind: "type", text: " ", target: "x" }, del)?.intent).toBe("delete");
+    expect(detectConsequence({ kind: "type", text: "\n", target: "x" }, buy)?.intent).toBe("buy");
+    // A lying lastTypedTarget does not hide the focused button.
+    expect(
+      detectConsequence({ kind: "key", combo: "enter" }, { ...del, lastTypedTarget: "Notes" })
+        ?.intent,
+    ).toBe("delete");
+  });
+
+  it("Enter or Space on a harmless focused control does not ask", () => {
+    const ok = { focusedDescribed: { role: "push button", name: "Open" } };
+    expect(detectConsequence({ kind: "key", combo: "enter" }, ok)).toBeUndefined();
+    expect(detectConsequence({ kind: "key", combo: "space" }, { focusedDescribed: field })).toBe(
+      undefined,
     );
-    expect(detectConsequence({ kind: "type", text: "hi", target: "Message" })).toBeUndefined();
-    expect(detectConsequence({ kind: "type", text: "a\nb", target: "Notes" })).toBeUndefined();
+    expect(
+      detectConsequence(
+        { kind: "type", text: "beach png", target: "x" },
+        { focusedDescribed: field },
+      ),
+    ).toBeUndefined();
+  });
+
+  it("a bare Delete outside a text field is a delete", () => {
+    expect(detectConsequence({ kind: "key", combo: "delete" })?.intent).toBe("delete");
+    expect(
+      detectConsequence(
+        { kind: "key", combo: "delete" },
+        { focusedDescribed: { role: "table cell", name: "photo.jpg" } },
+      )?.intent,
+    ).toBe("delete");
+    expect(
+      detectConsequence({ kind: "key", combo: "delete" }, { focusedDescribed: field }),
+    ).toBeUndefined();
   });
 
   it("drags onto a trash are deletes", () => {
@@ -183,5 +267,68 @@ describe("normalizeLabel / labelIntent", () => {
 
   it("prefers overwrite over save for a replace dialog", () => {
     expect(labelIntent("Replace file")).toBe("overwrite");
+  });
+});
+
+describe("focusAfterKey", () => {
+  const field = { role: "text", name: "Search" };
+  it("forgets the focused control after any key that can move focus", () => {
+    for (const combo of [
+      "tab",
+      "shift+tab",
+      "up",
+      "down",
+      "left",
+      "right",
+      "pagedown",
+      "f6",
+      "enter",
+      "escape",
+      "ctrl+l",
+      "ctrl+tab",
+    ]) {
+      expect(focusAfterKey(combo, { role: "push button", name: "Open" })).toBeUndefined();
+    }
+    for (const combo of ["tab", "shift+tab", "enter", "escape", "f6", "ctrl+tab"]) {
+      expect(focusAfterKey(combo, field)).toBeUndefined();
+    }
+  });
+
+  it("keeps a text field across editing keys only", () => {
+    for (const combo of [
+      "backspace",
+      "delete",
+      "ctrl+a",
+      "ctrl+c",
+      "ctrl+v",
+      "ctrl+x",
+      "ctrl+z",
+      "home",
+      "end",
+      "left",
+      "right",
+      "shift+left",
+      "shift+end",
+    ]) {
+      expect(focusAfterKey(combo, field)).toEqual(field);
+    }
+    expect(focusAfterKey("left", { role: "list item", name: "a" })).toBeUndefined();
+    expect(focusAfterKey("backspace", undefined)).toBeUndefined();
+  });
+});
+
+describe("labelIntent buy phrases (V7)", () => {
+  it("catches common checkout labels", () => {
+    for (const label of [
+      "Place your order",
+      "Continue to payment",
+      "Pay now",
+      "Complete order",
+      "Proceed to payment",
+      "متابعة الدفع",
+      "إتمام الشراء",
+    ]) {
+      expect(labelIntent(label)).toBe("buy");
+    }
   });
 });

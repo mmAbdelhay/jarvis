@@ -200,6 +200,7 @@ export function createCuClient(options: CuClientOptions): CuClient & { close(): 
   return {
     apps: async () => parseCuAppList(await request("apps", {})),
     describeAt: async (x, y) => parseCuDescription(await request("describeAt", { x, y })),
+    describeFocused: async () => parseCuDescription(await request("describeFocused", {})),
     begin: (sessionId, appIds) => none("begin", { sessionId, appIds: [...appIds] }),
     windows: async () => parseCuWindows(await request("windows", {})),
     capture: async (maxEdge) =>

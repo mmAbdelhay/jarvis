@@ -34,6 +34,8 @@ function answer(request) {
         ok: true,
         data: request.x === 40 ? { role: "push button", name: "Export" } : { role: "unknown" },
       };
+    case "describeFocused":
+      return { ok: true, data: { role: "unknown" } };
     case "begin":
       session = request.sessionId;
       return { ok: true, data: null };

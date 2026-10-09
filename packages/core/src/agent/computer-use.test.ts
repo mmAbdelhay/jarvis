@@ -213,7 +213,8 @@ describe("computer-use runner (contracts §2)", () => {
   });
 
   it("asks before pressing Enter in a message field", async () => {
-    const { cu, cards, ctx } = setup();
+    const { cu, fake, cards, ctx } = setup();
+    fake.client.describeFocused = async () => ({ role: "text" });
     await cu.run(LOOK, START, ctx());
     await cu.run(TYPE, { text: "see you at 5", target: "Message" }, ctx());
     await cu.run(KEY, { combo: "enter" }, ctx());
@@ -303,6 +304,55 @@ describe("computer-use runner (contracts §2)", () => {
       tool: "screen.key",
       title: "Press enter: this sends something",
     });
+  });
+
+  // Final review finding 3: click a field, Tab to a button, Enter/Space.
+  it("asks before Enter or Space when Tab moved focus onto a consequential button", async () => {
+    for (const combo of ["enter", "space"]) {
+      const { cu, fake, cards, ctx } = setup({
+        answer: (card) => (card.items[0]?.tool === "screen.key" ? "deny" : "approve"),
+      });
+      fake.client.describeAt = async () => ({ role: "text", name: "Search" });
+      let focus = { role: "text", name: "Search" };
+      fake.client.describeFocused = async () => focus;
+      await cu.run(LOOK, START, ctx());
+      await cu.run(CLICK, { x: 3, y: 4, target: "Search" }, ctx());
+      await cu.run(KEY, { combo: "tab" }, ctx());
+      focus = { role: "push button", name: "Delete account" };
+      const result = await cu.run(KEY, { combo }, ctx());
+      expect(cards.at(-1)?.items[0]).toMatchObject({ tool: "screen.key" });
+      expect(result.isError).toBe(true);
+      expect(fake.calls.filter((c) => c.op === "key").map((c) => c.args[0])).toEqual(["tab"]);
+    }
+  });
+
+  it("asks before Enter when the focused control cannot be named after a Tab", async () => {
+    const { cu, fake, cards, ctx } = setup({
+      answer: (card) => (card.items[0]?.tool === "screen.key" ? "deny" : "approve"),
+    });
+    fake.client.describeAt = async () => ({ role: "text", name: "Search" });
+    await cu.run(LOOK, START, ctx());
+    await cu.run(CLICK, { x: 3, y: 4, target: "Search" }, ctx());
+    await cu.run(TYPE, { text: "shoes", target: "Search" }, ctx());
+    expect(cards).toHaveLength(1); // a plain field: no card yet
+    await cu.run(KEY, { combo: "tab" }, ctx()); // describeFocused answers unknown
+    await cu.run(KEY, { combo: "enter" }, ctx());
+    expect(cards.at(-1)?.items[0]).toMatchObject({ tool: "screen.key" });
+    expect(fake.calls.filter((c) => c.op === "key").map((c) => c.args[0])).toEqual(["tab"]);
+  });
+
+  it("does not ask for Enter in a plain text field named by the focus", async () => {
+    const { cu, fake, cards, ctx } = setup();
+    let asked = 0;
+    fake.client.describeFocused = async () => {
+      asked++;
+      return { role: "text", name: "File name" };
+    };
+    await cu.run(LOOK, START, ctx());
+    await cu.run(TYPE, { text: "beach.png", target: "File name" }, ctx());
+    await cu.run(KEY, { combo: "enter" }, ctx());
+    expect(cards).toHaveLength(1);
+    expect(asked).toBe(2);
   });
 
   it("cu:stop while paused ends the session", async () => {

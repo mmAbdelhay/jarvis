@@ -13,7 +13,7 @@ import {
   type CuPauseReason,
   type CuState,
 } from "./contract.js";
-import { type DescribedTarget, detectConsequence } from "./consequential.js";
+import { type DescribedTarget, detectConsequence, focusAfterKey } from "./consequential.js";
 import { type CuCapture, type CuClient, CuClientError, parseCuErrorCode } from "./cu-protocol.js";
 import { CU_IDLE_STATE, type CuEndReason, type CuSession, createCuSession } from "./cu-session.js";
 import { CU_MODEL_TEXT, CU_TEXT, joinApps } from "./cu-text.js";
@@ -306,6 +306,21 @@ export function createComputerUse(deps: ComputerUseDeps): ComputerUse {
     }
   }
 
+  // Final review finding 3: Enter, Space, Delete and typed newlines act on
+  // whatever has keyboard focus, which Tab or a dialog may have moved since
+  // the last click. Ask jarvis-cu; when it cannot say, fall back to the
+  // control last clicked (forgotten after any key that may move focus).
+  async function focusFor(action: ScreenAction): Promise<DescribedTarget | undefined> {
+    if (action.kind !== "key" && action.kind !== "type") return focusedDescribed;
+    try {
+      const now = await deps.client.describeFocused();
+      if (now.role !== "unknown") return now;
+    } catch {
+      // older helper or AT-SPI trouble: use what V tracked
+    }
+    return focusedDescribed;
+  }
+
   function gateResultText(result: GateItemResult | undefined): string {
     if (result === undefined || result.status === "ran") return AGENT_TEXT.stopped;
     return STATUS_TEXT[result.status];
@@ -447,9 +462,10 @@ export function createComputerUse(deps: ComputerUseDeps): ComputerUse {
     }
     emit();
     const described = await describePoint(action);
+    const focused = await focusFor(action);
     const finding = detectConsequence(action, {
       ...(lastTyped === undefined ? {} : { lastTypedTarget: lastTyped }),
-      ...(focusedDescribed === undefined ? {} : { focusedDescribed }),
+      ...(focused === undefined ? {} : { focusedDescribed: focused }),
       ...(described === undefined ? {} : { described }),
     });
     const audited = cuAuditInput(action);
@@ -513,7 +529,9 @@ export function createComputerUse(deps: ComputerUseDeps): ComputerUse {
     lastTyped =
       action.kind === "type" ? action.target : action.kind === "key" ? lastTyped : undefined;
     if (action.kind === "click") focusedDescribed = described;
-    else if (action.kind !== "type" && action.kind !== "key") focusedDescribed = undefined;
+    else if (action.kind === "key") focusedDescribed = focusAfterKey(action.combo, focused);
+    else if (action.kind === "type") focusedDescribed = focused;
+    else focusedDescribed = undefined;
     if (session !== current) return refuse(CU_MODEL_TEXT.stoppedByUser);
     current.finishStep(index, outcome.ok);
     emit();
