@@ -143,3 +143,29 @@ func TestCaptureCopyFailureCleansUp(t *testing.T) {
 		}
 	}
 }
+
+// Contract section 4 requires rotated outputs to map to unsupported while
+// preserving the Capture interface's ErrRotated sentinel.
+func TestCaptureRotatedIsUnsupported(t *testing.T) {
+	for transform := 1; transform <= 7; transform++ {
+		t.Run(fmt.Sprint(transform), func(t *testing.T) {
+			f := newFake()
+			f.outputs[0].transform = int32(transform)
+			c, err := startFake(t, f, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = c.Capture("HEADLESS-1")
+			if !errors.Is(err, ErrRotated) {
+				t.Fatalf("rotated sentinel: %v", err)
+			}
+			var unsupported *UnsupportedError
+			if !errors.As(err, &unsupported) {
+				t.Fatalf("rotated capture must be unsupported: %v", err)
+			}
+			if f.count("frame destroy") != 0 {
+				t.Fatal("rotated capture created a frame")
+			}
+		})
+	}
+}
