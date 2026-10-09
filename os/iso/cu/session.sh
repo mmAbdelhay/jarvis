@@ -189,7 +189,7 @@ check "the privacy scan detects planted PNG data (with a missing directory in th
 rm -rf "$control"
 check "the logs the privacy scan reads exist" test -s "$out/jarvisd.log" -a -e "$out/turn-probe.log"
 check "criterion 8: no screenshot is stored (no PNG data in jarvis's directories or the logs)" not_stored
-check "criterion 6: no screenshot outside computer-use turns, none leaked" cuc no-leaks "$report"
+check "criterion 6: no screenshot outside computer-use turns, none leaked" cuc no-leaks "$report" --min-verified 1
 
 if [ "$failures" -gt 0 ]; then
   { echo "--- jarvisd.log (tail)"; tail -n 80 "$out/jarvisd.log"

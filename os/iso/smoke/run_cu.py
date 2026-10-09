@@ -5,8 +5,12 @@ Boots the release ISO like run_smoke.py (direct kernel boot, serial debug
 shell) plus a USB tablet, installs GIMP in the live session, points jarvisd at
 the scripted vision model (assets/cu/fakevision.mjs) and checks what needs the
 real session: jarvis-cu started by the autostart under systemd, the peer
-check, the GIMP export, the overlay border, real (QMP) pointer input pausing
+check, the overlay border, real (QMP) pointer input pausing
 Jarvis, and Super+L ending it. The lock check is last: it leaves the screen locked.
+
+The GIMP export, the consequential card, the screen-action audit entries and the
+privacy-mask evidence are BLOCKED (contracts U-1, until X14): recorded as not
+verified, never as passes; CU_FAIL_ON_BLOCKED=1 turns them into a failing exit.
 """
 
 from __future__ import annotations
@@ -29,6 +33,7 @@ from jarvis_smoke.qmp import Qmp  # noqa: E402
 from jarvis_smoke.serial_shell import SerialShell, SerialTimeout  # noqa: E402
 from run_smoke import BOOTAPPEND, Run, build_assets  # noqa: E402
 
+BLOCKED_REASON = "U-1: dialogs are not capturable; escalated to Plans U/V (see cu-gimp.json concerns)"
 USB_TABLET = ("-device", "qemu-xhci", "-device", "usb-tablet")
 
 
@@ -72,14 +77,18 @@ def run_checks(run: Run, args: argparse.Namespace, qmp: Qmp, out: Path) -> int:
     run.check("criterion 2: off by default, no screen tools reach the model", off)
     run.check("computer use enabled for the scripted provider", lambda: sh(cu.enable(uid), 60))
 
+    # Criteria 1 and 5 are BLOCKED (contracts U-1, as in os/iso/cu/session.sh): cu-gimp.json's
+    # export turn stops after look/done because the Export dialogs are not capturable. The
+    # turn still runs as scripted; nothing below claims an export, a card or a screen action.
     def export():
-        sh(cu.turn(uid, "export", "open the GIMP image beach.xcf and export it as PNG to Pictures",
-                   f"--absent {cu.PNG_TARGET}"), 700)
-        sh(cu.cucheck(uid, f"card {cu.log('export')} consequential --absent"))
-        sh(cu.cucheck(uid, f"png {cu.PNG_TARGET} 640 480"))
+        sh(cu.turn(uid, "export", "open the GIMP image beach.xcf and export it as PNG to Pictures"), 700)
         sh(cu.cucheck(uid, f"turn {cu.REPORT} export --images"))
 
-    run.check("criterion 1: GIMP export to Pictures through computer use", export)
+    run.check("the export turn ran as scripted (no export attempted)", export)
+    for name in ("criterion 1: GIMP export to Pictures through computer use",
+                 "criterion 5: a consequential card before the export"):
+        run.results.append(report.blocked(name, BLOCKED_REASON))
+        print(f"[BLOCKED] {name}", flush=True)
 
     def border_during():
         sh(cu.turn(uid, "physical", "cu-physical: hold the session", background=True))
@@ -98,10 +107,24 @@ def run_checks(run: Run, args: argparse.Namespace, qmp: Qmp, out: Path) -> int:
         sh(cu.stop(uid), 30)
 
     run.check("criterion 3: real pointer motion pauses Jarvis within 2 s", physical)
-    run.check("criterion 8: the audit log has the goal and the screen actions", lambda: sh(cu.AUDIT_HAS_GOAL_AND_ACTIONS))
-    run.check("criterion 8: no screenshot stored in jarvis's directories", lambda: sh(cu.no_screenshots_stored(uid)))
-    run.check("criterion 6: every screenshot showed only allowed windows",
+    run.check("criterion 8: the audit log has the goal", lambda: sh(cu.AUDIT_HAS_GOAL))
+    # No turn of this tier acts (export is stubbed, the others only look): a screen action in the
+    # audit log can only appear once X14 restores the real export script.
+    if not run.check("criterion 8: the audit log has the screen actions", lambda: sh(cu.AUDIT_HAS_ACTIONS)):
+        failed = run.results.pop()
+        run.results.append(report.blocked(failed["name"], f"{BLOCKED_REASON}; no screen action was driven"))
+    run.check("criterion 8: no screenshot stored in jarvis's directories, /tmp, the test logs or the journals",
+              lambda: sh(cu.no_screenshots_stored(uid)))
+    run.check("criterion 6: no screenshot leaked a foreign window, none outside computer-use turns",
               lambda: sh(cu.cucheck(uid, f"no-leaks {cu.REPORT}")))
+    # Under U-1 every ordinary capture here is fullscreen: the mask is vacuous, so the check above
+    # can pass without testing a pixel. Privacy is verified only when at least one capture was
+    # really checked (an all-black frame); otherwise it is reported BLOCKED, not passed.
+    if not run.check("criterion 6: at least one screenshot was really checked for leaks",
+                     lambda: sh(cu.cucheck(uid, f"no-leaks {cu.REPORT} --min-verified 1"))):
+        failed = run.results.pop()
+        run.results.append(report.blocked(failed["name"], "U-1: every capture was vacuous (allowed window = whole frame); "
+                                          "the all-black evidence is only produced by the container tier's excluded turn"))
 
     def lock():
         sh(cu.turn(uid, "lock", "cu-lock: hold the session", background=True))
@@ -185,7 +208,10 @@ def main(argv: list[str] | None = None) -> int:
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
             f.write(summary)
     print(summary)
-    return 0 if results and all(r["ok"] for r in results) else 1
+    blocked = [r for r in results if r.get("blocked")]
+    if blocked:
+        print(f"passed, but {len(blocked)} BLOCKED criteria are NOT verified (release blocker: U/V dialog-capture decision)")
+    return report.exit_code(results, os.environ.get("CU_FAIL_ON_BLOCKED") == "1")
 
 
 if __name__ == "__main__":

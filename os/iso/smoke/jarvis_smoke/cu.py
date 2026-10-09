@@ -19,9 +19,9 @@ INSTALL_GIMP = (
     "apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends gimp >/dev/null"
 )
 AUDIT = f"{HOME}/.local/state/jarvis/audit.jsonl"
-AUDIT_HAS_GOAL_AND_ACTIONS = (
-    f"grep -qF beach.xcf {AUDIT} && grep -qE '\"tool\":\"screen[._](click|key|type)' {AUDIT}"
-)
+AUDIT_HAS_GOAL = f"grep -qF beach.xcf {AUDIT}"
+AUDIT_HAS_ACTIONS = f"grep -qE '\"tool\":\"screen[._](click|key|type)' {AUDIT}"
+AUDIT_HAS_GOAL_AND_ACTIONS = f"{AUDIT_HAS_GOAL} && {AUDIT_HAS_ACTIONS}"
 
 
 def log(name: str) -> str:
@@ -116,9 +116,15 @@ def wait_check(uid: int, args: str, seconds: int) -> str:
 
 
 def no_screenshots_stored(uid: int) -> str:
-    dirs = f"{HOME}/.local/state/jarvis {HOME}/.local/share/jarvis {HOME}/.config/jarvis {HOME}/.cache/jarvis /run/user/{uid}/jarvis"
-    return (f"! (find {dirs} -type f 2>/dev/null | xargs -r grep -l -e iVBORw0KGgo -- 2>/dev/null | grep -q .) "
-            f"&& [ -z \"$(find {dirs} -name '*.png' 2>/dev/null)\" ]")
+    """Criterion 8: no screenshot on disk or in a log. The base64 PNG marker must be in no
+    file of jarvis's directories, /tmp or the test logs, and in neither service journal."""
+    own = (f"{HOME}/.local/state/jarvis {HOME}/.local/share/jarvis {HOME}/.config/jarvis {HOME}/.cache/jarvis "
+           f"/run/user/{uid}/jarvis")
+    dirs = f"{own} /tmp {LOGS}"
+    journal = scenarios.as_user(uid, "journalctl --user -u jarvisd -u jarvis-cu --no-pager")
+    return (f"! (find {dirs} -type f 2>/dev/null | xargs -r grep -l -a -e iVBORw0KGgo -- 2>/dev/null | grep -q .) "
+            f"&& [ -z \"$(find {own} -name '*.png' 2>/dev/null)\" ] "
+            f"&& ! ({journal} | grep -q iVBORw0KGgo)")
 
 
 _PPM = re.compile(rb"P6\s+(\d+)\s+(\d+)\s+(\d+)\s")

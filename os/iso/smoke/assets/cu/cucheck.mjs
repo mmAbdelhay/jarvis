@@ -7,7 +7,7 @@
 //   cucheck no-screen-tools REPORT NAME
 //   cucheck looks-below REPORT NAME N
 //   cucheck step REPORT NAME N
-//   cucheck no-leaks REPORT
+//   cucheck no-leaks REPORT [--min-verified N]
 //   cucheck card LOG begin|consequential [--absent] [--title-has TEXT]
 //   cucheck active LOG
 //   cucheck paused LOG REASON --since MS [--within MS]
@@ -74,8 +74,14 @@ export function stepIssued(report, name, n) {
   return turn.steps.length > n ? [] : [`turn "${name}" has issued ${turn.steps.length} steps, waiting for step ${n}`];
 }
 
-export function leaks(report) {
+/** minVerified: at least that many screenshots must really have been checked (hasEvidence);
+ * vacuous captures (U-1: the allowed rectangle is the whole frame) skip the leak test and do not count. */
+export function leaks(report, { minVerified = 0 } = {}) {
   const p = [];
+  const verified = (report.turns ?? []).reduce((n, t) => n + t.images.filter(hasEvidence).length, 0);
+  if (verified < minVerified) {
+    p.push(`${verified} screenshots were really checked for leaks, expected at least ${minVerified} (vacuous captures prove nothing)`);
+  }
   if ((report.imagesOutsideComputerUse ?? 0) > 0) {
     p.push(`${report.imagesOutsideComputerUse} screenshots reached the model in turns without screen tools`);
   }
@@ -135,7 +141,7 @@ export function main(argv) {
     allowPositionals: true,
     options: {
       images: { type: "boolean" }, evidence: { type: "boolean" }, absent: { type: "boolean" },
-      "title-has": { type: "string" }, since: { type: "string" }, within: { type: "string", default: "2000" },
+      "title-has": { type: "string" }, "min-verified": { type: "string", default: "0" }, since: { type: "string" }, within: { type: "string", default: "2000" },
     },
   });
   const [cmd, a, b, c] = positionals;
@@ -148,7 +154,7 @@ export function main(argv) {
       case "no-screen-tools": problems = noScreenTools(json(a), b); break;
       case "looks-below": problems = looksBelow(json(a), b, Number(c)); break;
       case "step": problems = stepIssued(json(a), b, Number(c)); break;
-      case "no-leaks": problems = leaks(json(a)); break;
+      case "no-leaks": problems = leaks(json(a), { minVerified: Number(values["min-verified"]) }); break;
       case "card": problems = cardProblems(events(a), b, { absent: values.absent === true, titleHas: values["title-has"] }); break;
       case "active": problems = isActive(events(a)) ? [] : ["no cu:state with active true"]; break;
       case "paused": problems = pausedProblems(events(a), b, Number(values.since), Number(values.within)); break;

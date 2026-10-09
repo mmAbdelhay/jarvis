@@ -105,6 +105,16 @@ test("vacuous screenshots are missing evidence: not a leak, not a pass", () => {
   assert.match(leaks(r).join(), /9 pixels outside/);
 });
 
+test("no-leaks --min-verified: vacuous captures alone prove nothing", () => {
+  const only = { imagesOutsideComputerUse: 0, turns: [{ name: "t", toolsOffered: [], steps: [], images: [vacuousImage, vacuousImage] }] };
+  assert.deepEqual(leaks(only), []);
+  assert.match(leaks(only, { minVerified: 1 }).join(), /0 screenshots were really checked/);
+  only.turns[0].images.push(okImage);
+  assert.deepEqual(leaks(only, { minVerified: 1 }), []);
+  assert.match(leaks(only, { minVerified: 2 }).join(), /1 screenshots were really checked/);
+  assert.deepEqual(leaks({ imagesOutsideComputerUse: 0, turns: [] }), []);
+});
+
 test("step: the model has issued a turn's step N (harness synchronisation)", () => {
   assert.deepEqual(stepIssued(report, "stuck", 4), []);
   assert.match(stepIssued(report, "stuck", 5).join(), /has issued 5 steps/);

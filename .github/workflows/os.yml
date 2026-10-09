@@ -443,6 +443,14 @@ jobs:
       - run: |
           python3 os/iso/smoke/run_cu.py --iso "$(ls "$RUNNER_TEMP"/iso/*.iso)" \
             --out "$RUNNER_TEMP/cu-kvm" --accel kvm ${{ steps.apt.outputs.flag }}
+      # BLOCKED criteria are unverified, not passed (contracts U-1); release blocker until X14.
+      - if: always()
+        run: |
+          n=$(jq '[.results[] | select(.blocked)] | length' "$RUNNER_TEMP/cu-kvm/results.json" 2>/dev/null || echo 0)
+          if [ "${n:-0}" -gt 0 ]; then
+            echo "::warning title=cu-kvm-test::$n BLOCKED computer-use criteria are NOT verified (release blocker: U/V dialog-capture decision)"
+            { echo "### cu-kvm-test: $n BLOCKED criteria (unverified)"; jq -r '.results[] | select(.blocked) | "- " + .name' "$RUNNER_TEMP/cu-kvm/results.json"; } >> "$GITHUB_STEP_SUMMARY"
+          fi
       - if: always()
         uses: actions/upload-artifact@v4
         with:
