@@ -5,6 +5,7 @@
 // order stay. The system text (and so the safety rules) is never touched.
 // Pure.
 import type { ProviderKind } from "./contract.js";
+import { IMAGE_TOKENS, withoutImage } from "./images.js";
 import { estimateTokens } from "./safety.js";
 import type { ModelMessage, ModelToolSpec } from "./types.js";
 
@@ -66,8 +67,11 @@ export function messageTokens(message: ModelMessage): number {
       );
     case "tool":
       return (
-        message.results.reduce((sum, result) => sum + estimateTokens(result.content), 0) +
-        PER_MESSAGE_TOKENS
+        message.results.reduce(
+          (sum, result) =>
+            sum + estimateTokens(result.content) + (result.image === undefined ? 0 : IMAGE_TOKENS),
+          0,
+        ) + PER_MESSAGE_TOKENS
       );
   }
 }
@@ -119,7 +123,10 @@ export function fitHistory(messages: readonly ModelMessage[], budget: number): M
     if (message?.role !== "tool" || i === lastTool) continue;
     const shorter: ModelMessage = {
       role: "tool",
-      results: message.results.map((result) => ({ ...result, content: ELIDED_TOOL_OUTPUT })),
+      results: message.results.map((result) => ({
+        ...withoutImage(result),
+        content: ELIDED_TOOL_OUTPUT,
+      })),
     };
     size -= messageTokens(message) - messageTokens(shorter);
     turn[i] = shorter;

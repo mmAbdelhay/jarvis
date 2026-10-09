@@ -1,3 +1,4 @@
+import { CU_TEXT } from "./cu-text.js";
 import type { Lang, Localized } from "./i18n.js";
 
 // Every string jarvisd produces. Text a person sees lives in the {en, ar}
@@ -156,6 +157,13 @@ const ACTIVITY_EN = {
   "disks.format_removable": "Formatting a drive",
   "recipes.list": "Reading setup recipes",
   "recipes.run": "Running a setup recipe",
+  "screen.look": "Looking at the screen",
+  "screen.click": "Clicking on the screen",
+  "screen.type": "Typing on the screen",
+  "screen.key": "Pressing keys",
+  "screen.scroll": "Scrolling",
+  "screen.drag": "Dragging on the screen",
+  "screen.done": "Finishing computer use",
 };
 
 const ACTIVITY_AR: Record<keyof typeof ACTIVITY_EN, string> = {
@@ -224,6 +232,13 @@ const ACTIVITY_AR: Record<keyof typeof ACTIVITY_EN, string> = {
   "disks.format_removable": "تهيئة قرص",
   "recipes.list": "قراءة وصفات الإعداد",
   "recipes.run": "تنفيذ وصفة إعداد",
+  "screen.look": "النظر إلى الشاشة",
+  "screen.click": "النقر على الشاشة",
+  "screen.type": "الكتابة على الشاشة",
+  "screen.key": "الضغط على المفاتيح",
+  "screen.scroll": "التمرير",
+  "screen.drag": "السحب على الشاشة",
+  "screen.done": "إنهاء استخدام الحاسوب",
 };
 
 export const TOOL_ACTIVITY: Localized<Readonly<Record<string, string>>> = {
@@ -412,6 +427,7 @@ const CONTROL_EN = {
   lockClientOnly: "Only the lock screen can change the lock state.",
   localOnly: "This can only be changed on the computer.",
   passwordNotFromPhone: "Changes that need your password can only be approved on the computer.",
+  computerUseNotFromPhone: "Letting Jarvis use the screen can only be approved on the computer.",
   nothingToUndo: "There is nothing to undo.",
   undone: (title: string) => `Undone: ${title}.`,
   undoTitle: (title: string) => `Undo: ${title}`,
@@ -438,6 +454,7 @@ const CONTROL_AR: ControlText = {
   lockClientOnly: "شاشة القفل وحدها يمكنها تغيير حالة القفل.",
   localOnly: "لا يمكن تغيير هذا إلا من الحاسوب نفسه.",
   passwordNotFromPhone: "التغييرات التي تتطلب كلمة مرورك لا تُعتمد إلا من الحاسوب.",
+  computerUseNotFromPhone: "لا يُعتمد استخدام جارفيس للشاشة إلا من الحاسوب نفسه.",
   nothingToUndo: "لا يوجد ما يمكن التراجع عنه.",
   undone: (title) => `تم التراجع عن: ${title}.`,
   undoTitle: (title) => `تراجع عن: ${title}`,
@@ -477,6 +494,7 @@ export const RECIPE_TEXT = {
 
 /** Every user-visible table, for the i18n gate (i18n-tables.test.ts). */
 export const I18N_TABLES = {
+  cu: CU_TEXT,
   user: USER_TEXT,
   activity: TOOL_ACTIVITY,
   doctor: DOCTOR_TEXT,

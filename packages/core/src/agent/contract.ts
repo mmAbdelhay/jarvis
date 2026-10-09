@@ -13,7 +13,13 @@ export type ProviderConfig = {
 export type ProviderDraft = { kind: ProviderKind; baseUrl: string; model: string; apiKey?: string };
 export type ProbeResult = { ok: boolean; supportsTools: boolean; models: string[]; error?: string };
 /** The provider:status push. Not "ProviderStatus": core already exports one. */
-export type ProviderListEntry = ProviderConfig & { id: string };
+/** Rafiq v1.1 §4.8: computer-use state per provider. */
+export type ProviderComputerUse = { enabled: boolean; consentAt: string | null };
+export type ProviderListEntry = ProviderConfig & {
+  id: string;
+  vision: boolean;
+  computerUse: ProviderComputerUse;
+};
 export type ProviderDraftEntry = ProviderDraft & { id: string };
 export type ProviderListResult = {
   providers: ProviderListEntry[];
@@ -159,3 +165,20 @@ export type UndoResult = { undone: string | null };
 
 /** Rafiq M4 §3 (copied from @jarvis/wire; contract-types.test.ts pins them equal). */
 export type UiLanguage = "en" | "ar";
+
+/** Rafiq v1.1 §2 (copied from @jarvis/wire; contract-types.test.ts pins them equal). */
+export const CU_MAX_STEPS = 50;
+export type CuStepStatus = "done" | "running" | "pending" | "failed";
+export type CuStep = { title: string; status: CuStepStatus };
+export const CU_PAUSE_REASONS = ["physical-input", "esc", "locked", "excluded-focus"] as const;
+export type CuPauseReason = (typeof CU_PAUSE_REASONS)[number];
+export type CuState = {
+  active: boolean;
+  sessionId: string | null;
+  goal: string;
+  apps: string[];
+  step: number;
+  maxSteps: number;
+  steps: CuStep[];
+  paused: CuPauseReason | null;
+};

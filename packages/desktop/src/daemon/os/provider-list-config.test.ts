@@ -49,6 +49,7 @@ describe("parseOsBrainConfig (M2.5 contracts §1)", () => {
       memoryEnabled: true,
       migratedFromLegacy: true,
       language: null,
+      computerUse: { enabled: {}, cloudConsent: {} },
     });
   });
 

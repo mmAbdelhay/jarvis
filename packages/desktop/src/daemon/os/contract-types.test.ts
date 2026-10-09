@@ -36,6 +36,10 @@ describe("core's agent types are exactly the contract's (@jarvis/wire)", () => {
     expectTypeOf<Core.MemoryItem>().toEqualTypeOf<Wire.MemoryItem>();
     expectTypeOf<Core.RegistryEntry>().toEqualTypeOf<Wire.RegistryEntry>();
     expectTypeOf<Core.RegistryListResult>().toEqualTypeOf<Wire.RegistryListResult>();
+    expectTypeOf<Core.CuState>().toEqualTypeOf<Wire.CuState>();
+    expectTypeOf<Core.CuStep>().toEqualTypeOf<Wire.CuStep>();
+    expectTypeOf<Core.CuStepStatus>().toEqualTypeOf<Wire.CuStepStatus>();
+    expectTypeOf<Core.CuPauseReason>().toEqualTypeOf<Wire.CuPauseReason>();
     expectTypeOf<Core.UiLanguage>().toEqualTypeOf<Wire.UiLanguage>();
   });
 });

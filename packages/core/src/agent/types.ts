@@ -12,7 +12,16 @@ export type ModelToolSpec = {
 };
 
 export type ModelToolCall = { id: string; name: string; input: unknown };
-export type ModelToolResult = { callId: string; name: string; content: string; isError: boolean };
+/** A screenshot handed to the model (Rafiq v1.1 §3.2). Only screen.look
+ *  produces one; images.ts provides pure helpers for removing it. */
+export type ModelImage = { mediaType: "image/png"; dataBase64: string };
+export type ModelToolResult = {
+  callId: string;
+  name: string;
+  content: string;
+  isError: boolean;
+  image?: ModelImage;
+};
 
 export type ModelMessage =
   | { role: "user"; text: string }

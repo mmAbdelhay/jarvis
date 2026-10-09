@@ -38,7 +38,11 @@
     "remote:revoke",
     "pairing:open",
     "pairing:cancel",
-    "ui:setLanguage"
+    "ui:setLanguage",
+    "cu:stop",
+    "cu:resume",
+    "cu:setEnabled",
+    "cu:consent"
   ],
   "pushes": [
     "agent:events",
@@ -48,7 +52,8 @@
     "voice:state",
     "pairing:pending",
     "remote:status",
-    "ui:language"
+    "ui:language",
+    "cu:state"
   ],
   "blobs": ["voice:utterance"],
   "otherClients": ["sys:setLocked"]

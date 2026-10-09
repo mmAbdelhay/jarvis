@@ -17,7 +17,7 @@
 // process or log line sees them.
 //
 // No electron here (core/no-electron.test.ts); process.platform read once, here.
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, rm, mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir, tmpdir, totalmem } from "node:os";
@@ -49,6 +49,7 @@ import {
 } from "@jarvis/platform/store";
 import { DAEMON_EXIT, DAEMON_USAGE, parseDaemonArgs } from "../args.js";
 import { nodeControlDeps } from "../control/deps.js";
+import { nodePeerCheck } from "../control/peer.js";
 import { runDirectoryFor } from "../control/endpoint.js";
 import { createControlServer } from "../control/server.js";
 import { takeDaemonEnv } from "../env.js";
@@ -62,6 +63,8 @@ import {
 } from "../log-file.js";
 import { loadRecipeFiles, parseOsReleaseId } from "./recipe-files.js";
 import { createOsAgent } from "./agent-service.js";
+import { CU_HELPER_PATH, connectUnix, createCuClient, cuSocketPath } from "./cu-client.js";
+import { readVisionTags, readOllamaVision } from "./catalog-vision.js";
 import { readBackupTag } from "./backup-model.js";
 import { createEnvKeyStore, takeEnvProviderKeys } from "./provider-keys.js";
 import { createMemoryBackendOpener } from "./memory-backend.js";
@@ -356,13 +359,38 @@ async function main(argv: readonly string[]): Promise<void> {
     hostServers: new Set(TRUSTED_MCP_SERVERS),
     log: info,
   });
+  // Rafiq v1.1 §1: jarvis-cu on $XDG_RUNTIME_DIR/jarvis/cu.sock, spoken to
+  // only after the kernel names /usr/libexec/jarvis/jarvis-cu as the peer.
+  const cuPath = cuSocketPath(env);
+  const peerCheck = nodePeerCheck();
+  const cuClient =
+    readonlyProfile || cuPath === undefined
+      ? undefined
+      : createCuClient({
+          connect: () => connectUnix(cuPath),
+          verifyPeer: async (socket) => (await peerCheck.executableOf(socket)) === CU_HELPER_PATH,
+          timers,
+          log: info,
+        });
+  if (cuClient === undefined) info("computer use is off (read-only profile or no XDG_RUNTIME_DIR)");
   const agent = createOsAgent({
+    ...(cuClient === undefined
+      ? {}
+      : {
+          computerUse: {
+            client: cuClient,
+            hash: async (png: string) => createHash("sha256").update(png).digest("hex"),
+          },
+        }),
     ...(readonlyProfile ? {} : { recipes }),
     defaultLanguage: langFromLocale({ LANG: process.env["LANG"] }),
     // The Docker image (read-only profile) ships no model and no catalog.
     ...(readonlyProfile
       ? {}
       : {
+          readVisionTags: () =>
+            readVisionTags(MODEL_CATALOG_PATH, (path) => readFile(path, "utf8"), info),
+          readOllamaVision: (baseUrl, model) => readOllamaVision(baseUrl, model, fetch),
           readBackupTag: () =>
             readBackupTag(MODEL_CATALOG_PATH, (path) => readFile(path, "utf8"), info),
         }),
@@ -501,6 +529,7 @@ async function main(argv: readonly string[]): Promise<void> {
         .catch((thrown: unknown) => error(`phone bridge stop: ${describe(thrown)}`));
       voice?.stop();
       await agent.shutdown();
+      cuClient?.close();
       vectorCache?.close();
     },
     closeControl: () => server.close(),

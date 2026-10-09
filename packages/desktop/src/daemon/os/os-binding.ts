@@ -27,6 +27,8 @@ import {
   parseMemorySetEnabled,
   parseNoArgs,
   parseOwnerPassword,
+  parseCuConsent,
+  parseCuSetEnabled,
   parsePairingAnswer,
   parseProviderDraft,
   parseProviderSave,
@@ -170,6 +172,24 @@ export function createOsRouter(services: OsServices): OsRouter {
         return agent.memoryClear();
       case OS_CONTROL_REQUESTS.memorySetEnabled:
         return agent.memorySetEnabled(value(parseMemorySetEnabled(args)).enabled);
+      case OS_CONTROL_REQUESTS.cuSetEnabled:
+        requireLocal(origin, agent.language());
+        return agent.cuSetEnabled(value(parseCuSetEnabled(args)));
+      case OS_CONTROL_REQUESTS.cuStop:
+        requireLocal(origin, agent.language());
+        value(parseNoArgs(args));
+        return agent.cuStop();
+      case OS_CONTROL_REQUESTS.cuResume:
+        requireLocal(origin, agent.language());
+        value(parseNoArgs(args));
+        return agent.cuResume();
+      case OS_CONTROL_REQUESTS.cuConsent: {
+        requireLocal(origin, agent.language());
+        const request = value(parseCuConsent(args));
+        return request.revoke === true
+          ? agent.cuConsent(request.providerId, true)
+          : agent.cuConsent(request.providerId);
+      }
       case OS_CONTROL_REQUESTS.voiceStop:
         value(parseNoArgs(args));
         return services.voice?.stop() ?? null;
