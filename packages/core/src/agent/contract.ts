@@ -13,7 +13,13 @@ export type ProviderConfig = {
 export type ProviderDraft = { kind: ProviderKind; baseUrl: string; model: string; apiKey?: string };
 export type ProbeResult = { ok: boolean; supportsTools: boolean; models: string[]; error?: string };
 /** The provider:status push. Not "ProviderStatus": core already exports one. */
-export type ProviderListEntry = ProviderConfig & { id: string; vision: boolean };
+/** Rafiq v1.1 §4.8: computer-use state per provider. */
+export type ProviderComputerUse = { enabled: boolean; consentAt: string | null };
+export type ProviderListEntry = ProviderConfig & {
+  id: string;
+  vision: boolean;
+  computerUse: ProviderComputerUse;
+};
 export type ProviderDraftEntry = ProviderDraft & { id: string };
 export type ProviderListResult = {
   providers: ProviderListEntry[];

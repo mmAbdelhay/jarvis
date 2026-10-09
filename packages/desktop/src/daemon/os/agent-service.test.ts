@@ -768,6 +768,7 @@ describe("provider list and failover (M2.5 contracts §1-§2, design §3.5)", ()
           model: "qwen3:8b",
           hasKey: false,
           vision: false,
+          computerUse: { enabled: false, consentAt: null },
         },
         {
           id: "work",
@@ -776,6 +777,7 @@ describe("provider list and failover (M2.5 contracts §1-§2, design §3.5)", ()
           model: "claude-sonnet-5-5",
           hasKey: true,
           vision: true,
+          computerUse: { enabled: false, consentAt: null },
         },
       ],
       activeId: "local",

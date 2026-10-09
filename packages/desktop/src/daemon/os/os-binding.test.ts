@@ -58,6 +58,8 @@ function fakeAgent() {
     memoryList: record("memoryList", Promise.resolve([])) as OsAgent["memoryList"],
     memoryDelete: record("memoryDelete", Promise.resolve(null)) as OsAgent["memoryDelete"],
     memoryClear: record("memoryClear", Promise.resolve(null)) as OsAgent["memoryClear"],
+    cuSetEnabled: record("cuSetEnabled", Promise.resolve(null)) as OsAgent["cuSetEnabled"],
+    cuConsent: record("cuConsent", Promise.resolve(null)) as OsAgent["cuConsent"],
     memorySetEnabled: record(
       "memorySetEnabled",
       Promise.resolve(null),
@@ -321,6 +323,33 @@ describe("OS router adapters", () => {
       ["test", [1], { kind: "local", connection }],
       ["blob", [2], bytes, { kind: "local", connection }],
     ]);
+  });
+});
+
+describe("computer-use settings channels (v1.1 §2)", () => {
+  it("routes cu:setEnabled and cu:consent from the computer only", async () => {
+    const { agent, calls } = fakeAgent();
+    const router = createOsRouter({ agent });
+    const local = { kind: "local" as const, connection };
+    await expect(
+      router.invoke("cu:setEnabled", [{ providerId: "work", enabled: true }], local),
+    ).resolves.toBeNull();
+    await expect(router.invoke("cu:consent", [{ providerId: "work" }], local)).resolves.toBeNull();
+    await expect(
+      router.invoke("cu:consent", [{ providerId: "work", revoke: true }], local),
+    ).resolves.toBeNull();
+    expect(calls.slice(-3).map((c) => [c.method, c.args])).toEqual([
+      ["cuSetEnabled", [{ providerId: "work", enabled: true }]],
+      ["cuConsent", ["work"]],
+      ["cuConsent", ["work", true]],
+    ]);
+    await expect(
+      router.invoke("cu:setEnabled", [{ providerId: "work" }], local),
+    ).rejects.toMatchObject({ code: "bad-request" });
+    const phone = { kind: "phone" as const, device: { id: "d1", name: "Pixel" } };
+    await expect(
+      router.invoke("cu:consent", [{ providerId: "work" }], phone),
+    ).rejects.toMatchObject({ code: "forbidden" });
   });
 });
 

@@ -94,7 +94,13 @@ export type ProbeResult = { ok: boolean; supportsTools: boolean; models: string[
 /** M2.5 contracts §1: lower-case letters, digits and "-", up to 32. */
 export const PROVIDER_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,31}$/;
 export const MAX_PROVIDERS = 8;
-export type ProviderListEntry = ProviderConfig & { id: string; vision: boolean };
+/** Rafiq v1.1 §4.8: computer-use state per provider. */
+export type ProviderComputerUse = { enabled: boolean; consentAt: string | null };
+export type ProviderListEntry = ProviderConfig & {
+  id: string;
+  vision: boolean;
+  computerUse: ProviderComputerUse;
+};
 export type ProviderDraftEntry = ProviderDraft & { id: string };
 /** provider:probe's draft; `id` lets a probe without apiKey use that provider's stored key. */
 export type ProviderProbeDraft = ProviderDraft & { id?: string };

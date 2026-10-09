@@ -6,6 +6,7 @@
 //
 // No electron here (core/no-electron.test.ts).
 import {
+  CU_TEXT,
   modelSupportsVision,
   AGENT_TEXT,
   BACKUP_BASE_URL,
@@ -83,7 +84,13 @@ import {
   type UpdatesCheckResult,
 } from "@jarvis/core";
 import type { SecretStore } from "@jarvis/platform/model";
-import { OS_CONTROL_PUSHES } from "@jarvis/wire";
+import { type CuSetEnabledRequest, OS_CONTROL_PUSHES } from "@jarvis/wire";
+import {
+  type ComputerUseSettings,
+  isEmptyComputerUse,
+  pruneComputerUse,
+  writeComputerUse,
+} from "./cu-config.js";
 import { createBackupProvider } from "./backup-model.js";
 import type { LockStore } from "./lock-store.js";
 import type { MemoryOpener } from "./memory-backend.js";
@@ -206,6 +213,10 @@ export interface OsAgent {
   memoryClear(): Promise<null>;
   /** memory:setEnabled (M2.5 contracts §7 #9); persisted in jarvis.yaml. */
   memorySetEnabled(enabled: boolean): Promise<null>;
+  /** cu:setEnabled (v1.1 §2). Enabling needs a vision model. */
+  cuSetEnabled(request: CuSetEnabledRequest): Promise<null>;
+  /** cu:consent (v1.1 §2, §4.8): screenshots may go to this provider from now on; `revoke` withdraws it. */
+  cuConsent(providerId: string, revoke?: boolean): Promise<null>;
   /** updates:check (M2 contracts §2). */
   checkUpdates(): Promise<UpdatesCheckResult>;
   /** A shell (re)connected: re-push what a broadcast it missed would have said. */
@@ -613,6 +624,22 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
   /** A stored key is reused only from a saved entry with the same kind and
    *  base URL (and the same id when one is given): a changed URL never
    *  receives the old key. */
+  async function saveComputerUse(next: ComputerUseSettings): Promise<null> {
+    try {
+      await writeComputerUse(deps.configPath, next, deps.configIo);
+    } catch (error) {
+      throw new OsAgentError("internal", describeError(error));
+    }
+    brain = { ...brain, computerUse: next };
+    return null;
+  }
+  function configuredEntry(providerId: string): ProviderEntry {
+    const entry = brain.providers.find((candidate) => candidate.id === providerId);
+    if (entry === undefined)
+      throw new OsAgentError("bad-request", CU_TEXT[uiLanguage].noSuchProvider(providerId));
+    return entry;
+  }
+
   function draftProvider(draft: ProviderDraft & { id?: string }): ModelProvider {
     const target: ProviderSection = {
       kind: draft.kind,
@@ -838,6 +865,10 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
           model: entry.model,
           hasKey: await hasProviderKey(entry, keyStores()),
           vision: visionOf(entry),
+          computerUse: {
+            enabled: brain.computerUse.enabled[entry.id] === true,
+            consentAt: brain.computerUse.cloudConsent[entry.id] ?? null,
+          },
         })),
       );
       return {
@@ -895,6 +926,17 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
       const results: Record<string, ProbeResult> = Object.fromEntries(probed);
       if (!probed.every(([, result]) => result.ok)) return { ok: false, results };
       const previous = brain.providers;
+      // v1.1: enable and consent survive only for a provider whose endpoint is unchanged.
+      const keptComputerUse = pruneComputerUse(brain.computerUse, (id) => {
+        const old = savedById.get(id);
+        const next = request.providers.find((draft) => draft.id === id);
+        return (
+          old !== undefined &&
+          next !== undefined &&
+          old.kind === next.kind &&
+          old.baseUrl === next.baseUrl
+        );
+      });
       try {
         for (const draft of request.providers) {
           if (draft.apiKey !== undefined) await deps.providerKeys.set(draft.id, draft.apiKey);
@@ -911,6 +953,7 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
               supportsTools: results[draft.id]?.supportsTools ?? true,
             })),
             allowCloudFallback: request.allowCloudFallback,
+            ...(isEmptyComputerUse(brain.computerUse) ? {} : { computerUse: keptComputerUse }),
           },
           deps.configIo,
         );
@@ -1028,6 +1071,24 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
       }
       await memory.clear();
       return null;
+    },
+
+    async cuSetEnabled({ providerId, enabled }) {
+      const entry = configuredEntry(providerId);
+      if (enabled && !visionOf(entry))
+        throw new OsAgentError("bad-request", CU_TEXT[uiLanguage].noVisionModel);
+      return saveComputerUse({
+        enabled: { ...brain.computerUse.enabled, [providerId]: enabled },
+        cloudConsent: { ...brain.computerUse.cloudConsent },
+      });
+    },
+
+    async cuConsent(providerId, revoke) {
+      configuredEntry(providerId);
+      const cloudConsent = { ...brain.computerUse.cloudConsent };
+      if (revoke === true) delete cloudConsent[providerId];
+      else cloudConsent[providerId] = new Date(deps.now()).toISOString();
+      return saveComputerUse({ enabled: { ...brain.computerUse.enabled }, cloudConsent });
     },
 
     async memorySetEnabled(enabled) {
