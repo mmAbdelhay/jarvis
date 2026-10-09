@@ -127,7 +127,8 @@ blocked "criterion 1: Pictures/beach.png is a 640x480 PNG" "$blocked_reason"
 #    resumes or stops. The harness stops it (cu-stop, as Esc / Take over would),
 #    and checks that the key never reached GIMP (no audit entry).
 audit=$HOME/.local/state/jarvis/audit.jsonl
-foreign_app="cu-foreign-viewer" # not in policy/apps.go's terminals, no jarvis/rafiq prefix
+# Not in policy/apps.go's terminals, and no assistant or distro prefix.
+foreign_app="cu-foreign-viewer"
 { ctl cu --text "cu-excluded: press a key in GIMP" --timeout 600 > "$out/turn-excluded.log" 2>&1
   touch "$out/turn-excluded.done"; } &
 excluded_turn=$!
