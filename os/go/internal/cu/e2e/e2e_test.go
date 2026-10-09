@@ -216,7 +216,12 @@ func TestComputerUseAgainstLabwc(t *testing.T) {
 	if err := exec.Command("cp", "/bin/sleep", fakeLock).Run(); err != nil {
 		t.Fatal(err)
 	}
-	start(t, os.Getenv("JARVIS_CU_BIN"), "--socket", sock, "--peer-exe", self, "--peer-script", "", "--lock-exe", fakeLock)
+	_, cuOut := start(t, os.Getenv("JARVIS_CU_BIN"), "--socket", sock, "--peer-exe", self, "--peer-script", "", "--lock-exe", fakeLock)
+	t.Cleanup(func() {
+		if t.Failed() {
+			t.Logf("jarvis-cu output:\n%s", cuOut.String())
+		}
+	})
 	obs := observer(t)
 	_, wevOut := start(t, "stdbuf", "-oL", "wev") // wev block-buffers stdout on a pipe
 	appWindow(t, obs, "wev")
@@ -357,6 +362,67 @@ func TestComputerUseAgainstLabwc(t *testing.T) {
 				t.Fatalf("%s into password field: %q", op, code)
 			}
 		}
+		cl.must("end", nil)
+	})
+
+	// Final review finding 1: a second window of the allowed app (a dialog)
+	// takes focus. Nothing is injected until a capture has shown it, and the
+	// capture raises it and makes it the fullscreen base.
+	t.Run("a dialog of the allowed app becomes the base before any input", func(t *testing.T) {
+		cl.t = t
+		cl.do("end", nil)
+		zenityWindows := func() []wlcu.Toplevel {
+			tops, _ := obs.Toplevels()
+			var out []wlcu.Toplevel
+			for _, x := range tops {
+				if strings.Contains(strings.ToLower(x.AppID), "zenity") {
+					out = append(out, x)
+				}
+			}
+			return out
+		}
+		// The previous subtest's zenity is killed by its cleanup.
+		waitFor(t, "no zenity", func() bool { return len(zenityWindows()) == 0 })
+		start(t, "zenity", "--info", "--text", "main window")
+		waitFor(t, "zenity main", func() bool { return len(zenityWindows()) == 1 })
+		main := zenityWindows()[0]
+		cl.must("begin", map[string]any{"sessionId": "dialog", "appIds": []string{main.AppID}})
+		t.Cleanup(func() { cl.t = t; cl.do("end", nil) })
+		waitFor(t, "main fullscreen", func() bool { w := zenityWindows(); return len(w) == 1 && w[0].Fullscreen })
+		time.Sleep(300 * time.Millisecond)
+		cl.must("capture", map[string]any{"maxEdge": 640})
+		start(t, "zenity", "--question", "--text", "a dialog")
+		var dialog wlcu.Toplevel
+		waitFor(t, "dialog focused", func() bool {
+			for _, w := range zenityWindows() {
+				if w.ID != main.ID && w.Focused {
+					dialog = w
+					return true
+				}
+			}
+			return false
+		})
+		time.Sleep(300 * time.Millisecond)
+		if _, code := cl.do("key", map[string]any{"combo": "tab"}); code != "outside" {
+			t.Fatalf("a key reached a dialog the model has not seen: %q", code)
+		}
+		d := cl.must("capture", map[string]any{"maxEdge": 640})
+		waitFor(t, "dialog fullscreen", func() bool {
+			for _, w := range zenityWindows() {
+				if w.ID == dialog.ID {
+					return w.Fullscreen && w.Focused
+				}
+			}
+			return false
+		})
+		if centre(t, d) == [3]uint32{0, 0, 0} {
+			time.Sleep(300 * time.Millisecond) // the first frame may predate the resize
+			d = cl.must("capture", map[string]any{"maxEdge": 640})
+		}
+		if centre(t, d) == [3]uint32{0, 0, 0} {
+			t.Fatal("the raised fullscreen dialog was not shown")
+		}
+		cl.must("key", map[string]any{"combo": "tab"})
 		cl.must("end", nil)
 	})
 

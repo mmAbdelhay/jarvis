@@ -102,6 +102,13 @@ func (c *Client) Toplevels() ([]Toplevel, error) {
 	if err := c.roundtrip(); err != nil {
 		return nil, err
 	}
+	return c.Current(), nil
+}
+
+// Current returns the windows as last reported, without a round trip. It is
+// the only window read allowed inside OnChange (which runs on the read
+// goroutine, so a round trip there would wait for itself).
+func (c *Client) Current() []Toplevel {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	out := []Toplevel{}
@@ -112,7 +119,7 @@ func (c *Client) Toplevels() ([]Toplevel, error) {
 			out = append(out, t)
 		}
 	}
-	return out, nil
+	return out
 }
 
 func (c *Client) handleFor(windowID string) (uint32, error) {

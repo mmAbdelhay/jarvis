@@ -84,6 +84,7 @@ type waylandDesktop struct {
 }
 
 func (w *waylandDesktop) Toplevels() ([]wlcu.Toplevel, error)    { return w.c.Toplevels() }
+func (w *waylandDesktop) Current() []wlcu.Toplevel               { return w.c.Current() }
 func (w *waylandDesktop) Outputs() ([]wlcu.Output, error)        { return w.c.Outputs() }
 func (w *waylandDesktop) Activate(id string) error               { return w.c.Activate(id) }
 func (w *waylandDesktop) SetFullscreen(id string, on bool) error { return w.c.SetFullscreen(id, on) }

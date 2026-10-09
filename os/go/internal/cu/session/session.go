@@ -31,6 +31,9 @@ import (
 // Desktop is what the session needs from the compositor.
 type Desktop interface {
 	Toplevels() ([]wlcu.Toplevel, error)
+	// Current is the window list as last reported, without a round trip:
+	// the only read allowed from FocusChanged (the Wayland read goroutine).
+	Current() []wlcu.Toplevel
 	Outputs() ([]wlcu.Output, error)
 	Activate(id string) error
 	SetFullscreen(id string, on bool) error
@@ -193,10 +196,9 @@ func (m *Manager) FocusChanged() {
 	m.smu.Unlock()
 	if running {
 		// Record a stacking change at once: the debounce below is longer
-		// than a quick focus hop (w3, then an allowed dialog).
-		if tops, err := m.d.Desktop.Toplevels(); err == nil {
-			m.noteFocus(tops)
-		}
+		// than a quick focus hop (w3, then an allowed dialog). This runs on
+		// the Wayland read goroutine: never a round trip here.
+		m.noteFocus(m.d.Desktop.Current())
 		m.d.After(focusDebounce, m.checkFocus)
 	}
 }

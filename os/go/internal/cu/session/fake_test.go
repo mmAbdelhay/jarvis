@@ -30,6 +30,10 @@ type fakeDesk struct {
 	onType           func(call int)
 	types            int
 	onCapture        func()
+	// onReadLoop: the test is calling FocusChanged as the Wayland read
+	// goroutine would; a Toplevels (round trip) then is a deadlock.
+	onReadLoop          bool
+	roundtripOnReadLoop bool
 }
 
 func newDesk() *fakeDesk {
@@ -85,7 +89,16 @@ func (d *fakeDesk) set(id string, f func(*wlcu.Toplevel)) {
 func (d *fakeDesk) Toplevels() ([]wlcu.Toplevel, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if d.onReadLoop {
+		d.roundtripOnReadLoop = true // the real client would deadlock here
+	}
 	return slices.Clone(d.tops), nil
+}
+
+func (d *fakeDesk) Current() []wlcu.Toplevel {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return slices.Clone(d.tops)
 }
 
 func (d *fakeDesk) Outputs() ([]wlcu.Output, error) {

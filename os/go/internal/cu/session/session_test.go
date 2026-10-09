@@ -398,3 +398,24 @@ func TestResumeRaisesBaseAfterFocusHopsWhilePaused(t *testing.T) {
 		t.Fatalf("resume left a window between base and dialog unblanked: %v", c)
 	}
 }
+
+func TestFocusChangedNeverRoundTrips(t *testing.T) {
+	h := newHarness(t)
+	h.m.d.After = func(time.Duration, func()) {} // the debounced check runs elsewhere
+	h.begin(t)
+	h.d.mu.Lock()
+	h.d.onReadLoop = true
+	h.d.mu.Unlock()
+	h.d.focus("w3")
+	h.m.FocusChanged()
+	h.d.mu.Lock()
+	bad := h.d.roundtripOnReadLoop
+	h.d.onReadLoop = false
+	h.d.mu.Unlock()
+	if bad {
+		t.Fatal("FocusChanged made a Wayland round trip on the read goroutine (deadlock)")
+	}
+	if !h.m.isTainted() {
+		t.Fatal("the focus hop must still be recorded at once")
+	}
+}

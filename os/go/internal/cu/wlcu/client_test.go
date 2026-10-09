@@ -377,3 +377,39 @@ func TestTruncatedDisplayEventKillsTheClient(t *testing.T) {
 		t.Fatalf("dead client answered: %v", err)
 	}
 }
+
+// Final review finding 5 (labwc e2e): OnChange runs on the read goroutine, so
+// it must read windows without a round trip; Current does.
+func TestCurrentWorksInsideOnChange(t *testing.T) {
+	f := newFake()
+	var c *Client
+	got := make(chan []Toplevel, 64)
+	ready := make(chan struct{})
+	c, err := startFake(t, f, func() {
+		select {
+		case <-ready:
+			got <- c.Current()
+		default:
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	close(ready)
+	f.open(fakeWindow{appID: "zenity", title: "Question", states: []uint32{stateActivated}})
+	select {
+	case tops := <-got:
+		found := false
+		for _, w := range tops {
+			found = found || w.AppID == "zenity" && w.Focused
+		}
+		if !found {
+			t.Fatalf("%+v", tops)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("OnChange did not see the new window")
+	}
+	if _, err := c.Toplevels(); err != nil {
+		t.Fatalf("the connection must stay alive: %v", err)
+	}
+}
