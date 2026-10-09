@@ -13,11 +13,21 @@ import (
 
 // RolePasswordText is ATSPI_ROLE_PASSWORD_TEXT.
 //
-// Known gap (proposed contract gap 13, see cu/e2e/README.md): GTK4 password
-// entries (e.g. trixie's zenity --password) report ATSPI_ROLE_TEXT (61) with
-// no distinguishing state or attribute, so they are NOT detected here and
-// input into them is not refused. Toolkits reporting role 40 (GTK3, Qt) are.
+// GTK4 (gap 13, see cu/e2e/README.md): an entry with hidden text, such as
+// trixie's zenity --password, reports ATSPI_ROLE_TEXT (61) with no
+// distinguishing state or attribute. For a focused text or entry the watch
+// therefore also reads its name, its labelled-by labels and the labels just
+// before it, and treats password words there as a password field (fails
+// closed; a field with no such label stays a residual risk, threat model).
 const RolePasswordText = 40
+
+const (
+	roleText       = 61 // ATSPI_ROLE_TEXT
+	roleEntry      = 79 // ATSPI_ROLE_ENTRY
+	atspiRoleLabel = 29 // ATSPI_ROLE_LABEL
+	relLabelledBy  = 2  // ATSPI_RELATION_LABELLED_BY
+	labelsLookBack = 2  // siblings before the entry that may be its label
+)
 
 const (
 	stateActive  = 1  // ATSPI_STATE_ACTIVE, bit in word 0
@@ -150,7 +160,7 @@ func (w *PasswordWatch) PasswordFocused(ctx context.Context) (bool, error) {
 		}
 		return false, fmt.Errorf("%w: %v", ErrNoA11y, err)
 	}
-	if role != RolePasswordText {
+	if role != RolePasswordText && role != roleText && role != roleEntry {
 		return false, nil
 	}
 	states, err := w.q.States(ctx, last)
@@ -161,7 +171,114 @@ func (w *PasswordWatch) PasswordFocused(ctx context.Context) (bool, error) {
 		}
 		return false, fmt.Errorf("%w: %v", ErrNoA11y, err)
 	}
-	return len(states) > 0 && states[0]&(1<<stateFocused) != 0, nil
+	if len(states) == 0 || states[0]&(1<<stateFocused) == 0 {
+		return false, nil
+	}
+	if role == RolePasswordText {
+		return true, nil
+	}
+	lq, ok := w.q.(labelQuery)
+	if !ok {
+		return false, nil
+	}
+	return labelledPassword(ctx, w.q, lq, last)
+}
+
+// labelQuery is what the GTK4 label heuristic needs from the bus.
+type labelQuery interface {
+	Name(ctx context.Context, a Accessible) (string, error)
+	Parent(ctx context.Context, a Accessible) (Accessible, bool, error)
+	children(ctx context.Context, a Accessible) ([]Accessible, error)
+	LabelledBy(ctx context.Context, a Accessible) ([]Accessible, error)
+}
+
+// labelledPassword reports whether a text field is labelled as a password:
+// its own name, its labelled-by labels, or a label just before it. A
+// vanished object ends the search (false); any other bus error is ErrNoA11y.
+func labelledPassword(ctx context.Context, q A11yQuery, lq labelQuery, a Accessible) (bool, error) {
+	fail := func(err error) (bool, error) {
+		if gone(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("%w: %v", ErrNoA11y, err)
+	}
+	named := func(x Accessible) (bool, error) {
+		n, err := lq.Name(ctx, x)
+		if err != nil {
+			return false, err
+		}
+		return passwordWords(n), nil
+	}
+	if hit, err := named(a); err != nil || hit {
+		if err != nil {
+			return fail(err)
+		}
+		return true, nil
+	}
+	labels, err := lq.LabelledBy(ctx, a)
+	if err != nil {
+		return fail(err)
+	}
+	for _, l := range labels {
+		if hit, err := named(l); err != nil || hit {
+			if err != nil {
+				return fail(err)
+			}
+			return true, nil
+		}
+	}
+	parent, ok, err := lq.Parent(ctx, a)
+	if err != nil || !ok {
+		if err != nil {
+			return fail(err)
+		}
+		return false, nil
+	}
+	kids, err := lq.children(ctx, parent)
+	if err != nil {
+		return fail(err)
+	}
+	at := -1
+	for i, k := range kids {
+		if k == a {
+			at = i
+		}
+	}
+	for i := at - 1; i >= 0 && i >= at-labelsLookBack; i-- {
+		r, err := q.Role(ctx, kids[i])
+		if err != nil {
+			return fail(err)
+		}
+		if r != atspiRoleLabel {
+			continue
+		}
+		if hit, err := named(kids[i]); err != nil || hit {
+			if err != nil {
+				return fail(err)
+			}
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// passwordWords: English words as whole tokens (so "Passport" and "Pinned"
+// do not count), Arabic phrases after alef/taa-marbuta normalisation.
+func passwordWords(s string) bool {
+	low := strings.ToLower(s)
+	for _, tok := range strings.FieldsFunc(low, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) }) {
+		switch tok {
+		case "password", "passwords", "passphrase", "passcode", "pin", "pincode":
+			return true
+		}
+	}
+	ar := strings.NewReplacer("ة", "ه", "أ", "ا", "إ", "ا", "آ", "ا").Replace(low)
+	for _, p := range []string{"كلمه المرور", "كلمه السر", "كلمه مرور", "كلمه سر", "رمز المرور", "الرقم السري", "رمز سري"} {
+		if strings.Contains(ar, p) {
+			return true
+		}
+	}
+	return false
 }
 
 func (w *PasswordWatch) handleSignal(s *dbus.Signal) {
@@ -214,6 +331,56 @@ func (b busQuery) Name(ctx context.Context, a Accessible) (string, error) {
 }
 
 const nullPath = "/org/a11y/atspi/null"
+
+// Parent reads the Accessible.Parent property; found=false for the root.
+func (b busQuery) Parent(ctx context.Context, a Accessible) (Accessible, bool, error) {
+	var v dbus.Variant
+	err := b.conn.Object(a.Bus, a.Path).CallWithContext(ctx, "org.freedesktop.DBus.Properties.Get", 0,
+		"org.a11y.atspi.Accessible", "Parent").Store(&v)
+	if err != nil {
+		return Accessible{}, false, err
+	}
+	ref, ok := v.Value().([]interface{})
+	if !ok || len(ref) != 2 {
+		return Accessible{}, false, errors.New("malformed parent reference")
+	}
+	bus, ok1 := ref[0].(string)
+	path, ok2 := ref[1].(dbus.ObjectPath)
+	if !ok1 || !ok2 {
+		return Accessible{}, false, errors.New("malformed parent reference")
+	}
+	if bus == "" || path == "" || path == nullPath {
+		return Accessible{}, false, nil
+	}
+	return Accessible{Bus: bus, Path: path}, true, nil
+}
+
+// LabelledBy reads the labelled-by targets of a's relation set.
+func (b busQuery) LabelledBy(ctx context.Context, a Accessible) ([]Accessible, error) {
+	var rels []struct {
+		Type    uint32
+		Targets []struct {
+			Bus  string
+			Path dbus.ObjectPath
+		}
+	}
+	err := b.conn.Object(a.Bus, a.Path).CallWithContext(ctx, "org.a11y.atspi.Accessible.GetRelationSet", 0).Store(&rels)
+	if err != nil {
+		return nil, err
+	}
+	var out []Accessible
+	for _, r := range rels {
+		if r.Type != relLabelledBy {
+			continue
+		}
+		for _, t := range r.Targets {
+			if t.Bus != "" && t.Path != "" && t.Path != nullPath {
+				out = append(out, Accessible{Bus: t.Bus, Path: t.Path})
+			}
+		}
+	}
+	return out, nil
+}
 
 func (b busQuery) atPoint(ctx context.Context, a Accessible, x, y int32) (Accessible, bool, error) {
 	var ref []interface{}
@@ -578,3 +745,5 @@ func StartPasswordWatch(ctx context.Context) (*PasswordWatch, func(), error) {
 		sess.Close()
 	}, nil
 }
+
+var _ labelQuery = busQuery{}
