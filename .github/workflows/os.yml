@@ -553,6 +553,7 @@ jobs:
           python3 os/iso/smoke/run_smoke.py \
             --iso "$(ls "$RUNNER_TEMP"/iso/*.iso)" \
             --out "$RUNNER_TEMP/smoke" \
+            --ram-fail-mb 600 \
             --accel "${{ steps.kvm.outputs.accel }}" ${{ steps.apt.outputs.flag }}
       - if: always()
         uses: actions/upload-artifact@v4
