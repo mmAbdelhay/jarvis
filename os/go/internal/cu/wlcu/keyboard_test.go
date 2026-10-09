@@ -129,3 +129,28 @@ func TestCombo(t *testing.T) {
 		t.Fatal(f.keymaps[0])
 	}
 }
+
+// Invalid names must be rejected before any part of a multi-keymap sequence
+// reaches the compositor.
+func TestTypeRejectsInvalidLaterBatchBeforeInput(t *testing.T) {
+	f := newFake()
+	c, err := startFake(t, f, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	k, err := c.NewKeyboard()
+	if err != nil {
+		t.Fatal(err)
+	}
+	syms := make([]string, MaxSymsPerKeymap+1)
+	for i := 0; i < MaxSymsPerKeymap; i++ {
+		syms[i] = fmt.Sprintf("U%04X", 0x4E00+i)
+	}
+	syms[MaxSymsPerKeymap] = "invalid keysym"
+	if err := k.Type(syms); err == nil {
+		t.Fatal("invalid keysym accepted")
+	}
+	if got := keyEvents(f); len(got) != 0 {
+		t.Fatalf("invalid sequence sent %d keymap/input events", len(got))
+	}
+}

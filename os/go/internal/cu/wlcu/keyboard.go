@@ -135,6 +135,13 @@ func (k *Keyboard) tap(keycode int, mask uint32) error {
 
 // Type presses and releases each keysym in order.
 func (k *Keyboard) Type(syms []string) error {
+	// Validate the entire sequence before sending input, including names
+	// that would otherwise be checked only after a keymap boundary.
+	for _, s := range syms {
+		if !symRe.MatchString(s) {
+			return fmt.Errorf("wlcu: invalid keysym name")
+		}
+	}
 	for len(syms) > 0 {
 		var uniq []string
 		seen := map[string]bool{}
