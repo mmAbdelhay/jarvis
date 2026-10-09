@@ -85,5 +85,5 @@ export function hits(click: Click | null, t: Target, tol = TOLERANCE): boolean {
 }
 
 export function verdict(results: readonly boolean[]): "passed" | "failed" {
-  return results.filter(Boolean).length >= 2 ? "passed" : "failed";
+  return results.length === 3 && results.filter(Boolean).length >= 2 ? "passed" : "failed";
 }
