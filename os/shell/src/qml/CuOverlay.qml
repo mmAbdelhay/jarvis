@@ -173,7 +173,7 @@ Item {
                     width: ListView.view.width
                     spacing: 10
                     Accessible.role: Accessible.ListItem
-                    Accessible.name: statusLabel
+                    Accessible.name: qsTr("%1: %2").arg(statusLabel).arg(stepTitle.text)
 
                     Rectangle {
                         Layout.preferredWidth: 10
@@ -185,14 +185,22 @@ Item {
                         border.color: stepRow.status === "running" ? Theme.accent : Theme.stepPending
                     }
                     Text {
+                        id: stepTitle
                         objectName: "cuStepTitle_" + stepRow.index
                         Layout.fillWidth: true
-                        text: stepRow.statusLabel
+                        text: qsTr("Step %1").arg(stepRow.index + 1)
                         textFormat: Text.PlainText
                         elide: Text.ElideRight
                         color: stepRow.status === "pending" ? Theme.muted : Theme.text
                         font.pixelSize: Theme.fontSmall
                         font.weight: stepRow.status === "running" ? Font.DemiBold : Font.Normal
+                    }
+                    Text {
+                        objectName: "cuStepStatus_" + stepRow.index
+                        text: stepRow.statusLabel
+                        textFormat: Text.PlainText
+                        color: Theme.muted
+                        font.pixelSize: Theme.fontSmall
                     }
                 }
             }

@@ -312,6 +312,14 @@
             <translation>Steps</translation>
         </message>
         <message>
+            <source>%1: %2</source>
+            <translation>%1: %2</translation>
+        </message>
+        <message>
+            <source>Step %1</source>
+            <translation>Step %1</translation>
+        </message>
+        <message>
             <source>Screen control request failed.</source>
             <translation>Screen control request failed.</translation>
         </message>
