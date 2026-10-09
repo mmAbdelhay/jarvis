@@ -3,7 +3,7 @@
 // the computer-use GUI tests (v1.1 design §2). Exit 0 when the claim holds,
 // 1 with the reasons on stderr, 64 on bad usage.
 //
-//   cucheck turn REPORT NAME [--images] [--foreign]
+//   cucheck turn REPORT NAME [--images] [--evidence]
 //   cucheck no-screen-tools REPORT NAME
 //   cucheck looks-below REPORT NAME N
 //   cucheck no-leaks REPORT
@@ -16,9 +16,18 @@ import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { readPngInfo } from "./png.mjs";
 
+// Contracts U-1: an ordinary fullscreen capture has a frame-covering allowed rectangle,
+// so the mask cannot see a leak. fakevision records that as vacuous:true, ok:false with
+// no leaked pixels. That is missing privacy evidence: neither a leak nor a pass.
+export const missingEvidence = (i) =>
+  i.ok !== true && i.vacuous === true && (i.leakedPixels ?? 0) === 0 &&
+  (i.problems ?? []).every((p) => /cannot detect a leak/.test(p));
+// Evidence = the mask really ran: ok, and either not vacuous (all-black) or a verified fixture.
+export const hasEvidence = (i) => i.ok === true && (i.vacuous !== true || i.maskMode === "fixture");
+
 const lastTurn = (report, name) => [...(report.turns ?? [])].reverse().find((t) => t.name === name);
 
-export function turnProblems(report, name, { images = false, foreign = false } = {}) {
+export function turnProblems(report, name, { images = false, evidence = false } = {}) {
   const turn = lastTurn(report, name);
   if (turn === undefined) return [`no turn "${name}" reached the model`];
   const p = [];
@@ -29,10 +38,10 @@ export function turnProblems(report, name, { images = false, foreign = false } =
       p.push(`step ${s.index} ${s.call}: expected ${s.expectError.join("|")}, got ${got}`);
     }
   }
-  for (const i of turn.images) if (!i.ok) p.push(`screenshot ${i.sha256}: ${i.problems.join("; ")}`);
+  for (const i of turn.images) if (!i.ok && !missingEvidence(i)) p.push(`screenshot ${i.sha256}: ${i.problems.join("; ")}`);
   if (images && turn.images.length === 0) p.push("no screenshot reached the model");
-  if (foreign && !turn.images.some((i) => (i.foreignPixels ?? 0) > 0)) {
-    p.push("no screenshot had a non-allowed window in view; the mask was not exercised");
+  if (evidence && !turn.images.some(hasEvidence)) {
+    p.push("no screenshot gave privacy evidence (every one was vacuous: the allowed window covered the frame); use an all-black or fixture capture");
   }
   return p;
 }
@@ -56,7 +65,7 @@ export function leaks(report) {
   if ((report.imagesOutsideComputerUse ?? 0) > 0) {
     p.push(`${report.imagesOutsideComputerUse} screenshots reached the model in turns without screen tools`);
   }
-  for (const t of report.turns ?? []) for (const i of t.images) if (!i.ok) p.push(`${t.name}: screenshot ${i.sha256}: ${i.problems.join("; ")}`);
+  for (const t of report.turns ?? []) for (const i of t.images) if (!i.ok && !missingEvidence(i)) p.push(`${t.name}: screenshot ${i.sha256}: ${i.problems.join("; ")}`);
   return p;
 }
 
@@ -111,7 +120,7 @@ export function main(argv) {
     args: argv,
     allowPositionals: true,
     options: {
-      images: { type: "boolean" }, foreign: { type: "boolean" }, absent: { type: "boolean" },
+      images: { type: "boolean" }, evidence: { type: "boolean" }, absent: { type: "boolean" },
       "title-has": { type: "string" }, since: { type: "string" }, within: { type: "string", default: "2000" },
     },
   });
@@ -121,7 +130,7 @@ export function main(argv) {
   let problems;
   try {
     switch (cmd) {
-      case "turn": problems = turnProblems(json(a), b, { images: values.images === true, foreign: values.foreign === true }); break;
+      case "turn": problems = turnProblems(json(a), b, { images: values.images === true, evidence: values.evidence === true }); break;
       case "no-screen-tools": problems = noScreenTools(json(a), b); break;
       case "looks-below": problems = looksBelow(json(a), b, Number(c)); break;
       case "no-leaks": problems = leaks(json(a)); break;

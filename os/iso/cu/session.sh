@@ -22,6 +22,10 @@ check() {
 wait_for() { local secs=$1 _; shift; for _ in $(seq "$secs"); do "$@" && return 0; sleep 1; done; return 1; }
 ctl() { "$node" "$assets/jarvisctl.mjs" "$@"; }
 cuc() { "$node" "$cu/cucheck.mjs" "$@"; }
+# blocked NAME REASON — a check that cannot run yet. Recorded, not claimed, not a failure.
+blocked() { echo "BLOCKED $1 ($2)" | tee -a "$out/results.txt"; }
+# shellcheck source=scan.sh
+source "$(dirname "$0")/scan.sh"
 turn() { # turn NAME TEXT [jarvisctl cu flags...] — one computer-use turn, log in $out/turn-NAME.log
   local name=$1 text=$2; shift 2
   ctl cu --text "$text" --timeout 600 "$@" > "$out/turn-$name.log" 2>&1 || true
@@ -91,27 +95,35 @@ check "computer use enabled for the scripted provider" ctl cu-enable --provider 
 # 8. Criteria 4 and 6: one session card; only GIMP visible; a click on the terminal refused.
 turn probe "cu-probe: look at the GIMP window"
 check "criterion 4: exactly one session card, 'Let Jarvis use … to: …'" cuc card "$out/turn-probe.log" begin --title-has cu-probe
-check "criterion 6: screenshots show only the allowed window, with the terminal in view" cuc turn "$report" probe --images --foreign
+# Under contracts U-1 an ordinary screenshot is a fullscreen GIMP frame: the mask is
+# vacuous there (no evidence, neither a leak nor a pass). The probe turn only has to
+# run; the privacy evidence is the all-black capture in section 11.
+check "the probe turn ran as scripted (the click outside the allowed window is refused)" cuc turn "$report" probe --images
 
-# 9. Criterion 5: the export waits for its card, and no means no file.
-turn deny "cu-deny: export beach as PNG to Pictures" --consequential deny --absent "$target"
-check "criterion 5: a consequential card before the export" cuc card "$out/turn-deny.log" consequential --absent
-check "criterion 5: denying it leaves no file" test ! -e "$target"
-check "the deny turn's screenshots are masked" cuc turn "$report" deny --images
+# 9-10. Criteria 1 and 5 (export, consequential card, deny leaves no file) are BLOCKED:
+# contracts U-1 makes the Export dialogs invisible to screen.look, so cu-gimp.json's
+# deny/export turns stop after begin/look/done. They run, but claim nothing.
+blocked_reason="U-1: dialogs are not capturable; escalated to Plans U/V (see cu-gimp.json concerns)"
+turn deny "cu-deny: export beach as PNG to Pictures"
+check "the deny turn ran as scripted (no export attempted)" cuc turn "$report" deny
+turn export "open the GIMP image beach.xcf and export it as PNG to Pictures"
+check "the export turn ran as scripted (no export attempted)" cuc turn "$report" export
+blocked "criterion 5: a consequential card before the export" "$blocked_reason"
+blocked "criterion 5: denying it leaves no file" "$blocked_reason"
+blocked "criterion 1: Pictures/beach.png is a 640x480 PNG" "$blocked_reason"
 
-# 10. Criterion 1: the export.
-turn export "open the GIMP image beach.xcf and export it as PNG to Pictures" --absent "$target"
-check "criterion 5: the export card came while beach.png did not exist" cuc card "$out/turn-export.log" consequential --absent
-check "criterion 1: Pictures/beach.png is a 640x480 PNG" cuc png "$target" 640 480
-check "criterion 6: every export screenshot is masked" cuc turn "$report" export --images
-
-# 11. Criterion 4: no input while a terminal has focus.
+# 11. Criterion 4: no input while a terminal has focus. GIMP is activated at
+# cu_begin (settle), so the terminal must take focus after begin: the turn's second
+# look is held for 8 s, during which the terminal opens. That look is asserted all black.
+ctl cu --text "cu-excluded: press a key in GIMP" --timeout 600 > "$out/turn-excluded.log" 2>&1 &
+excluded_turn=$!
+check "the excluded turn has begun" wait_for 60 cuc active "$out/turn-excluded.log"
 foot --title cu-excluded-terminal sh -c 'exec sleep infinity' > /dev/null 2>&1 &
 excluded=$!
-sleep 3
-turn excluded "cu-excluded: press a key in GIMP"
+wait "$excluded_turn" 2>/dev/null || true
 kill "$excluded" 2>/dev/null || true
 check "criterion 4: input refused while a terminal has focus (excluded)" cuc turn "$report" excluded
+check "criterion 6: with a terminal focused the capture is entirely black (non-vacuous mask evidence)" cuc turn "$report" excluded --evidence
 sleep 2
 
 # 12. Criterion 7: a loop that changes nothing stops.
@@ -138,11 +150,20 @@ audit=$HOME/.local/state/jarvis/audit.jsonl
 check "criterion 8: the audit log records the goal" grep -qF 'beach.xcf' "$audit"
 check "criterion 8: the audit log records screen actions" grep -qE '"tool":"screen[._](click|key|type)' "$audit"
 jarvis_dirs=("$HOME/.local/state/jarvis" "$HOME/.local/share/jarvis" "$HOME/.config/jarvis" "$HOME/.cache/jarvis" "$rt/jarvis")
+# Logs too: the daemon's and helper's output (the journal on the ISO) and the
+# jarvisctl event logs (what clients were pushed). Base64 and raw PNG signatures.
+scan_logs=("$out/jarvisd.log" "$out/jarvis-cu.log" "$out"/turn-*.log)
 not_stored() {
-  ! (find "${jarvis_dirs[@]}" -type f -print0 2>/dev/null | xargs -0 -r grep -l -e 'iVBORw0KGgo' -- 2>/dev/null | grep -q .) &&
-    [ -z "$(find "${jarvis_dirs[@]}" -name '*.png' 2>/dev/null)" ]
+  [ -z "$(png_hits "${jarvis_dirs[@]}" "${scan_logs[@]}")" ] && [ -z "$(png_files "${jarvis_dirs[@]}")" ]
 }
-check "criterion 8: no screenshot is stored (no PNG data in jarvis's directories)" not_stored
+# Control: the scan must see a planted PNG even with a missing directory listed.
+control=$(mktemp -d)
+printf 'x iVBORw0KGgo y' > "$control/b64"; printf '\x89PNG\r\n' > "$control/raw"
+check "the privacy scan detects planted PNG data (with a missing directory in the list)" \
+  test "$(png_hits "$control" /nonexistent-dir | wc -l)" -eq 2
+rm -rf "$control"
+check "the logs the privacy scan reads exist" test -s "$out/jarvisd.log" -a -e "$out/turn-probe.log"
+check "criterion 8: no screenshot is stored (no PNG data in jarvis's directories or the logs)" not_stored
 check "criterion 6: no screenshot outside computer-use turns, none leaked" cuc no-leaks "$report"
 
 if [ "$failures" -gt 0 ]; then

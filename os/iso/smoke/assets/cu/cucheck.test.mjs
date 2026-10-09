@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  cardProblems, isActive, leaks, looksBelow, noScreenTools, pausedProblems, pngProblems, readLog, turnProblems,
+  cardProblems, hasEvidence, isActive, leaks, missingEvidence, looksBelow, noScreenTools, pausedProblems, pngProblems, readLog, turnProblems,
 } from "./cucheck.mjs";
 import { encodePng } from "./png.mjs";
 
-const okImage = { sha256: "a", ok: true, problems: [], leakedPixels: 0, foreignPixels: 12 };
+const okImage = { sha256: "a", ok: true, problems: [], leakedPixels: 0, foreignPixels: 0, vacuous: false, maskMode: "all-black" };
+const vacuousImage = { sha256: "v", ok: false, vacuous: true, leakedPixels: 0, foreignPixels: 0, maskMode: "outside",
+  problems: ["the allowed window covers the whole frame, so the mask cannot detect a leak; pass expectAllBlack"] };
 const report = {
   imagesOutsideComputerUse: 0,
   unexpected: [],
@@ -23,18 +25,18 @@ const report = {
 };
 
 test("turn: a clean turn passes and every failure is named", () => {
-  assert.deepEqual(turnProblems(report, "probe", { images: true, foreign: true }), []);
+  assert.deepEqual(turnProblems(report, "probe", { images: true, evidence: true }), []);
   assert.match(turnProblems(report, "nope").join(), /no turn "nope"/);
   const bad = structuredClone(report);
   bad.turns[0].steps[1].pass = false;
   bad.turns[0].steps[1].result.error = null;
-  bad.turns[0].images[0] = { ...okImage, ok: false, problems: ["3 pixels outside"], foreignPixels: 0 };
+  bad.turns[0].images[0] = { ...okImage, ok: false, problems: ["3 pixels outside"], leakedPixels: 3 };
   bad.turns[0].steps.push({ index: 2, call: "screen_click", problem: "no click target" });
-  const p = turnProblems(bad, "probe", { images: true, foreign: true }).join("\n");
+  const p = turnProblems(bad, "probe", { images: true, evidence: true }).join("\n");
   assert.match(p, /expected outside, got success/);
   assert.match(p, /3 pixels outside/);
   assert.match(p, /no click target/);
-  assert.match(p, /mask was not exercised/);
+  assert.match(p, /3 pixels outside/);
   assert.match(turnProblems(report, "off", { images: true }).join(), /no screenshot/);
 });
 
@@ -81,4 +83,20 @@ test("png: checks the exported size", () => {
   assert.deepEqual(pngProblems(encodePng(640, 480, () => [0, 0, 0]), 640, 480), []);
   assert.match(pngProblems(encodePng(2, 2, () => [0, 0, 0]), 640, 480).join(), /2x2/);
   assert.match(pngProblems(Buffer.from("x".repeat(40)), 1, 1).join(), /not a PNG/);
+});
+
+test("vacuous screenshots are missing evidence: not a leak, not a pass", () => {
+  assert.equal(missingEvidence(vacuousImage), true);
+  assert.equal(missingEvidence({ ...vacuousImage, leakedPixels: 4 }), false);
+  assert.equal(missingEvidence({ ...vacuousImage, problems: ["capture is 4000x3000"] }), false);
+  assert.equal(hasEvidence(vacuousImage), false);
+  assert.equal(hasEvidence(okImage), true);
+  const r = { imagesOutsideComputerUse: 0, turns: [{ name: "t", toolsOffered: [], steps: [], images: [vacuousImage] }] };
+  assert.deepEqual(turnProblems(r, "t", { images: true }), []);
+  assert.deepEqual(leaks(r), []);
+  assert.match(turnProblems(r, "t", { images: true, evidence: true }).join(), /no screenshot gave privacy evidence/);
+  r.turns[0].images.push(okImage);
+  assert.deepEqual(turnProblems(r, "t", { evidence: true }), []);
+  r.turns[0].images.push({ ...okImage, ok: false, leakedPixels: 9, problems: ["9 pixels outside"] });
+  assert.match(leaks(r).join(), /9 pixels outside/);
 });
