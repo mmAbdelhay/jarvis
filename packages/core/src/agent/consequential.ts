@@ -218,6 +218,13 @@ export function detectConsequence(
       }
       return undefined;
     }
+    case "type": {
+      // A typed newline presses Return; in a message field that sends.
+      if (action.text.includes("\n") && isSendField(action.target)) {
+        return { intent: "send", source: "key" };
+      }
+      return undefined;
+    }
     default:
       return undefined;
   }
