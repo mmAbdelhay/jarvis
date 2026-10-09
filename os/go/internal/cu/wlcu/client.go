@@ -479,9 +479,4 @@ func (c *Client) dispatch(m wl.Message) error {
 	return r.Err()
 }
 
-// frameState is filled in by Task 6 (screencopy).
-type frameState struct{}
-
-func (c *Client) frameEvent(obj uint32, op uint16, r *wl.Reader) {}
-
 func (c *Client) idleEvent(obj uint32, op uint16) {}
