@@ -5,7 +5,10 @@
 // tool result, fenced when it carries tool output. A running tool is never
 // interrupted: Stop takes effect between calls. Never throws.
 import { SIMPLE_PROFILE, type ToolProfile } from "./backup.js";
+import type { ComputerUse } from "./computer-use.js";
 import { fenceToolOutput } from "./fence.js";
+import { keepLatestImages, stripImages } from "./images.js";
+import { isScreenTool } from "./screen-tools.js";
 import { DEFAULT_CONTEXT_TOKENS, fitHistory, historyBudget } from "./context-fit.js";
 import { mapLimit } from "./map-limit.js";
 import { type Lang, languageRule } from "./i18n.js";
@@ -13,7 +16,7 @@ import { AGENT_TEXT, RECIPE_TEXT, SYSTEM_PROMPT, toolActivity, USER_TEXT } from 
 import type { RecipeEngine } from "./recipe-engine.js";
 import { RECIPE_RUN_TOOL } from "./recipes.js";
 import { buildSystemPrompt } from "./safety.js";
-import type { AgentEvent } from "./contract.js";
+import type { AgentEvent, AuditVia } from "./contract.js";
 import type { GateCall, GateItemStatus, RiskGate } from "./risk-gate.js";
 import { callRisk, type RegisteredTool, type ToolRegistry } from "./tool-registry.js";
 import {
@@ -54,6 +57,11 @@ export type ToolLoopDeps = {
   profile?(): ToolProfile;
   /** M4 §4: runs recipes.run itself (one card item per step). Absent: recipes.run is refused. */
   recipes?: RecipeEngine;
+  /** v1.1 §2: runs screen.* calls, one at a time in the model's order. Absent: they are unknown tools. */
+  computerUse?: ComputerUse;
+  /** v1.1: the turn's step cap now (CU_TURN_MAX_STEPS once a session ran).
+   *  The cap only ever rises within a turn; default MAX_STEPS. */
+  maxSteps?(): number;
 };
 
 export type TurnRequest = {
@@ -66,6 +74,8 @@ export type TurnRequest = {
   notes?: readonly string[];
   /** The turn's language (M4 §3): activity lines, step-limit text, cards. */
   lang?: Lang;
+  /** Who asked (M3 §2). Computer use refuses phone-origin turns. Default desktop. */
+  via?: AuditVia;
   signal: AbortSignal;
 };
 
@@ -156,6 +166,7 @@ async function runCalls(
     signal: AbortSignal;
     ran: string[];
     lang: Lang;
+    via: AuditVia;
     allows(tool: string): boolean;
     /** Tools resolve at all: the deps' toolsEnabled, or the simple profile. */
     toolsOn: boolean;
@@ -167,6 +178,11 @@ async function runCalls(
   const safe: { call: ModelToolCall; tool: RegisteredTool; input: Record<string, unknown> }[] = [];
 
   const recipeCalls: {
+    call: ModelToolCall;
+    tool: RegisteredTool;
+    input: Record<string, unknown>;
+  }[] = [];
+  const screenCalls: {
     call: ModelToolCall;
     tool: RegisteredTool;
     input: Record<string, unknown>;
@@ -206,6 +222,11 @@ async function runCalls(
       continue;
     }
     const input = deps.registry.sanitizeInput(tool, call.input);
+    if (isScreenTool(tool.name)) {
+      // v1.1 §2: the session card is their approval; jarvisd runs them itself.
+      screenCalls.push({ call, tool, input });
+      continue;
+    }
     if (tool.name === RECIPE_RUN_TOOL) {
       // M4 §4: jarvisd runs a recipe itself; recipes.run never reaches its server.
       recipeCalls.push({ call, tool, input });
@@ -227,6 +248,52 @@ async function runCalls(
     }
     results.set(call.id, fenced(call, tool, await execute(call.id, tool, input)));
   });
+
+  for (const { call, tool, input } of screenCalls) {
+    if (deps.computerUse === undefined) {
+      results.set(call.id, note(call, AGENT_TEXT.unknownTool(call.name), true));
+      continue;
+    }
+    if (signal.aborted) {
+      results.set(call.id, note(call, AGENT_TEXT.stopped));
+      continue;
+    }
+    context.ran.push(tool.name);
+    const activity = toolActivity(tool.name, context.lang);
+    deps.emit({
+      type: "tool",
+      turnId,
+      callId: call.id,
+      name: tool.name,
+      status: "running",
+      summary: activity,
+    });
+    const ran = await deps.computerUse.run(tool, input, {
+      turnId,
+      lang: context.lang,
+      via: context.via,
+      signal,
+    });
+    deps.emit({
+      type: "tool",
+      turnId,
+      callId: call.id,
+      name: tool.name,
+      status: ran.isError ? "error" : "ok",
+      summary: ran.isError ? USER_TEXT[context.lang].toolFailed(activity, undefined) : activity,
+    });
+    results.set(call.id, {
+      callId: call.id,
+      name: call.name,
+      // jarvisd's note stays outside the fence; window titles are untrusted data.
+      content:
+        ran.untrusted === undefined
+          ? ran.text
+          : `${ran.text}\n${fenceToolOutput(tool.name, ran.untrusted)}`,
+      isError: ran.isError,
+      ...(ran.image === undefined ? {} : { image: ran.image }),
+    });
+  }
 
   for (const { call, tool, input } of recipeCalls) {
     if (deps.recipes === undefined) {
@@ -328,7 +395,7 @@ async function reportStepLimit(
       deps,
       {
         system: context.system,
-        messages: fitHistory(context.messages, context.budget),
+        messages: keepLatestImages(fitHistory(context.messages, context.budget)),
         tools: [],
         final: true,
         signal: context.signal,
@@ -373,7 +440,7 @@ export async function runTurn(deps: ToolLoopDeps, request: TurnRequest): Promise
     deps.emit({ type: "turn-end", turnId, reason, ...(error === undefined ? {} : { error }) });
     return {
       reason,
-      messages,
+      messages: stripImages(messages),
       ...(error === undefined ? {} : { error }),
       ...(failure instanceof ProviderError ? { errorKind: failure.kind } : {}),
     };
@@ -381,6 +448,7 @@ export async function runTurn(deps: ToolLoopDeps, request: TurnRequest): Promise
 
   let profile: ToolProfile = FULL_PROFILE;
   let profileSteps = 0;
+  let turnCap = MAX_STEPS;
   let noticed = false;
   // The failover switches inside chat(); the profile is read at the reply's
   // first event (for the notice) and after it (for the cap and the tools).
@@ -408,12 +476,10 @@ export async function runTurn(deps: ToolLoopDeps, request: TurnRequest): Promise
     }
     for (let step = 0; ; step++) {
       if (signal.aborted) return finish("stopped");
-      const cap =
-        step === MAX_STEPS
-          ? MAX_STEPS
-          : profileSteps >= profile.maxSteps
-            ? profile.maxSteps
-            : undefined;
+      turnCap = Math.max(turnCap, deps.maxSteps?.() ?? MAX_STEPS);
+      // The usual (full) profile follows the turn's raised cap; the backup's own cap stays.
+      const profileCap = profile.name === FULL_PROFILE.name ? turnCap : profile.maxSteps;
+      const cap = step >= turnCap ? turnCap : profileSteps >= profileCap ? profileCap : undefined;
       if (cap !== undefined) {
         await reportStepLimit(deps, {
           system,
@@ -429,7 +495,7 @@ export async function runTurn(deps: ToolLoopDeps, request: TurnRequest): Promise
       }
       const reply = await streamReply(
         deps,
-        { system, messages: fitHistory(messages, budget), tools, signal },
+        { system, messages: keepLatestImages(fitHistory(messages, budget)), tools, signal },
         turnId,
         readProfile,
       );
@@ -446,6 +512,7 @@ export async function runTurn(deps: ToolLoopDeps, request: TurnRequest): Promise
           signal,
           ran,
           lang,
+          via: request.via ?? "desktop",
           allows: (name) => profile.allows(name),
           // M4 §1: the simple profile always has its tools, even when the
           // usual model that started the turn could not call any.
