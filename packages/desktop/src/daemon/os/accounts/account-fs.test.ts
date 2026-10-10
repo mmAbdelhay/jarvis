@@ -5,6 +5,9 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { nodeAccountFs, readOpenUrlFile, readRegularFile } from "./account-fs.js";
 
+// FIFOs and no-follow opens are Linux-only (systemd sandbox).
+const win32 = process.platform === "win32";
+
 // Files in the account config and temp dirs are writable by the sandboxed CLI
 // (threat A4), so jarvisd must never block on, follow, or slurp what it finds.
 function dir(): string {
@@ -18,13 +21,13 @@ describe("readRegularFile", () => {
     expect(await readRegularFile(path, 1024)).toBe('{"ok":true}');
   });
 
-  it("refuses a FIFO at once instead of blocking", async () => {
+  it.skipIf(win32)("refuses a FIFO at once instead of blocking", async () => {
     const path = join(dir(), "open-url");
     execFileSync("mkfifo", [path]);
     await expect(readRegularFile(path, 1024)).rejects.toThrow(/not a regular file/);
   });
 
-  it("refuses to follow a symlink", async () => {
+  it.skipIf(win32)("refuses to follow a symlink", async () => {
     const d = dir();
     writeFileSync(join(d, "real"), "secret");
     symlinkSync(join(d, "real"), join(d, "link"));
@@ -37,7 +40,7 @@ describe("readRegularFile", () => {
     await expect(readRegularFile(path, 1024)).rejects.toThrow(/too large/);
   });
 
-  it("is what nodeAccountFs.readText uses", async () => {
+  it.skipIf(win32)("is what nodeAccountFs.readText uses", async () => {
     const d = dir();
     const path = join(d, "google_accounts.json");
     execFileSync("mkfifo", [path]);
@@ -53,7 +56,7 @@ describe("readOpenUrlFile", () => {
     expect(await readOpenUrlFile(path)).toBeUndefined();
   });
 
-  it("ignores a FIFO or a symlink", async () => {
+  it.skipIf(win32)("ignores a FIFO or a symlink", async () => {
     const d = dir();
     execFileSync("mkfifo", [join(d, "fifo")]);
     expect(await readOpenUrlFile(join(d, "fifo"))).toBeUndefined();

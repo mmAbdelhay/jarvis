@@ -150,7 +150,8 @@ describe("attribute-keyed stores (M2.5 contracts §1: provider=<id>)", () => {
   });
 });
 
-describe("nodeSecretToolExec", () => {
+// Linux-only: secret-tool is a libsecret CLI, faked here with a sh script.
+describe.skipIf(process.platform === "win32")("nodeSecretToolExec", () => {
   const dirs: string[] = [];
   afterEach(() => {
     for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });

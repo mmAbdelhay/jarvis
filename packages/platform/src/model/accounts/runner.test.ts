@@ -56,7 +56,8 @@ async function collect(gen: AsyncGenerator<CliStreamEvent>): Promise<CliStreamEv
   return out;
 }
 
-describe("runCli with the fake CLI", () => {
+// Linux-only: the account runner, FIFOs and no-follow opens exist for the systemd sandbox.
+describe.skipIf(process.platform === "win32")("runCli with the fake CLI", () => {
   it("plays a reply through the parser and writes the invocation's files 0600", async () => {
     const inv = invocation({ FAKE_CLI_SCRIPT: fixture("claude-reply") });
     const events = await collect(
