@@ -220,3 +220,20 @@ test("step: the model has issued a turn's step N (harness synchronisation)", () 
   assert.match(stepIssued(report, "stuck", 5).join(), /has issued 5 steps/);
   assert.match(stepIssued(report, "nope", 0).join(), /no turn "nope"/);
 });
+
+test("turn --strict: an error the script did not expect fails the turn; a denied card does not", () => {
+  const r = structuredClone(report);
+  r.turns[0].steps.push({
+    index: 2,
+    call: "screen_click",
+    result: { received: true, error: "outside", text: "ERROR: outside" },
+  });
+  assert.deepEqual(turnProblems(r, "probe"), []);
+  assert.match(
+    turnProblems(r, "probe", { strict: true }).join(),
+    /step 2 screen_click: unexpected outside/,
+  );
+  r.turns[0].steps[2].result.denied = true;
+  r.turns[0].steps[2].result.error = "failed";
+  assert.deepEqual(turnProblems(r, "probe", { strict: true }), []);
+});

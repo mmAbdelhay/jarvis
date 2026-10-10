@@ -110,12 +110,12 @@ check "the probe turn ran as scripted (a click beyond the screenshot is refused:
 # and Export in "Export Image as PNG" (GIMP's file-png plug-in) writes the file.
 png=$HOME/Pictures/beach.png
 turn deny "cu-deny: export beach as PNG to Pictures" --consequential deny --absent "$png"
-check "the deny turn ran as scripted (card denied, then Cancel)" cuc turn "$report" deny
+check "the deny turn ran as scripted (card denied, then Cancel)" cuc turn "$report" deny --strict
 check "criterion 5: a consequential card before the export click" \
   cuc card "$out/turn-deny.log" consequential --absent --title-has Export
 check "criterion 5: denying it leaves no file" test ! -e "$png"
 turn export "open the GIMP image beach.xcf and export it as PNG to Pictures" --absent "$png"
-check "the export turn ran as scripted" cuc turn "$report" export
+check "the export turn ran as scripted" cuc turn "$report" export --strict
 check "criterion 5: the approved export asked first, before the file existed" \
   cuc card "$out/turn-export.log" consequential --absent --title-has Export
 check "criterion 1: Pictures/beach.png is a 640x480 PNG" wait_for 20 cuc png "$png" 640 480
@@ -208,7 +208,7 @@ fi
 if [ "$blocked_n" -gt 0 ]; then
   # Not green: the v1.1 export and consequential-action gating are unproven end to end.
   # CU_FAIL_ON_BLOCKED=1 (release tags) turns this into a failure; CI also warns.
-  echo "passed, but $blocked_n BLOCKED criteria are NOT verified (release blocker: GIMP export not yet proven end to end)"
+  echo "passed, but $blocked_n BLOCKED criteria are NOT verified (release blocker)"
   [ "${CU_FAIL_ON_BLOCKED:-0}" = 1 ] && exit 1
   exit 0
 fi

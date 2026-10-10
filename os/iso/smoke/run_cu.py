@@ -81,7 +81,7 @@ def run_checks(run: Run, args: argparse.Namespace, qmp: Qmp, out: Path) -> int:
     def deny():
         sh(cu.turn(uid, "deny", "cu-deny: export beach as PNG to Pictures",
                    f"--consequential deny --absent {cu.PNG_TARGET}"), 700)
-        sh(cu.cucheck(uid, f"turn {cu.REPORT} deny --images"))
+        sh(cu.cucheck(uid, f"turn {cu.REPORT} deny --images --strict"))
 
     run.check("the deny turn ran as scripted (card denied, then Cancel)", deny)
     run.check("criterion 5: a consequential card before the export click",
@@ -91,7 +91,7 @@ def run_checks(run: Run, args: argparse.Namespace, qmp: Qmp, out: Path) -> int:
     def export():
         sh(cu.turn(uid, "export", "open the GIMP image beach.xcf and export it as PNG to Pictures",
                    f"--absent {cu.PNG_TARGET}"), 700)
-        sh(cu.cucheck(uid, f"turn {cu.REPORT} export --images"))
+        sh(cu.cucheck(uid, f"turn {cu.REPORT} export --images --strict"))
 
     run.check("the export turn ran as scripted", export)
     run.check("criterion 5: the approved export asked first, before the file existed",
@@ -227,7 +227,7 @@ def main(argv: list[str] | None = None) -> int:
     print(summary)
     blocked = [r for r in results if r.get("blocked")]
     if blocked:
-        print(f"passed, but {len(blocked)} BLOCKED criteria are NOT verified (release blocker: GIMP export not yet proven end to end)")
+        print(f"passed, but {len(blocked)} BLOCKED criteria are NOT verified (release blocker)")
     return report.exit_code(results, os.environ.get("CU_FAIL_ON_BLOCKED") == "1")
 
 

@@ -406,7 +406,7 @@ jobs:
         run: |
           n=$(grep -c '^BLOCKED' "$RUNNER_TEMP/cu/results.txt" 2>/dev/null || true)
           if [ "${n:-0}" -gt 0 ]; then
-            echo "::warning title=cu-test::$n BLOCKED computer-use criteria are NOT verified (release blocker: GIMP export not yet proven end to end)"
+            echo "::warning title=cu-test::$n BLOCKED computer-use criteria are NOT verified (release blocker)"
             { echo "### cu-test: $n BLOCKED criteria (unverified)"; grep '^BLOCKED' "$RUNNER_TEMP/cu/results.txt"; } >> "$GITHUB_STEP_SUMMARY"
           fi
       - if: always()
@@ -468,7 +468,7 @@ jobs:
         run: |
           n=$(jq '[.results[] | select(.blocked)] | length' "$RUNNER_TEMP/cu-kvm/results.json" 2>/dev/null || echo 0)
           if [ "${n:-0}" -gt 0 ]; then
-            echo "::warning title=cu-kvm-test::$n BLOCKED computer-use criteria are NOT verified (release blocker: GIMP export not yet proven end to end)"
+            echo "::warning title=cu-kvm-test::$n BLOCKED computer-use criteria are NOT verified (release blocker)"
             { echo "### cu-kvm-test: $n BLOCKED criteria (unverified)"; jq -r '.results[] | select(.blocked) | "- " + .name' "$RUNNER_TEMP/cu-kvm/results.json"; } >> "$GITHUB_STEP_SUMMARY"
           fi
       - if: always()

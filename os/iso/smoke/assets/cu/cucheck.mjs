@@ -3,7 +3,7 @@
 // the computer-use GUI tests (v1.1 design §2). Exit 0 when the claim holds,
 // 1 with the reasons on stderr, 64 on bad usage.
 //
-//   cucheck turn REPORT NAME [--images] [--evidence]
+//   cucheck turn REPORT NAME [--images] [--evidence] [--strict]   (strict: no unexpected error)
 //   cucheck no-screen-tools REPORT NAME
 //   cucheck looks-below REPORT NAME N
 //   cucheck step REPORT NAME N
@@ -30,12 +30,20 @@ export const hasEvidence = (i) => i.ok === true && (i.vacuous !== true || i.mask
 
 const lastTurn = (report, name) => [...(report.turns ?? [])].reverse().find((t) => t.name === name);
 
-export function turnProblems(report, name, { images = false, evidence = false } = {}) {
+export function turnProblems(
+  report,
+  name,
+  { images = false, evidence = false, strict = false } = {},
+) {
   const turn = lastTurn(report, name);
   if (turn === undefined) return [`no turn "${name}" reached the model`];
   const p = [];
   for (const s of turn.steps) {
     if (s.problem) p.push(`step ${s.index} ${s.call}: ${s.problem}`);
+    if (strict && !s.expectError && s.result?.error && s.result.denied !== true)
+      p.push(`step ${s.index} ${s.call}: unexpected ${s.result.error}: ${s.result.text ?? ""}`);
+    if (strict && s.result === undefined && s.call !== undefined && !s.skipped && !s.problem)
+      p.push(`step ${s.index} ${s.call}: no result`);
     if (s.expectError && s.pass !== true) {
       const got = s.result?.error ?? (s.result?.received ? "success" : "no result");
       p.push(`step ${s.index} ${s.call}: expected ${s.expectError.join("|")}, got ${got}`);
@@ -178,6 +186,7 @@ export function main(argv) {
       images: { type: "boolean" },
       evidence: { type: "boolean" },
       absent: { type: "boolean" },
+      strict: { type: "boolean" },
       "title-has": { type: "string" },
       "min-verified": { type: "string", default: "0" },
       since: { type: "string" },
@@ -194,6 +203,7 @@ export function main(argv) {
         problems = turnProblems(json(a), b, {
           images: values.images === true,
           evidence: values.evidence === true,
+          strict: values.strict === true,
         });
         break;
       case "no-screen-tools":
