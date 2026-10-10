@@ -106,7 +106,7 @@ c = d("checks")
 for s in ("discover -s os/recipes/tests", "recipes.py validate", "check_sources.py", "backup_model.py check",
           "qt6-l10n-tools", "fonts-noto-core", "fonts-ibm-plex", "desktop-file-utils", "JARVIS_DPKG_INSTALL_TESTS"):
     assert s in c, s
-assert "jarvis-session jarvis-fonts jarvis-recipes" in d("build-distro")
+assert "jarvis-session jarvis-fonts jarvis-recipes jarvis-accounts" in d("build-distro")
 qt = d("build-qt")
 for s in ("os/classic/deps/debian-build.txt", "os/classic/ci/test.sh", "jarvis-classic jarvis-i18n", "qt6-l10n-tools"):
     assert s in qt, s

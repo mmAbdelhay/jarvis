@@ -120,7 +120,7 @@ stub jarvis-voice-engines
 # --- Rafiq M4 (Plan T) ---
 repo_root=$(cd "$packaging/../.." && pwd)
 # The arch-all packages are cheap: stage their real contents.
-for p in jarvis-session jarvis-fonts jarvis-recipes; do
+for p in jarvis-session jarvis-fonts jarvis-recipes jarvis-accounts; do
   mkdir -p "$tmp/$p"
   REPO_ROOT=$repo_root "$packaging/$p/stage.sh" "$tmp/$p"
   stub "$p"

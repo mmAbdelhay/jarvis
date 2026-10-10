@@ -272,7 +272,7 @@ jobs:
             echo "JARVIS_APT_REPO_ENABLED=0" >> "$GITHUB_ENV"
             echo "APT source jarvis.sources: shipped disabled (repo not published yet, os/repo/README.md)" >> "$GITHUB_STEP_SUMMARY"
           fi
-      - run: os/packaging/build.sh --out out/debs jarvis-branding jarvis-models-catalog jarvis-archive-keyring jarvis-ollama jarvis-agent jarvis-session jarvis-fonts jarvis-recipes
+      - run: os/packaging/build.sh --out out/debs jarvis-branding jarvis-models-catalog jarvis-archive-keyring jarvis-ollama jarvis-agent jarvis-session jarvis-fonts jarvis-recipes jarvis-accounts
       - uses: actions/upload-artifact@v4
         with:
           name: debs-distro
