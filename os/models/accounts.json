@@ -68,10 +68,7 @@
         "version": "1.0.89",
         "integrity": "sha512-wkF+uILxEncP3HI6+ZhK4draB7UVuk043Emx3MGOtdbuS9Ug29w2wKCVdKafIAnc/wj27x32uItBPgv3K5WUug=="
       },
-      "models": [
-        { "id": "default", "vision": false },
-        { "id": "auto", "vision": false }
-      ]
+      "models": [{ "id": "default", "vision": false }, { "id": "auto", "vision": false }]
     }
   ]
 }

@@ -6,7 +6,11 @@ import type { Terminal } from "./terminal.js";
 
 function fakeTerm() {
   const out: string[] = [];
-  const term = { write: (s: string) => out.push(s), interactive: false, readLine: async () => null } as unknown as Terminal;
+  const term = {
+    write: (s: string) => out.push(s),
+    interactive: false,
+    readLine: async () => null,
+  } as unknown as Terminal;
   return { term, out };
 }
 
@@ -38,7 +42,14 @@ describe("jarvis account", () => {
     const { client, invoked } = fakeClient({ "account:status": { accounts: [] } });
     const close = vi.fn();
     Object.assign(client, { close });
-    expect(await main(["account"], { term, env: {}, connect: async () => client, readStdin: async () => "" })).toBe(0);
+    expect(
+      await main(["account"], {
+        term,
+        env: {},
+        connect: async () => client,
+        readStdin: async () => "",
+      }),
+    ).toBe(0);
     expect(invoked).toEqual([["account:status", []]]);
     expect(close).toHaveBeenCalledOnce();
   });
@@ -46,7 +57,12 @@ describe("jarvis account", () => {
   it("ignores malformed and unrelated pushes, including synchronous completion", async () => {
     let listener: ((channel: string, payload: unknown) => void) | undefined;
     const client = {
-      onPush: (fn: typeof listener) => { listener = fn; return () => { listener = undefined; }; },
+      onPush: (fn: typeof listener) => {
+        listener = fn;
+        return () => {
+          listener = undefined;
+        };
+      },
       onClose: () => () => {},
       invoke: async () => {
         listener?.("other:state", { account: "claude", phase: "failed" });
@@ -66,9 +82,20 @@ describe("jarvis account", () => {
     vi.useFakeTimers();
     try {
       let subscriptions = 0;
-      const subscribe = () => { subscriptions++; return () => { subscriptions--; }; };
-      const client = { invoke: async () => null, onPush: subscribe, onClose: subscribe } as unknown as ControlClient;
-      const result = expect(accountCommand(client, fakeTerm().term, "install", "claude")).rejects.toThrow("Timed out waiting for Jarvis.");
+      const subscribe = () => {
+        subscriptions++;
+        return () => {
+          subscriptions--;
+        };
+      };
+      const client = {
+        invoke: async () => null,
+        onPush: subscribe,
+        onClose: subscribe,
+      } as unknown as ControlClient;
+      const result = expect(
+        accountCommand(client, fakeTerm().term, "install", "claude"),
+      ).rejects.toThrow("Timed out waiting for Jarvis.");
       await vi.advanceTimersByTimeAsync(15 * 60_000);
       await result;
       expect(subscriptions).toBe(0);
@@ -94,29 +121,55 @@ describe("jarvis account", () => {
       const { term } = fakeTerm();
       const { client, invoked } = fakeClient({});
       expect(await accountCommand(client, term, action, "chatgpt")).toBe(0);
-      expect(invoked).toEqual([[action === "logout" ? "account:logout" : "account:uninstall", [{ account: "chatgpt" }]]]);
+      expect(invoked).toEqual([
+        [action === "logout" ? "account:logout" : "account:uninstall", [{ account: "chatgpt" }]],
+      ]);
     }
   });
 
   it("cleans up subscriptions when invocation fails", async () => {
     let subscriptions = 0;
     const client = {
-      invoke: async () => { throw new Error("Unavailable"); },
-      onPush: () => { subscriptions++; return () => { subscriptions--; }; },
-      onClose: () => { subscriptions++; return () => { subscriptions--; }; },
+      invoke: async () => {
+        throw new Error("Unavailable");
+      },
+      onPush: () => {
+        subscriptions++;
+        return () => {
+          subscriptions--;
+        };
+      },
+      onClose: () => {
+        subscriptions++;
+        return () => {
+          subscriptions--;
+        };
+      },
     } as unknown as ControlClient;
-    await expect(accountCommand(client, fakeTerm().term, "login", "claude")).rejects.toThrow("Unavailable");
+    await expect(accountCommand(client, fakeTerm().term, "login", "claude")).rejects.toThrow(
+      "Unavailable",
+    );
     expect(subscriptions).toBe(0);
   });
 
   it("stops waiting when the connection closes", async () => {
     let close: (() => void) | undefined;
     const client = {
-      invoke: async () => { close?.(); return null; },
+      invoke: async () => {
+        close?.();
+        return null;
+      },
       onPush: () => () => {},
-      onClose: (listener: () => void) => { close = listener; return () => { close = undefined; }; },
+      onClose: (listener: () => void) => {
+        close = listener;
+        return () => {
+          close = undefined;
+        };
+      },
     } as unknown as ControlClient;
-    await expect(accountCommand(client, fakeTerm().term, "login", "claude")).rejects.toThrow("Connection to Jarvis closed.");
+    await expect(accountCommand(client, fakeTerm().term, "login", "claude")).rejects.toThrow(
+      "Connection to Jarvis closed.",
+    );
     expect(close).toBeUndefined();
   });
 
@@ -125,30 +178,50 @@ describe("jarvis account", () => {
     const { client } = fakeClient({
       "account:status": {
         accounts: [
-          { account: "claude", installed: true, version: "2.1.280", signedIn: true, identity: "sara@example.com" },
+          {
+            account: "claude",
+            installed: true,
+            version: "2.1.280",
+            signedIn: true,
+            identity: "sara@example.com",
+          },
           { account: "chatgpt", installed: false, version: null, signedIn: false, identity: null },
         ],
       },
     });
     expect(await accountCommand(client, term, "status")).toBe(0);
-    expect(out.join("")).toBe("Claude          signed in as sara@example.com\nChatGPT         not set up\n");
+    expect(out.join("")).toBe(
+      "Claude          signed in as sara@example.com\nChatGPT         not set up\n",
+    );
   });
 
   it("signs in: prints the address and code, waits for the result", async () => {
     const { term, out } = fakeTerm();
     const { client, invoked } = fakeClient({}, [
-      ["account:state", { account: "copilot", phase: "awaiting-browser", url: "https://github.com/login/device", code: "WDJB-MJHT" }],
+      [
+        "account:state",
+        {
+          account: "copilot",
+          phase: "awaiting-browser",
+          url: "https://github.com/login/device",
+          code: "WDJB-MJHT",
+        },
+      ],
       ["account:state", { account: "copilot", phase: "signed-in", identity: "octocat" }],
     ]);
     expect(await accountCommand(client, term, "login", "copilot")).toBe(0);
     expect(invoked).toEqual([["account:login", [{ account: "copilot" }]]]);
-    expect(out.join("")).toContain("Open https://github.com/login/device in your browser and enter the code WDJB-MJHT.");
+    expect(out.join("")).toContain(
+      "Open https://github.com/login/device in your browser and enter the code WDJB-MJHT.",
+    );
     expect(out.join("")).toContain("Signed in as octocat.");
   });
 
   it("returns 1 when sign-in fails", async () => {
     const { term, out } = fakeTerm();
-    const { client } = fakeClient({}, [["account:state", { account: "gemini", phase: "failed", message: "Set up Google first." }]]);
+    const { client } = fakeClient({}, [
+      ["account:state", { account: "gemini", phase: "failed", message: "Set up Google first." }],
+    ]);
     expect(await accountCommand(client, term, "login", "gemini")).toBe(1);
     expect(out.join("")).toContain("Set up Google first.");
   });

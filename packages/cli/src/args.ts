@@ -6,7 +6,11 @@ export type Command =
   | { kind: "ask"; text: string }
   | { kind: "setup" }
   | { kind: "memory"; action: "list" | "clear"; yes: boolean }
-  | { kind: "account"; action: "status" | "install" | "login" | "logout" | "remove"; account?: AccountId }
+  | {
+      kind: "account";
+      action: "status" | "install" | "login" | "logout" | "remove";
+      account?: AccountId;
+    }
   | { kind: "help" }
   | { kind: "version" };
 
@@ -58,7 +62,10 @@ export function parseArgs(argv: readonly string[]): Parsed {
       return { kind: "usage-error", message: `Unknown account action "${action}".` };
     }
     if (!isAccountId(name)) {
-      return { kind: "usage-error", message: `jarvis account ${action} needs one of: ${ACCOUNT_IDS.join(", ")}` };
+      return {
+        kind: "usage-error",
+        message: `jarvis account ${action} needs one of: ${ACCOUNT_IDS.join(", ")}`,
+      };
     }
     return { kind: "account", action, account: name };
   }
