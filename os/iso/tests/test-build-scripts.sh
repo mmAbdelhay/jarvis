@@ -166,7 +166,7 @@ mkchroot "$tmp/c"
 rm "$tmp/c/etc/systemd/system/multi-user.target.wants/jarvis-flathub-appstream.service"
 check "first-boot appstream unit not enabled is caught" bash -c "! '$scripts/verify-chroot.sh' '$tmp/c' 2>/dev/null"
 mkchroot "$tmp/c"
-sed -i '/Super_L/d' "$tmp/c/etc/xdg/labwc/rc.xml"
+sed -i '/Super_L/,/<\/keybind>/d' "$tmp/c/etc/xdg/labwc/rc.xml"   # the whole bind: the real rc.xml spans lines
 check "missing Super keybind is caught" bash -c "! '$scripts/verify-chroot.sh' '$tmp/c' 2>/dev/null"
 mkchroot "$tmp/c"
 sed -i '/^Enabled:/d' "$tmp/c/etc/apt/sources.list.d/jarvis.sources"
