@@ -238,8 +238,12 @@ func run(o options) error {
 			lock := guard.DefaultLockWatch(o.lockExes)
 			home, _ := os.UserHomeDir()
 			mgr := session.New(session.Deps{
-				Desktop:         desk,
-				Apps:            func() *policy.AppIndex { return policy.NewAppIndex(desktop.IndexAll(desktop.DefaultDirs(home))) },
+				Desktop: desk,
+				Apps: func() *policy.AppIndex {
+					x := policy.NewAppIndex(desktop.IndexAll(desktop.DefaultDirs(home)))
+					x.AddGIMPPlugins(policy.GIMPPlugins(policy.GIMPPluginGlobs))
+					return x
+				},
 				Locked:          lock.Locked,
 				Password:        acc.check,
 				DescribeAt:      acc.describe,
