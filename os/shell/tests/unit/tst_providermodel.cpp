@@ -23,6 +23,42 @@ QJsonObject list(const QJsonValue& active)
 class TestProviderModel : public QObject {
     Q_OBJECT
 private slots:
+    void accountModeDrafts()
+    {
+        ProviderModel m;
+        m.setApiKey(u"old-cloud-key"_s);
+        m.setMode(u"account"_s);
+        QVERIFY(m.apiKey().isEmpty());
+        QCOMPARE(m.mode(), u"account"_s);
+        QCOMPARE(m.account(), u"claude"_s);
+        QVERIFY(!m.needsKey());
+        m.setBaseUrl(u"https://untrusted.example"_s);
+        m.setApiKey(u"must-not-leak"_s);
+        QCOMPARE(m.baseUrl(), u"https://claude.ai"_s);
+        QVERIFY(m.apiKey().isEmpty());
+        m.setAccount(u"copilot"_s);
+        QCOMPARE(m.baseUrl(), u"https://github.com/copilot"_s);
+        m.setModel(u"default"_s);
+        QCOMPARE(m.draft(), (QJsonObject{{"kind", "account"}, {"account", "copilot"}, {"baseUrl", "https://github.com/copilot"}, {"model", "default"}}));
+        QCOMPARE(m.suggestedId(), u"copilot"_s);
+        QVERIFY(m.privacyText().contains(u"GitHub Copilot"_s));
+        m.setAccount(u"bard"_s);
+        QCOMPARE(m.account(), u"copilot"_s);
+    }
+
+    void accountProvidersLoadAndLabel()
+    {
+        ProviderModel m;
+        m.editProvider(QJsonObject{{"id", "chatgpt"}, {"kind", "account"}, {"baseUrl", "https://chatgpt.com"}, {"model", "default"}, {"hasKey", false}});
+        QCOMPARE(m.mode(), u"account"_s);
+        QCOMPARE(m.account(), u"chatgpt"_s);
+        QCOMPARE(ProviderModel::providerLabel(u"account"_s, u"https://gemini.google.com"_s), u"Google"_s);
+        QCOMPARE(ProviderModel::providerMode(u"account"_s, u"https://claude.ai"_s), u"account"_s);
+        m.editProvider(QJsonObject{{"id", "work"}, {"kind", "account"}, {"account", "gemini"}, {"baseUrl", "https://untrusted.example"}, {"model", "default"}});
+        QCOMPARE(m.account(), u"gemini"_s);
+        QCOMPARE(m.baseUrl(), u"https://gemini.google.com"_s);
+    }
+
     void firstBootHasNoActiveProvider()
     {
         ProviderModel model;

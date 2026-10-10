@@ -57,6 +57,7 @@ void ProviderListModel::loadList(const QJsonObject& list)
             const QJsonObject o = value.toObject();
             Row row{o.value("id").toString(), o.value("kind").toString(), o.value("baseUrl").toString(),
                     o.value("model").toString(), o.value("hasKey").toBool(), {}};
+            row.account = o.value("account").toString();
             if (!row.id.isEmpty() && !row.kind.isEmpty())
                 m_rows.append(row);
         }
@@ -128,8 +129,12 @@ void ProviderListModel::remove(int row)
 QJsonArray ProviderListModel::rowsJson() const
 {
     QJsonArray out;
-    for (const Row& row : m_rows)
-        out.append(QJsonObject{{"id", row.id}, {"kind", row.kind}, {"baseUrl", row.baseUrl}, {"model", row.model}});
+    for (const Row& row : m_rows) {
+        QJsonObject o{{"id", row.id}, {"kind", row.kind}, {"baseUrl", row.baseUrl}, {"model", row.model}};
+        if (row.kind == u"account")
+            o.insert("account", row.account);
+        out.append(o);
+    }
     return out;
 }
 
@@ -210,7 +215,10 @@ QJsonObject ProviderListModel::config(int row) const
     if (row < 0 || row >= m_rows.size())
         return {};
     const Row& r = m_rows.at(row);
-    return {{"id", r.id}, {"kind", r.kind}, {"baseUrl", r.baseUrl}, {"model", r.model}, {"hasKey", r.hasKey}};
+    QJsonObject out{{"id", r.id}, {"kind", r.kind}, {"baseUrl", r.baseUrl}, {"model", r.model}, {"hasKey", r.hasKey}};
+    if (r.kind == u"account")
+        out.insert("account", r.account);
+    return out;
 }
 
 QJsonObject ProviderListModel::configFor(const QString& id) const

@@ -20,6 +20,7 @@ class ProviderModel : public QObject {
     Q_PROPERTY(bool activeHasKey READ activeHasKey NOTIFY activeChanged)
     Q_PROPERTY(QString activeId READ activeId NOTIFY activeChanged)
     Q_PROPERTY(QString editingId READ editingId NOTIFY draftChanged)
+    Q_PROPERTY(QString account READ account WRITE setAccount NOTIFY draftChanged)
     Q_PROPERTY(QString mode READ mode WRITE setMode NOTIFY draftChanged)
     Q_PROPERTY(QString preset READ preset WRITE setPreset NOTIFY draftChanged)
     Q_PROPERTY(QString kind READ kind WRITE setKind NOTIFY draftChanged)
@@ -59,6 +60,7 @@ public:
     QString baseUrl() const { return m_baseUrl; }
     QString model() const { return m_model; }
     QString apiKey() const { return m_apiKey; }
+    void setAccount(const QString& account);
     void setMode(const QString& mode);
     void setPreset(const QString& name);
     void setKind(const QString& kind);

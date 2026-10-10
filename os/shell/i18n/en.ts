@@ -2,6 +2,41 @@
 <!DOCTYPE TS>
 <TS version="2.1" language="en" sourcelanguage="en">
     <context>
+        <name>AccountPanel</name>
+        <message>
+            <source>Sign in</source>
+            <translation>Sign in</translation>
+        </message>
+        <message>
+            <source>Set up and sign in</source>
+            <translation>Set up and sign in</translation>
+        </message>
+        <message>
+            <source>Sign out</source>
+            <translation>Sign out</translation>
+        </message>
+        <message>
+            <source>Open this address, enter the code below and sign in. Your browser should already show it.</source>
+            <translation>Open this address, enter the code below and sign in. Your browser should already show it.</translation>
+        </message>
+        <message>
+            <source>Finish signing in in your browser. If it didn't open, open this address:</source>
+            <translation>Finish signing in in your browser. If it didn't open, open this address:</translation>
+        </message>
+        <message>
+            <source>Copy</source>
+            <translation>Copy</translation>
+        </message>
+        <message>
+            <source>Open browser</source>
+            <translation>Open browser</translation>
+        </message>
+        <message>
+            <source>Code</source>
+            <translation>Code</translation>
+        </message>
+    </context>
+    <context>
         <name>AccountsModel</name>
         <message>
             <source>Signed in as %1</source>
@@ -878,6 +913,14 @@
             <translation>Strongest models. Needs internet and an API key.</translation>
         </message>
         <message>
+            <source>Sign in with an account</source>
+            <translation>Sign in with an account</translation>
+        </message>
+        <message>
+            <source>Use your Claude, ChatGPT, Google or GitHub Copilot plan. No API key.</source>
+            <translation>Use your Claude, ChatGPT, Google or GitHub Copilot plan. No API key.</translation>
+        </message>
+        <message>
             <source>This computer</source>
             <translation>This computer</translation>
         </message>
@@ -994,6 +1037,10 @@
         <message>
             <source>On your network</source>
             <translation>On your network</translation>
+        </message>
+        <message>
+            <source>Your messages and Jarvis's tool results go to %1 under your own account. The %1 program runs in a sandbox with its own tools turned off; Jarvis never sees your password.</source>
+            <translation>Your messages and Jarvis's tool results go to %1 under your own account. The %1 program runs in a sandbox with its own tools turned off; Jarvis never sees your password.</translation>
         </message>
         <message>
             <source>When diagnosing problems, Jarvis sends short excerpts of system logs to %1. Passwords, keys and tokens are removed first.</source>

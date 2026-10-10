@@ -2,6 +2,41 @@
 <!DOCTYPE TS>
 <TS version="2.1" language="ar" sourcelanguage="en">
     <context>
+        <name>AccountPanel</name>
+        <message>
+            <source>Sign in</source>
+            <translation>تسجيل الدخول</translation>
+        </message>
+        <message>
+            <source>Set up and sign in</source>
+            <translation>الإعداد وتسجيل الدخول</translation>
+        </message>
+        <message>
+            <source>Sign out</source>
+            <translation>تسجيل الخروج</translation>
+        </message>
+        <message>
+            <source>Open this address, enter the code below and sign in. Your browser should already show it.</source>
+            <translation>افتح هذا العنوان، وأدخل الرمز أدناه، ثم سجّل الدخول. يُفترض أن يعرضه متصفحك الآن.</translation>
+        </message>
+        <message>
+            <source>Finish signing in in your browser. If it didn't open, open this address:</source>
+            <translation>أكمِل تسجيل الدخول في متصفحك. إن لم يُفتح، فافتح هذا العنوان:</translation>
+        </message>
+        <message>
+            <source>Copy</source>
+            <translation>نسخ</translation>
+        </message>
+        <message>
+            <source>Open browser</source>
+            <translation>فتح المتصفح</translation>
+        </message>
+        <message>
+            <source>Code</source>
+            <translation>الرمز</translation>
+        </message>
+    </context>
+    <context>
         <name>AccountsModel</name>
         <message>
             <source>Signed in as %1</source>
@@ -882,6 +917,14 @@
             <translation>أقوى النماذج. يحتاج إلى الإنترنت ومفتاح API.</translation>
         </message>
         <message>
+            <source>Sign in with an account</source>
+            <translation>تسجيل الدخول بحساب</translation>
+        </message>
+        <message>
+            <source>Use your Claude, ChatGPT, Google or GitHub Copilot plan. No API key.</source>
+            <translation>استخدم اشتراكك في Claude أو ChatGPT أو Google أو GitHub Copilot. لا تحتاج إلى مفتاح API.</translation>
+        </message>
+        <message>
             <source>This computer</source>
             <translation>هذا الحاسوب</translation>
         </message>
@@ -998,6 +1041,10 @@
         <message>
             <source>On your network</source>
             <translation>على شبكتك</translation>
+        </message>
+        <message>
+            <source>Your messages and Jarvis's tool results go to %1 under your own account. The %1 program runs in a sandbox with its own tools turned off; Jarvis never sees your password.</source>
+            <translation>تُرسَل رسائلك ونتائج أدوات جارفيس إلى %1 عبر حسابك. يعمل برنامج %1 داخل بيئة معزولة وأدواته الخاصة معطّلة؛ ولا يرى جارفيس كلمة مرورك أبدًا.</translation>
         </message>
         <message>
             <source>When diagnosing problems, Jarvis sends short excerpts of system logs to %1. Passwords, keys and tokens are removed first.</source>

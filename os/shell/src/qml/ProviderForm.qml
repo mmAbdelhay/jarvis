@@ -11,6 +11,7 @@ ColumnLayout {
     LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft
     LayoutMirroring.childrenInherit: true
     required property ProviderModel provider
+    property AccountsModel accounts: null
 
     spacing: 24
 
@@ -20,9 +21,10 @@ ColumnLayout {
         Repeater {
             model: [
                 { id: "cloud", title: qsTr("Cloud"), detail: qsTr("Strongest models. Needs internet and an API key.") },
+                { id: "account", title: qsTr("Sign in with an account"), detail: qsTr("Use your Claude, ChatGPT, Google or GitHub Copilot plan. No API key.") },
                 { id: "local", title: qsTr("This computer"), detail: qsTr("Private and offline. Uses your memory and GPU.") },
                 { id: "lan", title: qsTr("Network server"), detail: qsTr("A stronger PC at home or work runs the model.") }
-            ]
+            ].filter((tile) => tile.id !== "account" || root.accounts !== null)
             delegate: ChoiceTile {
                 required property var modelData
                 objectName: "mode_" + modelData.id
@@ -78,6 +80,17 @@ ColumnLayout {
             placeholder: root.provider.activeHasKey ? qsTr("Saved. Leave empty to keep it.") : ""
             value: root.provider.apiKey
             onEdited: (v) => root.provider.apiKey = v
+        }
+    }
+
+    Loader {
+        objectName: "accountPanel"
+        Layout.fillWidth: true
+        visible: root.provider.mode === "account"
+        active: root.accounts !== null && root.provider.mode === "account"
+        sourceComponent: AccountPanel {
+            provider: root.provider
+            accounts: root.accounts
         }
     }
 
@@ -162,6 +175,7 @@ ColumnLayout {
         ActionButton {
             objectName: "checkButton"
             visible: root.provider.probeState === "idle"
+                     && (root.provider.mode !== "account" || (root.accounts !== null && root.accounts.selectedSignedIn))
             variant: "ghost"
             text: qsTr("Check connection")
             onClicked: root.provider.probe()

@@ -14,6 +14,7 @@ Item {
         anchors.fill: parent
         shell: page.shell
         provider: page.shell.provider
+        accounts: page.shell.accounts
         providers: page.shell.providers
         memory: page.shell.memory
         registry: page.shell.registry

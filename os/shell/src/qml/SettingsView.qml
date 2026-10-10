@@ -9,6 +9,7 @@ Item {
     LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft
     LayoutMirroring.childrenInherit: true
     required property ProviderModel provider
+    property AccountsModel accounts: null
     required property ProviderListModel providers
     property ShellController shell: null
     property MemoryModel memory: null
@@ -88,6 +89,7 @@ Item {
                 Layout.fillWidth: true
                 visible: root.section === "providers"
                 provider: root.provider
+                accounts: root.accounts
                 providers: root.providers
                 doctorAvailable: root.doctorAvailable
                 onDoctorRequested: root.doctorRequested()

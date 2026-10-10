@@ -9,6 +9,7 @@ Item {
     LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft
     LayoutMirroring.childrenInherit: true
     required property ProviderModel provider
+    property AccountsModel accounts: null
     property bool doctorAvailable: false // sys:snapshot says offline (contracts §6.8)
     signal doctorRequested()
 
@@ -47,6 +48,7 @@ Item {
             ProviderForm {
                 Layout.fillWidth: true
                 provider: root.provider
+                accounts: root.accounts
             }
 
             RowLayout {

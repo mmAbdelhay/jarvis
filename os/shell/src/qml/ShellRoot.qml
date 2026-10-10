@@ -84,6 +84,7 @@ Rectangle {
                 }
                 SetupView {
                     provider: root.shell.provider
+                    accounts: root.shell.accounts
                     doctorAvailable: root.shell.system.known && !root.shell.system.online
                     onDoctorRequested: root.shell.openDoctor()
                 }
