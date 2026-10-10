@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"image/png"
+	"slices"
 	"testing"
 	"time"
 
@@ -318,55 +319,63 @@ func TestCaptureBlanksWhenFocusChangesDuringCopy(t *testing.T) {
 	}
 }
 
-func TestCaptureBlanksWhenNonAllowedWindowSitsBetweenBaseAndAllowedDialog(t *testing.T) {
-	{
-		// The compositor reports every focus change via FocusChanged.
-		viaEvent := true
+func TestNonAllowedWindowBetweenFirstBaseAndDialogIsCoveredOrBlanked(t *testing.T) {
+	for _, viaEvent := range []bool{true, false} {
 		h := newHarness(t)
 		h.begin(t)
 		h.d.tops = append(h.d.tops, wlcu.Toplevel{ID: "w5", AppID: "gimp", Title: "Export", Outputs: []string{"HEADLESS-1"}})
-		h.d.focus("w3") // a browser raises itself over the base
+		h.d.focus("w3") // a browser raises itself over the first base
 		if viaEvent {
-			h.m.FocusChanged() // seen as an event only, never by a capture
+			h.m.FocusChanged() // the compositor reports the hop as an event
 		}
 		h.d.focus("w5") // then an allowed dialog is raised over the browser
-		// The dialog becomes the base: it is raised (over the browser) and
-		// made fullscreen before any frame shows. If it cannot be made
-		// fullscreen, the frame stays black.
+		if viaEvent {
+			h.m.FocusChanged()
+		}
+		if !viaEvent {
+			// Never seen: no capture or event ran while w3 had focus. This
+			// is the residual the activity detector covers (a user's click).
+			continue
+		}
+		// The browser may sit between the first base and the dialog. If
+		// the first base cannot be raised over it again, the frame stays
+		// black and no input reaches the dialog.
 		h.d.mu.Lock()
-		h.d.ignoreFullscreen = true
+		h.d.ignoreActivate = map[string]bool{"w1": true}
 		h.d.mu.Unlock()
 		r, err := h.m.Capture(proto.Capture{MaxEdge: 640})
 		if err != nil {
 			t.Fatal(err)
 		}
 		if _, _, c := decodePNG(t, r); c != [3]uint32{0, 0, 0} {
-			t.Fatalf("viaEvent=%v: window between base and dialog leaked: %v", viaEvent, c)
+			t.Fatalf("window between first base and dialog leaked: %v", c)
 		}
+		if got := code(h.m.Click(proto.Click{X: f(10), Y: f(10)})); got != proto.CodeOutside {
+			t.Fatalf("input into a dialog shown over an unknown window: %q", got)
+		}
+		// Once the first base can be raised, it goes over the browser and
+		// the dialog over it; then the frame shows.
 		h.d.mu.Lock()
-		h.d.ignoreFullscreen = false
+		h.d.ignoreActivate = nil
+		h.d.log = nil
 		h.d.mu.Unlock()
 		r, err = h.m.Capture(proto.Capture{MaxEdge: 640})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !h.d.has("activate w5") || !h.d.has("fullscreen w5 true") {
-			t.Fatalf("the dialog must be raised and fullscreen before it is shown: %v", h.d.logged())
+		log := h.d.logged()
+		i1, i5 := slices.Index(log, "activate w1"), slices.Index(log, "activate w5")
+		if i1 < 0 || i5 < i1 {
+			t.Fatalf("the first base must be raised, then the dialog: %v", log)
+		}
+		if h.d.has("fullscreen w5 true") {
+			t.Fatalf("the dialog keeps its header bar: %v", log)
 		}
 		if _, _, c := decodePNG(t, r); c == [3]uint32{0, 0, 0} {
-			t.Fatal("a raised fullscreen dialog must be shown")
+			t.Fatal("the raised dialog over the raised first base must be shown")
 		}
-		// Resume raises the base again, and frames come back.
-		h.d.focus("w3")
-		if err := h.m.Begin(proto.Begin{SessionID: "s1", AppIDs: []string{"gimp"}}); err != nil {
+		if err := h.m.Click(proto.Click{X: f(10), Y: f(10)}); err != nil {
 			t.Fatal(err)
-		}
-		r, err = h.m.Capture(proto.Capture{MaxEdge: 640})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, _, c := decodePNG(t, r); c == [3]uint32{0, 0, 0} {
-			t.Fatal("after the base was raised again the frame must show")
 		}
 	}
 }

@@ -33,6 +33,7 @@ func TestCaptureMasksOutsideASmallFullscreenWindow(t *testing.T) {
 	h.mu.Lock()
 	h.frames["Export Image"] = [2]int{1280, 720} // half the output each way
 	h.mu.Unlock()
+	closeFirstBase(h) // nothing fullscreen behind it: the dialog is made fullscreen
 	openDialog(h, "w4")
 	r, err := h.m.Capture(proto.Capture{}) // 2560x1440 -> 1280x720
 	if err != nil {
@@ -64,6 +65,7 @@ func TestCaptureBlanksAMovedBaseOfUnknownSize(t *testing.T) {
 	h.mu.Lock()
 	h.frames["Export Image"] = [2]int{0, 0} // AT-SPI cannot measure it
 	h.mu.Unlock()
+	closeFirstBase(h)
 	openDialog(h, "w4")
 	r, err := h.m.Capture(proto.Capture{})
 	if err != nil {
@@ -100,5 +102,30 @@ func TestFirstBaseOfUnknownSizeIsTrusted(t *testing.T) {
 	}
 	if err := h.m.Key(proto.Key{Combo: "ctrl+s"}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestDialogOverASmallFirstBaseKeepsOnlyTheFirstBasesArea(t *testing.T) {
+	h := newHarness(t)
+	h.mu.Lock()
+	h.frames["beach.xcf"] = [2]int{1280, 720} // a fixed-size first base
+	h.mu.Unlock()
+	h.begin(t)
+	if _, err := h.m.Capture(proto.Capture{}); err != nil {
+		t.Fatal(err)
+	}
+	openDialog(h, "w4")
+	r, err := h.m.Capture(proto.Capture{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := pixel(t, r, 100, 100); c == [3]uint32{0, 0, 0} {
+		t.Fatal("inside the first base's area the dialog shows")
+	}
+	if c := pixel(t, r, 700, 400); c != [3]uint32{0, 0, 0} {
+		t.Fatalf("outside the fullscreen first base nothing may show: %v", c)
+	}
+	if got := code(h.m.Click(proto.Click{X: f(700), Y: f(400)})); got != proto.CodeOutside {
+		t.Fatalf("a click outside the kept area: %q", got)
 	}
 }

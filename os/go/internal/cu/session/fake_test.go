@@ -24,7 +24,8 @@ type fakeDesk struct {
 	lastPix          []byte
 	log              []string
 	ignoreFullscreen bool
-	moveFails        int // fail the Nth MoveTo (1-based), 0 = never
+	ignoreActivate   map[string]bool // labwc does not focus these
+	moveFails        int             // fail the Nth MoveTo (1-based), 0 = never
 	moves            int
 	onMove           func()
 	onType           func(call int)
@@ -110,8 +111,11 @@ func (d *fakeDesk) Outputs() ([]wlcu.Output, error) {
 func (d *fakeDesk) Activate(id string) error {
 	d.mu.Lock()
 	d.logf("activate %s", id)
+	ignore := d.ignoreActivate[id]
 	d.mu.Unlock()
-	d.focus(id)
+	if !ignore {
+		d.focus(id)
+	}
 	return nil
 }
 

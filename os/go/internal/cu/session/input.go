@@ -43,7 +43,7 @@ func (m *Manager) focusOK(v view) error {
 	if m.isTainted() {
 		return proto.Errorf(proto.CodeOutside, "a window that is not allowed took focus and may still be on top; capture again")
 	}
-	if v.base == nil || !v.base.Fullscreen {
+	if m.cover(v) == nil {
 		return proto.Errorf(proto.CodeOutside, "no allowed window fills the screen; capture again")
 	}
 	if v.focused.ID != v.base.ID {

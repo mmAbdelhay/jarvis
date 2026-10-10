@@ -8,10 +8,17 @@
 //
 // Dialogs (final review, finding 1): the base follows keyboard focus. When
 // another window of an allowed app (an Export dialog, say) takes focus, the
-// next capture raises it and makes it fullscreen, so the frame shows the
-// window that receives input. Input is refused while the focused window is
-// not the base, and while the base differs from the one the last capture
-// showed: the model never acts on a window it has not seen.
+// next capture raises it, so the frame shows the window that receives
+// input. Input is refused while the focused window is not the base, and
+// while the base differs from the one the last capture showed: the model
+// never acts on a window it has not seen.
+//
+// Such a dialog is NOT made fullscreen while the window chosen at begin is
+// still fullscreen behind it: GTK hides a client-side header bar in
+// fullscreen, and that is where GTK dialogs (GIMP's Export Image) keep
+// their Name field and their Export/Cancel buttons. The fullscreen first
+// base covers the screen around the raised dialog, so the frame still shows
+// only allowed windows. Without it the dialog is made fullscreen.
 package session
 
 import (
@@ -147,6 +154,11 @@ type Manager struct {
 	wApps   []string
 	wBase   string
 	tainted bool
+	// firstTainted: the same for the window chosen at begin. A dialog is
+	// shown over it only while nothing that is not allowed took focus since
+	// it was last focused (such a window may sit between the two).
+	wFirst       string
+	firstTainted bool
 }
 
 // New makes a Manager.
@@ -255,15 +267,26 @@ func (m *Manager) noteFocus(tops []wlcu.Toplevel) {
 		if !t.Focused {
 			continue
 		}
+		ex, _ := m.wIdx.Excluded(t.AppID)
+		bad := ex || !m.wIdx.Matches(t.AppID, m.wApps)
 		if t.ID == m.wBase {
 			m.tainted = false
-			return
-		}
-		if ex, _ := m.wIdx.Excluded(t.AppID); ex || !m.wIdx.Matches(t.AppID, m.wApps) {
+		} else if bad {
 			m.tainted = true
+		}
+		if t.ID == m.wFirst {
+			m.firstTainted = false
+		} else if bad {
+			m.firstTainted = true
 		}
 		return
 	}
+}
+
+func (m *Manager) isFirstTainted() bool {
+	m.smu.Lock()
+	defer m.smu.Unlock()
+	return m.firstTainted
 }
 
 func (m *Manager) isTainted() bool {
@@ -323,13 +346,44 @@ func (m *Manager) pickBase(v *view) (moved bool) {
 		// A new base: unless it is focused, something may be above it.
 		m.tainted = v.base != nil && (v.focused == nil || v.focused.ID != v.base.ID)
 	}
-	m.wIdx, m.wApps, m.wBase = m.s.index, m.s.apps, m.s.baseID
+	m.wIdx, m.wApps, m.wBase, m.wFirst = m.s.index, m.s.apps, m.s.baseID, m.s.firstBase
 	m.smu.Unlock()
 	return moved
 }
 
-// settle keeps the base fullscreen (and, at begin, focused) and waits up
-// to a second for labwc to confirm.
+// cover is the fullscreen window that fills the screen for the base: the
+// base itself, or, for a dialog, the window chosen at begin while it is
+// still fullscreen on the dialog's screen. nil: nothing allowed fills it.
+func (m *Manager) cover(v view) *wlcu.Toplevel {
+	if v.base == nil {
+		return nil
+	}
+	if v.base.Fullscreen {
+		return v.base
+	}
+	if first := m.firstBehind(v); first != nil && first.Fullscreen && !m.isFirstTainted() {
+		return first
+	}
+	return nil
+}
+
+// firstBehind is the window chosen at begin when the base is another
+// allowed window (a dialog) on the same screen; nil otherwise.
+func (m *Manager) firstBehind(v view) *wlcu.Toplevel {
+	if v.base == nil || m.s.firstBase == "" || v.base.ID == m.s.firstBase {
+		return nil
+	}
+	for i := range v.tops {
+		t := &v.tops[i]
+		if t.ID == m.s.firstBase && m.allowed(*t) && slices.Equal(t.Outputs, v.base.Outputs) {
+			return t
+		}
+	}
+	return nil
+}
+
+// settle keeps the base covered by a fullscreen allowed window (and, at
+// begin, focused) and waits up to a second for labwc to confirm.
 func (m *Manager) settle(activate bool) (view, error) {
 	v, err := m.snapshot()
 	if err != nil {
@@ -341,6 +395,39 @@ func (m *Manager) settle(activate bool) (view, error) {
 	}
 	focusedOK := func(v view) bool { return v.focused != nil && m.allowed(*v.focused) }
 	changed := false
+	// A window that is not allowed took focus since the first base was
+	// last focused, so it may sit between the first base and the dialog:
+	// raise the first base again (over it), then the dialog over that.
+	if first := m.firstBehind(v); first != nil && !v.base.Fullscreen && m.isFirstTainted() {
+		baseID, firstID := v.base.ID, first.ID
+		if err := m.d.Desktop.Activate(firstID); err != nil {
+			return v, err
+		}
+		for i := 0; i < fullscreenPolls; i++ {
+			if v, err = m.snapshot(); err != nil {
+				return v, err
+			}
+			if !m.isFirstTainted() {
+				break
+			}
+			m.d.Sleep(fullscreenPoll)
+		}
+		if err := m.d.Desktop.Activate(baseID); err != nil {
+			return v, err
+		}
+		if v, err = m.snapshot(); err != nil {
+			return v, err
+		}
+		for i := range v.tops {
+			if v.tops[i].ID == baseID && m.allowed(v.tops[i]) {
+				v.base = &v.tops[i]
+			}
+		}
+		if v.base == nil || v.base.ID != baseID {
+			return v, nil
+		}
+		changed = true
+	}
 	// At begin/resume the base is raised unless it already holds focus:
 	// focus hops while paused are not tracked (the user may have put a
 	// window that is not allowed between the base and an allowed dialog).
@@ -350,18 +437,22 @@ func (m *Manager) settle(activate bool) (view, error) {
 		}
 		changed = true
 	}
-	if !v.base.Fullscreen {
-		if err := m.d.Desktop.SetFullscreen(v.base.ID, true); err != nil {
+	full := v.base // the window that must be fullscreen
+	if first := m.firstBehind(v); first != nil && !v.base.Fullscreen {
+		full = first // a dialog stays as it is, over the first base
+	}
+	if !full.Fullscreen {
+		if err := m.d.Desktop.SetFullscreen(full.ID, true); err != nil {
 			return v, err
 		}
-		m.s.fullscreened[v.base.ID] = true
+		m.s.fullscreened[full.ID] = true
 		changed = true
 	}
 	for i := 0; changed && i < fullscreenPolls; i++ {
 		if v, err = m.snapshot(); err != nil {
 			return v, err
 		}
-		if v.base != nil && v.base.Fullscreen && (!activate && !moved || (focusedOK(v) && !m.isTainted())) {
+		if m.cover(v) != nil && (!activate && !moved || (focusedOK(v) && !m.isTainted())) {
 			break
 		}
 		m.d.Sleep(fullscreenPoll)
@@ -414,6 +505,7 @@ func (m *Manager) Begin(p proto.Begin) error {
 			m.s = nil
 			m.smu.Lock()
 			m.wIdx, m.wApps, m.wBase, m.tainted = nil, nil, "", false
+			m.wFirst, m.firstTainted = "", false
 			m.smu.Unlock()
 		}
 		return proto.Errorf(proto.CodeFailed, "could not prepare the app window: %v", err)
@@ -437,6 +529,7 @@ func (m *Manager) End() {
 	m.smu.Lock()
 	m.active, m.id, m.paused = false, "", ""
 	m.wIdx, m.wApps, m.wBase, m.tainted = nil, nil, "", false
+	m.wFirst, m.firstTainted = "", false
 	m.smu.Unlock()
 	if m.s == nil {
 		return
@@ -445,23 +538,28 @@ func (m *Manager) End() {
 	m.s = nil
 }
 
-// visible: only the base can be on screen. It is fullscreen, it holds
-// keyboard focus (so it is raised), and nothing that is not allowed took
-// focus since. A focused allowed window that is not the base may be hidden
-// behind it, and showing the base would let keys reach an unseen window.
+// visible: only allowed windows can be on screen. The base is fullscreen
+// or is a dialog over the fullscreen first base, it holds keyboard focus
+// (so it is raised), and nothing that is not allowed took focus since. A
+// focused allowed window that is not the base may be hidden behind it, and
+// showing the base would let keys reach an unseen window.
 func (m *Manager) visible(v view) bool {
-	return v.base != nil && v.base.Fullscreen && v.focused != nil && v.focused.ID == v.base.ID &&
+	return m.cover(v) != nil && v.focused != nil && v.focused.ID == v.base.ID &&
 		m.allowed(*v.focused) && !m.isTainted()
 }
 
 func (m *Manager) windowList(v view) []proto.Window {
 	out := []proto.Window{}
+	coverID := ""
+	if c := m.cover(v); c != nil {
+		coverID = c.ID
+	}
 	for _, t := range v.tops {
 		w := proto.Window{WindowID: t.ID, AppID: t.AppID, Focused: t.Focused, Allowed: m.allowed(t)}
 		if w.Allowed {
 			w.Title = t.Title
 		}
-		if sh := m.s.shot; v.base != nil && t.ID == v.base.ID && t.Fullscreen && sh != nil && !sh.unseen {
+		if sh := m.s.shot; t.ID == coverID && t.Fullscreen && sh != nil && !sh.unseen {
 			w.W, w.H = sh.capW, sh.capH
 			if !sh.keep.Empty() {
 				w.W = sh.keep.Dx() * sh.capW / sh.outW
@@ -589,7 +687,7 @@ func (m *Manager) Capture(p proto.Capture) (*proto.CaptureResult, error) {
 	var keep image.Rectangle
 	unseen := false
 	if !blanked {
-		keep, blanked, unseen = m.coverage(v.base, rgba.Bounds(), max(int(out.Scale), 1))
+		keep, blanked, unseen = m.coverage(m.cover(v), rgba.Bounds(), max(int(out.Scale), 1))
 	}
 	switch {
 	case blanked:
