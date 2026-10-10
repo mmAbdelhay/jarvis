@@ -128,6 +128,20 @@ describe("account sandbox argv", () => {
     expect(() => accountUnitName("copilot", () => "x;y")).toThrow();
   });
 
+  it("probes with the asking account's own dirs bound, never hidden", () => {
+    for (const account of ["claude", "chatgpt", "gemini", "copilot"] as const) {
+      const paths = accountPaths(HOME, account);
+      const props = prop(accountSandboxProbe(HOME, RT, paths, "u"));
+      for (const dir of [paths.configDir, paths.cliDir, paths.tmpDir])
+        expect(props).not.toContain(`InaccessiblePaths=-${dir}`);
+      expect(props).toContain(`BindPaths=${paths.configDir}`);
+      expect(props).toContain(`BindReadOnlyPaths=${paths.cliDir}`);
+    }
+    expect(() =>
+      accountSandboxProbe(HOME, RT, { ...accountPaths(HOME, "claude"), configDir: "/x/y" }, "u"),
+    ).toThrow();
+  });
+
   it("probes the system bus by access: InaccessiblePaths= leaves a mode-000 node behind", () => {
     expect(ACCOUNT_PROBE_SCRIPT).toContain("test ! -w /run/dbus/system_bus_socket");
     expect(ACCOUNT_PROBE_SCRIPT).not.toContain("test ! -e /run/dbus/system_bus_socket");

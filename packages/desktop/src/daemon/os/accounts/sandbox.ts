@@ -124,8 +124,12 @@ export function accountSandboxProbe(
   paths: AccountPaths,
   unit: string,
 ): string[] {
+  // The probe runs for whichever account asked first; its own dirs must be the
+  // bound ones and the OTHER accounts' dirs the hidden ones.
+  const account = ACCOUNT_IDS.find((id) => posix.basename(paths.configDir) === id);
+  if (account === undefined) throw new Error("probe paths are not an account's paths");
   const inv: CliInvocation = {
-    account: "claude",
+    account,
     purpose: "probe",
     argv: [
       "/bin/sh",
