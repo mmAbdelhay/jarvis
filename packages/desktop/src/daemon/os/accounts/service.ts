@@ -1,7 +1,7 @@
 // Plan Y §2.4: the account:* channels and the account providers, in one place.
 // Every process goes through the injected (sandboxed) spawner; the sandbox is
-// probed once and, if it did not apply, nothing account-related runs (fail
-// closed). Install and sign-in answer null at once and report on account:state.
+// probed once and, if it did not apply, no account processes run (fail closed).
+// File cleanup still runs. Install and sign-in answer null at once and report on account:state.
 //
 // No electron here (core/no-electron.test.ts).
 import {
@@ -118,6 +118,9 @@ export function createAccountService(deps: AccountServiceDeps): AccountService {
     await (await loginManager()).cancel(account);
     if (!(await sandboxOk(account))) {
       deps.push({ account, phase: "failed", message: text().sandboxOff() });
+      const p = paths(account);
+      await deps.fs.removeTree(p.configDir);
+      await deps.fs.removeTree(p.tmpDir);
       return null;
     }
     await logoutAccount({

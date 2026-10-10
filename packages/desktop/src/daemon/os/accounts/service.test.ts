@@ -227,8 +227,21 @@ it("does not spawn logout when the sandbox probe fails", async () => {
   const pushed: AccountStatePush[] = [];
   const files = new Map<string, string>();
   installed(files, "claude", true);
+  const paths = accountPaths(HOME, "claude");
+  files.set(`${paths.tmpDir}/session`, "temporary data");
   const svc = service(files, { sandbox: false, seen, pushed });
   await svc.logout("claude");
   expect(seen).toEqual([]);
   expect(pushed.at(-1)).toMatchObject({ account: "claude", phase: "failed" });
+  expect(files.has(`${paths.configDir}/.credentials.json`)).toBe(false);
+  expect(files.has(`${paths.tmpDir}/session`)).toBe(false);
+  expect((await svc.status()).accounts[0]).toMatchObject({ signedIn: false, installed: true });
+
+  installed(files, "claude", true);
+  files.set(`${paths.tmpDir}/session`, "temporary data");
+  await svc.uninstall("claude");
+  expect(seen).toEqual([]);
+  expect(files.has(`${paths.configDir}/.credentials.json`)).toBe(false);
+  expect(files.has(`${paths.tmpDir}/session`)).toBe(false);
+  expect((await svc.status()).accounts[0]).toMatchObject({ signedIn: false, installed: false });
 });
