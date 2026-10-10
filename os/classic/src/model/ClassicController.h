@@ -6,7 +6,7 @@
 #include "AppsModel.h"
 #include "app/ShellController.h"
 
-class Launcher;
+class AppLauncher;
 
 // State of the classic desktop (Rafiq M4 contracts §2): taskbar buttons, the
 // Apps menu and the docked Jarvis panel. Programs: foot, pcmanfm-qt,
@@ -23,7 +23,7 @@ class ClassicController : public QObject {
     Q_PROPERTY(ShellController* shell READ shell NOTIFY shellChanged)
 
 public:
-    ClassicController(AppsModel* apps, Launcher* launcher, bool fallback, QObject* parent = nullptr);
+    ClassicController(AppsModel* apps, AppLauncher* launcher, bool fallback, QObject* parent = nullptr);
 
     AppsModel* apps() const { return m_apps; }
     bool appsOpen() const { return m_appsOpen; }
@@ -60,7 +60,7 @@ private:
     void setNotice(const QString& notice);
 
     AppsModel* m_apps;
-    Launcher* m_launcher;
+    AppLauncher* m_launcher;
     bool m_fallback;
     bool m_appsOpen = false;
     bool m_chatOpen = false;

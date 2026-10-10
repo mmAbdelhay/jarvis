@@ -7,7 +7,7 @@
 #include "AppsModel.h"
 #include "ClassicController.h"
 #include "Language.h"
-#include "Launcher.h"
+#include "AppLauncher.h"
 #include "app/AppFont.h"
 #include "app/ShellController.h"
 #include "control/ControlClient.h"
@@ -61,7 +61,7 @@ public slots:
         auto* apps = new AppsModel({QStringLiteral(JARVIS_CLASSIC_TEST_DATA "/applications")}, {QStringLiteral("labwc")}, engine);
         QObject::connect(language, &jarvis::ui::LanguageManager::languageChanged, apps, &AppsModel::retranslate);
         auto* starts = new Starts(engine);
-        auto* launcher = new Launcher(engine);
+        auto* launcher = new AppLauncher(engine);
         launcher->setStarter([starts](const QString& program, const QStringList& args) {
             starts->add((QStringList{program} + args).join(u' '));
             return true;

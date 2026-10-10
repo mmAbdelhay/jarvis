@@ -2,6 +2,17 @@
 <!DOCTYPE TS>
 <TS version="2.1" language="ar" sourcelanguage="en">
     <context>
+        <name>AppLauncher</name>
+        <message>
+            <source>That app's launcher is broken, so it was not started.</source>
+            <translation>مُشغّل هذا التطبيق معطوب، لذا لم يُشغَّل.</translation>
+        </message>
+        <message>
+            <source>Couldn't start %1. Is it installed?</source>
+            <translation>تعذّر تشغيل %1. هل هو مثبّت؟</translation>
+        </message>
+    </context>
+    <context>
         <name>AuditModel</name>
         <message>
             <source>Approved</source>

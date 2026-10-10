@@ -53,6 +53,12 @@ void AppsModel::reload()
     rebuild();
 }
 
+void AppsModel::setDirectories(QStringList dirs)
+{
+    m_dirs = std::move(dirs);
+    reload();
+}
+
 void AppsModel::retranslate()
 {
     rebuild();

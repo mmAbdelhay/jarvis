@@ -1,11 +1,11 @@
-#include "Launcher.h"
+#include "AppLauncher.h"
 
 #include <QDir>
 #include <QFileInfo>
 #include <QProcess>
 #include <QStandardPaths>
 
-Launcher::Launcher(QObject* parent)
+AppLauncher::AppLauncher(QObject* parent)
     : QObject(parent)
     , m_starter([](const QString& program, const QStringList& args) {
         const bool found = program.startsWith(u'/') ? QFileInfo(program).isExecutable()
@@ -15,7 +15,7 @@ Launcher::Launcher(QObject* parent)
 {
 }
 
-bool Launcher::launchEntry(const jarvis::ui::DesktopEntry& entry)
+bool AppLauncher::launchEntry(const jarvis::ui::DesktopEntry& entry)
 {
     const auto argv = jarvis::ui::splitExec(entry.exec);
     if (!argv) {
@@ -27,7 +27,7 @@ bool Launcher::launchEntry(const jarvis::ui::DesktopEntry& entry)
     return launch(argv->first(), argv->mid(1));
 }
 
-bool Launcher::launch(const QString& program, const QStringList& args)
+bool AppLauncher::launch(const QString& program, const QStringList& args)
 {
     if (m_starter && m_starter(program, args))
         return true;

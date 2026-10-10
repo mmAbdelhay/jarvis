@@ -1,5 +1,6 @@
 #include <QCoreApplication>
 #include <QSignalSpy>
+#include <QTemporaryDir>
 #include <QtTest>
 
 #include "AppsModel.h"
@@ -62,6 +63,34 @@ private slots:
         model.setFilter(QString());
         QCOMPARE(model.rowCount(), 4);
         QVERIFY(count.size() >= 2);
+    }
+
+    void idAtCanBeCalledFromQml()
+    {
+        AppsModel model({kApps}, {u"labwc"_s});
+        QString id;
+        QVERIFY(QMetaObject::invokeMethod(&model, "idAt", Q_RETURN_ARG(QString, id), Q_ARG(int, 0)));
+        QCOMPARE(id, u"firefox"_s);
+        QVERIFY(QMetaObject::invokeMethod(&model, "idAt", Q_RETURN_ARG(QString, id), Q_ARG(int, -1)));
+        QVERIFY(id.isEmpty());
+        QVERIFY(QMetaObject::invokeMethod(&model, "idAt", Q_RETURN_ARG(QString, id), Q_ARG(int, model.count())));
+        QVERIFY(id.isEmpty());
+    }
+
+    void changingDirectoriesReloadsAndPreservesFilter()
+    {
+        AppsModel model({kApps}, {u"labwc"_s});
+        model.setFilter(u"fire"_s);
+        QTemporaryDir empty;
+        QVERIFY(empty.isValid());
+        QSignalSpy count(&model, &AppsModel::countChanged);
+        model.setDirectories({empty.path()});
+        QCOMPARE(model.count(), 0);
+        QVERIFY(!model.entry(u"firefox"_s));
+        model.setDirectories({kApps});
+        QCOMPARE(ids(model), QStringList{u"firefox"_s});
+        QCOMPARE(model.filter(), u"fire"_s);
+        QCOMPARE(count.size(), 2);
     }
 
     void currentDesktopsSplitsTheVariable()

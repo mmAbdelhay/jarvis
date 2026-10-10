@@ -32,17 +32,6 @@
         </message>
     </context>
     <context>
-        <name>Launcher</name>
-        <message>
-            <source>That app's launcher is broken, so it was not started.</source>
-            <translation>That app's launcher is broken, so it was not started.</translation>
-        </message>
-        <message>
-            <source>Couldn't start %1. Is it installed?</source>
-            <translation>Couldn't start %1. Is it installed?</translation>
-        </message>
-    </context>
-    <context>
         <name>Taskbar</name>
         <message>
             <source>Apps</source>

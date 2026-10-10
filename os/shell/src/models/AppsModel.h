@@ -7,12 +7,12 @@
 
 #include "DesktopEntry.h"
 
-// The classic Apps menu (Rafiq M4 contracts §2): visible .desktop applications
+// The classic and shell Apps views (Rafiq M4 contracts §2): visible .desktop applications
 // in XDG order, names in the UI language, filtered by the search box.
 class AppsModel : public QAbstractListModel {
     Q_OBJECT
     QML_ELEMENT
-    QML_UNCREATABLE("Owned by ClassicController")
+    QML_UNCREATABLE("Owned by ClassicController or ShellController")
     Q_PROPERTY(QString filter READ filter WRITE setFilter NOTIFY filterChanged)
     Q_PROPERTY(int count READ count NOTIFY countChanged)
 
@@ -32,7 +32,10 @@ public:
     void reload();
     void retranslate();
     std::optional<jarvis::ui::DesktopEntry> entry(const QString& id) const;
-    QString idAt(int row) const;
+    Q_INVOKABLE QString idAt(int row) const;
+
+    /** Tests and the shell: change where .desktop files are read from. */
+    void setDirectories(QStringList dirs);
 
     static QStringList currentDesktops();
 

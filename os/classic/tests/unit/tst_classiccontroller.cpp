@@ -5,7 +5,7 @@
 
 #include "AppsModel.h"
 #include "ClassicController.h"
-#include "Launcher.h"
+#include "AppLauncher.h"
 
 using namespace Qt::StringLiterals;
 
@@ -13,7 +13,7 @@ namespace {
 const QString kApps = QStringLiteral(JARVIS_CLASSIC_TEST_DATA "/applications");
 struct Rig {
     AppsModel apps{{kApps}, {u"labwc"_s}};
-    Launcher launcher;
+    AppLauncher launcher;
     QList<QStringList> started; // program + args
     bool ok = true;
     ClassicController controller{&apps, &launcher, false};

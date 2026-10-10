@@ -6,13 +6,13 @@
 
 #include "DesktopEntry.h"
 
-// Starts programs for the classic desktop. Always argv (splitExec), never a
-// shell; Terminal=true apps run inside foot.
-class Launcher : public QObject {
+// Starts programs for the classic desktop and the shell's Apps view. Always
+// argv (splitExec), never a shell; Terminal=true apps run inside foot.
+class AppLauncher : public QObject {
     Q_OBJECT
 public:
     using Starter = std::function<bool(const QString& program, const QStringList& args)>;
-    explicit Launcher(QObject* parent = nullptr);
+    explicit AppLauncher(QObject* parent = nullptr);
 
     void setStarter(Starter starter) { m_starter = std::move(starter); }
     void setTerminal(QStringList terminal) { m_terminal = std::move(terminal); }

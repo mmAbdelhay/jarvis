@@ -231,6 +231,9 @@ QStringList applicationDirectories()
     QStringList out{home + u"/applications"_s};
     for (const QString& dir : system.split(u':', Qt::SkipEmptyParts))
         out << QDir::cleanPath(dir) + u"/applications"_s;
+    // Flatpak exports have lowest precedence, whether or not installed.
+    out << home + u"/flatpak/exports/share/applications"_s
+        << u"/var/lib/flatpak/exports/share/applications"_s;
     out.removeDuplicates();
     return out;
 }
