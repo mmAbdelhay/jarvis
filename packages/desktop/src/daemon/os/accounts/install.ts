@@ -53,7 +53,7 @@ function npmEnv(paths: AccountPaths): Record<string, string> {
     TMPDIR: paths.tmpDir,
     LANG: "C.UTF-8",
     NO_COLOR: "1",
-    npm_config_update_notifier: "false",
+    NPM_CONFIG_UPDATE_NOTIFIER: "false",
   };
 }
 

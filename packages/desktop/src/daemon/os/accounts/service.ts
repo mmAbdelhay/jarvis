@@ -177,13 +177,18 @@ export function createAccountService(deps: AccountServiceDeps): AccountService {
       })
         .then(
           () => deps.push({ account, phase: "installed", message: text().installed(label) }),
-          (error: unknown) =>
+          (error: unknown) => {
+            // AccountInstallError is logged where it is thrown; anything else
+            // (a spawn or file error) would otherwise leave no trace.
+            if (!(error instanceof AccountInstallError))
+              deps.log(`[accounts] ${account} install failed: ${String(error)}`);
             deps.push({
               account,
               phase: "failed",
               message:
                 error instanceof AccountInstallError ? error.message : text().setupFailed(label),
-            }),
+            });
+          },
         )
         .finally(() => installing.delete(account));
       return null;

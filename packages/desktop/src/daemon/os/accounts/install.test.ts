@@ -2,8 +2,10 @@ import { readFileSync } from "node:fs";
 import { accountPaths, type CliInvocation, parseAccountPins } from "@jarvis/platform/model";
 import { describe, expect, it } from "vitest";
 import type { AccountFs } from "./account-fs.js";
+import { accountSandboxArgv } from "./sandbox.js";
 import {
   AccountInstallError,
+  auditInvocation,
   type InstallTexts,
   installAccount,
   installInvocation,
@@ -89,6 +91,21 @@ describe("installInvocation", () => {
       ]),
     );
     expect(inv.writable).toEqual([paths.cliDir, paths.tmpDir]);
+    // Every install step must be one the sandbox accepts (its environment
+    // names are upper case only; npm reads npm_config_* in any case).
+    for (const account of ["claude", "chatgpt", "gemini", "copilot"] as const) {
+      const p = accountPaths(HOME, account);
+      for (const step of [
+        installInvocation(PINS[account], p),
+        auditInvocation(PINS[account], p),
+        postinstallInvocation(PINS[account], p),
+      ]) {
+        if (step === null) continue;
+        expect(() =>
+          accountSandboxArgv(step, { home: HOME, runtimeDir: "/run/user/1000", unit: "u" }),
+        ).not.toThrow();
+      }
+    }
     expect(inv.network).toBe(true);
     expect(installInvocation(PINS.claude, accountPaths(HOME, "claude")).argv).not.toContain(
       "--omit=optional",
