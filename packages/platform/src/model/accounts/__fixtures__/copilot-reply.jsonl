@@ -1,0 +1,7 @@
+{"type":"session.start","id":"5c1a1e8e-0000-4000-8000-000000000001","timestamp":"2026-10-09T10:00:00.000Z","parentId":null,"data":{"sessionId":"s1"}}
+{"type":"user.message","id":"5c1a1e8e-0000-4000-8000-000000000002","timestamp":"2026-10-09T10:00:00.010Z","parentId":"5c1a1e8e-0000-4000-8000-000000000001","data":{"content":"Reply to the request on standard input."}}
+{"type":"assistant.turn_start","id":"5c1a1e8e-0000-4000-8000-000000000003","timestamp":"2026-10-09T10:00:00.500Z","parentId":"5c1a1e8e-0000-4000-8000-000000000002","data":{"turnId":"t1"}}
+{"type":"assistant.message_delta","id":"5c1a1e8e-0000-4000-8000-000000000004","timestamp":"2026-10-09T10:00:01.000Z","parentId":"5c1a1e8e-0000-4000-8000-000000000003","ephemeral":true,"data":{"messageId":"m1","deltaContent":"Searching."}}
+{"type":"assistant.message","id":"5c1a1e8e-0000-4000-8000-000000000005","timestamp":"2026-10-09T10:00:01.500Z","parentId":"5c1a1e8e-0000-4000-8000-000000000004","data":{"messageId":"m1","content":"Searching.\n```jarvis-tool 0123456789abcdef\n{\"name\":\"pkg_search\",\"input\":{\"query\":\"gimp\"}}\n```","toolRequests":[]}}
+{"type":"assistant.usage","id":"5c1a1e8e-0000-4000-8000-000000000006","timestamp":"2026-10-09T10:00:01.600Z","parentId":"5c1a1e8e-0000-4000-8000-000000000005","ephemeral":true,"data":{"model":"gpt-5.4","inputTokens":1900,"outputTokens":48}}
+{"type":"session.idle","id":"5c1a1e8e-0000-4000-8000-000000000007","timestamp":"2026-10-09T10:00:01.700Z","parentId":"5c1a1e8e-0000-4000-8000-000000000006","ephemeral":true,"data":{}}

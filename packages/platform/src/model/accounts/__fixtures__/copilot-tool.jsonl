@@ -1,0 +1,2 @@
+{"type":"assistant.turn_start","id":"5c1a1e8e-0000-4000-8000-000000000003","timestamp":"2026-10-09T10:00:00.500Z","parentId":null,"data":{"turnId":"t1"}}
+{"type":"tool.execution_start","id":"5c1a1e8e-0000-4000-8000-000000000008","timestamp":"2026-10-09T10:00:00.900Z","parentId":"5c1a1e8e-0000-4000-8000-000000000003","data":{"toolCallId":"c1","toolName":"bash","arguments":{"command":"ls ~"}}}

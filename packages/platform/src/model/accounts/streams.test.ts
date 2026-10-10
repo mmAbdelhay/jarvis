@@ -2,6 +2,9 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { createClaudeStream } from "./stream-claude.js";
 import { createCodexStream } from "./stream-codex.js";
+import { createCopilotStream } from "./stream-copilot.js";
+import { createGeminiStream } from "./stream-gemini.js";
+import { streamFor } from "./streams-index.js";
 import type { CliStreamEvent, CliStreamParser } from "./stream-types.js";
 
 const fixture = (name: string) =>
@@ -132,5 +135,71 @@ describe("Codex exec --json", () => {
       code: "rate-limit",
       detail: "429 Too Many Requests: usage limit reached",
     });
+  });
+});
+
+describe("Gemini stream-json", () => {
+  it("joins assistant deltas and ignores the echoed user message", () => {
+    const events = play(createGeminiStream(), fixture("gemini-reply"));
+    expect(events.filter((e) => e.kind === "progress")).toHaveLength(1);
+    expect(text(events)).toBe(
+      'Searching.\n```jarvis-tool 0123456789abcdef\n{"name":"pkg_search","input":{"query":"gimp"}}\n```',
+    );
+    expect(events).toContainEqual({ kind: "usage", inputTokens: 3050, outputTokens: 70 });
+  });
+
+  it("trips on a Gemini tool_use event", () => {
+    expect(play(createGeminiStream(), fixture("gemini-tool-use")).at(-1)).toEqual({
+      kind: "tripwire",
+      reason: "gemini asked for its own tool run_shell_command",
+    });
+  });
+
+  it("maps an authentication result to not-signed-in", () => {
+    const events = play(createGeminiStream(), fixture("gemini-auth"), 41);
+    expect(events.find((e) => e.kind === "error")).toMatchObject({
+      kind: "error",
+      code: "not-signed-in",
+    });
+  });
+});
+
+describe("Copilot --output-format json", () => {
+  it("uses assistant.message content, not the deltas", () => {
+    const events = play(createCopilotStream(), fixture("copilot-reply"));
+    expect(events.filter((e) => e.kind === "progress")).toHaveLength(1);
+    expect(text(events)).toBe(
+      'Searching.\n```jarvis-tool 0123456789abcdef\n{"name":"pkg_search","input":{"query":"gimp"}}\n```',
+    );
+    expect(events).toContainEqual({ kind: "usage", inputTokens: 1900, outputTokens: 48 });
+  });
+
+  it("trips on tool.execution_start before any output", () => {
+    expect(play(createCopilotStream(), fixture("copilot-tool"))).toEqual([
+      { kind: "progress" },
+      { kind: "tripwire", reason: "copilot started its own tool bash" },
+    ]);
+  });
+
+  it("trips on toolRequests in a message", () => {
+    expect(play(createCopilotStream(), fixture("copilot-tool-requests")).at(-1)).toEqual({
+      kind: "tripwire",
+      reason: "copilot asked for its own tool view",
+    });
+  });
+
+  it("maps session.error authentication to not-signed-in", () => {
+    expect(play(createCopilotStream(), fixture("copilot-auth"), 1)).toEqual([
+      { kind: "error", code: "not-signed-in", detail: "No authentication information found." },
+    ]);
+  });
+});
+
+describe("streamFor", () => {
+  it("gives each account its parser", () => {
+    expect(play(streamFor("claude"), fixture("claude-init-tools"))[0]?.kind).toBe("tripwire");
+    expect(play(streamFor("chatgpt"), fixture("codex-command")).at(-1)?.kind).toBe("tripwire");
+    expect(play(streamFor("gemini"), fixture("gemini-tool-use")).at(-1)?.kind).toBe("tripwire");
+    expect(play(streamFor("copilot"), fixture("copilot-tool")).at(-1)?.kind).toBe("tripwire");
   });
 });

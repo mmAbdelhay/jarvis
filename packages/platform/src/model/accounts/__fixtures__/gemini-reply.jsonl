@@ -1,0 +1,5 @@
+{"type":"init","timestamp":"2026-10-09T10:00:00.000Z","session_id":"c0ffee","model":"gemini-2.5-pro"}
+{"type":"message","timestamp":"2026-10-09T10:00:00.100Z","role":"user","content":"[User]\nfind gimp"}
+{"type":"message","timestamp":"2026-10-09T10:00:01.000Z","role":"assistant","content":"Searching.\n","delta":true}
+{"type":"message","timestamp":"2026-10-09T10:00:01.200Z","role":"assistant","content":"```jarvis-tool 0123456789abcdef\n{\"name\":\"pkg_search\",\"input\":{\"query\":\"gimp\"}}\n```","delta":true}
+{"type":"result","timestamp":"2026-10-09T10:00:01.300Z","status":"success","stats":{"total_tokens":3120,"input_tokens":3050,"output_tokens":70,"duration_ms":2100,"tool_calls":0}}

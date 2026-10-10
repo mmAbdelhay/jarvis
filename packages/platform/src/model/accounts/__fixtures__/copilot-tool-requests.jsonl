@@ -1,0 +1,1 @@
+{"type":"assistant.message","id":"5c1a1e8e-0000-4000-8000-000000000005","timestamp":"2026-10-09T10:00:01.500Z","parentId":null,"data":{"messageId":"m1","content":"","toolRequests":[{"toolCallId":"c1","name":"view","arguments":{"path":"/etc/shadow"}}]}}
