@@ -29,7 +29,7 @@ die() { echo "build.sh: $*" >&2; exit 1; }
 . "$here/../branding/lib/brand.sh"
 brand_load
 required="jarvisd jarvis-shell jarvis-pkg jarvis-diag jarvis-helper jarvis-ui jarvis-installer jarvis-greeter
-  jarvis-settings jarvis-apps jarvis-wl jarvis-lock jarvis-idle jarvis-voice-models jarvis-voice-engines
+  jarvis-settings jarvis-apps jarvis-files jarvis-wl jarvis-lock jarvis-idle jarvis-voice-models jarvis-voice-engines
   jarvis-installer-backend jarvis-model-fetch jarvis-ollama jarvis-models-catalog jarvis-archive-keyring jarvis-branding jarvis-cli
   jarvis-backup-model jarvis-classic jarvis-session jarvis-fonts jarvis-i18n jarvis-recipes jarvis-cu"
 for p in $required; do

@@ -86,9 +86,10 @@ def run_checks(run: Run, args: argparse.Namespace) -> dict | None:
         return sh(ctl("wait --timeout 60"), 70)
 
     run.check("jarvisd control socket", control_socket)
-    # v1.1 fix: the live login keyring needs no prompt.
+    # v1.1 fixes: the live login keyring needs no prompt; jarvis-files is shipped.
     run.check("v1.1: the live login keyring stores and reads a secret without a prompt",
               lambda: sh(scenarios.keyring_roundtrip(uid), 60))
+    run.check("v1.1: built-in jarvis-files answers files.trash_list", lambda: sh(scenarios.files_trash_list(uid), 40))
 
     ram_report: dict = {}
 

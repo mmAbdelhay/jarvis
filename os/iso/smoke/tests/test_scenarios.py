@@ -148,6 +148,7 @@ class V11FixScenarioTests(unittest.TestCase):
         for command in (
             scenarios.keyring_roundtrip(1000),
             scenarios.login_keyring_encrypted("ada"),
+            scenarios.files_trash_list(1000),
         ):
             self.assertNotIn("\n", command)
             self.assertLess(len(command), MAX_LINE - 100, command)
@@ -157,6 +158,28 @@ class V11FixScenarioTests(unittest.TestCase):
         self.assertIn("runuser -u ada --", command)
         self.assertEqual(command.count("timeout 15 secret-tool"), 3)
         self.assertIn("gcr-prompter", command)
+
+    def test_trash_list_calls_the_built_in_server(self):
+        command = scenarios.files_trash_list(1000)
+        self.assertIn("/usr/lib/jarvis/mcp/jarvis-files", command)
+        self.assertIn('"name":"files.trash_list"', command)
+        self.assertIn("ENOENT", command)
+
+    def test_trash_list_works_against_a_fake_server(self):
+        import subprocess
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            server = Path(d) / "server"
+            server.write_text(
+                "#!/bin/sh\nwhile read -r l; do case $l in *'\"id\":2'*) "
+                "echo '{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"content\":[]}}';; esac; done\n"
+            )
+            server.chmod(0o755)
+            command = scenarios.files_trash_list(1000)
+            command = command.replace(scenarios.FILES_MCP, str(server))
+            command = command.replace(scenarios.as_user(1000, "journalctl --user -u jarvisd --no-pager"), "true")
+            command = command.replace(scenarios.as_user(1000, f"timeout 20 {server}"), str(server))
+            self.assertEqual(subprocess.run(["sh", "-c", command]).returncode, 0, command)
 
 
 if __name__ == "__main__":

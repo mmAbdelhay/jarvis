@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # verify-v11.sh CHROOT — Rafiq v1.1 computer-use pieces in the built image
-# (contracts §1, §3): the helper and its network-less user unit, started only
+# (contracts §1, §3), plus the built-in jarvis-files M3 left unpackaged: the helper and its network-less user unit, started only
 # from the full session's autostart and stopped by the classic fallback, the
 # AT-SPI bus and toolkit switches for password-field detection, and the
 # catalog's vision flags. Lists every problem, then fails. Called by
@@ -15,7 +15,15 @@ field() { # field PACKAGE FIELD — from the image's dpkg status
 }
 installed() { [ "$(field "$1" Status)" = "install ok installed" ]; }
 
-for p in jarvis-cu at-spi2-core xdg-user-dirs; do installed "$p" || problems+=("package $p is not installed"); done
+for p in jarvis-cu jarvis-files at-spi2-core xdg-user-dirs; do installed "$p" || problems+=("package $p is not installed"); done
+# The built-in jarvis-files (M3 contracts §1): jarvisd starts it from here and
+# the files tools (move, copy, trash, restore) are missing without it.
+files=$c/usr/lib/jarvis/mcp/jarvis-files
+if [ -L "$files" ] || [ ! -f "$files" ] || [ ! -x "$files" ]; then
+  problems+=("/usr/lib/jarvis/mcp/jarvis-files is missing or not an executable file (M3 contracts §1)")
+elif [ "$(head -c 4 "$files" | od -An -tx1 | tr -d ' \n')" != 7f454c46 ]; then
+  problems+=("/usr/lib/jarvis/mcp/jarvis-files is not an ELF binary")
+fi
 [ -x "$c/usr/libexec/jarvis/jarvis-cu" ] || problems+=("/usr/libexec/jarvis/jarvis-cu missing (contracts §1)")
 unit=$c/usr/lib/systemd/user/jarvis-cu.service
 if [ -f "$unit" ]; then

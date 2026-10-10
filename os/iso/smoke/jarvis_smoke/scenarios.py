@@ -187,3 +187,25 @@ def login_keyring_encrypted(user: str = USER) -> str:
     path = f"/home/{user}/.local/share/keyrings/login.keyring"
     return f"[ \"$(head -c 12 {path})\" = GnomeKeyring ] && ! grep -q '^\\[keyring\\]' {path}"
 
+
+FILES_MCP = "/usr/lib/jarvis/mcp/jarvis-files"
+
+
+def files_trash_list(uid: int, user: str = USER) -> str:
+    """The built-in jarvis-files (M3 §1) is installed and answers
+    files.trash_list over MCP stdio as USER; jarvisd never failed to spawn it."""
+    requests = (
+        '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18",'
+        '"capabilities":{},"clientInfo":{"name":"smoke","version":"1"}}}',
+        '{"jsonrpc":"2.0","method":"notifications/initialized"}',
+        '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"files.trash_list","arguments":{}}}',
+    )
+    lines = " ".join(f"'{r}'" for r in requests)
+    call = as_user(uid, f"timeout 20 {FILES_MCP}", user)
+    journal = as_user(uid, "journalctl --user -u jarvisd --no-pager", user)
+    return (
+        f"test -x {FILES_MCP} && out=$(printf '%s\\n' {lines} | {call}) && "
+        f"printf '%s\\n' \"$out\" | grep '\"id\":2' | grep -q '\"result\"' && "
+        f"! printf '%s\\n' \"$out\" | grep '\"id\":2' | grep -q '\"isError\":true' && "
+        f"! {journal} | grep -q 'jarvis-files.*ENOENT'"
+    )

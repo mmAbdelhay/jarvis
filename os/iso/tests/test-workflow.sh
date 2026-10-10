@@ -74,7 +74,7 @@ w = yaml.safe_load(open(sys.argv[1]))
 j = w["jobs"]
 d = lambda n: yaml.safe_dump(j[n])
 needs = lambda n: {j[n]["needs"]} if isinstance(j[n]["needs"], str) else set(j[n]["needs"])
-assert "jarvis-settings jarvis-apps jarvis-wl" in d("build-go")
+assert "jarvis-settings jarvis-apps jarvis-files jarvis-wl" in d("build-go")
 qt = d("build-qt")
 for s in ("os/lock/deps/debian-build.txt", "os/idle/deps/debian-build.txt", "os/lock/ci/test.sh",
           "os/idle/ci/test.sh", "jarvis-lock jarvis-idle"):
@@ -156,6 +156,7 @@ j = w["jobs"]
 d = lambda n: yaml.safe_dump(j[n], width=1000)
 needs = lambda n: {j[n]["needs"]} if isinstance(j[n]["needs"], str) else set(j[n]["needs"])
 assert "jarvis-wl jarvis-cu" in d("build-go")
+assert "jarvis-apps jarvis-files" in d("build-go")
 assert "os/iso/smoke/assets/cu/*.test.mjs" in d("checks")
 assert "cu_changes.py" in d("changes") and "fetch-depth: 0" in d("changes")
 assert "cu" in j["changes"]["outputs"]

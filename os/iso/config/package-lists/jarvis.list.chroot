@@ -19,6 +19,7 @@ jarvis-accounts
 # Rafiq M3 runtime packages.
 jarvis-settings
 jarvis-apps
+jarvis-files
 jarvis-wl
 jarvis-lock
 jarvis-idle

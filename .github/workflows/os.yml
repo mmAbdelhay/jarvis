@@ -107,7 +107,7 @@ jobs:
       - run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends dpkg-dev dbus-daemon
       - run: make -C os/go check test
       - run: make -C os/go dist
-      - run: os/packaging/build.sh --out out/debs jarvis-pkg jarvis-diag jarvis-helper jarvis-installer-backend jarvis-model-fetch jarvis-settings jarvis-apps jarvis-wl jarvis-cu
+      - run: os/packaging/build.sh --out out/debs jarvis-pkg jarvis-diag jarvis-helper jarvis-installer-backend jarvis-model-fetch jarvis-settings jarvis-apps jarvis-files jarvis-wl jarvis-cu
       - run: sudo apt-get install -y -qq --no-install-recommends file gpg gpgv
       # Official MCP servers (contracts §7 #8: make -C os/go registry) as registry artifacts.
       - run: make -C os/go registry

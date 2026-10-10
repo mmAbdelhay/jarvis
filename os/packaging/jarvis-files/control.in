@@ -1,0 +1,13 @@
+Package: jarvis-files
+Version: @VERSION@
+Architecture: amd64
+Maintainer: Muhammad AbdElHay <mmAbdelhay@users.noreply.github.com>
+Installed-Size: @INSTALLED_SIZE@
+Section: utils
+Priority: optional
+Homepage: @HOME_URL@
+Description: @DISTRO_NAME@ file tools (MCP server)
+ Finds, reads and lists files in your home folder, and moves, copies,
+ renames, makes folders, trashes and restores them for the Jarvis agent
+ (freedesktop.org trash). Every change returns a journal id it can be undone
+ with.

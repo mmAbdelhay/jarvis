@@ -96,6 +96,9 @@ mkdir -p "$tmp/jarvis-settings/usr/share/polkit-1/rules.d"
 cp "$packaging/jarvis-settings/51-jarvis-settings.rules" "$tmp/jarvis-settings/usr/share/polkit-1/rules.d/"
 stub jarvis-settings
 stub jarvis-apps
+# An ELF that exits, at the built-in server path jarvisd starts.
+install -D -m0755 /bin/true "$tmp/jarvis-files/usr/lib/jarvis/mcp/jarvis-files"
+stub jarvis-files
 stub jarvis-wl
 # An ELF that exits (cannot lock) and the real PAM service.
 install -D -m0755 /bin/true "$tmp/jarvis-lock/usr/bin/jarvis-lock"

@@ -18,6 +18,11 @@ fresh; sed -i.bak '/^Package: xdg-user-dirs$/,/^$/d' "$c/var/lib/dpkg/status"; c
 fresh; sed -i.bak '/^xdg-user-dirs-update/d' "$c/etc/xdg/labwc/autostart"; check "a session without user folders is caught" caught
 fresh; sed -i.bak '/^xdg-user-dirs-update/d' "$c/etc/xdg/labwc-classic/autostart"; check "a classic session without user folders is caught" caught
 fresh; rm "$c/usr/libexec/jarvis/jarvis-cu"; check "missing helper binary is caught" caught
+fresh; sed -i.bak '/^Package: jarvis-files$/,/^$/d' "$c/var/lib/dpkg/status"; check "jarvis-files not installed is caught" caught
+fresh; rm "$c/usr/lib/jarvis/mcp/jarvis-files"; check "missing built-in jarvis-files is caught" caught
+fresh; chmod a-x "$c/usr/lib/jarvis/mcp/jarvis-files"; check "a nonexecutable jarvis-files is caught" caught
+fresh; printf '#!/bin/sh\n' > "$c/usr/lib/jarvis/mcp/jarvis-files"; check "a script jarvis-files is caught" caught
+fresh; rm "$c/usr/lib/jarvis/mcp/jarvis-files"; ln -s /bin/true "$c/usr/lib/jarvis/mcp/jarvis-files"; check "a symlinked jarvis-files is caught" caught
 fresh; sed -i.bak 's/^RestrictAddressFamilies=.*/RestrictAddressFamilies=AF_UNIX AF_INET/' "$c/usr/lib/systemd/user/jarvis-cu.service"
 check "network address family is caught" caught
 fresh; sed -i.bak 's/^RestrictAddressFamilies=.*/RestrictAddressFamilies=AF_UNIX AF_NETLINK/' "$c/usr/lib/systemd/user/jarvis-cu.service"
@@ -76,6 +81,7 @@ check "missing helper unit is caught" caught
 if command -v dpkg-deb >/dev/null; then
   "$ISO_DIR/dev/stub-debs.sh" "$tmp/stubs" >/dev/null
   check "stub jarvis-cu built" test -f "$tmp/stubs/jarvis-cu_0.0.0~stub1_amd64.deb"
+  check "stub jarvis-files ships the server path" bash -c 'dpkg-deb -c "$1" | grep -q "./usr/lib/jarvis/mcp/jarvis-files$"' _ "$tmp/stubs/jarvis-files_0.0.0~stub1_amd64.deb"
   check "stub jarvis-cu ships the real unit" cmp -s "$REPO_ROOT/os/packaging/jarvis-cu/jarvis-cu.service" \
     <(dpkg-deb --fsys-tarfile "$tmp/stubs/jarvis-cu_0.0.0~stub1_amd64.deb" | tar -xO ./usr/lib/systemd/user/jarvis-cu.service)
 else
