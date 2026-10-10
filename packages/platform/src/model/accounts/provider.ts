@@ -118,7 +118,7 @@ export function createAccountProvider(options: {
           case "error":
             throw toError(event.code, event.detail);
           case "tripwire":
-            throw new ProviderError("bad-response", texts.tripwire(label));
+            throw new ProviderError("tripwire", texts.tripwire(label));
         }
       }
       const parsed = parseTextToolReply(reply, nonce, new Set(tools.map((tool) => tool.name)));

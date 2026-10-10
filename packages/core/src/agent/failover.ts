@@ -5,7 +5,8 @@
 // the turn; beginTurn() starts at the first again. Auth and other 4xx errors
 // are not failed over between configured providers — they go straight to the
 // backup, the implicit last entry that is always allowed (local) and reached
-// from ANY failure before a first event. Privacy ruling: a cloud entry after
+// from ANY failure before a first event, except an account tripwire, which
+// ends the turn with its own reason. Privacy ruling: a cloud entry after
 // any local/LAN entry is skipped unless the user allowed cloud fallback.
 // Pure: timers are injected.
 import type { Lang } from "./i18n.js";
@@ -134,6 +135,9 @@ export function createFailoverProvider(options: {
           return;
         } catch (error) {
           if (request.signal.aborted) throw error;
+          // An account tripwire is the answer the user must see: another
+          // model would only replace it with its own failure.
+          if (error instanceof ProviderError && error.kind === "tripwire") throw error;
           const why = timedOut ? text().slow : failoverReason(error, lang());
           // A failover trigger tries the next entry; anything else skips the
           // remaining configured providers and goes straight to the backup.

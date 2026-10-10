@@ -115,6 +115,25 @@ describe("the backup provider (M4 §1)", () => {
     );
   });
 
+  it("never fails over after an account tripwire: its reason is what the user sees", async () => {
+    const seen: string[] = [];
+    const tripwire = new ProviderError(
+      "tripwire",
+      "ChatGPT tried to use its own tools; Jarvis stopped it.",
+    );
+    const { provider, switches } = setup(
+      [
+        { id: "chatgpt", locality: "cloud", provider: failing("chatgpt", tripwire, seen) },
+        { id: "home", locality: "cloud", provider: answering("home", seen) },
+      ],
+      failing("backup", network(), seen),
+    );
+    await expect(text(provider)).rejects.toBe(tripwire);
+    expect(seen).toEqual(["chatgpt"]);
+    expect(switches).toEqual([]);
+    expect(provider.status().activeId).toBe("chatgpt");
+  });
+
   it("is the whole chain when nothing is configured", async () => {
     const seen: string[] = [];
     const { provider } = setup([], answering("backup", seen), "ar");

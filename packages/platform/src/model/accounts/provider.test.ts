@@ -96,7 +96,7 @@ describe("account provider", () => {
     await expect(
       drain(provider("claude", lines("claude-tool-use")).chat(request())),
     ).rejects.toEqual(
-      new ProviderError("bad-response", "Claude tried to use its own tools; Jarvis stopped it."),
+      new ProviderError("tripwire", "Claude tried to use its own tools; Jarvis stopped it."),
     );
   });
 

@@ -58,7 +58,9 @@ export interface ModelProvider {
 
 /** network: no answer at all; auth: 401/403 or no key; http: any other non-2xx;
  *  bad-response: an answer we cannot read. */
-export type ProviderErrorKind = "network" | "auth" | "http" | "bad-response";
+/** "tripwire": a signed-in account's CLI tried something it must not (Rafiq
+ *  v1.1 account sign-in); the turn ends with that reason, never failed over. */
+export type ProviderErrorKind = "network" | "auth" | "http" | "bad-response" | "tripwire";
 
 export class ProviderError extends Error {
   constructor(
