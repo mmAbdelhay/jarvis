@@ -9,7 +9,12 @@ import {
   turnInvocation,
 } from "@jarvis/platform/model";
 import { describe, expect, it } from "vitest";
-import { accountSandboxArgv, accountSandboxProbe, accountUnitName } from "./sandbox.js";
+import {
+  ACCOUNT_PROBE_SCRIPT,
+  accountSandboxArgv,
+  accountSandboxProbe,
+  accountUnitName,
+} from "./sandbox.js";
 
 const PINS = parseAccountPins(
   JSON.parse(
@@ -121,6 +126,11 @@ describe("account sandbox argv", () => {
   it("names units with the account and 8 hex digits", () => {
     expect(accountUnitName("copilot", () => "deadbeef")).toBe("jarvis-account-copilot-deadbeef");
     expect(() => accountUnitName("copilot", () => "x;y")).toThrow();
+  });
+
+  it("probes the system bus by access: InaccessiblePaths= leaves a mode-000 node behind", () => {
+    expect(ACCOUNT_PROBE_SCRIPT).toContain("test ! -w /run/dbus/system_bus_socket");
+    expect(ACCOUNT_PROBE_SCRIPT).not.toContain("test ! -e /run/dbus/system_bus_socket");
   });
 });
 

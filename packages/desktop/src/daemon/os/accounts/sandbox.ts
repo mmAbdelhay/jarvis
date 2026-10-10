@@ -104,14 +104,16 @@ export function accountSandboxArgv(
 }
 
 /** The tmpfs home holds exactly the three bound trees' first segments; the
- *  runtime dir, the system bus, ~/.ssh and jarvis.yaml are gone; the config dir
- *  is writable, the CLI dir read-only, /usr read-only and /tmp private. Paths
- *  go in as arguments, never into the script text. */
+ *  runtime dir, ~/.ssh and jarvis.yaml are gone; the system bus socket cannot
+ *  be opened (InaccessiblePaths= leaves a mode-000 node in its place, so it
+ *  still exists); the config dir is writable, the CLI dir read-only, /usr
+ *  read-only and /tmp private. Paths go in as arguments, never into the
+ *  script text. */
 export const ACCOUNT_PROBE_SCRIPT =
   "home=$1; rt=$2; w=$3; r=$4; " +
   'test "$(ls -A "$home" | tr "\\n" " ")" = ".cache .config .local " && ' +
   'test ! -e "$rt/bus" && test ! -e "$home/.ssh" && test ! -e "$home/.config/jarvis/jarvis.yaml" && ' +
-  "test ! -e /run/dbus/system_bus_socket && " +
+  "test ! -r /run/dbus/system_bus_socket && test ! -w /run/dbus/system_bus_socket && " +
   'test -w "$w" && test -r "$r" && test ! -w "$r" && ' +
   "! touch /usr/.jarvis-probe 2>/dev/null && " +
   'test -z "$(ls -A /tmp)"';
