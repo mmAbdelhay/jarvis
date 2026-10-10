@@ -22,6 +22,8 @@ make_tarball() {
   rm -rf "$tmp/tar-src"
   mkdir -p "$root/bin"
   printf '#!/bin/sh\necho %s\n' "$2" > "$root/bin/node"
+  mkdir -p "$root/lib/node_modules/npm/bin"
+  printf '// npm\n' > "$root/lib/node_modules/npm/bin/npm-cli.js"
   chmod 0755 "$root/bin/node"
   echo "MIT" > "$root/LICENSE"
   tar -C "$tmp/tar-src" -cJf "$1" node-v24.0.0-linux-x64
@@ -45,6 +47,8 @@ check "build stamp beside the bundle (§6 #6)" deb_has "$deb" usr/lib/jarvis/dae
 check "nothing else in the daemon dir" test "$(deb_list "$deb" | awk '{print $6}' | grep -c '^./usr/lib/jarvis/daemon/.')" = 3
 check "node at contract path" deb_has "$deb" usr/lib/jarvis/node/bin/node
 check "node executable" test "$(deb_mode "$deb" usr/lib/jarvis/node/bin/node)" = "-rwxr-xr-x"
+check "npm ships with the bundled node" deb_has "$deb" usr/lib/jarvis/node/lib/node_modules/npm/bin/npm-cli.js
+check "npm launcher" deb_has "$deb" usr/lib/jarvis/node/bin/npm
 check "node licence shipped" deb_has "$deb" usr/lib/jarvis/node/LICENSE
 check "user unit at contract path" deb_has "$deb" usr/lib/systemd/user/jarvisd.service
 check "unit is Plan A's, running bundled node on the bundle" grep -qx "$EXEC" <<<"$unit"

@@ -1,0 +1,11 @@
+#!/bin/sh
+# Plan Y §5.7: inside an account sandbox, "open a browser" only hands the
+# address to jarvisd (through the file named by JARVIS_OPEN_URL_FILE), which
+# checks it against the account's allowlist and opens it in your session.
+set -eu
+[ "$#" -ge 1 ] || exit 2
+target=${JARVIS_OPEN_URL_FILE:-}
+[ -n "$target" ] || exit 2
+umask 077
+printf '%s\n' "$1" > "$target.tmp"
+mv -f "$target.tmp" "$target"

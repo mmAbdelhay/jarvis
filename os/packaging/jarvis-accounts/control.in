@@ -1,0 +1,14 @@
+Package: jarvis-accounts
+Version: @VERSION@
+Architecture: all
+Maintainer: Muhammad AbdElHay <mmAbdelhay@users.noreply.github.com>
+Installed-Size: @INSTALLED_SIZE@
+Depends: jarvisd (= @VERSION@)
+Section: admin
+Priority: optional
+Homepage: @HOME_URL@
+Description: Sign in to Jarvis with a Claude, ChatGPT, Google or GitHub Copilot account
+ The exact versions (with npm integrity) of the official command-line
+ programs Jarvis installs per user, on demand, when someone signs in with
+ an account on @DISTRO_NAME@, and the helper that hands their sign-in page
+ to your browser from inside their sandbox.
