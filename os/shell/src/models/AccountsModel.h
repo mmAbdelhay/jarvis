@@ -83,6 +83,7 @@ private:
         QString version;
         bool signedIn = false;
         QString identity;
+        QString revocationNotice;
     };
     int rowOf(const QString& account) const;
     void touchRow(int row);

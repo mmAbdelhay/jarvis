@@ -123,6 +123,33 @@ private slots:
         QVERIFY(model.statusLine().contains(u"https://github.com/settings/applications"));
     }
 
+    void signOutNonSelectedCopilotShowsRowGuidance()
+    {
+        AccountsModel model;
+        model.applyStatus(status(true, true));
+        model.applyState(QJsonObject{{"account", "copilot"}, {"phase", "signed-in"}, {"identity", "omar@example.com"}});
+        const QString selectedStatus = model.statusLine();
+        QSignalSpy logout(&model, &AccountsModel::logoutRequested);
+        QSignalSpy rowsChanged(&model, &AccountsModel::dataChanged);
+
+        model.signOut(u"copilot"_s);
+
+        QCOMPARE(model.selected(), u"claude"_s);
+        QCOMPARE(model.statusLine(), selectedStatus);
+        QCOMPARE(logout.count(), 1);
+        QCOMPARE(logout.at(0).at(0).toString(), u"copilot"_s);
+        QVERIFY(model.data(model.index(3), AccountsModel::StatusTextRole).toString()
+                    .contains(u"To revoke GitHub Copilot access after signing out, visit https://github.com/settings/applications."));
+        QCOMPARE(rowsChanged.count(), 1);
+        QCOMPARE(rowsChanged.at(0).at(0).value<QModelIndex>(), model.index(3));
+        model.applyStatus(status(true, true));
+        QVERIFY(model.data(model.index(3), AccountsModel::StatusTextRole).toString()
+                    .contains(u"https://github.com/settings/applications"));
+        QVERIFY(!model.data(model.index(0), AccountsModel::StatusTextRole).toString().contains(u"revoke"));
+        model.applyState(QJsonObject{{"account", "copilot"}, {"phase", "signed-in"}, {"identity", "omar@example.com"}});
+        QCOMPARE(model.data(model.index(3), AccountsModel::StatusTextRole).toString(), u"Signed in as omar@example.com"_s);
+    }
+
     void ignoresGarbage()
     {
         AccountsModel model;

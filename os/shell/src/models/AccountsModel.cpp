@@ -69,9 +69,10 @@ int AccountsModel::rowCount(const QModelIndex& parent) const { return parent.isV
 
 QString AccountsModel::statusTextOf(const Row& row) const
 {
-    if (row.signedIn)
-        return tr("Signed in as %1").arg(row.identity.isEmpty() ? label(row.account) : row.identity);
-    return row.installed ? tr("Ready to sign in") : tr("Not set up");
+    const QString status = row.signedIn
+        ? tr("Signed in as %1").arg(row.identity.isEmpty() ? label(row.account) : row.identity)
+        : row.installed ? tr("Ready to sign in") : tr("Not set up");
+    return row.revocationNotice.isEmpty() ? status : status + u'\n' + row.revocationNotice;
 }
 
 QVariant AccountsModel::data(const QModelIndex& index, int role) const
@@ -211,6 +212,7 @@ void AccountsModel::applyState(const QJsonObject& push)
     } else if (phase == u"signed-in") {
         r.installed = true;
         r.signedIn = true;
+        r.revocationNotice.clear();
         r.identity = push.value("identity").toString().left(254);
         touchRow(row);
     }
@@ -269,13 +271,16 @@ void AccountsModel::signOut(const QString& account)
 {
     if (!isAccount(account))
         return;
+    QString guidance;
+    if (account == u"gemini")
+        guidance = tr("To revoke Google access after signing out, visit https://myaccount.google.com/connections.");
+    else if (account == u"copilot")
+        guidance = tr("To revoke GitHub Copilot access after signing out, visit https://github.com/settings/applications.");
+    const int row = rowOf(account);
+    m_rows[row].revocationNotice = guidance;
+    touchRow(row);
     if (account == m_selected) {
         m_loginAfterInstall = false;
-        QString guidance;
-        if (account == u"gemini")
-            guidance = tr("To revoke Google access after signing out, visit https://myaccount.google.com/connections.");
-        else if (account == u"copilot")
-            guidance = tr("To revoke GitHub Copilot access after signing out, visit https://github.com/settings/applications.");
         setPhase(QString(), guidance);
     }
     emit logoutRequested(account);
