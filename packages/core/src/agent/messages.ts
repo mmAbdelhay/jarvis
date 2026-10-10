@@ -494,8 +494,76 @@ export const RECIPE_TEXT = {
   unavailable: "Setup recipes are not available in this version of jarvisd.",
 } as const;
 
+const ACCOUNT_EN = {
+  notInstalled: (label: string) =>
+    `${label} isn't set up on this computer yet. Open Settings → Model providers to sign in.`,
+  signIn: (label: string) =>
+    `Jarvis is signed out of ${label}. Open Settings → Model providers and sign in again.`,
+  rateLimited: (label: string) =>
+    `${label} says you have reached your plan's limit for now. Try again later.`,
+  unreachable: (label: string) => `Jarvis could not reach ${label}. Check the internet connection.`,
+  failed: (label: string, detail: string) => `${label} could not answer: ${detail}`,
+  tripwire: (label: string) => `${label} tried to use its own tools; Jarvis stopped it.`,
+  sandboxOff: () =>
+    "Signing in with an account needs the user sandbox (systemd-run --user), which is not working on this computer.",
+  downloading: (label: string) => `Downloading ${label}…`,
+  checking: (label: string) => `Checking ${label}'s signature…`,
+  finishing: (label: string) => `Finishing ${label} setup…`,
+  installed: (label: string) => `${label} is ready. Sign in next.`,
+  downloadFailed: (label: string) =>
+    `Couldn't download ${label}. Check the internet connection and try again.`,
+  integrityFailed: (label: string) =>
+    `The ${label} download didn't match the version Rafiq trusts, so it was removed.`,
+  signaturesFailed: (label: string) =>
+    `${label}'s package signature didn't check out, so it was removed.`,
+  setupFailed: (label: string) => `${label} couldn't finish setting up.`,
+  timedOut: "Sign-in timed out after 10 minutes. Try again.",
+  notFinished: (label: string) => `${label} sign-in didn't finish. Try again.`,
+  loginFailed: (label: string) => `${label} sign-in failed. Try again.`,
+  badUrl: (label: string) =>
+    `${label} asked to open an address Jarvis doesn't trust, so sign-in stopped.`,
+  installFirst: (label: string) => `Set up ${label} first.`,
+  busy: (label: string) => `${label} is already being set up.`,
+  pinsMissing: "The list of supported accounts is missing (package jarvis-accounts).",
+  accountsOff: "Signing in with an account is not available on this system.",
+};
+export type AccountText = typeof ACCOUNT_EN;
+
+const ACCOUNT_AR: AccountText = {
+  notInstalled: (label) =>
+    `${label} غير مُعدّ على هذا الحاسوب بعد. افتح الإعدادات ← مزوّدو النماذج لتسجيل الدخول.`,
+  signIn: (label) =>
+    `جارفيس غير مسجَّل الدخول إلى ${label}. افتح الإعدادات ← مزوّدو النماذج وسجّل الدخول مرة أخرى.`,
+  rateLimited: (label) => `يقول ${label} إنك بلغت حدّ خطتك حاليًا. حاول لاحقًا.`,
+  unreachable: (label) => `تعذّر على جارفيس الوصول إلى ${label}. تحقّق من الاتصال بالإنترنت.`,
+  failed: (label, detail) => `تعذّر على ${label} الإجابة: ${detail}`,
+  tripwire: (label) => `حاول ${label} استخدام أدواته الخاصة، فأوقفه جارفيس.`,
+  sandboxOff: () =>
+    "يتطلب تسجيل الدخول بحساب بيئة العزل الخاصة بالمستخدم (systemd-run --user)، وهي لا تعمل على هذا الحاسوب.",
+  downloading: (label) => `جارٍ تنزيل ${label}…`,
+  checking: (label) => `جارٍ التحقق من توقيع ${label}…`,
+  finishing: (label) => `جارٍ إكمال إعداد ${label}…`,
+  installed: (label) => `${label} جاهز. سجّل الدخول الآن.`,
+  downloadFailed: (label) => `تعذّر تنزيل ${label}. تحقّق من الاتصال بالإنترنت وحاول مرة أخرى.`,
+  integrityFailed: (label) => `لم يطابق تنزيل ${label} الإصدار الذي يثق به رفيق، لذا حُذف.`,
+  signaturesFailed: (label) => `لم يجتز توقيع حزمة ${label} التحقق، لذا حُذفت.`,
+  setupFailed: (label) => `تعذّر إكمال إعداد ${label}.`,
+  timedOut: "انتهت مهلة تسجيل الدخول بعد 10 دقائق. حاول مرة أخرى.",
+  notFinished: (label) => `لم يكتمل تسجيل الدخول إلى ${label}. حاول مرة أخرى.`,
+  loginFailed: (label) => `فشل تسجيل الدخول إلى ${label}. حاول مرة أخرى.`,
+  badUrl: (label) => `طلب ${label} فتح عنوان لا يثق به جارفيس، لذا توقف تسجيل الدخول.`,
+  installFirst: (label) => `أعِدّ ${label} أولًا.`,
+  busy: (label) => `يجري إعداد ${label} بالفعل.`,
+  pinsMissing: "قائمة الحسابات المدعومة مفقودة (الحزمة jarvis-accounts).",
+  accountsOff: "تسجيل الدخول بحساب غير متاح على هذا النظام.",
+};
+
+/** Plan Y: account sign-in, install and provider texts. */
+export const ACCOUNT_TEXT: Localized<AccountText> = { en: ACCOUNT_EN, ar: ACCOUNT_AR };
+
 /** Every user-visible table, for the i18n gate (i18n-tables.test.ts). */
 export const I18N_TABLES = {
+  account: ACCOUNT_TEXT,
   cu: CU_TEXT,
   user: USER_TEXT,
   activity: TOOL_ACTIVITY,

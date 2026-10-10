@@ -7,12 +7,20 @@
 // anyway, so editing it cannot make a desktop config unloadable.
 //
 // No electron here (core/no-electron.test.ts).
-import { PROVIDER_KINDS, type ProviderKind } from "@jarvis/core";
+import {
+  ACCOUNT_BASE_URLS,
+  ACCOUNT_IDS,
+  type AccountId,
+  isAccountId,
+  PROVIDER_KINDS,
+  type ProviderKind,
+} from "@jarvis/core";
 import { parseBaseUrl } from "@jarvis/wire";
 import { parse, parseDocument } from "yaml";
 
 export type ProviderSection = {
   kind: ProviderKind;
+  account?: AccountId;
   baseUrl: string;
   model: string;
   auth: "api-key" | "subscription";
@@ -37,6 +45,27 @@ export function parseProviderSection(raw: unknown): ProviderSection | null {
   if (typeof kind !== "string" || !(PROVIDER_KINDS as readonly string[]).includes(kind)) {
     throw new Error(`Config \`provider.kind\` must be one of ${PROVIDER_KINDS.join(", ")}`);
   }
+  const account = section["account"];
+  if (kind === "account") {
+    if (!isAccountId(account)) {
+      throw new Error(`Config \`provider.account\` must be one of ${ACCOUNT_IDS.join(", ")}`);
+    }
+    if (typeof model !== "string" || model.length === 0 || model.length > 200) {
+      throw new Error("Config `provider.model` must be a non-empty string");
+    }
+    if (tools !== undefined && typeof tools !== "boolean")
+      throw new Error("Config `provider.tools` must be true or false");
+    return {
+      kind: "account",
+      account,
+      baseUrl: ACCOUNT_BASE_URLS[account],
+      model,
+      auth: "api-key",
+      supportsTools: tools !== false,
+    };
+  }
+  if (account !== undefined) throw new Error("Config `provider.account` is only for kind account");
+
   const baseUrl = parseBaseUrl(section["baseUrl"]);
   if (baseUrl === undefined)
     throw new Error("Config `provider.baseUrl` must be an http(s) URL without credentials");
@@ -97,6 +126,9 @@ export async function writeProviderSection(
     baseUrl: section.baseUrl,
     model: section.model,
   };
+  if (section.kind === "account" && section.account !== undefined)
+    value["account"] = section.account;
+
   if (!section.supportsTools) value["tools"] = false;
   if (section.auth === "subscription") value["auth"] = "subscription";
   document.setIn(["provider"], document.createNode(value));

@@ -288,7 +288,7 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
   let visionTags: ReadonlySet<string> = new Set();
   const ollamaVision = new Set<string>();
   const visionOf = (entry: ProviderEntry): boolean =>
-    modelSupportsVision(entry.kind, entry.model, visionTags) ||
+    modelSupportsVision(entry.kind, entry.model, visionTags, entry.account) ||
     (entry.kind === "ollama" && ollamaVision.has(entry.id));
   /** The backup as a provider entry (fixed loopback URL, M4 §1). */
   function backupEntry(): ProviderEntry | null {
@@ -664,7 +664,12 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
       entries: brain.providers.map((entry) => ({
         id: entry.id,
         locality: isLocalBaseUrl(entry.baseUrl) ? ("local" as const) : ("cloud" as const),
-        provider: withImagePolicy(keyedProvider(entry, entry), () => cuBlocked(entry) === null),
+        provider: withImagePolicy(
+          entry.kind === "account"
+            ? deps.makeProvider(entry, undefined)
+            : keyedProvider(entry, entry),
+          () => cuBlocked(entry) === null,
+        ),
       })),
       allowCloudFallback: brain.allowCloudFallback,
       ...(backup === undefined ? {} : { backup }),
@@ -704,7 +709,9 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
       model: draft.model,
       auth: "api-key",
       supportsTools: true,
+      ...(draft.account === undefined ? {} : { account: draft.account }),
     };
+    if (draft.kind === "account") return deps.makeProvider(target, undefined);
     if (draft.apiKey !== undefined) return deps.makeProvider(target, draft.apiKey);
     const saved = brain.providers.find(
       (entry) =>
@@ -932,7 +939,8 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
           kind: entry.kind,
           baseUrl: entry.baseUrl,
           model: entry.model,
-          hasKey: await hasProviderKey(entry, keyStores()),
+          ...(entry.account === undefined ? {} : { account: entry.account }),
+          hasKey: entry.kind === "account" ? false : await hasProviderKey(entry, keyStores()),
           vision: visionOf(entry),
           computerUse: {
             enabled: brain.computerUse.enabled[entry.id] === true,
@@ -985,6 +993,7 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
             draft.apiKey === undefined &&
             saved.kind === draft.kind &&
             saved.baseUrl === draft.baseUrl &&
+            saved.account === draft.account &&
             saved.model === draft.model;
           if (unchanged) {
             return [draft.id, { ok: true, supportsTools: saved.supportsTools, models: [] }];
@@ -1018,6 +1027,7 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
               kind: draft.kind,
               baseUrl: draft.baseUrl,
               model: draft.model,
+              ...(draft.account === undefined ? {} : { account: draft.account }),
               auth: "api-key" as const,
               supportsTools: results[draft.id]?.supportsTools ?? true,
             })),

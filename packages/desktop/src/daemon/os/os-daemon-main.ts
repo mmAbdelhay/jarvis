@@ -17,6 +17,13 @@
 // process or log line sees them.
 //
 // No electron here (core/no-electron.test.ts); process.platform read once, here.
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { OS_CONTROL_PUSHES } from "@jarvis/wire";
+import { nodeAccountFs } from "./accounts/account-fs.js";
+import { accountSandboxArgv, accountSandboxProbe, accountUnitName } from "./accounts/sandbox.js";
+import { type AccountService, createAccountService } from "./accounts/service.js";
+
 import { createHash, randomBytes } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, rm, mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
@@ -31,6 +38,9 @@ import {
   TRUSTED_MCP_SERVERS,
 } from "@jarvis/core";
 import {
+  ACCOUNT_PINS_PATH,
+  createNodeCliSpawner,
+  parseAccountPins,
   auditLogPath,
   createAuditLog,
   createSecretToolStore,
@@ -219,6 +229,64 @@ async function main(argv: readonly string[]): Promise<void> {
   };
   const runtimeDir =
     resolveRuntimeDir(env, process.getuid?.()) ?? `/run/user/${process.getuid?.() ?? 0}`;
+  const execFileP = promisify(execFile);
+  const unitHex = () => randomBytes(4).toString("hex");
+  // Plan Y: account CLIs (not in the Docker read-only profile).
+  const accounts: AccountService | undefined = readonlyProfile
+    ? undefined
+    : createAccountService({
+        home,
+        readPins: async () =>
+          parseAccountPins(JSON.parse(await readFile(ACCOUNT_PINS_PATH, "utf8"))),
+        spawn: createNodeCliSpawner({
+          // systemd-run itself needs jarvisd's own environment to reach the
+          // user manager; `env -i` inside the argv gives the CLI only its own.
+          wrap: (inv, unit) => ({
+            command: accountSandboxArgv(inv, { home, runtimeDir, unit }),
+            env: Object.fromEntries(
+              Object.entries(process.env).filter((e): e is [string, string] => e[1] !== undefined),
+            ),
+          }),
+          unitName: (inv) => accountUnitName(inv.account, unitHex),
+          stopUnit: async (unit) => {
+            await execFileP("systemctl", ["--user", "stop", unit]).catch(() => {});
+          },
+        }),
+        sandboxWorks: async (paths) => {
+          // The probe runs as a claude-named unit, whichever account asked first.
+          const [cmd, ...args] = accountSandboxProbe(
+            home,
+            runtimeDir,
+            paths,
+            accountUnitName("claude", unitHex),
+          );
+          return execFileP(cmd as string, args, { timeout: 30_000 }).then(
+            () => true,
+            () => false,
+          );
+        },
+        fs: nodeAccountFs(home),
+        readOpenUrl: async (path) => {
+          try {
+            const url = (await readFile(path, "utf8")).trim().slice(0, 4096);
+            await rm(path, { force: true });
+            return url === "" ? undefined : url;
+          } catch {
+            return undefined;
+          }
+        },
+        openBrowser: async (url) => {
+          await execFileP("xdg-open", [url], {
+            env: { ...process.env, ...sessionEnv.current() },
+            timeout: 15_000,
+          });
+        },
+        push: (state) => push(OS_CONTROL_PUSHES.accountState, state),
+        language: () => agent.language(),
+        randomBytes: (n) => randomBytes(n),
+        log: info,
+      });
+
   const registryServers = createRegistryServers({
     home,
     runtimeDir,
@@ -412,6 +480,7 @@ async function main(argv: readonly string[]): Promise<void> {
       buildProvider(section, apiKey, {
         fetch: (url, init) => fetch(url, init),
         language: () => agent.language(),
+        ...(accounts === undefined ? {} : { account: (s) => accounts.provider(s) }),
       }),
     ...(fakeScript === undefined ? {} : { fakeScript }),
     connectMcp: async () => {
@@ -490,6 +559,7 @@ async function main(argv: readonly string[]): Promise<void> {
     agent,
     voice,
     remote,
+    ...(accounts === undefined ? {} : { accounts }),
     // Rafiq M3 §3: the kernel names the peer program; only jarvis-lock may lock or unlock.
     isLockClient: async (connection) => (await connection.peerExecutable?.()) === LOCK_CLIENT_PATH,
   });
@@ -528,6 +598,7 @@ async function main(argv: readonly string[]): Promise<void> {
         .stop()
         .catch((thrown: unknown) => error(`phone bridge stop: ${describe(thrown)}`));
       voice?.stop();
+      await accounts?.shutdown();
       await agent.shutdown();
       cuClient?.close();
       vectorCache?.close();

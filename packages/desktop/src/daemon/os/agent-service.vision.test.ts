@@ -74,3 +74,26 @@ describe("provider:list vision (v1.1 contracts §2)", () => {
     expect(probes).toEqual(["http://127.0.0.1:11434/custom:7b", "http://127.0.0.1:11434/text:7b"]);
   });
 });
+
+it("reports account identities, no stored keys, and Claude-only vision", async () => {
+  const { agent } = await startAgent({
+    yaml:
+      "os:\n  providers:\n" +
+      ["claude", "chatgpt", "gemini", "copilot"]
+        .map(
+          (account) =>
+            `    - { id: ${account}, kind: account, account: ${account}, model: default }\n`,
+        )
+        .join(""),
+    overrides: { makeProvider: () => scripted([]) },
+  });
+  expect(
+    (await agent.providerList()).providers.map((p) => [p.account, p.hasKey, p.vision]),
+  ).toEqual([
+    ["claude", false, true],
+    ["chatgpt", false, false],
+    ["gemini", false, false],
+    ["copilot", false, false],
+  ]);
+  await agent.shutdown();
+});

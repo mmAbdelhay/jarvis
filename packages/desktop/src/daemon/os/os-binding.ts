@@ -9,6 +9,7 @@ import {
   type Lang,
   type AuditVia,
   CONTROL_TEXT,
+  ACCOUNT_TEXT,
   type ConfirmFrom,
   LOCAL_CONFIRM,
 } from "@jarvis/core";
@@ -26,6 +27,7 @@ import {
   parseMemoryList,
   parseMemorySetEnabled,
   parseNoArgs,
+  parseAccountRequest,
   parseOwnerPassword,
   parseCuConsent,
   parseCuSetEnabled,
@@ -43,6 +45,7 @@ import { ControlRequestError } from "../control/messages.js";
 import type { ControlConnection, ControlHandlers } from "../control/server.js";
 import { type OsAgent, OsAgentError } from "./agent-service.js";
 import type { OsRemoteControls } from "./os-remote.js";
+import type { AccountService } from "./accounts/service.js";
 import type { OsVoice } from "./voice-service.js";
 
 function value<T>(parsed: Parsed<T>): T {
@@ -60,6 +63,7 @@ export type OsServices = {
   /** Rafiq M3 §3: true only for /usr/bin/jarvis-lock (peer-checked). */
   isLockClient?(connection: ControlConnection): Promise<boolean>;
   voice?: OsVoice;
+  accounts?: AccountService;
   /** Rafiq M3 plan N: the phone bridge controls (local-only channels). */
   remote?: OsRemoteControls;
 };
@@ -78,6 +82,7 @@ export const PHONE_REQUESTS: ReadonlySet<string> = new Set([
   OS_CONTROL_REQUESTS.agentUndo,
   OS_CONTROL_REQUESTS.auditList,
   OS_CONTROL_REQUESTS.memoryList,
+  OS_CONTROL_REQUESTS.accountStatus,
 ]);
 
 const MAX_PHONE_NAME = 64;
@@ -112,6 +117,13 @@ export function requireLocal(origin: OsOrigin, lang: Lang = "en"): void {
 export function createOsRouter(services: OsServices): OsRouter {
   const { agent } = services;
 
+  function accounts(): AccountService {
+    if (services.accounts === undefined) {
+      throw new ControlRequestError("unsupported", ACCOUNT_TEXT[agent.language()].accountsOff);
+    }
+    return services.accounts;
+  }
+
   function remote(): OsRemoteControls {
     if (services.remote === undefined) {
       throw new ControlRequestError("unsupported", CONTROL_TEXT[agent.language()].remoteOff);
@@ -121,6 +133,22 @@ export function createOsRouter(services: OsServices): OsRouter {
 
   async function route(channel: string, args: unknown[], origin: OsOrigin): Promise<unknown> {
     switch (channel) {
+      case OS_CONTROL_REQUESTS.accountStatus:
+        value(parseNoArgs(args));
+        return accounts().status();
+      case OS_CONTROL_REQUESTS.accountInstall:
+        requireLocal(origin, agent.language());
+        return accounts().install(value(parseAccountRequest(args)).account);
+      case OS_CONTROL_REQUESTS.accountLogin:
+        requireLocal(origin, agent.language());
+        return accounts().login(value(parseAccountRequest(args)).account);
+      case OS_CONTROL_REQUESTS.accountLogout:
+        requireLocal(origin, agent.language());
+        return accounts().logout(value(parseAccountRequest(args)).account);
+      case OS_CONTROL_REQUESTS.accountUninstall:
+        requireLocal(origin, agent.language());
+        return accounts().uninstall(value(parseAccountRequest(args)).account);
+
       case OS_CONTROL_REQUESTS.uiSetLanguage:
         requireLocal(origin, agent.language());
         return agent.setLanguage(value(parseUiSetLanguage(args)).lang);
@@ -240,6 +268,22 @@ export function createOsRouter(services: OsServices): OsRouter {
     origin: OsOrigin,
   ): Promise<unknown> {
     switch (channel) {
+      case OS_CONTROL_REQUESTS.accountStatus:
+        value(parseNoArgs(args));
+        return accounts().status();
+      case OS_CONTROL_REQUESTS.accountInstall:
+        requireLocal(origin, agent.language());
+        return accounts().install(value(parseAccountRequest(args)).account);
+      case OS_CONTROL_REQUESTS.accountLogin:
+        requireLocal(origin, agent.language());
+        return accounts().login(value(parseAccountRequest(args)).account);
+      case OS_CONTROL_REQUESTS.accountLogout:
+        requireLocal(origin, agent.language());
+        return accounts().logout(value(parseAccountRequest(args)).account);
+      case OS_CONTROL_REQUESTS.accountUninstall:
+        requireLocal(origin, agent.language());
+        return accounts().uninstall(value(parseAccountRequest(args)).account);
+
       case OS_CONTROL_BLOBS.voiceUtterance: {
         if (bytes.byteLength > MAX_VOICE_BYTES) {
           throw new ControlRequestError("bad-request", CONTROL_TEXT[agent.language()].badAudio);

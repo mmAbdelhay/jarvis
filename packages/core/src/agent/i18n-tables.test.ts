@@ -9,6 +9,27 @@ import { HOST_FORCED_RISK } from "./tool-registry.js";
 
 /** Arguments for every function cell, by "<table>.<key>". */
 const SAMPLES: Record<string, unknown[]> = {
+  "account.notInstalled": ["Claude"],
+  "account.signIn": ["Claude"],
+  "account.rateLimited": ["Claude"],
+  "account.unreachable": ["Claude"],
+  "account.failed": ["Claude", "boom"],
+  "account.tripwire": ["Claude"],
+  "account.sandboxOff": [],
+  "account.downloading": ["Claude"],
+  "account.checking": ["Claude"],
+  "account.finishing": ["Claude"],
+  "account.installed": ["Claude"],
+  "account.downloadFailed": ["Claude"],
+  "account.integrityFailed": ["Claude"],
+  "account.signaturesFailed": ["Claude"],
+  "account.setupFailed": ["Claude"],
+  "account.notFinished": ["Claude"],
+  "account.loginFailed": ["Claude"],
+  "account.badUrl": ["Claude"],
+  "account.installFirst": ["Claude"],
+  "account.busy": ["Claude"],
+
   "cu.sessionTitle": ["GIMP", "export beach.xcf"],
   "cu.stepClick": ["Export"],
   "cu.stepDoubleClick": ["beach.xcf"],
@@ -95,4 +116,8 @@ describe("jarvisd message tables (M4 i18n gate)", () => {
       expect(Object.hasOwn(TOOL_ACTIVITY.en, tool), tool).toBe(true);
     }
   });
+});
+
+it("registers account messages", () => {
+  expect(I18N_TABLES).toHaveProperty("account");
 });

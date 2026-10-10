@@ -134,6 +134,8 @@ function entryValue(entry: ProviderEntry): Record<string, unknown> {
     baseUrl: entry.baseUrl,
     model: entry.model,
   };
+  if (entry.kind === "account" && entry.account !== undefined) value["account"] = entry.account;
+
   if (!entry.supportsTools) value["tools"] = false;
   if (entry.auth === "subscription") value["auth"] = "subscription";
   return value;

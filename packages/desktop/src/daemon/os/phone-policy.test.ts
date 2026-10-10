@@ -44,6 +44,7 @@ describe("the phone's OS surface (Rafiq M3 §2)", () => {
       "agent:undo",
       "audit:list",
       "memory:list",
+      "account:status",
     ]) {
       await expect(handle(channel, [], DEVICE)).resolves.toEqual({
         kind: "value",
@@ -66,6 +67,7 @@ describe("the phone's OS surface (Rafiq M3 §2)", () => {
       "agent:undo",
       "audit:list",
       "memory:list",
+      "account:status",
     ]);
     for (const channel of Object.values(OS_CONTROL_REQUESTS).filter((c) => !allowed.has(c))) {
       await expect(handle(channel, [], DEVICE)).resolves.toEqual({ kind: "forbidden" });

@@ -151,3 +151,40 @@ describe("read/writeProviderSection", () => {
     expect(broken.files.get("/c/jarvis.yaml")).toBe("provider: [unclosed\n");
   });
 });
+
+describe("account providers (Plan Y §2.1)", () => {
+  it("parses kind account with its account and forces the display URL", () => {
+    expect(
+      parseProviderSection({
+        kind: "account",
+        account: "copilot",
+        baseUrl: "http://x.example",
+        model: "default",
+      }),
+    ).toEqual({
+      kind: "account",
+      account: "copilot",
+      baseUrl: "https://github.com/copilot",
+      model: "default",
+      auth: "api-key",
+      supportsTools: true,
+    });
+  });
+
+  it("refuses an account provider without a known account, and an account on another kind", () => {
+    expect(() => parseProviderSection({ kind: "account", model: "default" })).toThrow(
+      /provider.account/,
+    );
+    expect(() =>
+      parseProviderSection({ kind: "account", account: "bard", model: "default" }),
+    ).toThrow(/provider.account/);
+    expect(() =>
+      parseProviderSection({
+        kind: "anthropic",
+        account: "claude",
+        baseUrl: "https://api.anthropic.com",
+        model: "m",
+      }),
+    ).toThrow(/only for kind account/);
+  });
+});

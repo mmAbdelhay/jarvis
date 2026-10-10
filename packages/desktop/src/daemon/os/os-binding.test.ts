@@ -279,6 +279,7 @@ describe("createOsRouter origins (Rafiq M3 phone bridge)", () => {
   it("names the phone allowlist of the contract", () => {
     expect([...PHONE_REQUESTS].sort()).toEqual(
       [
+        "account:status",
         "agent:confirm",
         "agent:prompt",
         "agent:stop",
