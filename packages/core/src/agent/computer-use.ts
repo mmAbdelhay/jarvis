@@ -13,7 +13,7 @@ import {
   type CuPauseReason,
   type CuState,
 } from "./contract.js";
-import { type DescribedTarget, detectConsequence, focusAfterKey } from "./consequential.js";
+import { type DescribedTarget, detectConsequence } from "./consequential.js";
 import { type CuCapture, type CuClient, CuClientError, parseCuErrorCode } from "./cu-protocol.js";
 import { CU_IDLE_STATE, type CuEndReason, type CuSession, createCuSession } from "./cu-session.js";
 import { CU_MODEL_TEXT, CU_TEXT, joinApps } from "./cu-text.js";
@@ -167,7 +167,6 @@ export function createComputerUse(deps: ComputerUseDeps): ComputerUse {
   let bounds: CaptureBounds | null = null;
   let needsLook = true;
   let lastTyped: string | undefined;
-  let focusedDescribed: DescribedTarget | undefined;
   let lastPause: CuPauseReason = "physical-input";
   let lastState: CuState = CU_IDLE_STATE;
   const waiters = new Set<(how: "resumed" | "stopped") => void>();
@@ -192,7 +191,6 @@ export function createComputerUse(deps: ComputerUseDeps): ComputerUse {
     bounds = null;
     needsLook = true;
     lastTyped = undefined;
-    focusedDescribed = undefined;
     for (const wake of [...waiters]) wake("stopped");
     lastState = ending.end(why);
     deps.emitState(lastState);
@@ -306,19 +304,20 @@ export function createComputerUse(deps: ComputerUseDeps): ComputerUse {
     }
   }
 
-  // Final review finding 3: Enter, Space, Delete and typed newlines act on
-  // whatever has keyboard focus, which Tab or a dialog may have moved since
-  // the last click. Ask jarvis-cu; when it cannot say, fall back to the
-  // control last clicked (forgotten after any key that may move focus).
+  // Final review (security): Enter, Space, Delete and typed newlines act on
+  // whatever has keyboard focus, which Tab, a click or a dialog may have
+  // moved. Only jarvis-cu's live answer counts; the control last clicked is
+  // no proof, so when the helper cannot say the focus stays unknown and the
+  // key asks (fail closed).
   async function focusFor(action: ScreenAction): Promise<DescribedTarget | undefined> {
-    if (action.kind !== "key" && action.kind !== "type") return focusedDescribed;
+    if (action.kind !== "key" && action.kind !== "type") return undefined;
     try {
       const now = await deps.client.describeFocused();
       if (now.role !== "unknown") return now;
     } catch {
-      // older helper or AT-SPI trouble: use what V tracked
+      // older helper or AT-SPI trouble: unknown
     }
-    return focusedDescribed;
+    return undefined;
   }
 
   function gateResultText(result: GateItemResult | undefined): string {
@@ -528,10 +527,6 @@ export function createComputerUse(deps: ComputerUseDeps): ComputerUse {
     }
     lastTyped =
       action.kind === "type" ? action.target : action.kind === "key" ? lastTyped : undefined;
-    if (action.kind === "click") focusedDescribed = described;
-    else if (action.kind === "key") focusedDescribed = focusAfterKey(action.combo, focused);
-    else if (action.kind === "type") focusedDescribed = focused;
-    else focusedDescribed = undefined;
     if (session !== current) return refuse(CU_MODEL_TEXT.stoppedByUser);
     current.finishStep(index, outcome.ok);
     emit();

@@ -120,11 +120,14 @@ func TestGimpExportThroughDialogs(t *testing.T) {
 		})
 		return got
 	}
+	// The base is the focused allowed window the capture showed: the image
+	// window (fullscreen, with the frame's rect) or a dialog raised over it
+	// (not fullscreen, so it keeps its header bar; listed without a rect).
 	baseIs := func(d map[string]any, id string) {
 		t.Helper()
 		for _, w := range d["windows"].([]any) {
 			m := w.(map[string]any)
-			if m["windowId"] == id && m["w"].(float64) > 0 {
+			if m["windowId"] == id && m["allowed"] == true && m["focused"] == true {
 				return
 			}
 		}

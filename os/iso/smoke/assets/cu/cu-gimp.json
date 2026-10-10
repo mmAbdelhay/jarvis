@@ -55,13 +55,126 @@
           }
         },
         {
-          "call": "screen_done",
+          "call": "screen_click",
+          "target": {
+            "window": "GIMP$",
+            "inset": [20, 12],
+            "from": "top-left"
+          },
           "input": {
-            "summary": "Export blocked by U-1 dialog capture contract; U/V resolution required."
+            "button": "left",
+            "target": "File menu"
           }
         },
         {
-          "text": "Export blocked: U/V must resolve invisible dialog capture and input before approval or denial can be tested."
+          "call": "screen_look",
+          "input": {},
+          "hold": 1
+        },
+        {
+          "call": "screen_click",
+          "target": {
+            "window": "GIMP$",
+            "inset": [72, 327],
+            "from": "top-left"
+          },
+          "input": {
+            "button": "left",
+            "target": "Export As…"
+          }
+        },
+        {
+          "call": "screen_look",
+          "input": {},
+          "hold": 3
+        },
+        {
+          "call": "screen_click",
+          "target": {
+            "window": "GIMP$",
+            "inset": [67, 145],
+            "from": "top-left"
+          },
+          "input": {
+            "button": "left",
+            "target": "Pictures"
+          }
+        },
+        {
+          "call": "screen_look",
+          "input": {},
+          "hold": 2
+        },
+        {
+          "call": "screen_click",
+          "target": {
+            "window": "GIMP$",
+            "inset": [49, 23],
+            "from": "top-right"
+          },
+          "input": {
+            "button": "left",
+            "target": "Export"
+          }
+        },
+        {
+          "call": "screen_look",
+          "input": {},
+          "hold": 3
+        },
+        {
+          "call": "screen_click",
+          "target": {
+            "window": "GIMP$",
+            "inset": [270, -238]
+          },
+          "input": {
+            "button": "left",
+            "target": "Export",
+            "intent": "save"
+          }
+        },
+        {
+          "call": "screen_look",
+          "input": {},
+          "hold": 3
+        },
+        {
+          "call": "screen_done",
+          "input": {
+            "summary": "Exported beach.png."
+          }
+        },
+        {
+          "text": "Exported beach.png."
+        }
+      ],
+      "onDenied": [
+        {
+          "call": "screen_click",
+          "target": {
+            "window": "GIMP$",
+            "from": "top-left",
+            "inset": [47, 23]
+          },
+          "input": {
+            "button": "left",
+            "target": "Cancel"
+          }
+        },
+        {
+          "call": "screen_look",
+          "input": {},
+          "hold": 2
+        },
+        {
+          "call": "screen_done",
+          "input": {
+            "summary": "Export not approved."
+          }
+        },
+        {
+          "text": "Stopped: you did not approve the export."
         }
       ]
     },
@@ -77,13 +190,98 @@
           }
         },
         {
-          "call": "screen_done",
+          "call": "screen_click",
+          "target": {
+            "window": "GIMP$",
+            "inset": [20, 12],
+            "from": "top-left"
+          },
           "input": {
-            "summary": "Export blocked by U-1 dialog capture contract; U/V resolution required."
+            "button": "left",
+            "target": "File menu"
           }
         },
         {
-          "text": "Export blocked: U/V must resolve invisible dialog capture and input before approval or denial can be tested."
+          "call": "screen_look",
+          "input": {},
+          "hold": 1
+        },
+        {
+          "call": "screen_click",
+          "target": {
+            "window": "GIMP$",
+            "inset": [72, 327],
+            "from": "top-left"
+          },
+          "input": {
+            "button": "left",
+            "target": "Export As…"
+          }
+        },
+        {
+          "call": "screen_look",
+          "input": {},
+          "hold": 3
+        },
+        {
+          "call": "screen_click",
+          "target": {
+            "window": "GIMP$",
+            "inset": [67, 145],
+            "from": "top-left"
+          },
+          "input": {
+            "button": "left",
+            "target": "Pictures"
+          }
+        },
+        {
+          "call": "screen_look",
+          "input": {},
+          "hold": 2
+        },
+        {
+          "call": "screen_click",
+          "target": {
+            "window": "GIMP$",
+            "inset": [49, 23],
+            "from": "top-right"
+          },
+          "input": {
+            "button": "left",
+            "target": "Export"
+          }
+        },
+        {
+          "call": "screen_look",
+          "input": {},
+          "hold": 3
+        },
+        {
+          "call": "screen_click",
+          "target": {
+            "window": "GIMP$",
+            "inset": [270, -238]
+          },
+          "input": {
+            "button": "left",
+            "target": "Export",
+            "intent": "save"
+          }
+        },
+        {
+          "call": "screen_look",
+          "input": {},
+          "hold": 3
+        },
+        {
+          "call": "screen_done",
+          "input": {
+            "summary": "Exported beach.png to Pictures."
+          }
+        },
+        {
+          "text": "Done: beach.png is in Pictures."
         }
       ]
     },
@@ -249,7 +447,7 @@
     }
   ],
   "concerns": [
-    "Escalation to U/V: contracts \u00a74 U-1 makes only the original allowed GIMP toplevel fullscreen. Export Image and Export Image as PNG are separate toplevels: their titles/rectangles are redacted and their focus makes captures all black. X cannot locate or verify their save buttons via screen.look. U/V must agree a safe visible, focusable dialog capture/input contract before X10/X11 can test Review Focus 4 (deny leaves no file; approve writes PNG). These turns are blocked and do not claim consequential-card or export coverage.",
+    "Export turns (final review, calibrated with CU_DUMP_DIR frames on GIMP 3.0.4, labwc 0.8.3, 1280x800): mouse only, since GTK3 apps ignore virtual-keyboard keys under headless labwc. File > Export As… opens Export Image (gimp) over the fullscreen image window; jarvis-cu raises it without making it fullscreen, so its header bar (Name, Cancel, Export) shows. Pictures is in the sidebar (install-user-dirs.sh). Its Export button is consequential (save, found from the AT-SPI name under the pointer and the label; the model declares nothing there): the deny turn denies that card and clicks Cancel; the export turn approves it and then Export in 'Export Image as PNG' (declared intent save, gap G7), a window of GIMP's file-png plug-in (app id file-png, allowed with GIMP), centred over the image window. Targets are offsets in the image window's full-frame rectangle. Each look after a click that opens or changes a window waits (hold) for it: under KVM GIMP is fast enough that an immediate look still shows the menu, and the next click then meets the new dialog unseen (outside). Under KVM the shell's Screen control panel (an overlay layer surface, in the captures too) covers the right part of the PNG dialog's Export button, and that dialog is narrower there (fonts): the click goes to the left part of the button that both tiers show uncovered (centre offset 270,-238; measured from QMP screendumps).",
     "X10/X11: ordinary fullscreen screenshots have vacuous:true and ok:false because there are no foreign pixels to inspect. This means missing mask evidence, not a leak. Require a controlled all-black capture (turn.mask or step.mask mode all-black), or a known full-frame fixture (mode fixture with pngBase64) before asserting ok. Excluded-focus captures must be all black. Summary-only screen.look cannot provide outside-target geometry.",
     "Merged V (screen-tools.ts, computer-use.ts) never offers cu_begin to the model: a session starts with screen_look {goal, apps}, and the begin card's cu.begin item is hidden. V also rewrites helper refusals into English (cu-text.ts CU_MODEL_TEXT); fakevision maps those texts back to codes, and its tests read cu-text.ts.",
     "Excluded turn (merged U session.go checkFocus): a terminal taking focus PAUSES the session (excluded-focus); V then holds every call in waitForResume until cu:resume/cu:stop. So criterion 4 is the pause plus no key in the audit (session.sh ends the turn with cu-stop), and the all-black evidence comes from the held look while a foreign NON-excluded window (foot --app-id cu-foreign-viewer) has focus: Capture blanks because the focused window is not allowed, without pausing."

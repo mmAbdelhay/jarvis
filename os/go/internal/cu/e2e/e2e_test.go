@@ -392,7 +392,8 @@ func TestComputerUseAgainstLabwc(t *testing.T) {
 
 	// Final review finding 1: a second window of the allowed app (a dialog)
 	// takes focus. Nothing is injected until a capture has shown it, and the
-	// capture raises it and makes it the fullscreen base.
+	// capture raises it over the fullscreen main window without making it
+	// fullscreen (GTK hides a dialog's header bar, and its buttons, then).
 	t.Run("a dialog of the allowed app becomes the base before any input", func(t *testing.T) {
 		cl.t = t
 		cl.do("end", nil)
@@ -432,20 +433,24 @@ func TestComputerUseAgainstLabwc(t *testing.T) {
 			t.Fatalf("a key reached a dialog the model has not seen: %q", code)
 		}
 		d := cl.must("capture", map[string]any{"maxEdge": 640})
-		waitFor(t, "dialog fullscreen", func() bool {
+		waitFor(t, "dialog focused over the fullscreen main window", func() bool {
+			mainFull, dialogUp := false, false
 			for _, w := range zenityWindows() {
+				if w.ID == main.ID {
+					mainFull = w.Fullscreen
+				}
 				if w.ID == dialog.ID {
-					return w.Fullscreen && w.Focused
+					dialogUp = w.Focused && !w.Fullscreen
 				}
 			}
-			return false
+			return mainFull && dialogUp
 		})
 		if baseCentre(t, d) == [3]uint32{0, 0, 0} {
 			time.Sleep(300 * time.Millisecond) // the first frame may predate the resize
 			d = cl.must("capture", map[string]any{"maxEdge": 640})
 		}
 		if baseCentre(t, d) == [3]uint32{0, 0, 0} {
-			t.Fatal("the raised fullscreen dialog was not shown")
+			t.Fatal("the raised dialog was not shown")
 		}
 		cl.must("key", map[string]any{"combo": "tab"})
 		cl.must("end", nil)

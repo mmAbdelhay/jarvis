@@ -37,6 +37,13 @@ app (zenity --entry), the lock end and the disconnect restore.
 - The smoke assets' `gimprc` had `(single-window-mode yes)`, which GIMP 3
   rejects as a fatal parse error, so the whole file was ignored and the
   Welcome dialog opened (it then took focus and became the base).
+- Fullscreen hides a GTK dialog's client-side header bar, and GIMP 3's
+  Export Image dialog keeps its Name field and its Cancel/Export buttons
+  there (seen in CU_DUMP_DIR frames). jarvis-cu now raises a dialog over the
+  fullscreen image window instead of making it fullscreen. "Export Image as
+  PNG" belongs to the file-png plug-in program (Wayland app id `file-png`),
+  which jarvis-cu counts as GIMP. With both, the container tier
+  (os/iso/cu) exports Pictures/beach.png mouse only.
 - OPEN: under headless labwc no GTK3 app receives virtual-keyboard input.
   GIMP gets `wl_keyboard.enter`, the keymap and the keys (WAYLAND_DEBUG) but
   shortcuts, Escape on an open menu and typing do nothing; `yad --entry`
@@ -44,7 +51,8 @@ app (zenity --entry), the lock end and the disconnect restore.
   zenity works. jarvis-cu now creates its virtual devices at start and
   gives letters a capital level (neither fixed it). Whether a session with a
   real keyboard (KVM, hardware) behaves the same is not yet known; until it
-  is, the GIMP export is unproven end to end. Reproduce with
+  is, keyboard steps in GIMP are unproven (the scripted export uses the
+  mouse only). Reproduce with
   `CU_E2E_GTK3=1` (yad subtest) or `CU_E2E_GIMP=1`.
 
 ## GTK4 password fields (was proposed contract gap 13)

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, mkdirSync, symlinkSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, mkdirSync, symlinkSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -469,7 +469,10 @@ test("fixture flows begin the way merged V does: screen_look {goal, apps}, never
   assert.ok(
     script.turns.find((t) => t.name === "deny").steps.some((s) => s.call === "screen_done"),
   );
-  assert.match(script.turns.find((t) => t.name === "export").steps.at(-1).text, /blocked/);
+  assert.match(
+    script.turns.find((t) => t.name === "export").steps.at(-1).text,
+    /beach.png is in Pictures/,
+  );
 });
 
 // What merged V (computer-use.ts look()) actually sends: a header line, then the fenced
@@ -730,15 +733,24 @@ test("fixture mode proves full-frame pixels and rejects a changed fixture", () =
   }
 });
 
-test("U-1 export fixtures explicitly escalate invisible dialogs without claiming an export", () => {
+test("the export turns click through both Export dialogs; the deny turn cancels after the card", () => {
   const script = JSON.parse(readFileSync(new URL("./cu-gimp.json", import.meta.url), "utf8"));
-  assert.match(script.concerns.join("\n"), /U\/V/);
-  for (const turn of script.turns.filter((t) => ["deny", "export"].includes(t.name))) {
-    assert.ok(
-      !turn.steps.some((s) => s.onlyIfWindow || s.target?.window?.includes("Export Image")),
-    );
-    assert.match(turn.steps.at(-1).text, /blocked/i);
+  const turn = (name) => script.turns.find((t) => t.name === name);
+  for (const name of ["deny", "export"]) {
+    const steps = turn(name).steps;
+    // Mouse only: GTK3 (GIMP) ignores virtual-keyboard keys under headless labwc.
+    assert.ok(!steps.some((s) => s.call === "screen_key" || s.call === "screen_type"));
+    const clicks = steps.filter((s) => s.call === "screen_click").map((s) => s.input.target);
+    assert.deepEqual(clicks, ["File menu", "Export As…", "Pictures", "Export", "Export"]);
+    // Every click is preceded by a look at what it acts on.
+    steps.forEach((s, i) => {
+      if (s.call === "screen_click") assert.equal(steps[i - 1].call, "screen_look");
+    });
   }
+  const cancel = turn("deny").onDenied;
+  assert.equal(cancel[0].input.target, "Cancel");
+  assert.equal(cancel.at(-2).call, "screen_done");
+  assert.ok(!script.concerns.join("\n").includes("U/V must"));
 });
 
 test("summary-only capture invalidates earlier target geometry", () => {
@@ -830,4 +842,93 @@ test("a new turn does not recheck historical images under its mask policy", () =
   c.ask();
   assert.equal(core.report.turns[1].images.length, 1);
   assert.equal(core.report.turns[1].images[0].ok, true);
+});
+
+test("CU_DUMP_DIR writes each screenshot of a turn with its window list", () => {
+  const dir = mkdtempSync(join(tmpdir(), "fv-dump-"));
+  try {
+    const core = createFakeVision(
+      {
+        turns: [
+          {
+            name: "calib",
+            expectPromptContains: "cu-calib",
+            steps: [
+              { call: "screen_look", input: { goal: "g", apps: ["org.gimp.GIMP"] } },
+              { call: "screen_look", input: {} },
+              { text: "Done." },
+            ],
+          },
+        ],
+      },
+      { env: { CU_DUMP_DIR: dir } },
+    );
+    const c = conversation(core, "cu-calib: dump");
+    let r = c.ask();
+    c.add(called("screen_look", r.call.arguments), ...lookResult([GIMP]));
+    r = c.ask();
+    c.add(called("screen_look", r.call.arguments), ...lookResult([GIMP, DIALOG]));
+    c.ask();
+    const files = readdirSync(dir).sort();
+    assert.equal(files.filter((f) => f.endsWith(".png")).length, 2);
+    assert.ok(files.every((f) => f.startsWith("calib-")));
+    const first = files.find((f) => f.endsWith(".png"));
+    assert.equal(decodePng(readFileSync(join(dir, first))).width, 100);
+    const windows = JSON.parse(readFileSync(join(dir, first.replace(/png$/, "json")), "utf8"));
+    assert.equal(windows[0].title, GIMP.title);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("resolves targets from every corner of a window", () => {
+  const w = { ...GIMP, x: 10, y: 20, w: 100, h: 50 };
+  assert.deepEqual(resolveTarget({ window: "GIMP", from: "top-left", inset: [3, 4] }, [w]), {
+    x: 13,
+    y: 24,
+  });
+  assert.deepEqual(resolveTarget({ window: "GIMP", from: "top-right", inset: [3, 4] }, [w]), {
+    x: 107,
+    y: 24,
+  });
+  assert.deepEqual(resolveTarget({ window: "GIMP", from: "bottom-left", inset: [3, 4] }, [w]), {
+    x: 13,
+    y: 66,
+  });
+  assert.deepEqual(resolveTarget({ window: "GIMP", from: "bottom-right", inset: [3, 4] }, [w]), {
+    x: 107,
+    y: 66,
+  });
+});
+
+test("a turn survives jarvisd trimming older prompts from the history mid-turn", () => {
+  const core = createFakeVision({
+    turns: [
+      {
+        name: "t",
+        expectPromptContains: "cu-t",
+        steps: [
+          { call: "screen_look", input: { goal: "g", apps: ["org.gimp.GIMP"] } },
+          { call: "screen_look", input: {} },
+          { call: "screen_done", input: { summary: "s" } },
+          { text: "Done." },
+        ],
+      },
+    ],
+  });
+  const history = [
+    { role: "user", content: "an earlier request" },
+    { role: "assistant", content: "earlier answer" },
+  ];
+  const messages = [...history, { role: "user", content: "cu-t: go" }];
+  const ask = () => core.chat({ messages, tools: SCREEN });
+  let r = ask();
+  assert.equal(r.call.arguments.goal, "g");
+  messages.push(called("screen_look", r.call.arguments), ...lookResult([GIMP]));
+  messages.splice(0, history.length); // trimmed
+  r = ask();
+  assert.deepEqual(r.call, { name: "screen_look", arguments: {} });
+  messages.push(called("screen_look", {}), ...lookResult([GIMP]));
+  assert.equal(ask().call.name, "screen_done");
+  assert.equal(core.report.turns.length, 1);
 });

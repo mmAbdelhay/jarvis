@@ -1,6 +1,7 @@
 package session
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/mmAbdelhay/jarvis/os/go/internal/cu/proto"
@@ -9,8 +10,10 @@ import (
 
 // Dialog contract (final review, finding 1): what the model sees is always
 // the window that gets the input. A focused dialog of an allowed app becomes
-// the base (raised and made fullscreen); until a capture has shown it, no
-// input is injected.
+// the base and is raised; until a capture has shown it, no input is
+// injected. While the window chosen at begin is fullscreen behind it, the
+// dialog is not made fullscreen: GTK hides a client-side header bar in
+// fullscreen, and GTK dialogs keep their buttons there.
 
 func openDialog(h *harness, id string) {
 	h.d.mu.Lock()
@@ -45,23 +48,22 @@ func TestCaptureMakesFocusedDialogTheBase(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !h.d.has("activate w4") || !h.d.has("fullscreen w4 true") {
-		t.Fatalf("the dialog must be raised and made fullscreen: %v", h.d.logged())
+	if !h.d.has("activate w4") {
+		t.Fatalf("the dialog must be raised: %v", h.d.logged())
+	}
+	if h.d.has("fullscreen w4 true") {
+		t.Fatalf("a dialog over the fullscreen first base keeps its header bar (not fullscreen): %v", h.d.logged())
 	}
 	if _, _, c := decodePNG(t, r); c == [3]uint32{0, 0, 0} {
-		t.Fatal("a raised, fullscreen allowed dialog must be shown")
+		t.Fatal("a raised allowed dialog over the fullscreen first base must be shown")
 	}
-	var rect proto.Window
 	for _, w := range r.Windows {
-		if w.WindowID == "w4" {
-			rect = w
+		if w.WindowID == "w4" && (w.W != 0 || w.Title != "Export Image") {
+			t.Fatalf("the dialog is listed with its title, without a rect: %+v", w)
 		}
-		if w.WindowID == "w1" && w.W != 0 {
-			t.Fatalf("only the base has a rect: %+v", w)
+		if w.WindowID == "w1" && (w.W != 1280 || w.H != 720) {
+			t.Fatalf("the fullscreen first base fills the frame: %+v", w)
 		}
-	}
-	if rect.W != 1280 || rect.H != 720 {
-		t.Fatalf("the dialog is the base: %+v", rect)
 	}
 	if err := h.m.Key(proto.Key{Combo: "Return"}); err != nil {
 		t.Fatalf("after the dialog was shown, keys go to it: %v", err)
@@ -90,9 +92,56 @@ func TestCaptureMakesFocusedDialogTheBase(t *testing.T) {
 	}
 }
 
+func TestDialogOverAFirstBaseThatLeftFullscreenIsBlank(t *testing.T) {
+	h := ready(t)
+	h.d.set("w1", func(w *wlcu.Toplevel) { w.Fullscreen = false }) // the user or app left fullscreen
+	h.d.mu.Lock()
+	h.d.ignoreFullscreen = true
+	h.d.mu.Unlock()
+	openDialog(h, "w4")
+	r, err := h.m.Capture(proto.Capture{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !h.d.has("fullscreen w1 true") {
+		t.Fatalf("the first base is made fullscreen again: %v", h.d.logged())
+	}
+	if _, _, c := decodePNG(t, r); c != [3]uint32{0, 0, 0} {
+		t.Fatalf("a dialog with nothing fullscreen behind it may sit beside other windows: %v", c)
+	}
+	if got := code(h.m.Key(proto.Key{Combo: "Return"})); got != proto.CodeOutside {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func closeFirstBase(h *harness) {
+	h.d.mu.Lock()
+	h.d.tops = slices.DeleteFunc(h.d.tops, func(w wlcu.Toplevel) bool { return w.ID == "w1" })
+	h.d.mu.Unlock()
+}
+
+func TestDialogWithoutTheFirstBaseIsMadeFullscreen(t *testing.T) {
+	h := ready(t)
+	closeFirstBase(h)
+	openDialog(h, "w4")
+	r, err := h.m.Capture(proto.Capture{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !h.d.has("fullscreen w4 true") {
+		t.Fatalf("with the first base gone the (focused) dialog must be made fullscreen: %v", h.d.logged())
+	}
+	if _, _, c := decodePNG(t, r); c == [3]uint32{0, 0, 0} {
+		t.Fatal("a raised, fullscreen allowed dialog must be shown")
+	}
+}
+
 func TestDialogThatRefusesFullscreenStaysBlank(t *testing.T) {
 	h := ready(t)
+	closeFirstBase(h)
+	h.d.mu.Lock()
 	h.d.ignoreFullscreen = true
+	h.d.mu.Unlock()
 	openDialog(h, "w4")
 	r, err := h.m.Capture(proto.Capture{})
 	if err != nil {

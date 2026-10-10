@@ -293,9 +293,10 @@ describe("computer-use runner (contracts §2)", () => {
     expect(fake.calls.some((c) => c.op === "click")).toBe(false);
   });
 
-  it("asks before Enter when the clicked control is a message field, whatever target the model typed", async () => {
+  it("asks before Enter when the focused control is a message field, whatever target the model typed", async () => {
     const { cu, fake, cards, ctx } = setup();
     fake.client.describeAt = async () => ({ role: "text", name: "Type a message" });
+    fake.client.describeFocused = async () => ({ role: "text", name: "Type a message" });
     await cu.run(LOOK, START, ctx());
     await cu.run(CLICK, { x: 3, y: 4, target: "Notes" }, ctx());
     await cu.run(TYPE, { text: "send me money", target: "Notes" }, ctx());
@@ -304,6 +305,50 @@ describe("computer-use runner (contracts §2)", () => {
       tool: "screen.key",
       title: "Press enter: this sends something",
     });
+  });
+
+  // Final review (security): the control last clicked is not proof of what
+  // has keyboard focus now (the click may have opened a dialog whose default
+  // button now takes Enter). Only the live focus can let a key through.
+  for (const [how, focused] of [
+    ["answers unknown", async () => ({ role: "unknown" })],
+    [
+      "fails",
+      async () => {
+        throw new Error("no AT-SPI");
+      },
+    ],
+  ] as const) {
+    it(`asks before Enter, Space or Delete after clicking a text field when the live focus ${how}`, async () => {
+      for (const combo of ["enter", "shift+enter", "space", "shift+space", "delete"]) {
+        const { cu, fake, cards, ctx } = setup({
+          answer: (card) => (card.items[0]?.tool === "screen.key" ? "deny" : "approve"),
+        });
+        fake.client.describeAt = async () => ({ role: "text", name: "Search" });
+        fake.client.describeFocused = focused;
+        await cu.run(LOOK, START, ctx());
+        await cu.run(CLICK, { x: 3, y: 4, target: "Search" }, ctx());
+        await cu.run(TYPE, { text: "shoes", target: "Search" }, ctx());
+        const result = await cu.run(KEY, { combo }, ctx());
+        expect(cards.at(-1)?.items[0], combo).toMatchObject({ tool: "screen.key" });
+        expect(result.isError, combo).toBe(true);
+        expect(
+          fake.calls.some((c) => c.op === "key"),
+          combo,
+        ).toBe(false);
+      }
+    });
+  }
+
+  it("asks before Enter on a focused harmless-looking button", async () => {
+    const { cu, fake, cards, ctx } = setup({
+      answer: (card) => (card.items[0]?.tool === "screen.key" ? "deny" : "approve"),
+    });
+    fake.client.describeFocused = async () => ({ role: "push button", name: "OK" });
+    await cu.run(LOOK, START, ctx());
+    await cu.run(KEY, { combo: "enter" }, ctx());
+    expect(cards.at(-1)?.items[0]).toMatchObject({ tool: "screen.key" });
+    expect(fake.calls.some((c) => c.op === "key")).toBe(false);
   });
 
   // Final review finding 3: click a field, Tab to a button, Enter/Space.
@@ -346,13 +391,23 @@ describe("computer-use runner (contracts §2)", () => {
     let asked = 0;
     fake.client.describeFocused = async () => {
       asked++;
-      return { role: "text", name: "File name" };
+      return { role: "text", name: "Notes" };
     };
     await cu.run(LOOK, START, ctx());
-    await cu.run(TYPE, { text: "beach.png", target: "File name" }, ctx());
+    await cu.run(TYPE, { text: "beach day", target: "Notes" }, ctx());
     await cu.run(KEY, { combo: "enter" }, ctx());
     expect(cards).toHaveLength(1);
     expect(asked).toBe(2);
+  });
+
+  it("asks before Enter in a dialog's file-name field: it presses Export", async () => {
+    const { cu, fake, cards, ctx } = setup();
+    fake.client.describeFocused = async () => ({ role: "text", name: "File name" });
+    await cu.run(LOOK, START, ctx());
+    await cu.run(TYPE, { text: "beach.png", target: "File name" }, ctx());
+    expect(cards).toHaveLength(1);
+    await cu.run(KEY, { combo: "enter" }, ctx());
+    expect(cards.at(-1)?.items[0]).toMatchObject({ tool: "screen.key" });
   });
 
   it("cu:stop while paused ends the session", async () => {
