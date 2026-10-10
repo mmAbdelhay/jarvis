@@ -103,4 +103,23 @@ describe("docs/os/threat-model.md (design §3.2, criterion 2)", () => {
     }
     expect(parseThreatModel(DOC).mitigations.length).toBeGreaterThanOrEqual(44);
   });
+
+  it("covers Plan Y's account sign-in (spec §3)", () => {
+    const mitigations = section(DOC, "Mitigations");
+    for (const term of [
+      "jarvis-tool",
+      "nonce",
+      "tripwire",
+      "ProtectHome=tmpfs",
+      "npm audit signatures",
+      "allowlist",
+      "stdin",
+    ]) {
+      expect(mitigations, term).toContain(term);
+    }
+    const accepted = section(DOC, "Accepted risks");
+    for (const term of ["vendor", "apply_patch", "github.com/settings/applications"]) {
+      expect(accepted, term).toContain(term);
+    }
+  });
 });
