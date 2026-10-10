@@ -18,3 +18,4 @@ export * from "./accounts/streams-index.js";
 export * from "./accounts/specs.js";
 export * from "./accounts/runner.js";
 export * from "./accounts/node-spawner.js";
+export * from "./accounts/provider.js";
