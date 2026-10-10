@@ -210,11 +210,94 @@ describe("jarvis account", () => {
       ["account:state", { account: "copilot", phase: "signed-in", identity: "octocat" }],
     ]);
     expect(await accountCommand(client, term, "login", "copilot")).toBe(0);
-    expect(invoked).toEqual([["account:login", [{ account: "copilot" }]]]);
+    expect(invoked).toEqual([
+      ["account:status", []],
+      ["account:login", [{ account: "copilot" }]],
+    ]);
     expect(out.join("")).toContain(
       "Open https://github.com/login/device in your browser and enter the code WDJB-MJHT.",
     );
     expect(out.join("")).toContain("Signed in as octocat.");
+  });
+
+  it("sets the account up first when it is not installed, then signs in", async () => {
+    const { term, out } = fakeTerm();
+    const pushes: Record<string, [string, unknown][]> = {
+      "account:install": [
+        [
+          "account:state",
+          { account: "chatgpt", phase: "installing", message: "Downloading ChatGPT" },
+        ],
+        [
+          "account:state",
+          { account: "chatgpt", phase: "installed", message: "ChatGPT is set up." },
+        ],
+      ],
+      "account:login": [
+        ["account:state", { account: "chatgpt", phase: "signed-in", identity: "sara@example.com" }],
+      ],
+    };
+    const invoked: string[] = [];
+    let listener: ((ch: string, p: unknown) => void) | undefined;
+    const client = {
+      invoke: async (ch: string) => {
+        invoked.push(ch);
+        setTimeout(() => {
+          for (const [c, p] of pushes[ch] ?? []) listener?.(c, p);
+        }, 0);
+        return ch === "account:status"
+          ? {
+              accounts: [
+                {
+                  account: "chatgpt",
+                  installed: false,
+                  version: null,
+                  signedIn: false,
+                  identity: null,
+                },
+              ],
+            }
+          : null;
+      },
+      onPush: (l: (ch: string, p: unknown) => void) => {
+        listener = l;
+        return () => {
+          listener = undefined;
+        };
+      },
+      onClose: () => () => {},
+    } as unknown as ControlClient;
+    expect(await accountCommand(client, term, "login", "chatgpt")).toBe(0);
+    expect(invoked).toEqual(["account:status", "account:install", "account:login"]);
+    expect(out.join("")).toBe("Downloading ChatGPT\nSigned in as sara@example.com.\n");
+  });
+
+  it("does not sign in when the setup fails", async () => {
+    const { term, out } = fakeTerm();
+    const { client, invoked } = fakeClient(
+      {
+        "account:status": {
+          accounts: [
+            {
+              account: "chatgpt",
+              installed: false,
+              version: null,
+              signedIn: false,
+              identity: null,
+            },
+          ],
+        },
+      },
+      [
+        [
+          "account:state",
+          { account: "chatgpt", phase: "failed", message: "ChatGPT download failed" },
+        ],
+      ],
+    );
+    expect(await accountCommand(client, term, "login", "chatgpt")).toBe(1);
+    expect(invoked.map(([ch]) => ch)).toEqual(["account:status", "account:install"]);
+    expect(out.join("")).toBe("ChatGPT download failed\n");
   });
 
   it("returns 1 when sign-in fails", async () => {

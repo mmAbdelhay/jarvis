@@ -81,6 +81,37 @@ function parseState(payload: object): AccountStatePush | undefined {
   return state;
 }
 
+function parseStatuses(result: unknown): AccountStatus[] | undefined {
+  if (
+    typeof result !== "object" ||
+    result === null ||
+    !("accounts" in result) ||
+    !Array.isArray(result.accounts)
+  )
+    return undefined;
+  const out: AccountStatus[] = [];
+  for (const raw of result.accounts as unknown[]) {
+    if (typeof raw !== "object" || raw === null) continue;
+    const value = raw as Record<string, unknown>;
+    if (
+      !isAccountId(value.account) ||
+      typeof value.installed !== "boolean" ||
+      typeof value.signedIn !== "boolean" ||
+      (value.version !== null && typeof value.version !== "string") ||
+      (value.identity !== null && typeof value.identity !== "string")
+    )
+      continue;
+    out.push({
+      account: value.account,
+      installed: value.installed,
+      signedIn: value.signedIn,
+      version: value.version,
+      identity: value.identity,
+    });
+  }
+  return out;
+}
+
 export async function accountCommand(
   client: ControlClient,
   term: Terminal,
@@ -88,35 +119,10 @@ export async function accountCommand(
   account?: AccountId,
 ): Promise<number> {
   if (action === "status" || account === undefined) {
-    const result: unknown = await client.invoke("account:status", []);
-    if (
-      typeof result !== "object" ||
-      result === null ||
-      !("accounts" in result) ||
-      !Array.isArray(result.accounts)
-    ) {
-      throw new Error("Jarvis returned an invalid account status.");
-    }
-    for (const raw of result.accounts as unknown[]) {
-      if (typeof raw !== "object" || raw === null) continue;
-      const value = raw as Record<string, unknown>;
-      if (
-        !isAccountId(value.account) ||
-        typeof value.installed !== "boolean" ||
-        typeof value.signedIn !== "boolean" ||
-        (value.version !== null && typeof value.version !== "string") ||
-        (value.identity !== null && typeof value.identity !== "string")
-      )
-        continue;
-      const status: AccountStatus = {
-        account: value.account,
-        installed: value.installed,
-        signedIn: value.signedIn,
-        version: value.version,
-        identity: value.identity,
-      };
+    const statuses = parseStatuses(await client.invoke("account:status", []));
+    if (statuses === undefined) throw new Error("Jarvis returned an invalid account status.");
+    for (const status of statuses)
       term.write(`${LABELS[status.account].padEnd(16)}${describe(status)}\n`);
-    }
     return 0;
   }
   const show = (state: AccountStatePush) => {
@@ -136,6 +142,22 @@ export async function accountCommand(
       action === "logout" ? `Signed out of ${LABELS[account]}.\n` : `Removed ${LABELS[account]}.\n`,
     );
     return 0;
+  }
+  // "set up and sign in" (USAGE): jarvisd refuses account:login before the
+  // CLI is installed, so a login installs it first.
+  if (action === "login") {
+    const current = parseStatuses(await client.invoke("account:status", []))?.find(
+      (s) => s.account === account,
+    );
+    if (current !== undefined && !current.installed) {
+      const setup = await waitFor(client, account, new Set(["installed", "failed"]), show, () =>
+        client.invoke("account:install", [{ account }]),
+      );
+      if (setup.phase === "failed") {
+        term.write(`${terminalLine(setup.message ?? "It didn't work.", 300)}\n`);
+        return 1;
+      }
+    }
   }
   const finalPhases = new Set(
     action === "install" ? ["installed", "failed"] : ["signed-in", "failed"],
