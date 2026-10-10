@@ -2,6 +2,57 @@
 <!DOCTYPE TS>
 <TS version="2.1" language="ar" sourcelanguage="en">
     <context>
+        <name>AccountsModel</name>
+        <message>
+            <source>Signed in as %1</source>
+            <translation>تم تسجيل الدخول باسم %1</translation>
+        </message>
+        <message>
+            <source>Ready to sign in</source>
+            <translation>جاهز لتسجيل الدخول</translation>
+        </message>
+        <message>
+            <source>Not set up</source>
+            <translation>غير مُعدّ</translation>
+        </message>
+        <message>
+            <source>Getting %1 ready…</source>
+            <translation>جارٍ تجهيز %1…</translation>
+        </message>
+        <message>
+            <source>Starting %1 sign-in…</source>
+            <translation>جارٍ بدء تسجيل الدخول إلى %1…</translation>
+        </message>
+        <message>
+            <source>Finish signing in to %1 in your browser.</source>
+            <translation>أكمِل تسجيل الدخول إلى %1 في متصفحك.</translation>
+        </message>
+        <message>
+            <source>That didn't work. Try again.</source>
+            <translation>لم ينجح ذلك. حاول مرة أخرى.</translation>
+        </message>
+        <message>
+            <source>%1 is set up. Sign in to use it.</source>
+            <translation>%1 مُعدّ. سجّل الدخول لاستخدامه.</translation>
+        </message>
+        <message>
+            <source>%1 isn't set up yet. Jarvis installs the official %1 program for you.</source>
+            <translation>%1 غير مُعدّ بعد. يثبّت جارفيس برنامج %1 الرسمي لك.</translation>
+        </message>
+        <message>
+            <source>%1 sent a sign-in address Jarvis can't open.</source>
+            <translation>أرسل %1 عنوان تسجيل دخول لا يستطيع جارفيس فتحه.</translation>
+        </message>
+        <message>
+            <source>To revoke Google access after signing out, visit https://myaccount.google.com/connections.</source>
+            <translation>لإلغاء وصول Google بعد تسجيل الخروج، انتقل إلى https://myaccount.google.com/connections.</translation>
+        </message>
+        <message>
+            <source>To revoke GitHub Copilot access after signing out, visit https://github.com/settings/applications.</source>
+            <translation>لإلغاء وصول GitHub Copilot بعد تسجيل الخروج، انتقل إلى https://github.com/settings/applications.</translation>
+        </message>
+    </context>
+    <context>
         <name>AppLauncher</name>
         <message>
             <source>That app's launcher is broken, so it was not started.</source>

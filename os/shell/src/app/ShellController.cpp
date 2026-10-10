@@ -28,6 +28,7 @@ ShellController::ShellController(ControlClient* client, QObject* parent)
     , m_conversation(new Conversation(this))
     , m_chatCard(new CardModel(this))
     , m_doctorCard(new CardModel(this))
+    , m_accounts(new AccountsModel(this))
     , m_provider(new ProviderModel(this))
     , m_providers(new ProviderListModel(this))
     , m_doctor(new DoctorModel(this))
@@ -261,6 +262,39 @@ ShellController::ShellController(ControlClient* client, QObject* parent)
                     m_cuSettings->applyEnabledResult(id, enabled, r.ok, r.code, r.text);
                 });
     });
+    // Plan Y §2.4: account sign-in.
+    connect(m_accounts, &AccountsModel::statusRequested, this, [this] {
+        request(u"account:status"_s, QJsonArray{}, [this](const ControlResult& r) {
+            if (r.ok)
+                m_accounts->applyStatus(r.value.toObject());
+        });
+    });
+    const auto accountResult = [this](const QString& account, bool refreshAfter) {
+        return [this, account, refreshAfter](const ControlResult& r) {
+            if (!r.ok)
+                m_accounts->applyRequestError(account, r.text);
+            if (refreshAfter)
+                m_accounts->refresh();
+        };
+    };
+    connect(m_accounts, &AccountsModel::installRequested, this, [this, accountResult](const QString& a) {
+        request(u"account:install"_s, QJsonArray{QJsonObject{{"account", a}}}, accountResult(a, false));
+    });
+    connect(m_accounts, &AccountsModel::loginRequested, this, [this, accountResult](const QString& a) {
+        request(u"account:login"_s, QJsonArray{QJsonObject{{"account", a}}}, accountResult(a, false));
+    });
+    connect(m_accounts, &AccountsModel::logoutRequested, this, [this, accountResult](const QString& a) {
+        request(u"account:logout"_s, QJsonArray{QJsonObject{{"account", a}}}, accountResult(a, true));
+    });
+    connect(m_accounts, &AccountsModel::uninstallRequested, this, [this, accountResult](const QString& a) {
+        request(u"account:uninstall"_s, QJsonArray{QJsonObject{{"account", a}}}, accountResult(a, true));
+    });
+    connect(m_accounts, &AccountsModel::signedIn, this, [this](const QString& account) {
+        m_accounts->refresh();
+        // Setup/Settings: the account just signed in is the provider being edited → check it now.
+        if (m_provider->mode() == u"account" && m_provider->account() == account)
+            m_provider->probe();
+    });
 }
 
 void ShellController::request(const QString& channel, const QJsonArray& args,
@@ -366,6 +400,7 @@ void ShellController::refreshProviders()
 
 void ShellController::onOpened()
 {
+    m_accounts->refresh();
     m_cu->connectionOpened(); // jarvisd re-pushes cu:state for a session still running
     setConnection(u"open"_s);
     refreshProviders();
@@ -426,6 +461,11 @@ void ShellController::onPush(const QString& channel, const QJsonValue& payload)
         const QJsonValue lang = payload.toObject().value("lang");
         if (payload.isObject() && lang.isString())
             applyLanguage(lang.toString());
+        return;
+    }
+    if (channel == u"account:state") {
+        if (payload.isObject())
+            m_accounts->applyState(payload.toObject());
         return;
     }
     if (channel == u"cu:state") {
@@ -637,6 +677,7 @@ void ShellController::showView(const QString& view)
     if (view == u"audit")
         m_audit->refresh();
     if (view == u"settings") {
+        m_accounts->refresh();
         m_provider->editActive();
         refreshProviders();
         m_memory->refresh();
@@ -852,7 +893,7 @@ void ShellController::applyLanguage(const QString& code)
 void ShellController::refreshTranslatedText()
 {
     for (QAbstractListModel* model : std::initializer_list<QAbstractListModel*>{
-             m_chatCard, m_doctorCard, m_providers, m_registry, m_audit, m_memory, m_doctor, m_cu, m_cuSettings}) {
+             m_chatCard, m_doctorCard, m_providers, m_registry, m_audit, m_memory, m_doctor, m_cu, m_cuSettings, m_accounts}) {
         if (const int rows = model->rowCount(); rows > 0)
             emit model->dataChanged(model->index(0), model->index(rows - 1));
     }
@@ -869,6 +910,7 @@ void ShellController::refreshTranslatedText()
     emit m_doctor->stateChanged();
     emit m_voice->changed();   // Plan O Task 7 VoiceModel
     emit m_pairing->changed(); // Plan O Task 10 PairingModel
+    emit m_accounts->changed();
     emit m_cu->changed();
     emit m_cuSettings->changed();
     emit bannerChanged();

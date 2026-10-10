@@ -52,6 +52,7 @@ public:
     static QString providerMode(const QString& kind, const QString& url);
     static QString providerLabel(const QString& kind, const QString& url);
 
+    QString account() const { return m_account; }
     QString mode() const { return m_mode; }
     QString preset() const { return m_preset; }
     QString kind() const { return m_kind; }
@@ -110,6 +111,7 @@ private:
     QString m_editingId, m_editingKind, m_editingBaseUrl;
     bool m_editingHasKey = false;
 
+    QString m_account;
     QString m_mode, m_preset, m_kind, m_baseUrl, m_model, m_apiKey;
     QStringList m_models;
     QString m_probeState = QStringLiteral("idle");

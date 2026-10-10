@@ -9,6 +9,7 @@
 #include <QtQml/qqmlregistration.h>
 #include <functional>
 
+#include "models/AccountsModel.h"
 #include "models/AuditModel.h"
 #include "models/CardModel.h"
 #include "models/Conversation.h"
@@ -40,6 +41,7 @@ class ShellController : public QObject {
     Q_PROPERTY(CardModel* chatCard READ chatCard CONSTANT)
     Q_PROPERTY(bool locked READ locked NOTIFY lockedChanged)
     Q_PROPERTY(CardModel* doctorCard READ doctorCard CONSTANT)
+    Q_PROPERTY(AccountsModel* accounts READ accounts CONSTANT)
     Q_PROPERTY(ProviderModel* provider READ provider CONSTANT)
     Q_PROPERTY(ProviderListModel* providers READ providers CONSTANT)
     Q_PROPERTY(DoctorModel* doctor READ doctor CONSTANT)
@@ -86,6 +88,7 @@ public:
     bool undoAvailable() const { return m_undoAvailable && !m_locked; }
     bool undoing() const { return m_undoing; }
     CardModel* doctorCard() const { return m_doctorCard; }
+    AccountsModel* accounts() const { return m_accounts; }
     ProviderModel* provider() const { return m_provider; }
     ProviderListModel* providers() const { return m_providers; }
     DoctorModel* doctor() const { return m_doctor; }
@@ -187,6 +190,7 @@ private:
     bool m_undoAvailable = false;
     bool m_undoing = false;
     CardModel* m_doctorCard;
+    AccountsModel* m_accounts;
     ProviderModel* m_provider;
     ProviderListModel* m_providers;
     QString m_fallbackReason;
