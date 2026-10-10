@@ -86,6 +86,9 @@ def run_checks(run: Run, args: argparse.Namespace) -> dict | None:
         return sh(ctl("wait --timeout 60"), 70)
 
     run.check("jarvisd control socket", control_socket)
+    # v1.1 fix: the live login keyring needs no prompt.
+    run.check("v1.1: the live login keyring stores and reads a secret without a prompt",
+              lambda: sh(scenarios.keyring_roundtrip(uid), 60))
 
     ram_report: dict = {}
 

@@ -72,6 +72,9 @@ export type TurnRequest = {
   context?: string;
   /** Fenced memory notes (memory.ts); placed before the safety rules. */
   notes?: readonly string[];
+  /** Shown to the user at the start of the reply, never sent to the model
+   *  (memory turned off because the keyring did not answer). */
+  notice?: string;
   /** The turn's language (M4 §3): activity lines, step-limit text, cards. */
   lang?: Lang;
   /** Who asked (M3 §2). Computer use refuses phone-origin turns. Default desktop. */
@@ -464,6 +467,8 @@ export async function runTurn(deps: ToolLoopDeps, request: TurnRequest): Promise
   };
 
   deps.emit({ type: "turn-start", turnId, text: request.text });
+  if (request.notice !== undefined)
+    deps.emit({ type: "text", turnId, delta: `${request.notice}\n\n` });
   try {
     if (deps.selectTools !== undefined && allTools.length > 0) {
       try {

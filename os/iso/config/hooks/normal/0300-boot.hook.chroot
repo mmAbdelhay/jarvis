@@ -12,6 +12,14 @@ pam=/etc/pam.d/greetd
 if ! grep -q pam_gnome_keyring "$pam"; then
   printf '%s\n' '-auth optional pam_gnome_keyring.so' '-session optional pam_gnome_keyring.so auto_start' >> "$pam"
 fi
+# ...and let that PAM module start the daemon itself, with the password, as
+# on desktops without GNOME (the labwc autostart completes it with --start).
+# gnome-keyring's systemd user socket would start it first, without the
+# password: the login keyring PAM then creates on a user's first login is
+# never put on D-Bus (gnome-keyring 48 exports collections only when the
+# daemon starts), so the first secret store asks to create a new keyring.
+# Masked, D-Bus activation fails fast instead of starting a second daemon.
+systemctl --global mask gnome-keyring-daemon.socket gnome-keyring-daemon.service
 
 # Initramfs with cryptsetup and the Plymouth theme (installed systems) and
 # live-boot (this ISO).

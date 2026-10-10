@@ -142,5 +142,22 @@ class M3CommandsTest(unittest.TestCase):
         self.assertIn("! pkcheck --action-id x", scenarios.polkit_denies(1000, "x"))
 
 
+
+class V11FixScenarioTests(unittest.TestCase):
+    def test_commands_fit_one_tty_line(self):
+        for command in (
+            scenarios.keyring_roundtrip(1000),
+            scenarios.login_keyring_encrypted("ada"),
+        ):
+            self.assertNotIn("\n", command)
+            self.assertLess(len(command), MAX_LINE - 100, command)
+
+    def test_keyring_roundtrip_is_bounded_and_as_the_user(self):
+        command = scenarios.keyring_roundtrip(1001, "ada")
+        self.assertIn("runuser -u ada --", command)
+        self.assertEqual(command.count("timeout 15 secret-tool"), 3)
+        self.assertIn("gcr-prompter", command)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,10 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   createMemorySecretStore,
   createSecretToolStore,
   type KeyringExec,
+  KeyringTimeoutError,
   KeyringUnavailableError,
   MEMORY_KEY_LABEL,
+  nodeSecretToolExec,
   PROVIDER_KEY_ATTRIBUTE,
   providerAccount,
 } from "./keyring.js";
@@ -142,5 +147,53 @@ describe("attribute-keyed stores (M2.5 contracts §1: provider=<id>)", () => {
       "anthropic https://api.anthropic.com",
     ]);
     expect(calls[1]?.args[1]).toBe("--label=Jarvis memory key");
+  });
+});
+
+describe("nodeSecretToolExec", () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+  /** A secret-tool on PATH that runs `body` (sh). */
+  function fakeSecretTool(body: string): NodeJS.ProcessEnv {
+    const dir = mkdtempSync(join(tmpdir(), "jarvis-secret-tool-"));
+    dirs.push(dir);
+    const tool = join(dir, "secret-tool");
+    writeFileSync(tool, `#!/bin/sh\n${body}\n`);
+    chmodSync(tool, 0o755);
+    return { PATH: `${dir}:/usr/bin:/bin` };
+  }
+
+  it("passes the answer through", async () => {
+    const exec = nodeSecretToolExec(fakeSecretTool('cat >/dev/null; printf "sk-1"'));
+    await expect(exec(["lookup", "service", "jarvis"])).resolves.toEqual({
+      code: 0,
+      stdout: "sk-1",
+      stderr: "",
+    });
+  });
+
+  it("gives up on a keyring that waits for a password prompt, then fails fast", async () => {
+    let clock = 1_000;
+    const exec = nodeSecretToolExec(fakeSecretTool("exec sleep 30"), {
+      timeoutMs: 200,
+      backoffMs: 60_000,
+      now: () => clock,
+    });
+    const started = Date.now();
+    await expect(exec(["lookup", "service", "jarvis"])).rejects.toBeInstanceOf(KeyringTimeoutError);
+    expect(Date.now() - started).toBeLessThan(5_000);
+    // Within the back-off: no new secret-tool (and no new prompt).
+    const again = Date.now();
+    await expect(exec(["lookup", "service", "jarvis"])).rejects.toBeInstanceOf(KeyringTimeoutError);
+    expect(Date.now() - again).toBeLessThan(150);
+    clock += 60_001;
+    await expect(exec(["lookup", "service", "jarvis"])).rejects.toBeInstanceOf(KeyringTimeoutError);
+  });
+
+  it("keeps the timeout distinct through the store", async () => {
+    const exec = nodeSecretToolExec(fakeSecretTool("exec sleep 30"), { timeoutMs: 100 });
+    await expect(createSecretToolStore(exec).get("x")).rejects.toBeInstanceOf(KeyringTimeoutError);
   });
 });

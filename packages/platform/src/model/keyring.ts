@@ -22,6 +22,24 @@ export class KeyringUnavailableError extends Error {
   }
 }
 
+/** A keyring that is locked, or has no login keyring yet, makes gnome-keyring
+ *  show a password prompt and secret-tool wait for it. jarvisd never waits on
+ *  that prompt inside a turn: past this, the call fails with
+ *  KeyringTimeoutError (memory off, provider keys asked again). */
+export const KEYRING_TIMEOUT_MS = 8_000;
+/** After a timeout, calls fail at once for this long instead of stacking
+ *  another prompt and another wait per call. */
+export const KEYRING_BACKOFF_MS = 60_000;
+
+export class KeyringTimeoutError extends Error {
+  constructor(seconds: number) {
+    super(
+      `The system keyring did not answer within ${seconds} s (it may be waiting for a password)`,
+    );
+    this.name = "KeyringTimeoutError";
+  }
+}
+
 const SERVICE = "jarvis";
 const LABEL = "Jarvis model provider key";
 
@@ -43,6 +61,7 @@ async function run(exec: KeyringExec, args: readonly string[], stdin?: string) {
   try {
     return await exec(args, stdin);
   } catch (error) {
+    if (error instanceof KeyringTimeoutError) throw error;
     if (error !== null && typeof error === "object" && "code" in error && error.code === "ENOENT")
       throw new KeyringUnavailableError();
     throw new Error(
@@ -87,20 +106,49 @@ export function createSecretToolStore(
   };
 }
 
-export function nodeSecretToolExec(env: NodeJS.ProcessEnv): KeyringExec {
+export function nodeSecretToolExec(
+  env: NodeJS.ProcessEnv,
+  options: { timeoutMs?: number; backoffMs?: number; now?: () => number } = {},
+): KeyringExec {
+  const timeoutMs = options.timeoutMs ?? KEYRING_TIMEOUT_MS;
+  const backoffMs = options.backoffMs ?? KEYRING_BACKOFF_MS;
+  const now = options.now ?? Date.now;
+  const seconds = Math.round(timeoutMs / 1000);
+  let blockedUntil = 0;
   return (args, stdin) =>
     new Promise((resolve, reject) => {
+      if (now() < blockedUntil) {
+        reject(new KeyringTimeoutError(seconds));
+        return;
+      }
       const child = spawn("secret-tool", [...args], { env, stdio: ["pipe", "pipe", "pipe"] });
       let stdout = "";
       let stderr = "";
+      let settled = false;
+      // Killing secret-tool drops its D-Bus connection, which dismisses the prompt.
+      const timer = setTimeout(() => {
+        settled = true;
+        blockedUntil = now() + backoffMs;
+        child.kill("SIGKILL");
+        reject(new KeyringTimeoutError(seconds));
+      }, timeoutMs);
+      timer.unref?.();
       child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
         stdout += chunk;
       });
       child.stderr.setEncoding("utf8").on("data", (chunk: string) => {
         stderr += chunk;
       });
-      child.on("error", reject);
-      child.on("close", (code) => resolve({ code: code ?? 1, stdout, stderr }));
+      child.on("error", (error) => {
+        clearTimeout(timer);
+        if (!settled) reject(error);
+        settled = true;
+      });
+      child.on("close", (code) => {
+        clearTimeout(timer);
+        if (!settled) resolve({ code: code ?? 1, stdout, stderr });
+        settled = true;
+      });
       child.stdin.on("error", () => {
         // An early exit closes stdin; "close" above reports the outcome.
       });

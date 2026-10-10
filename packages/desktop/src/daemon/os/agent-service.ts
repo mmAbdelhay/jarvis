@@ -818,6 +818,11 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
           await checkSession();
           const tools = await ensureRegistry({ reloadAddOns: true });
           const notes = await memory.recall(text).catch(() => []);
+          // The keyring timed out (a prompt is up): memory is off; say so once.
+          const notice =
+            deps.memory?.takeKeyringNotice() === true && memoryOn()
+              ? USER_TEXT[turnLanguage(uiLanguage, text)].memoryKeyringTimeout
+              : undefined;
           const before = history.length;
           failover?.beginTurn();
           const cuOn = computerUse !== undefined && cuBlocked(activeEntry()) === null;
@@ -853,6 +858,7 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
               signal: controller.signal,
               ...(context === undefined ? {} : { context }),
               ...(notes.length === 0 ? {} : { notes }),
+              ...(notice === undefined ? {} : { notice }),
             },
           );
           memory.afterTurn(result.messages.slice(before));

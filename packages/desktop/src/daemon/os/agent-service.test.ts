@@ -1425,7 +1425,13 @@ function memoryOpener(): MemoryOpener & { rows: MemoryRecord[] } {
       rows.length = 0;
     },
   };
-  return { rows, open: async () => backend, reset: async () => {}, close: () => {} };
+  return {
+    rows,
+    open: async () => backend,
+    takeKeyringNotice: () => false,
+    reset: async () => {},
+    close: () => {},
+  };
 }
 
 describe("memory and tool search in jarvisd (design §3.8, §3.9)", () => {
@@ -1539,6 +1545,36 @@ describe("memory and tool search in jarvisd (design §3.8, §3.9)", () => {
       code: "unsupported",
       message: "Memory is off",
     });
+  });
+
+  it("says once that memory is off when the keyring timed out, and the turn still runs", async () => {
+    const memory = memoryOpener();
+    let notices = 1;
+    const h = harness({
+      memory: {
+        ...memory,
+        open: async () => null,
+        takeKeyringNotice: () => notices-- > 0,
+      },
+      makeProvider: () => recording([]),
+    });
+    h.files.set(YAML, LOCAL_YAML);
+    await h.agent.start();
+    const texts = (turnId: string) =>
+      h
+        .events()
+        .filter((e) => e.type === "text" && e.turnId === turnId)
+        .map((e) => (e as { delta: string }).delta)
+        .join("");
+    const first = h.agent.prompt("hello");
+    await h.until(() => h.events().some((e) => e.type === "turn-end" && e.turnId === first.turnId));
+    expect(texts(first.turnId)).toContain(USER_TEXT.en.memoryKeyringTimeout);
+    expect(texts(first.turnId)).toContain("talked");
+    const second = h.agent.prompt("hello again");
+    await h.until(() =>
+      h.events().some((e) => e.type === "turn-end" && e.turnId === second.turnId),
+    );
+    expect(texts(second.turnId)).not.toContain(USER_TEXT.en.memoryKeyringTimeout);
   });
 
   it("writes a summary at shutdown with a request that also ends with the rules", async () => {

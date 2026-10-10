@@ -18,7 +18,22 @@ c = tomllib.load(open(sys.argv[1], "rb"))
 assert c["initial_session"] == {"command": "labwc", "user": "jarvis"}, c
 assert c["default_session"]["user"] == "_greetd", c
 PY
-check "keyring empty-password unlock only on live boots" grep -q 'if \[ -d /run/live/medium \]' "$inc/etc/xdg/labwc/autostart"
+kr=$tmp/live/home/jarvis/.local/share/keyrings
+check "live boots get an unlocked login keyring with no password (plain text format)" \
+  grep -qx '\[keyring\]' "$kr/login.keyring"
+check "the live login keyring holds no secret and never locks" \
+  bash -c '! grep -q "^secret=" "$1" && grep -qx lock-on-idle=false "$1" && grep -qx lock-after=false "$1"' _ "$kr/login.keyring"
+check "the live login keyring is the default collection (no new-keyring prompt)" grep -qx login "$kr/default"
+check "the live keyring files are private" test "$(stat -c %a "$kr/login.keyring" 2>/dev/null || stat -f %Lp "$kr/login.keyring")" = 600
+printf '[keyring]\ndisplay-name=Login\n[1]\nsecret=kept\n' > "$kr/login.keyring"
+env LIVE_ROOT="$tmp/live" sh "$live"
+check "live-config never overwrites an existing login keyring" grep -qx 'secret=kept' "$kr/login.keyring"
+for a in labwc labwc-classic; do
+  check "$a autostart starts no second keyring daemon (no --unlock)" \
+    bash -c '! grep -v "^[[:space:]]*#" "$1" | grep -q -- "--unlock"' _ "$inc/etc/xdg/$a/autostart"
+  check "$a autostart completes the keyring daemon PAM started" \
+    grep -qx 'gnome-keyring-daemon --start --components=pkcs11,secrets >/dev/null 2>&1 || true' "$inc/etc/xdg/$a/autostart"
+done
 check "installer starts only where installed (live)" grep -Fxq 'if [ -x /usr/bin/jarvis-installer ]; then jarvis-installer & fi' "$inc/etc/xdg/labwc/autostart"
 
 # keybinds FILE -> "key<TAB>action<TAB>command" lines, sorted

@@ -62,6 +62,8 @@ const USER_EN = {
     "Claude subscription sign-in is not available in Jarvis OS. Use an API key instead.",
   accountUnavailable: "Signing in with an account is not available on this system.",
   memoryOff: "Memory is off",
+  memoryKeyringTimeout:
+    "Memory is off for now: the system keyring did not answer (it may be waiting for a password).",
   updatesUnavailable: "Checking for updates is not available on this system.",
   updatesCheckFailed: (message: string) => `Could not check for updates: ${message}`,
   pickModel: "Pick a model before saving",
@@ -83,6 +85,7 @@ const USER_AR: UserText = {
     "تسجيل الدخول باشتراك Claude غير متاح في رفيق. استخدم مفتاح API بدلًا من ذلك.",
   accountUnavailable: "تسجيل الدخول بحساب غير متاح على هذا النظام.",
   memoryOff: "الذاكرة متوقفة",
+  memoryKeyringTimeout: "الذاكرة متوقفة الآن: حلقة مفاتيح النظام لم تستجب (ربما تنتظر كلمة مرور).",
   updatesUnavailable: "التحقق من التحديثات غير متاح على هذا النظام.",
   updatesCheckFailed: (message) => `تعذّر التحقق من التحديثات: ${message}`,
   pickModel: "اختر نموذجًا قبل الحفظ",

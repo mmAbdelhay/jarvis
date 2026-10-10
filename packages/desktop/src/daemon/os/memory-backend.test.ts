@@ -4,6 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  KeyringTimeoutError,
   MEMORY_KEY_ACCOUNT,
   createMemorySecretStore,
   type SecretStore,
@@ -116,6 +117,30 @@ describe("createMemoryBackendOpener", () => {
     await expect(memory.open()).resolves.toBeNull();
     expect(reads).toBe(1);
     clock.now = MEMORY_RETRY_MS;
+    await memory.open();
+    expect(reads).toBe(2);
+  });
+
+  it("a keyring that times out turns memory off for the session, with one notice", async () => {
+    let reads = 0;
+    const prompting: SecretStore = {
+      ...createMemorySecretStore(),
+      get: async () => {
+        reads++;
+        throw new KeyringTimeoutError(8);
+      },
+    };
+    const { memory, clock, logs } = await opener(prompting);
+    expect(memory.takeKeyringNotice()).toBe(false);
+    await expect(memory.open()).resolves.toBeNull();
+    expect(memory.takeKeyringNotice()).toBe(true);
+    expect(memory.takeKeyringNotice()).toBe(false);
+    clock.now = 10 * MEMORY_RETRY_MS;
+    await expect(memory.open()).resolves.toBeNull();
+    expect(reads).toBe(1);
+    expect(logs.join("\n")).toContain("did not answer");
+    // Forget all starts over (and may ask the keyring again).
+    await memory.reset();
     await memory.open();
     expect(reads).toBe(2);
   });

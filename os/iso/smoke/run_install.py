@@ -282,6 +282,13 @@ def greeter_login(run: Run, m: Machine, layout: str = "us") -> None:
 
     run.check("criterion 6: greeter login → labwc → jarvisd ready", login)
 
+    def keyring():
+        uid = int(sh(f"id -u {flow.USER}").strip())
+        sh(scenarios.keyring_roundtrip(uid, flow.USER), 60)
+        sh(scenarios.login_keyring_encrypted(flow.USER))
+
+    run.check("v1.1: the login password unlocked the login keyring (no prompt, encrypted)", keyring)
+
 
 def scenario_erase(args, run: Run, work: Path, out: Path, ovmf: firmware.Ovmf) -> None:
     b = brand(BRAND_ENV)

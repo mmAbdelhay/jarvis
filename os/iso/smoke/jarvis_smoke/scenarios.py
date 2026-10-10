@@ -162,3 +162,28 @@ def start_lock(uid: int) -> str:
         as_user(uid, f"env WAYLAND_DISPLAY={display} QT_QPA_PLATFORM=wayland setsid -f jarvis-lock")
         + f" && sleep 3 && pgrep -u {USER} -x jarvis-lock >/dev/null"
     )
+
+
+# --- Rafiq v1.1 fixes ---
+def keyring_roundtrip(uid: int, user: str = USER) -> str:
+    """Stores a Secret Service item in the default collection and reads it
+    back as USER, each step bounded: a "Choose password for new keyring" or
+    unlock prompt makes secret-tool wait, so a timeout here is that prompt.
+    No prompter may be up afterwards. The item is removed again."""
+    tool = as_user(uid, "timeout 15 secret-tool", user)
+    attrs = "service jarvis-smoke account keyring-probe"
+    return (
+        f"printf smoke-secret | {tool} store --label=jarvis-smoke {attrs} && "
+        f"[ \"$({tool} lookup {attrs})\" = smoke-secret ] && "
+        f"{tool} clear {attrs} && "
+        f"! pgrep -u {user} -f gcr-prompter >/dev/null && "
+        f"test -s /home/{user}/.local/share/keyrings/login.keyring"
+    )
+
+
+def login_keyring_encrypted(user: str = USER) -> str:
+    """Installed systems: pam_gnome_keyring made the login keyring with the
+    login password, so it is in the encrypted binary format, not plain text."""
+    path = f"/home/{user}/.local/share/keyrings/login.keyring"
+    return f"[ \"$(head -c 12 {path})\" = GnomeKeyring ] && ! grep -q '^\\[keyring\\]' {path}"
+

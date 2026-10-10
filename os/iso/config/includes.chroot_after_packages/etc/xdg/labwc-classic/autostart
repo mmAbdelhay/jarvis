@@ -1,13 +1,12 @@
 #!/bin/sh
 # Session autostart; labwc runs this with sh at start, live and installed.
 
-# Live session only: it autologins, so there is no password to unlock the
-# login keyring with; unlock (or create) it with an empty one (M1 design §4).
-# Installed systems unlock it with the login password via greetd's PAM
-# (hook 0300-boot) and must never get an empty-password keyring.
-if [ -d /run/live/medium ]; then
-  printf '' | gnome-keyring-daemon --unlock --components=secrets >/dev/null 2>&1 &
-fi
+# The login keyring. pam_gnome_keyring started the keyring daemon with the
+# login password (hook 0300-boot); this completes it: it unlocks, or on the
+# first login creates, the login keyring, then offers the Secret Service.
+# Live boots have no password but an unlocked login keyring with none
+# (live-config 2000-jarvis-live-session).
+gnome-keyring-daemon --start --components=pkcs11,secrets >/dev/null 2>&1 || true
 
 # Give user services and D-Bus activated tools access to this session (§5.14).
 systemctl --user import-environment WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP >/dev/null 2>&1 || true

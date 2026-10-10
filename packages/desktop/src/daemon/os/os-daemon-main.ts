@@ -198,6 +198,9 @@ async function main(argv: readonly string[]): Promise<void> {
     info("JARVIS_PROVIDER_KEY_* is ignored outside the read-only tool profile");
   }
   const env = { ...process.env };
+  // One secret-tool runner for memory and provider keys: after a keyring
+  // timeout (a password prompt is up) every store fails fast for a while.
+  const keyringExec = nodeSecretToolExec(env);
   const mcpDir = mcpDirFrom(env);
   // Rafiq M3 §5.14: host servers get the graphical session's display and
   // desktop from the user manager, re-read before each turn (session-env.ts).
@@ -331,7 +334,7 @@ async function main(argv: readonly string[]): Promise<void> {
   });
   const memory = createMemoryBackendOpener({
     path: memoryDbPath(home),
-    secrets: createSecretToolStore(nodeSecretToolExec(env), { label: MEMORY_KEY_LABEL }),
+    secrets: createSecretToolStore(keyringExec, { label: MEMORY_KEY_LABEL }),
     fileExists: existsSync,
     removeFile: removeMemoryFile,
     randomKey: () => randomBytes(32),
@@ -459,12 +462,10 @@ async function main(argv: readonly string[]): Promise<void> {
     configIo,
     ...(lockStore === undefined ? {} : { lockStore }),
     voiceAvailability: () => voice?.availability() ?? voiceIo.availability(),
-    secrets: readonlyProfile
-      ? createEnvKeyStore(new Map())
-      : createSecretToolStore(nodeSecretToolExec(env)),
+    secrets: readonlyProfile ? createEnvKeyStore(new Map()) : createSecretToolStore(keyringExec),
     providerKeys: readonlyProfile
       ? createEnvKeyStore(envKeys)
-      : createSecretToolStore(nodeSecretToolExec(env), {
+      : createSecretToolStore(keyringExec, {
           attribute: PROVIDER_KEY_ATTRIBUTE,
         }),
     ...(readonlyProfile ? { toolProfile: "readonly" as const } : {}),
