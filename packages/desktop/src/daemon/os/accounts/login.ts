@@ -77,7 +77,21 @@ export function createLoginManager(deps: {
   type Session = { proc: CliProcess; done: boolean; stop(): void };
   const sessions = new Map<AccountId, Session>();
 
+  // Bumped synchronously by every start and cancel, so a spawn that is still in
+  // flight when a newer start or a cancel (logout) arrives can tell it is stale.
+  const generations = new Map<AccountId, number>();
+  const bump = (account: AccountId): number => {
+    const next = (generations.get(account) ?? 0) + 1;
+    generations.set(account, next);
+    return next;
+  };
+
   async function cancel(account: AccountId): Promise<void> {
+    bump(account);
+    await stopSession(account);
+  }
+
+  async function stopSession(account: AccountId): Promise<void> {
     const session = sessions.get(account);
     if (session === undefined) return;
     sessions.delete(account);
@@ -87,11 +101,17 @@ export function createLoginManager(deps: {
   }
 
   async function start(account: AccountId): Promise<null> {
-    await cancel(account);
+    const generation = bump(account);
+    await stopSession(account);
+    if (generations.get(account) !== generation) return null;
     const pin: AccountPin = deps.pins[account];
     const paths = deps.paths(account);
     const label = ACCOUNT_LABELS[account];
     const proc = await deps.spawn(loginInvocation(pin, paths));
+    if (generations.get(account) !== generation) {
+      await proc.kill(); // cancelled or superseded while starting: never register it
+      return null;
+    }
     let announced = false;
     let url: string | undefined;
     let code: string | undefined;

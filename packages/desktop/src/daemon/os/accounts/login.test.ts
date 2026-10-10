@@ -104,6 +104,49 @@ describe("createLoginManager", () => {
     expect(opened).toEqual(["https://auth.openai.com/oauth/authorize?client_id=app_X&state=s"]);
   });
 
+  function gated(killed: CliInvocation[]) {
+    const inner = scriptedSpawner({ login: { exitCode: null, hang: true } }, [], killed);
+    const releases: Array<() => void> = [];
+    const spawn: ReturnType<typeof scriptedSpawner> = (inv) =>
+      new Promise((resolve) => {
+        releases.push(() => resolve(inner(inv)));
+      });
+    return { spawn, releases };
+  }
+
+  it("kills a login whose spawn was still pending when cancel arrived", async () => {
+    const killed: CliInvocation[] = [];
+    const { spawn, releases } = gated(killed);
+    const { login, pushed } = manager(spawn, {});
+    const started = login.start("claude");
+    await vi.advanceTimersByTimeAsync(0); // spawn is now in flight
+    await login.cancel("claude");
+    releases[0]?.();
+    await started;
+    expect(killed).toHaveLength(1);
+    expect(login.running("claude")).toBe(false);
+    await vi.advanceTimersByTimeAsync(11 * 60 * 1000);
+    expect(pushed).toEqual([]);
+  });
+
+  it("a double start leaves only the second login running", async () => {
+    const killed: CliInvocation[] = [];
+    const { spawn, releases } = gated(killed);
+    const { login } = manager(spawn, {});
+    const first = login.start("claude");
+    await vi.advanceTimersByTimeAsync(0); // first spawn in flight
+    const second = login.start("claude");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(releases).toHaveLength(2);
+    releases[0]?.();
+    releases[1]?.();
+    await Promise.all([first, second]);
+    expect(killed).toHaveLength(1);
+    expect(login.running("claude")).toBe(true);
+    await login.cancel("claude");
+    expect(killed).toHaveLength(2);
+  });
+
   it("uses the URL the browser shim wrote (Gemini)", async () => {
     const { login, pushed, opened } = manager(
       scriptedSpawner({ login: { exitCode: 0, hang: true } }),
