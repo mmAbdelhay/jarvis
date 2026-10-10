@@ -2,6 +2,7 @@
 // so it is tested without a terminal or a daemon of its own.
 import { MAX_PROMPT_CHARS } from "@jarvis/wire";
 import type { ControlClient } from "../../desktop/src/daemon/control/client.js";
+import { accountCommand } from "./account.js";
 import { parseArgs, USAGE } from "./args.js";
 import { ask, chat } from "./chat.js";
 import {
@@ -75,6 +76,8 @@ export async function main(argv: readonly string[], deps: MainDeps): Promise<num
         return await ask(client, term, parsed.text);
       case "setup":
         return await setup(client, term);
+      case "account":
+        return await accountCommand(client, term, parsed.action, parsed.account);
       case "memory":
         return await memoryCommand(client, term, parsed.action, parsed.yes);
     }
