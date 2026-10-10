@@ -1,4 +1,5 @@
 #include "models/ProviderModel.h"
+#include "models/AccountsModel.h"
 
 #include <QHostAddress>
 #include <QJsonArray>
@@ -57,6 +58,7 @@ bool isPrivateHost(const QString& host)
 
 QString modeFor(const QString& kind, const QString& url)
 {
+    if (kind == u"account") return u"account"_s;
     const QString host = QUrl(url).host();
     if (kind == u"ollama")
         return isLoopbackHost(host) ? u"local"_s : u"lan"_s;
@@ -93,6 +95,7 @@ QString ProviderModel::providerMode(const QString& kind, const QString& url)
 
 QString ProviderModel::providerLabel(const QString& kind, const QString& url)
 {
+    if (kind == u"account") return AccountsModel::label(AccountsModel::accountForUrl(url));
     const QString mode = modeFor(kind, url);
     if (mode == u"local")
         return tr("On this computer");
@@ -114,6 +117,7 @@ QString ProviderModel::activeLabel() const
 
 QString ProviderModel::suggestedId() const
 {
+    if (m_mode == u"account") return m_account;
     if (m_mode != u"cloud")
         return m_mode;
     QString slug;
@@ -125,7 +129,7 @@ QString ProviderModel::suggestedId() const
 
 void ProviderModel::setMode(const QString& mode)
 {
-    if (mode != u"cloud" && mode != u"local" && mode != u"lan")
+    if (mode != u"cloud" && mode != u"local" && mode != u"lan" && mode != u"account")
         return;
     m_mode = mode;
     m_models.clear();
@@ -135,12 +139,34 @@ void ProviderModel::setMode(const QString& mode)
         m_preset = preset->name.toString();
         m_kind = preset->kind.toString();
         m_baseUrl = preset->baseUrl.toString();
+    } else if (mode == u"account") {
+        // Plan Y §2.1: no key, no URL of the user's; the vendor's URL for display.
+        m_preset.clear();
+        if (!AccountsModel::isAccount(m_account))
+            m_account = u"claude"_s;
+        m_kind = u"account"_s;
+        m_baseUrl = AccountsModel::displayUrl(m_account);
+        wipeKey();
     } else {
         m_preset.clear();
         m_kind = u"ollama"_s;
         m_baseUrl = mode == u"local" ? u"http://localhost:11434"_s : QString();
     }
     resetProbe();
+    emit draftChanged();
+}
+
+void ProviderModel::setAccount(const QString& account)
+{
+    if (!AccountsModel::isAccount(account) || account == m_account)
+        return;
+    m_account = account;
+    if (m_mode == u"account") {
+        m_baseUrl = AccountsModel::displayUrl(account);
+        m_model.clear();
+        m_models.clear();
+        resetProbe();
+    }
     emit draftChanged();
 }
 
@@ -160,7 +186,7 @@ void ProviderModel::setPreset(const QString& name)
 
 void ProviderModel::setKind(const QString& kind)
 {
-    if (kind == m_kind || (kind != u"anthropic" && kind != u"gemini" && kind != u"openai-compatible" && kind != u"ollama"))
+    if (m_mode == u"account" || kind == m_kind || (kind != u"anthropic" && kind != u"gemini" && kind != u"openai-compatible" && kind != u"ollama"))
         return;
     m_kind = kind;
     m_models.clear();
@@ -170,7 +196,7 @@ void ProviderModel::setKind(const QString& kind)
 
 void ProviderModel::setBaseUrl(const QString& url)
 {
-    if (url == m_baseUrl)
+    if (m_mode == u"account" || url == m_baseUrl)
         return;
     m_baseUrl = url;
     m_models.clear();
@@ -189,7 +215,7 @@ void ProviderModel::setModel(const QString& model)
 
 void ProviderModel::setApiKey(const QString& key)
 {
-    if (key == m_apiKey)
+    if (m_mode == u"account" || key == m_apiKey)
         return;
     m_apiKey = key;
     resetProbe();
@@ -198,6 +224,10 @@ void ProviderModel::setApiKey(const QString& key)
 
 QString ProviderModel::privacyText() const
 {
+    if (m_mode == u"account")
+        return tr("Your messages and Jarvis's tool results go to %1 under your own account. The %1 program runs in a sandbox with its own tools turned off; Jarvis never sees your password.")
+            .arg(displayName());
+
     if (m_mode == u"cloud")
         return tr("When diagnosing problems, Jarvis sends short excerpts of system logs to %1. Passwords, keys and tokens are removed first.")
             .arg(displayName());
@@ -206,6 +236,7 @@ QString ProviderModel::privacyText() const
 
 QString ProviderModel::displayName() const
 {
+    if (m_mode == u"account") return AccountsModel::label(m_account);
     const QString host = QUrl(m_baseUrl).host();
     if (m_mode == u"local")
         return u"Ollama"_s;
@@ -246,6 +277,8 @@ bool ProviderModel::keepsSavedKey() const
 
 QJsonObject ProviderModel::draft() const
 {
+    if (m_mode == u"account")
+        return {{"kind", "account"}, {"account", m_account}, {"baseUrl", m_baseUrl}, {"model", m_model}};
     QJsonObject out{{"kind", m_kind}, {"baseUrl", m_baseUrl.trimmed()}, {"model", m_model}};
     if (!m_apiKey.isEmpty())
         out.insert("apiKey", m_apiKey);
@@ -346,6 +379,11 @@ void ProviderModel::loadDraft(const QJsonObject& config)
     m_editingBaseUrl = baseUrl;
     m_editingHasKey = config.value("hasKey").toBool();
     m_mode = modeFor(kind, baseUrl);
+    if (m_mode == u"account") {
+        const QString account = config.value("account").toString();
+        m_account = AccountsModel::isAccount(account) ? account : AccountsModel::accountForUrl(baseUrl);
+    }
+
     m_preset.clear();
     if (m_mode == u"cloud") {
         const Preset* preset = presetFor(kind, baseUrl);
@@ -355,7 +393,7 @@ void ProviderModel::loadDraft(const QJsonObject& config)
                  : u"Custom URL"_s; // i18n: ignore
     }
     m_kind = kind;
-    m_baseUrl = baseUrl;
+    m_baseUrl = m_mode == u"account" ? AccountsModel::displayUrl(m_account) : baseUrl;
     m_model = model;
     m_models = model.isEmpty() ? QStringList{} : QStringList{model};
     wipeKey();

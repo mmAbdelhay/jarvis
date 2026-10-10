@@ -2,7 +2,8 @@
 <!--
   jarvis-shell keybinds for labwc. Plan P merges this <keyboard> block into
   /etc/xdg/labwc/rc.xml. Super alone (on release) focuses the chat; Super+Space
-  starts, or sends, a voice message (M3 contracts section 5.15); Super+L runs
+  starts, or sends, a voice message (M3 contracts section 5.15); Super+Esc
+  takes over from computer use (Rafiq v1.1); Super+L runs
   jarvis-lock directly, like the session's rc.xml, so it also works on live
   boots without jarvis-idle (plan P's deliberate deviation from section 5.15;
   a crashed Super+L locker is not relaunched, docs/os/threat-model.md R6);
@@ -16,6 +17,9 @@
     </keybind>
     <keybind key="W-space">
       <action name="Execute" command="jarvis-shell --voice" />
+    </keybind>
+    <keybind key="W-Escape">
+      <action name="Execute" command="jarvis-shell --cu-stop" />
     </keybind>
     <keybind key="W-l">
       <action name="Execute" command="jarvis-lock" />

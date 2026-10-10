@@ -86,6 +86,11 @@ check "classic session: Super+Space opens the docked chat" test "$(cat "$tmp/cal
 reset; mkdir -p "$state"; echo reason=shell-failed > "$state/classic-fallback"
 key_run env JARVIS_SESSION_MODE=full sh "$key" --focus
 check "after a fallback: Super opens the docked chat, never a new full shell" test "$(cat "$tmp/calls")" = 'classic:--chat'
+reset; key_run env JARVIS_SESSION_MODE=full sh "$key" --cu-stop
+check "Super+Esc: Take over goes to jarvis-shell --cu-stop" test "$(cat "$tmp/calls")" = 'shell:--cu-stop'
+reset; mkdir -p "$state"; echo reason=shell-failed > "$state/classic-fallback"
+key_run env JARVIS_SESSION_MODE=classic sh "$key" --cu-stop
+check "Super+Esc never opens the classic chat" test "$(cat "$tmp/calls")" = 'shell:--cu-stop'
 
 printf '#!/bin/sh\necho "labwc:$JARVIS_SESSION_MODE:$*" >> "%s/calls"\n' "$tmp" > "$tmp/labwc"
 chmod +x "$tmp/labwc"

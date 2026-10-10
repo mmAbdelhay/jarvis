@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# fetch-node.sh DEST — put Node's linux-x64 runtime (bin/node, LICENSE) in
+# fetch-node.sh DEST — put Node's linux-x64 runtime (bin/node, npm, LICENSE) in
 # DEST, verified against the SHA-256 pinned in jarvisd/node.env.
 #
 #   NODE_ENV_FILE   pin file (default: ../jarvisd/node.env)
@@ -44,3 +44,12 @@ tar -xJf "$tarball" -C "$tmp"
 src="$tmp/node-v${NODE_VERSION}-linux-x64"
 install -D -m0755 "$src/bin/node" "$dest/bin/node"
 install -D -m0644 "$src/LICENSE" "$dest/LICENSE"
+# Plan Y §5.5: jarvisd installs account CLIs with its own npm.
+if [ ! -f "$src/lib/node_modules/npm/bin/npm-cli.js" ]; then
+  echo "fetch-node: $name carries no npm" >&2
+  exit 1
+fi
+mkdir -p "$dest/lib/node_modules"
+rm -rf "$dest/lib/node_modules/npm"
+cp -R "$src/lib/node_modules/npm" "$dest/lib/node_modules/npm"
+ln -sfn ../lib/node_modules/npm/bin/npm-cli.js "$dest/bin/npm"

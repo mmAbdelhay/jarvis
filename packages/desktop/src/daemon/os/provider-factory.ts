@@ -11,6 +11,7 @@ import {
   createOllamaProvider,
   createOpenAiCompatibleProvider,
   type FetchLike,
+  KeyringTimeoutError,
 } from "@jarvis/platform/model";
 import type { ProviderSection } from "./provider-config.js";
 
@@ -34,7 +35,9 @@ export function unavailableProvider(message: string | (() => string)): ModelProv
  * gnome-keyring unlocks with the autologin session, which may be after the
  * user unit started jarvisd. A read that throws (locked, D-Bus not up yet) is
  * retried; a found key is cached; a missing one is not, so a key saved later
- * in settings is picked up on the next use.
+ * in settings is picked up on the next use. A keyring that times out (a
+ * password prompt is up) is not retried: the turn goes on without the key,
+ * so the provider asks for it again instead of waiting on the prompt.
  */
 export function createLazyKeyProvider(options: {
   readKey(): Promise<string | undefined>;
@@ -54,7 +57,8 @@ export function createLazyKeyProvider(options: {
       try {
         key = await options.readKey();
         break;
-      } catch {
+      } catch (error) {
+        if (error instanceof KeyringTimeoutError) break;
         if (attempt < attempts) await options.sleep(delayMs);
       }
     }
@@ -76,9 +80,20 @@ export function createLazyKeyProvider(options: {
 export function buildProvider(
   section: ProviderSection,
   apiKey: string | undefined,
-  deps: { fetch: FetchLike; subscription?: (model: string) => ModelProvider; language?(): Lang },
+  deps: {
+    fetch: FetchLike;
+    subscription?: (model: string) => ModelProvider;
+    /** Plan Y: the account adapter (Task 13 wires it). */
+    account?: (section: ProviderSection) => ModelProvider;
+    language?(): Lang;
+  },
 ): ModelProvider {
   switch (section.kind) {
+    case "account":
+      return (
+        deps.account?.(section) ??
+        unavailableProvider(() => USER_TEXT[deps.language?.() ?? "en"].accountUnavailable)
+      );
     case "anthropic":
       if (section.auth === "subscription") {
         return (

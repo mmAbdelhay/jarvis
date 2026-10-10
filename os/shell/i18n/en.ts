@@ -2,6 +2,130 @@
 <!DOCTYPE TS>
 <TS version="2.1" language="en" sourcelanguage="en">
     <context>
+        <name>AccountPanel</name>
+        <message>
+            <source>Sign in</source>
+            <translation>Sign in</translation>
+        </message>
+        <message>
+            <source>Set up and sign in</source>
+            <translation>Set up and sign in</translation>
+        </message>
+        <message>
+            <source>Sign out</source>
+            <translation>Sign out</translation>
+        </message>
+        <message>
+            <source>Open this address, enter the code below and sign in. Your browser should already show it.</source>
+            <translation>Open this address, enter the code below and sign in. Your browser should already show it.</translation>
+        </message>
+        <message>
+            <source>Finish signing in in your browser. If it didn't open, open this address:</source>
+            <translation>Finish signing in in your browser. If it didn't open, open this address:</translation>
+        </message>
+        <message>
+            <source>Copy</source>
+            <translation>Copy</translation>
+        </message>
+        <message>
+            <source>Open browser</source>
+            <translation>Open browser</translation>
+        </message>
+        <message>
+            <source>Code</source>
+            <translation>Code</translation>
+        </message>
+    </context>
+    <context>
+        <name>AccountsModel</name>
+        <message>
+            <source>Signed in as %1</source>
+            <translation>Signed in as %1</translation>
+        </message>
+        <message>
+            <source>Ready to sign in</source>
+            <translation>Ready to sign in</translation>
+        </message>
+        <message>
+            <source>Not set up</source>
+            <translation>Not set up</translation>
+        </message>
+        <message>
+            <source>Getting %1 ready…</source>
+            <translation>Getting %1 ready…</translation>
+        </message>
+        <message>
+            <source>Starting %1 sign-in…</source>
+            <translation>Starting %1 sign-in…</translation>
+        </message>
+        <message>
+            <source>Finish signing in to %1 in your browser.</source>
+            <translation>Finish signing in to %1 in your browser.</translation>
+        </message>
+        <message>
+            <source>That didn't work. Try again.</source>
+            <translation>That didn't work. Try again.</translation>
+        </message>
+        <message>
+            <source>%1 is set up. Sign in to use it.</source>
+            <translation>%1 is set up. Sign in to use it.</translation>
+        </message>
+        <message>
+            <source>%1 isn't set up yet. Jarvis installs the official %1 program for you.</source>
+            <translation>%1 isn't set up yet. Jarvis installs the official %1 program for you.</translation>
+        </message>
+        <message>
+            <source>%1 sent a sign-in address Jarvis can't open.</source>
+            <translation>%1 sent a sign-in address Jarvis can't open.</translation>
+        </message>
+        <message>
+            <source>To revoke Google access after signing out, visit https://myaccount.google.com/connections.</source>
+            <translation>To revoke Google access after signing out, visit https://myaccount.google.com/connections.</translation>
+        </message>
+        <message>
+            <source>To revoke GitHub Copilot access after signing out, visit https://github.com/settings/applications.</source>
+            <translation>To revoke GitHub Copilot access after signing out, visit https://github.com/settings/applications.</translation>
+        </message>
+    </context>
+    <context>
+        <name>AccountsSection</name>
+        <message>
+            <source>Accounts you signed in with. Their sign-in stays inside each program's own folder on this computer; Jarvis never stores it.</source>
+            <translation>Accounts you signed in with. Their sign-in stays inside each program's own folder on this computer; Jarvis never stores it.</translation>
+        </message>
+        <message>
+            <source>Sign out</source>
+            <translation>Sign out</translation>
+        </message>
+        <message>
+            <source>Remove</source>
+            <translation>Remove</translation>
+        </message>
+        <message>
+            <source>Remove %1</source>
+            <translation>Remove %1</translation>
+        </message>
+        <message>
+            <source>To revoke Google access after signing out, visit https://myaccount.google.com/connections.</source>
+            <translation>To revoke Google access after signing out, visit https://myaccount.google.com/connections.</translation>
+        </message>
+        <message>
+            <source>Signing out of GitHub Copilot deletes its sign-in data from this computer. To cancel its access completely, also remove "GitHub Copilot CLI" at github.com/settings/applications.</source>
+            <translation>Signing out of GitHub Copilot deletes its sign-in data from this computer. To cancel its access completely, also remove "GitHub Copilot CLI" at github.com/settings/applications.</translation>
+        </message>
+    </context>
+    <context>
+        <name>AppLauncher</name>
+        <message>
+            <source>That app's launcher is broken, so it was not started.</source>
+            <translation>That app's launcher is broken, so it was not started.</translation>
+        </message>
+        <message>
+            <source>Couldn't start %1. Is it installed?</source>
+            <translation>Couldn't start %1. Is it installed?</translation>
+        </message>
+    </context>
+    <context>
         <name>AuditModel</name>
         <message>
             <source>Approved</source>
@@ -232,6 +356,49 @@
         </message>
     </context>
     <context>
+        <name>ComputerUseSection</name>
+        <message>
+            <source>Jarvis can look at the screen and use the mouse and keyboard in apps you allow, for one task at a time. It's off until you turn it on for a model, and you can take over at any moment with Esc.</source>
+            <translation>Jarvis can look at the screen and use the mouse and keyboard in apps you allow, for one task at a time. It's off until you turn it on for a model, and you can take over at any moment with Esc.</translation>
+        </message>
+        <message>
+            <source>No model providers yet.</source>
+            <translation>No model providers yet.</translation>
+        </message>
+        <message>
+            <source>Let %1 use the screen</source>
+            <translation>Let %1 use the screen</translation>
+        </message>
+        <message>
+            <source>Send screenshots to %1?</source>
+            <translation>Send screenshots to %1?</translation>
+        </message>
+        <message>
+            <source>While Jarvis uses the screen, screenshots of the allowed windows are sent to %1. Other windows are blacked out, and screenshots are never saved.</source>
+            <translation>While Jarvis uses the screen, screenshots of the allowed windows are sent to %1. Other windows are blacked out, and screenshots are never saved.</translation>
+        </message>
+        <message>
+            <source>Cancel</source>
+            <translation>Cancel</translation>
+        </message>
+        <message>
+            <source>Allow and turn on</source>
+            <translation>Allow and turn on</translation>
+        </message>
+        <message>
+            <source>Saving…</source>
+            <translation>Saving…</translation>
+        </message>
+        <message>
+            <source>Never controlled</source>
+            <translation>Never controlled</translation>
+        </message>
+        <message>
+            <source>These are always protected and can't be removed.</source>
+            <translation>These are always protected and can't be removed.</translation>
+        </message>
+    </context>
+    <context>
         <name>ConfirmCard</name>
         <message>
             <source>Approval needed</source>
@@ -287,6 +454,162 @@
         <message>
             <source>Something went wrong: %1</source>
             <translation>Something went wrong: %1</translation>
+        </message>
+    </context>
+    <context>
+        <name>CuOverlay</name>
+        <message>
+            <source>Take over (Super+Esc)</source>
+            <translation>Take over (Super+Esc)</translation>
+        </message>
+        <message>
+            <source>Resume</source>
+            <translation>Resume</translation>
+        </message>
+        <message>
+            <source>Stop</source>
+            <translation>Stop</translation>
+        </message>
+        <message>
+            <source>Screen control</source>
+            <translation>Screen control</translation>
+        </message>
+        <message>
+            <source>Steps</source>
+            <translation>Steps</translation>
+        </message>
+        <message>
+            <source>%1: %2</source>
+            <translation>%1: %2</translation>
+        </message>
+        <message>
+            <source>Step %1</source>
+            <translation>Step %1</translation>
+        </message>
+        <message>
+            <source>Screen control request failed.</source>
+            <translation>Screen control request failed.</translation>
+        </message>
+    </context>
+    <context>
+        <name>CuOverlayWindow</name>
+        <message>
+            <source>Jarvis screen control</source>
+            <translation>Jarvis screen control</translation>
+        </message>
+    </context>
+    <context>
+        <name>CuSessionModel</name>
+        <message>
+            <source>Couldn't stop Jarvis: %1</source>
+            <translation>Couldn't stop Jarvis: %1</translation>
+        </message>
+        <message>
+            <source>Couldn't resume: %1</source>
+            <translation>Couldn't resume: %1</translation>
+        </message>
+        <message>
+            <source>, </source>
+            <translation>, </translation>
+        </message>
+        <message>
+            <source>Lost the connection to Jarvis. Reconnecting…</source>
+            <translation>Lost the connection to Jarvis. Reconnecting…</translation>
+        </message>
+        <message>
+            <source>Paused · you have control</source>
+            <translation>Paused · you have control</translation>
+        </message>
+        <message>
+            <source>Jarvis is controlling the screen · step %1 of %2</source>
+            <translation>Jarvis is controlling the screen · step %1 of %2</translation>
+        </message>
+        <message>
+            <source>You moved the mouse or typed.</source>
+            <translation>You moved the mouse or typed.</translation>
+        </message>
+        <message>
+            <source>You pressed Esc.</source>
+            <translation>You pressed Esc.</translation>
+        </message>
+        <message>
+            <source>A protected window has focus.</source>
+            <translation>A protected window has focus.</translation>
+        </message>
+        <message>
+            <source>The screen locked.</source>
+            <translation>The screen locked.</translation>
+        </message>
+        <message>
+            <source>Jarvis paused.</source>
+            <translation>Jarvis paused.</translation>
+        </message>
+        <message>
+            <source>Done</source>
+            <translation>Done</translation>
+        </message>
+        <message>
+            <source>Running</source>
+            <translation>Running</translation>
+        </message>
+        <message>
+            <source>Failed</source>
+            <translation>Failed</translation>
+        </message>
+        <message>
+            <source>Waiting</source>
+            <translation>Waiting</translation>
+        </message>
+    </context>
+    <context>
+        <name>CuSettingsModel</name>
+        <message>
+            <source>This model can't see images, so it can't use the screen.</source>
+            <translation>This model can't see images, so it can't use the screen.</translation>
+        </message>
+        <message>
+            <source>Screenshots of the allowed windows go to %1.</source>
+            <translation>Screenshots of the allowed windows go to %1.</translation>
+        </message>
+        <message>
+            <source>Screenshots stay on this computer.</source>
+            <translation>Screenshots stay on this computer.</translation>
+        </message>
+        <message>
+            <source>a computer on your network</source>
+            <translation>a computer on your network</translation>
+        </message>
+        <message>
+            <source>Jarvis apps, the shell and Settings</source>
+            <translation>Jarvis apps, the shell and Settings</translation>
+        </message>
+        <message>
+            <source>Lock screen</source>
+            <translation>Lock screen</translation>
+        </message>
+        <message>
+            <source>Installer</source>
+            <translation>Installer</translation>
+        </message>
+        <message>
+            <source>Password and key prompts (polkit, keyrings, SSH)</source>
+            <translation>Password and key prompts (polkit, keyrings, SSH)</translation>
+        </message>
+        <message>
+            <source>Terminals</source>
+            <translation>Terminals</translation>
+        </message>
+        <message>
+            <source>Password fields in any app</source>
+            <translation>Password fields in any app</translation>
+        </message>
+        <message>
+            <source>This version of Jarvis can't use the screen yet.</source>
+            <translation>This version of Jarvis can't use the screen yet.</translation>
+        </message>
+        <message>
+            <source>Couldn't change computer use: %1</source>
+            <translation>Couldn't change computer use: %1</translation>
         </message>
     </context>
     <context>
@@ -470,6 +793,10 @@
     <context>
         <name>NavRail</name>
         <message>
+            <source>Apps</source>
+            <translation>Apps</translation>
+        </message>
+        <message>
             <source>Chat</source>
             <translation>Chat</translation>
         </message>
@@ -617,6 +944,14 @@
             <translation>Strongest models. Needs internet and an API key.</translation>
         </message>
         <message>
+            <source>Sign in with an account</source>
+            <translation>Sign in with an account</translation>
+        </message>
+        <message>
+            <source>Use your Claude, ChatGPT, Google or GitHub Copilot plan. No API key.</source>
+            <translation>Use your Claude, ChatGPT, Google or GitHub Copilot plan. No API key.</translation>
+        </message>
+        <message>
             <source>This computer</source>
             <translation>This computer</translation>
         </message>
@@ -733,6 +1068,10 @@
         <message>
             <source>On your network</source>
             <translation>On your network</translation>
+        </message>
+        <message>
+            <source>Your messages and Jarvis's tool results go to %1 under your own account. The %1 program runs in a sandbox with its own tools turned off; Jarvis never sees your password.</source>
+            <translation>Your messages and Jarvis's tool results go to %1 under your own account. The %1 program runs in a sandbox with its own tools turned off; Jarvis never sees your password.</translation>
         </message>
         <message>
             <source>When diagnosing problems, Jarvis sends short excerpts of system logs to %1. Passwords, keys and tokens are removed first.</source>
@@ -939,6 +1278,14 @@
             <translation>Phone</translation>
         </message>
         <message>
+            <source>Computer use</source>
+            <translation>Computer use</translation>
+        </message>
+        <message>
+            <source>Accounts</source>
+            <translation>Accounts</translation>
+        </message>
+        <message>
             <source>Settings</source>
             <translation>Settings</translation>
         </message>
@@ -949,6 +1296,13 @@
         <message>
             <source>No provider yet.</source>
             <translation>No provider yet.</translation>
+        </message>
+    </context>
+    <context>
+        <name>SettingsWindow</name>
+        <message>
+            <source>Jarvis Settings</source>
+            <translation>Jarvis Settings</translation>
         </message>
     </context>
     <context>
@@ -1392,11 +1746,31 @@
             <translation>The microphone recorder stopped without any audio.</translation>
         </message>
     </context>
-<context>
-    <name>SettingsWindow</name>
-    <message>
-        <source>Jarvis Settings</source>
-        <translation>Jarvis Settings</translation>
-    </message>
-</context>
+    <context>
+        <name>AppsView</name>
+        <message>
+            <source>Apps</source>
+            <translation>Apps</translation>
+        </message>
+        <message>
+            <source>Search apps, or ask Jarvis</source>
+            <translation>Search apps, or ask Jarvis</translation>
+        </message>
+        <message>
+            <source>Search apps</source>
+            <translation>Search apps</translation>
+        </message>
+        <message>
+            <source>No apps match “%1”.</source>
+            <translation>No apps match “%1”.</translation>
+        </message>
+        <message>
+            <source>No apps found.</source>
+            <translation>No apps found.</translation>
+        </message>
+        <message>
+            <source>Ask Jarvis: %1</source>
+            <translation>Ask Jarvis: %1</translation>
+        </message>
+    </context>
 </TS>

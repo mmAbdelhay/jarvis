@@ -82,6 +82,8 @@ hook=$ISO_DIR/config/hooks/normal/0300-boot.hook.chroot
 check "boot hook rebuilds the initramfs" grep -q 'update-initramfs -u -k all' "$hook"
 check "boot hook requires the jarvis Plymouth theme" grep -q 'plymouth-set-default-theme' "$hook"
 check "boot hook wires gnome-keyring into greetd PAM" grep -q 'pam_gnome_keyring.so auto_start' "$hook"
+check "boot hook leaves starting the keyring daemon to PAM (systemd units masked)" \
+  grep -qx 'systemctl --global mask gnome-keyring-daemon.socket gnome-keyring-daemon.service' "$hook"
 check "boot hook refuses an autologin in the image" grep -q 'initial_session' "$hook"
 
 check "daily APT lists refresh" grep -Fxq 'APT::Periodic::Update-Package-Lists "1";' "$ISO_DIR/config/includes.chroot_after_packages/etc/apt/apt.conf.d/20jarvis-periodic"

@@ -67,6 +67,7 @@ private:
         QString id, kind, baseUrl, model;
         bool hasKey = false;
         QString error;
+        QString account;
     };
     QJsonArray rowsJson() const;
     void markDirty();

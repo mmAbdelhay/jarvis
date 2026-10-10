@@ -21,6 +21,7 @@ offer (shipped by `jarvis-models-catalog` at
 | `languages` | Languages it handles well |
 | `recommendedFor` | One-line guidance |
 | `role` | `main` (offered to the user) or `backup` (exactly one: the small built-in model jarvisd falls back to, M4 contracts §1; shipped by `jarvis-backup-model`) |
+| `vision` | `true` only with passing tool-calling and vision probe evidence at jarvisd’s runtime context size (`OLLAMA_NUM_CTX`, 8,192 tokens) in `vision-candidates.json` (`os-models.yml`, input `vision`); at most one entry, always a main model (v1.1 contracts §4.12). Computer use requires it; without passing evidence, v1.1 computer use is cloud-only. |
 
 ## Adding a model
 
@@ -43,3 +44,41 @@ Tiers group models by hardware: `small` and `medium` run on CPU/modest RAM,
 only when you dispatch with the input `large_runner` set to the label of a big
 runner; otherwise the job emits a warning and skips them
 (`tools/matrix.py`).
+
+## Local vision model (computer use)
+
+`vision-candidates.json` lists local models that might see screenshots. The
+`vision-probe` job of `os-models.yml` (weekly, or `gh workflow run os-models.yml -f vision=true`)
+checks at Jarvis’s runtime context size (8,192 tokens) that Ollama reports
+the `vision` and `tools` capabilities and that the model clicks a red button in two of three 1280x800 screenshots, in pixel
+coordinates (`probe/vision-probe.test.ts`). Record results with
+`tools/vision_pick.py record --result vision-<id>.json --run-id <run>`;
+`tools/vision_pick.py apply` adds the smallest passing model that runs in 16 GB
+to `catalog.json` with `vision: true`. At most one; none if nothing passes.
+
+All current candidates are untested, so no local vision model is enabled:
+computer use remains cloud-only until passing CI artifacts are recorded.
+
+The recorder rejects passing results with missing capabilities, the wrong
+context size, or fewer than two hits across exactly three trials. A failed
+run replaces earlier passing evidence. CPU-capable candidates must fit within
+75% of their declared RAM, as required by the catalog. Direct `apply` refuses
+GPU-only candidates because the candidate format has no VRAM metadata.
+Candidate sizes must be refreshed
+and verified against registry manifests before merging:
+
+```sh
+python3 os/models/tools/check_registry.py os/models/vision-candidates.json --fix
+python3 os/models/tools/check_registry.py os/models/vision-candidates.json
+```
+
+## Account CLIs (`accounts.json`, Plan Y)
+
+The official CLIs Jarvis installs per user when someone signs in with an account
+(Claude, ChatGPT, Google, GitHub Copilot). Exact versions and npm `sha512`
+integrity, plus the linux-x64 platform package each CLI downloads. jarvisd
+refuses an install whose lockfile integrity differs, then runs
+`npm audit signatures`. Re-pin with
+`python3 os/models/tools/accounts_pin.py <account> <version> --write`
+(versions younger than 7 days are refused), then run Task 23's live tests
+(`docs/os/accounts.md`) before merging.

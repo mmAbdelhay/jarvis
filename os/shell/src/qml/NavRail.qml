@@ -2,7 +2,7 @@ import QtQuick
 import Jarvis.UI
 import QtQuick.Layouts
 
-// 72 px rail: chat, activity log, settings; terminal pinned at the bottom.
+// 72 px rail: chat, activity log, apps, settings; terminal pinned at the bottom.
 Rectangle {
     id: root
     LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft
@@ -35,6 +35,14 @@ Rectangle {
             iconPath: Icons.activity
             selected: root.current === "audit"
             onClicked: root.navigate("audit")
+        }
+        IconButton {
+            objectName: "navApps"
+            Layout.alignment: Qt.AlignHCenter
+            text: qsTr("Apps")
+            iconPath: Icons.apps
+            selected: root.current === "apps"
+            onClicked: root.navigate("apps")
         }
         IconButton {
             objectName: "navSettings"

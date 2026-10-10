@@ -150,3 +150,45 @@ Without the secrets `JARVIS_APT_SIGNING_KEY` / `JARVIS_APT_DEPLOY_KEY` the
 generated in CI (uid contains `NOT FOR RELEASE`), and `os-v*` release builds
 refuse a throwaway keyring. Key setup and rotation: `os/repo/README.md`. The
 model catalog has its own workflow, `os-models.yml` (`os/models/README.md`).
+
+## Computer-use GUI tests (Rafiq v1.1)
+
+Two tiers share `smoke/assets/cu/` (`fakevision.mjs`, `png.mjs`,
+`cucheck.mjs`, and `cu-gimp.json`):
+
+| Test | Where | What |
+|---|---|---|
+| `cu/run.sh --debs DIR` | Linux + unprivileged Docker | headless labwc, real packages, GIMP, cards, capture privacy, exclusion, stuck loop, lock, peer check |
+| `smoke/run_cu.py --iso ISO` | Linux + KVM | release ISO, systemd-started helper, overlay, physical pointer input, lock |
+
+Neither tier runs on the dev Mac. The runner requires local `gh` (logged in),
+`rsync`, and batch-mode SSH access. It syncs this checkout to
+`~/rafiq-build/v11/src`, merges the requested artifacts into
+`~/rafiq-build/v11/artifacts`, and runs one quoted command with `ARTIFACTS`
+and `OUT` set. `OUT` is emptied before each run; results return to
+`./remote-out/`, even when the test fails. The runner preserves the test's
+exit status and reports retrieval failure when the test succeeded. Git metadata
+is excluded because this checkout is a worktree; `OS_VERSION` carries the local
+package version instead. `--dry-run` prints commands without connecting or
+creating local artifact directories; its temporary path is a display placeholder.
+The host comes only from `JARVIS_LINUX_BOX` and is never recorded in the repo.
+
+```bash
+export JARVIS_LINUX_BOX=user@host
+os/iso/dev/remote.sh --dry-run --run-id <id> --artifact debs-go -- 'ls "$ARTIFACTS"'
+os/iso/dev/remote.sh --run-id <id> --artifact debs-go --artifact debs-daemon --artifact debs-qt --artifact debs-distro \
+  -- 'systemctl --user is-active --quiet rafiq-no-sleep || exit 2; DOCKER_CONTEXT=default os/iso/cu/run.sh --debs "$ARTIFACTS" --out "$OUT/cu"'
+os/iso/dev/remote.sh --run-id <id> --artifact os-iso \
+  -- 'systemctl --user is-active --quiet rafiq-no-sleep || exit 2; while pgrep -f "[q]emu-system" >/dev/null; do sleep 5; done; python3 os/iso/smoke/run_cu.py --iso "$(ls "$ARTIFACTS"/*.iso)" --out "$OUT/cu-kvm" --accel kvm --disable-jarvis-apt'
+```
+
+Keep the Linux user's `rafiq-no-sleep` unit active. Do not use sudo. On hosts
+with a wedged Docker daemon, invoke Docker as
+`perl -e 'alarm 900; exec @ARGV' docker ...`; use `docker --context default`
+for any separately authorized privileged container. A hung Docker step is
+**CI-only, not run**. These examples use unprivileged containers and KVM;
+loop devices, privileged FUSE/NTFS, and OVMF are outside this runner task.
+The commands supplied to the runner are responsible for these host checks.
+
+CI runs both tiers (`cu-test`, `cu-kvm-test`) for computer-use changes selected
+by `smoke/jarvis_smoke/cu_changes.py`.

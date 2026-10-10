@@ -11,6 +11,7 @@ ColumnLayout {
     LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft
     LayoutMirroring.childrenInherit: true
     required property ProviderModel provider
+    property AccountsModel accounts: null
     required property ProviderListModel providers
     property bool doctorAvailable: false
     property bool editing: false
@@ -174,6 +175,7 @@ ColumnLayout {
         ProviderForm {
             Layout.fillWidth: true
             provider: root.provider
+            accounts: root.accounts
         }
         RowLayout {
             Layout.fillWidth: true

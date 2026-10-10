@@ -87,10 +87,19 @@ fi
 grep -qx 'ConditionKernelCommandLine=!boot=live' "$c/usr/lib/systemd/system/ollama.service" 2>/dev/null ||
   problems+=("ollama would run in the live session")
 grep -q pam_gnome_keyring "$c/etc/pam.d/greetd" 2>/dev/null || problems+=("greetd PAM does not unlock gnome-keyring")
+for u in gnome-keyring-daemon.socket gnome-keyring-daemon.service; do
+  [ "$(readlink "$c/etc/systemd/user/$u" 2>/dev/null)" = /dev/null ] ||
+    problems+=("$u is not masked: it starts the keyring before PAM has the password (no login keyring on D-Bus at first login)")
+done
+for a in labwc labwc-classic; do
+  grep -qE '^gnome-keyring-daemon --start --components=[a-z0-9,]*secrets' "$c/etc/xdg/$a/autostart" 2>/dev/null ||
+    problems+=("/etc/xdg/$a/autostart does not complete the keyring daemon PAM started (gnome-keyring-daemon --start)")
+done
 [ -f "$c/usr/share/grub/themes/jarvis/theme.txt" ] || problems+=("GRUB theme missing")
 
 "$(dirname "$0")/verify-m3.sh" "$c" || problems+=("Rafiq M3 image checks failed (verify-m3 lines above)")
 "$(dirname "$0")/verify-m4.sh" "$c" || problems+=("Rafiq M4 image checks failed (verify-m4 lines above)")
+"$(dirname "$0")/verify-v11.sh" "$c" || problems+=("Rafiq v1.1 image checks failed (verify-v11 lines above)")
 
 if [ ${#problems[@]} -gt 0 ]; then
   printf 'verify-chroot: %s\n' "${problems[@]}" >&2

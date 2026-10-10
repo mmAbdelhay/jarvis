@@ -3,6 +3,7 @@
 source "$(dirname "$0")/lib.sh"
 source "$(dirname "$0")/m3-fixture.sh"
 source "$(dirname "$0")/m4-fixture.sh"
+source "$(dirname "$0")/v11-fixture.sh"
 scripts=$ISO_DIR/scripts
 tmp=$(mktmp); trap 'rm -rf "$tmp"' EXIT
 
@@ -101,6 +102,8 @@ mkchroot() { # mkchroot DIR — every piece of session wiring present
   ln -s /usr/lib/systemd/system/ollama.service "$c/etc/systemd/system/multi-user.target.wants/ollama.service"
   echo 'ConditionKernelCommandLine=!boot=live' > "$c/usr/lib/systemd/system/ollama.service"
   echo 'auth optional pam_gnome_keyring.so' > "$c/etc/pam.d/greetd"
+  ln -s /dev/null "$c/etc/systemd/user/gnome-keyring-daemon.socket"
+  ln -s /dev/null "$c/etc/systemd/user/gnome-keyring-daemon.service"
   printf '<keybind key="Super_L" onRelease="yes"><action name="Execute" command="/usr/libexec/jarvis/jarvis-session-key --focus" />\n<keybind key="C-A-t">\n' > "$c/etc/xdg/labwc/rc.xml"
   echo '. /usr/share/jarvis-session/labwc/autostart' > "$c/etc/xdg/labwc/autostart"
   echo '(while true; do jarvis-shell; sleep 1; done) &' > "$c/usr/share/jarvis-shell/jarvis-shell-loop"
@@ -121,6 +124,7 @@ mkchroot() { # mkchroot DIR — every piece of session wiring present
   done
   m3_fixture "$c"
   m4_fixture "$c"
+  v11_fixture "$c"
 }
 mkchroot "$tmp/c"
 check "complete chroot verifies" "$scripts/verify-chroot.sh" "$tmp/c"
@@ -140,6 +144,12 @@ check "missing grub-efi-amd64-signed is caught" bash -c "! '$scripts/verify-chro
 mkchroot "$tmp/c"
 rm "$tmp/c/usr/lib/live/config/2000-jarvis-live-session"
 check "missing live-config script is caught" bash -c "! '$scripts/verify-chroot.sh' '$tmp/c' 2>/dev/null"
+mkchroot "$tmp/c"
+rm "$tmp/c/etc/systemd/user/gnome-keyring-daemon.socket"
+check "a keyring daemon started before PAM has the password is caught" bash -c "! '$scripts/verify-chroot.sh' '$tmp/c' 2>/dev/null"
+mkchroot "$tmp/c"
+sed -i '/^gnome-keyring-daemon --start/d' "$tmp/c/etc/xdg/labwc/autostart"
+check "a session that never completes the keyring daemon is caught" bash -c "! '$scripts/verify-chroot.sh' '$tmp/c' 2>/dev/null"
 mkchroot "$tmp/c"
 sed -i '/^ConditionKernel/d' "$tmp/c/usr/lib/systemd/system/ollama.service"
 check "ollama running in the live session is caught" bash -c "! '$scripts/verify-chroot.sh' '$tmp/c' 2>/dev/null"
@@ -164,7 +174,7 @@ mkchroot "$tmp/c"
 rm "$tmp/c/etc/systemd/system/multi-user.target.wants/jarvis-flathub-appstream.service"
 check "first-boot appstream unit not enabled is caught" bash -c "! '$scripts/verify-chroot.sh' '$tmp/c' 2>/dev/null"
 mkchroot "$tmp/c"
-sed -i '/Super_L/d' "$tmp/c/etc/xdg/labwc/rc.xml"
+sed -i '/Super_L/,/<\/keybind>/d' "$tmp/c/etc/xdg/labwc/rc.xml"   # the whole bind: the real rc.xml spans lines
 check "missing Super keybind is caught" bash -c "! '$scripts/verify-chroot.sh' '$tmp/c' 2>/dev/null"
 mkchroot "$tmp/c"
 sed -i '/^Enabled:/d' "$tmp/c/etc/apt/sources.list.d/jarvis.sources"

@@ -6,6 +6,19 @@
 //
 // No electron here (core/no-electron.test.ts).
 import {
+  CU_IDLE_STATE,
+  CU_MODEL_TEXT,
+  CU_TEXT,
+  CU_TURN_MAX_STEPS,
+  type ComputerUse,
+  type CuClient,
+  type CuState,
+  MAX_STEPS,
+  SCREEN_TOOL_MODEL_NAMES,
+  createComputerUse,
+  withImagePolicy,
+  withScreenTools,
+  modelSupportsVision,
   AGENT_TEXT,
   BACKUP_BASE_URL,
   BACKUP_PROVIDER_ID,
@@ -43,6 +56,7 @@ import {
   createFailoverProvider,
   type FailoverProvider,
   isLocalBaseUrl,
+  isLoopbackBaseUrl,
   type ProviderListResult,
   type ProviderSaveRequest,
   type ProviderSaveResult,
@@ -82,7 +96,13 @@ import {
   type UpdatesCheckResult,
 } from "@jarvis/core";
 import type { SecretStore } from "@jarvis/platform/model";
-import { OS_CONTROL_PUSHES } from "@jarvis/wire";
+import { type CuSetEnabledRequest, OS_CONTROL_PUSHES } from "@jarvis/wire";
+import {
+  type ComputerUseSettings,
+  isEmptyComputerUse,
+  pruneComputerUse,
+  writeComputerUse,
+} from "./cu-config.js";
 import { createBackupProvider } from "./backup-model.js";
 import type { LockStore } from "./lock-store.js";
 import type { MemoryOpener } from "./memory-backend.js";
@@ -114,6 +134,8 @@ export class OsAgentError extends Error {
 }
 
 export type OsAgentDeps = {
+  /** v1.1 §2: jarvis-cu (cu-client.ts) and a capture digest (SHA-256). Absent: no computer use. */
+  computerUse?: { client: CuClient; hash(pngBase64: string): Promise<string> };
   /** M4 §4: runs recipes locally with one card item per step. */
   recipes?: RecipeEngine;
   defaultLanguage?: Lang;
@@ -135,6 +157,8 @@ export type OsAgentDeps = {
   /** M4 §1: the catalog's backup model tag (backup-model.ts readBackupTag);
    *  null or absent: no backup. Read at start and after provider:save. */
   readBackupTag?(): Promise<string | null>;
+  readVisionTags?(): Promise<ReadonlySet<string>>;
+  readOllamaVision?(baseUrl: string, model: string): Promise<boolean>;
   /** Add-on servers from mcp.d (registry-servers.ts); none when absent. */
   registryServers?: { load(): Promise<LoadedRegistry> };
   /** Calls onChange when mcp.d changes; returns a stop function. */
@@ -203,6 +227,16 @@ export interface OsAgent {
   memoryClear(): Promise<null>;
   /** memory:setEnabled (M2.5 contracts §7 #9); persisted in jarvis.yaml. */
   memorySetEnabled(enabled: boolean): Promise<null>;
+  /** cu:state now (v1.1 §2). */
+  cuState(): CuState;
+  /** cu:stop: ends the session and stops the running turn. */
+  cuStop(): Promise<null>;
+  /** cu:resume: resumes a paused session. */
+  cuResume(): Promise<null>;
+  /** cu:setEnabled (v1.1 §2). Enabling needs a vision model. */
+  cuSetEnabled(request: CuSetEnabledRequest): Promise<null>;
+  /** cu:consent (v1.1 §2, §4.8): screenshots may go to this provider from now on; `revoke` withdraws it. */
+  cuConsent(providerId: string, revoke?: boolean): Promise<null>;
   /** updates:check (M2 contracts §2). */
   checkUpdates(): Promise<UpdatesCheckResult>;
   /** A shell (re)connected: re-push what a broadcast it missed would have said. */
@@ -251,6 +285,11 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
     log: deps.log,
   });
   let backupTag: string | null = null;
+  let visionTags: ReadonlySet<string> = new Set();
+  const ollamaVision = new Set<string>();
+  const visionOf = (entry: ProviderEntry): boolean =>
+    modelSupportsVision(entry.kind, entry.model, visionTags, entry.account) ||
+    (entry.kind === "ollama" && ollamaVision.has(entry.id));
   /** The backup as a provider entry (fixed loopback URL, M4 §1). */
   function backupEntry(): ProviderEntry | null {
     return backupTag === null
@@ -313,6 +352,7 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
     }, SESSION_IDLE_MS);
   };
   const coreToolNames = new Set(CORE_TOOLS.map(toModelName));
+  const cuCoreToolNames = new Set([...coreToolNames, ...SCREEN_TOOL_MODEL_NAMES]);
   let lastSearchNote = "";
   const logSearchOnce = (line: string) => {
     if (line === lastSearchNote) return;
@@ -431,6 +471,39 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
     },
   });
 
+  /** null when computer use may run for `entry` now, else why not (model-facing).
+   *  Contracts §2 + design §2.2/§2.6/§2.9; asked before every screen call. */
+  function cuBlocked(entry: ProviderEntry | null): string | null {
+    if (deps.computerUse === undefined || safeOnly) return CU_MODEL_TEXT.off;
+    if (locked) return CU_MODEL_TEXT.locked;
+    if (entry === null || entry.id === BACKUP_PROVIDER_ID) return CU_MODEL_TEXT.notEnabled;
+    if (brain.computerUse.enabled[entry.id] !== true) return CU_MODEL_TEXT.notEnabled;
+    if (!visionOf(entry)) return CU_MODEL_TEXT.noVision;
+    if (
+      !isLoopbackBaseUrl(entry.baseUrl) &&
+      brain.computerUse.cloudConsent[entry.id] === undefined
+    ) {
+      return CU_MODEL_TEXT.noConsent;
+    }
+    return null;
+  }
+
+  const computerUse: ComputerUse | undefined =
+    deps.computerUse === undefined
+      ? undefined
+      : createComputerUse({
+          client: deps.computerUse.client,
+          gate,
+          audit: (entry) => deps.audit.append(entry),
+          emitState: (state) => deps.push(OS_CONTROL_PUSHES.cuState, state),
+          available: () => cuBlocked(activeEntry()),
+          hash: deps.computerUse.hash,
+          now: deps.now,
+          newId: deps.newId,
+          timers: deps.timers,
+          log: deps.log,
+        });
+
   const monitor = createProviderMonitor({
     check: () => provider.reachable(),
     active: () => failover?.status() ?? { activeId: null, fallbackReason: null },
@@ -535,6 +608,23 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
       brain = emptyBrain();
     }
     if (brain.language !== null) uiLanguage = brain.language;
+    visionTags = new Set();
+    ollamaVision.clear();
+    try {
+      visionTags = (await deps.readVisionTags?.()) ?? new Set();
+    } catch {
+      deps.log("[vision] catalog unavailable");
+    }
+    await Promise.all(
+      brain.providers.map(async (entry) => {
+        if (entry.kind !== "ollama" || visionOf(entry)) return;
+        try {
+          if (await deps.readOllamaVision?.(entry.baseUrl, entry.model)) ollamaVision.add(entry.id);
+        } catch {
+          deps.log("[vision] capabilities unavailable");
+        }
+      }),
+    );
     failover = undefined;
     // JARVIS_FAKE_PROVIDER replaces the configured providers entirely (contracts §6 #11).
     if (deps.fakeScript !== undefined) {
@@ -555,12 +645,15 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
         : {
             id: BACKUP_PROVIDER_ID,
             locality: "local" as const,
-            provider: withSimpleProfile(
-              createBackupProvider({
-                tag: backupTag,
-                make: (section) => deps.makeProvider(section, undefined),
-              }),
-              () => (registry === undefined ? [] : simpleToolSpecs(registry)),
+            provider: withImagePolicy(
+              withSimpleProfile(
+                createBackupProvider({
+                  tag: backupTag,
+                  make: (section) => deps.makeProvider(section, undefined),
+                }),
+                () => (registry === undefined ? [] : simpleToolSpecs(registry)),
+              ),
+              () => false,
             ),
           };
     if (brain.providers.length === 0 && backup === undefined) {
@@ -571,7 +664,12 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
       entries: brain.providers.map((entry) => ({
         id: entry.id,
         locality: isLocalBaseUrl(entry.baseUrl) ? ("local" as const) : ("cloud" as const),
-        provider: keyedProvider(entry, entry),
+        provider: withImagePolicy(
+          entry.kind === "account"
+            ? deps.makeProvider(entry, undefined)
+            : keyedProvider(entry, entry),
+          () => cuBlocked(entry) === null,
+        ),
       })),
       allowCloudFallback: brain.allowCloudFallback,
       ...(backup === undefined ? {} : { backup }),
@@ -588,6 +686,22 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
   /** A stored key is reused only from a saved entry with the same kind and
    *  base URL (and the same id when one is given): a changed URL never
    *  receives the old key. */
+  async function saveComputerUse(next: ComputerUseSettings): Promise<null> {
+    try {
+      await writeComputerUse(deps.configPath, next, deps.configIo);
+    } catch (error) {
+      throw new OsAgentError("internal", describeError(error));
+    }
+    brain = { ...brain, computerUse: next };
+    return null;
+  }
+  function configuredEntry(providerId: string): ProviderEntry {
+    const entry = brain.providers.find((candidate) => candidate.id === providerId);
+    if (entry === undefined)
+      throw new OsAgentError("bad-request", CU_TEXT[uiLanguage].noSuchProvider(providerId));
+    return entry;
+  }
+
   function draftProvider(draft: ProviderDraft & { id?: string }): ModelProvider {
     const target: ProviderSection = {
       kind: draft.kind,
@@ -595,7 +709,9 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
       model: draft.model,
       auth: "api-key",
       supportsTools: true,
+      ...(draft.account === undefined ? {} : { account: draft.account }),
     };
+    if (draft.kind === "account") return deps.makeProvider(target, undefined);
     if (draft.apiKey !== undefined) return deps.makeProvider(target, draft.apiKey);
     const saved = brain.providers.find(
       (entry) =>
@@ -702,13 +818,23 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
           await checkSession();
           const tools = await ensureRegistry({ reloadAddOns: true });
           const notes = await memory.recall(text).catch(() => []);
+          // The keyring timed out (a prompt is up): memory is off; say so once.
+          const notice =
+            deps.memory?.takeKeyringNotice() === true && memoryOn()
+              ? USER_TEXT[turnLanguage(uiLanguage, text)].memoryKeyringTimeout
+              : undefined;
           const before = history.length;
           failover?.beginTurn();
+          const cuOn = computerUse !== undefined && cuBlocked(activeEntry()) === null;
+          const turnTools = cuOn ? withScreenTools(tools) : tools;
+          computerUse?.beginTurn();
           const result = await runTurn(
             {
               ...(deps.recipes === undefined ? {} : { recipes: deps.recipes }),
+              ...(computerUse === undefined ? {} : { computerUse }),
+              maxSteps: () => (computerUse?.active() === true ? CU_TURN_MAX_STEPS : MAX_STEPS),
               provider,
-              registry: tools,
+              registry: turnTools,
               gate,
               contextTokens: contextTokens(),
               toolsEnabled: deps.fakeScript !== undefined || activeEntry()?.supportsTools !== false,
@@ -718,7 +844,7 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
               newId: deps.newId,
               selectTools: (query, all) =>
                 selectTools(all, query, {
-                  coreModelNames: coreToolNames,
+                  coreModelNames: cuOn ? cuCoreToolNames : coreToolNames,
                   embedder,
                   log: logSearchOnce,
                 }),
@@ -728,9 +854,11 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
               lang: turnLanguage(uiLanguage, text),
               history,
               text,
+              via: from.via,
               signal: controller.signal,
               ...(context === undefined ? {} : { context }),
               ...(notes.length === 0 ? {} : { notes }),
+              ...(notice === undefined ? {} : { notice }),
             },
           );
           memory.afterTurn(result.messages.slice(before));
@@ -748,7 +876,11 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
             error: describeError(error),
           });
         } finally {
+          // A session never outlives its turn. endSession drops the session
+          // synchronously; the helper's `end` finishes after the turn is free.
+          const ending = computerUse?.endSession("turn-end");
           if (turn?.turnId === turnId) turn = undefined;
+          await ending;
         }
       })();
       return { turnId };
@@ -781,6 +913,8 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
     async setLocked(next) {
       if (locked !== next) {
         locked = next;
+        // Design §2.9: the lock ends computer use at once.
+        if (next) void computerUse?.endSession("locked");
         deps.log(`[lock] ${next ? "locked" : "unlocked"}`);
         const current = sys.current();
         if (current !== undefined) deps.push(OS_CONTROL_PUSHES.sysSnapshot, { ...current, locked });
@@ -811,7 +945,13 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
           kind: entry.kind,
           baseUrl: entry.baseUrl,
           model: entry.model,
-          hasKey: await hasProviderKey(entry, keyStores()),
+          ...(entry.account === undefined ? {} : { account: entry.account }),
+          hasKey: entry.kind === "account" ? false : await hasProviderKey(entry, keyStores()),
+          vision: visionOf(entry),
+          computerUse: {
+            enabled: brain.computerUse.enabled[entry.id] === true,
+            consentAt: brain.computerUse.cloudConsent[entry.id] ?? null,
+          },
         })),
       );
       return {
@@ -859,6 +999,7 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
             draft.apiKey === undefined &&
             saved.kind === draft.kind &&
             saved.baseUrl === draft.baseUrl &&
+            saved.account === draft.account &&
             saved.model === draft.model;
           if (unchanged) {
             return [draft.id, { ok: true, supportsTools: saved.supportsTools, models: [] }];
@@ -869,6 +1010,17 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
       const results: Record<string, ProbeResult> = Object.fromEntries(probed);
       if (!probed.every(([, result]) => result.ok)) return { ok: false, results };
       const previous = brain.providers;
+      // v1.1: enable and consent survive only for a provider whose endpoint is unchanged.
+      const keptComputerUse = pruneComputerUse(brain.computerUse, (id) => {
+        const old = savedById.get(id);
+        const next = request.providers.find((draft) => draft.id === id);
+        return (
+          old !== undefined &&
+          next !== undefined &&
+          old.kind === next.kind &&
+          old.baseUrl === next.baseUrl
+        );
+      });
       try {
         for (const draft of request.providers) {
           if (draft.apiKey !== undefined) await deps.providerKeys.set(draft.id, draft.apiKey);
@@ -881,10 +1033,12 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
               kind: draft.kind,
               baseUrl: draft.baseUrl,
               model: draft.model,
+              ...(draft.account === undefined ? {} : { account: draft.account }),
               auth: "api-key" as const,
               supportsTools: results[draft.id]?.supportsTools ?? true,
             })),
             allowCloudFallback: request.allowCloudFallback,
+            ...(isEmptyComputerUse(brain.computerUse) ? {} : { computerUse: keptComputerUse }),
           },
           deps.configIo,
         );
@@ -1004,6 +1158,38 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
       return null;
     },
 
+    async cuSetEnabled({ providerId, enabled }) {
+      const entry = configuredEntry(providerId);
+      if (enabled && !visionOf(entry))
+        throw new OsAgentError("bad-request", CU_TEXT[uiLanguage].noVisionModel);
+      return saveComputerUse({
+        enabled: { ...brain.computerUse.enabled, [providerId]: enabled },
+        cloudConsent: { ...brain.computerUse.cloudConsent },
+      });
+    },
+
+    cuState: () => computerUse?.state() ?? CU_IDLE_STATE,
+
+    async cuStop() {
+      await computerUse?.stop();
+      turn?.controller.abort();
+      return null;
+    },
+
+    async cuResume() {
+      if (locked) throw new OsAgentError("locked", CONTROL_TEXT[uiLanguage].locked);
+      await computerUse?.resume();
+      return null;
+    },
+
+    async cuConsent(providerId, revoke) {
+      configuredEntry(providerId);
+      const cloudConsent = { ...brain.computerUse.cloudConsent };
+      if (revoke === true) delete cloudConsent[providerId];
+      else cloudConsent[providerId] = new Date(deps.now()).toISOString();
+      return saveComputerUse({ enabled: { ...brain.computerUse.enabled }, cloudConsent });
+    },
+
     async memorySetEnabled(enabled) {
       try {
         await writeOsMemoryEnabled(deps.configPath, enabled, deps.configIo);
@@ -1043,6 +1229,7 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
     },
     resync() {
       deps.push(OS_CONTROL_PUSHES.uiLanguage, { lang: uiLanguage });
+      deps.push(OS_CONTROL_PUSHES.cuState, computerUse?.state() ?? CU_IDLE_STATE);
       // Contracts §6 #7: on every new connection, re-push provider:status,
       // doctor:state, sys:snapshot and every open card (the shell de-dups
       // cards by cardId).
@@ -1056,6 +1243,7 @@ export function createOsAgent(deps: OsAgentDeps): OsAgent {
 
     async shutdown() {
       turn?.controller.abort();
+      await computerUse?.endSession("stopped");
       doctor.cancel();
       gate.closeAll();
       if (idleTimer !== undefined) deps.timers.clearTimeout(idleTimer);

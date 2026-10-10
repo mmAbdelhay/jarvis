@@ -19,3 +19,20 @@ user = "jarvis"
 command = "agreety --cmd labwc"
 user = "_greetd"
 EOF
+
+# The live session autologins, so there is no password to unlock a login
+# keyring with. Give "jarvis" an unlocked login keyring with no password
+# (gnome-keyring's plain text format) and make it the default collection,
+# before the session's gnome-keyring-daemon starts and reads them: provider
+# keys and the memory key then store and read without a "Choose password for
+# new keyring" prompt. Installed systems never run this: pam_gnome_keyring
+# creates and unlocks theirs with the login password (hook 0300-boot).
+keyrings=$root/home/jarvis/.local/share/keyrings
+if [ ! -e "$keyrings/login.keyring" ]; then
+  mkdir -p "$keyrings"
+  printf '[keyring]\ndisplay-name=Login\nctime=0\nmtime=0\nlock-on-idle=false\nlock-after=false\n' > "$keyrings/login.keyring"
+  printf 'login\n' > "$keyrings/default"
+  chmod 0700 "$keyrings"
+  chmod 0600 "$keyrings/login.keyring" "$keyrings/default"
+  if [ -z "$root" ]; then chown -R jarvis:jarvis /home/jarvis/.local; fi
+fi

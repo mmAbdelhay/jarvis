@@ -4,6 +4,11 @@
 # contracts §2) they open the docked chat instead of starting the full shell
 # over it. Test hooks: JARVIS_SHELL, JARVIS_CLASSIC.
 set -u
+# Super+Esc: Take over from computer use. Only the full shell runs computer
+# use; never open the classic chat for it.
+if [ "${1:-}" = --cu-stop ]; then
+  exec "${JARVIS_SHELL:-jarvis-shell}" --cu-stop
+fi
 state="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/jarvis"
 if [ "${JARVIS_SESSION_MODE:-full}" = classic ] || [ -e "$state/classic-fallback" ]; then
   exec "${JARVIS_CLASSIC:-/usr/bin/jarvis-classic}" --chat

@@ -1,0 +1,27 @@
+# Jarvis computer use helper (v1.1 contracts §1). A user service started by
+# the full session's labwc autostart once WAYLAND_DISPLAY is imported; never
+# enabled for every user (no [Install]). It only ever talks over Unix sockets
+# (Wayland, D-Bus for AT-SPI, its own control socket), so AF_UNIX is the only
+# address family: the helper cannot open a network socket at all. Its peer
+# check is SO_PEERCRED plus /proc, not `ss`, so it needs no netlink either.
+[Unit]
+Description=Jarvis computer use helper (allowed windows only)
+ConditionEnvironment=WAYLAND_DISPLAY
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=exec
+# A crash restarts it, but never against a compositor that has gone away.
+ExecCondition=/bin/sh -c 'test -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY"'
+ExecStart=/usr/libexec/jarvis/jarvis-cu
+Restart=on-failure
+RestartSec=2
+UMask=0077
+NoNewPrivileges=yes
+RestrictAddressFamilies=AF_UNIX
+LockPersonality=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+SystemCallArchitectures=native
+MemoryDenyWriteExecute=yes

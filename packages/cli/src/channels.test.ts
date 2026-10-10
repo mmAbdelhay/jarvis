@@ -17,6 +17,8 @@ describe("the CLI's control channels", () => {
       for (const match of text.matchAll(/channel !== "([^"]+)"/g)) pushes.add(match[1] ?? "");
     }
     expect([...used].sort()).toEqual([
+      "account:install",
+      "account:status",
       "agent:confirm",
       "agent:prompt",
       "agent:stop",

@@ -6,6 +6,7 @@ import {
   type ModelEvent,
   type ModelMessage,
   type ModelProvider,
+  screenshotCaption,
   ProviderError,
   isRecord,
 } from "@jarvis/core";
@@ -43,6 +44,16 @@ export function toOllamaMessages(system: string, messages: readonly ModelMessage
           role: "tool",
           content: result.isError ? `ERROR: ${result.content}` : result.content,
           tool_name: result.name,
+        });
+      }
+      const shots = message.results.flatMap((r) =>
+        r.image === undefined ? [] : [{ r, image: r.image }],
+      );
+      if (shots.length > 0) {
+        out.push({
+          role: "user",
+          content: shots.map(({ r }) => screenshotCaption(r.name, r.callId)).join("\n"),
+          images: shots.map(({ image }) => image.dataBase64),
         });
       }
     }

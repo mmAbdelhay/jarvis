@@ -32,17 +32,6 @@
         </message>
     </context>
     <context>
-        <name>Launcher</name>
-        <message>
-            <source>That app's launcher is broken, so it was not started.</source>
-            <translation>مُشغّل هذا التطبيق معطوب، لذا لم يُشغَّل.</translation>
-        </message>
-        <message>
-            <source>Couldn't start %1. Is it installed?</source>
-            <translation>تعذّر تشغيل %1. هل هو مثبّت؟</translation>
-        </message>
-    </context>
-    <context>
         <name>Taskbar</name>
         <message>
             <source>Apps</source>

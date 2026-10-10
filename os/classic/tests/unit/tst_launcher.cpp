@@ -2,7 +2,7 @@
 #include <QtTest>
 
 #include "DesktopEntry.h"
-#include "Launcher.h"
+#include "AppLauncher.h"
 
 using namespace Qt::StringLiterals;
 
@@ -13,7 +13,7 @@ struct Recorder {
     QStringList args;
     int calls = 0;
     bool result = true;
-    Launcher::Starter starter()
+    AppLauncher::Starter starter()
     {
         return [this](const QString& p, const QStringList& a) {
             program = p;
@@ -25,12 +25,12 @@ struct Recorder {
 };
 } // namespace
 
-class TestLauncher : public QObject {
+class TestAppLauncher : public QObject {
     Q_OBJECT
 private slots:
     void launchUsesArgvNotAShell()
     {
-        Launcher launcher;
+        AppLauncher launcher;
         Recorder r;
         launcher.setStarter(r.starter());
         QVERIFY(launcher.launchEntry(*jarvis::ui::parseDesktopEntry(kApps + u"/shellthing.desktop"_s)));
@@ -43,7 +43,7 @@ private slots:
 
     void terminalAppsRunInFoot()
     {
-        Launcher launcher;
+        AppLauncher launcher;
         Recorder r;
         launcher.setStarter(r.starter());
         QVERIFY(launcher.launchEntry(*jarvis::ui::parseDesktopEntry(kApps + u"/htop.desktop"_s)));
@@ -53,10 +53,10 @@ private slots:
 
     void brokenExecIsRefused()
     {
-        Launcher launcher;
+        AppLauncher launcher;
         Recorder r;
         launcher.setStarter(r.starter());
-        QSignalSpy failed(&launcher, &Launcher::failed);
+        QSignalSpy failed(&launcher, &AppLauncher::failed);
         QVERIFY(!launcher.launchEntry(*jarvis::ui::parseDesktopEntry(kApps + u"/broken.desktop"_s)));
         QCOMPARE(r.calls, 0);
         QCOMPARE(failed.size(), 1);
@@ -65,15 +65,15 @@ private slots:
 
     void failedStartReports()
     {
-        Launcher launcher;
+        AppLauncher launcher;
         Recorder r;
         r.result = false;
         launcher.setStarter(r.starter());
-        QSignalSpy failed(&launcher, &Launcher::failed);
+        QSignalSpy failed(&launcher, &AppLauncher::failed);
         QVERIFY(!launcher.launch(u"pcmanfm-qt"_s));
         QCOMPARE(failed.at(0).at(0).toString(), u"Couldn't start pcmanfm-qt. Is it installed?"_s);
     }
 };
 
-QTEST_GUILESS_MAIN(TestLauncher)
+QTEST_GUILESS_MAIN(TestAppLauncher)
 #include "tst_launcher.moc"

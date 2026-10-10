@@ -7,6 +7,8 @@ import {
   type ModelEvent,
   type ModelMessage,
   type ModelProvider,
+  type ModelToolResult,
+  screenshotCaption,
   ProviderError,
   isRecord,
 } from "@jarvis/core";
@@ -50,6 +52,23 @@ export function toOpenAiMessages(system: string, messages: readonly ModelMessage
           role: "tool",
           tool_call_id: result.callId,
           content: result.isError ? `ERROR: ${result.content}` : result.content,
+        });
+      }
+      // Chat Completions tool messages are text only: a screenshot follows as a user message.
+      const shots = message.results.filter(
+        (r): r is ModelToolResult & { image: NonNullable<ModelToolResult["image"]> } =>
+          r.image !== undefined,
+      );
+      if (shots.length > 0) {
+        out.push({
+          role: "user",
+          content: shots.flatMap((r) => [
+            { type: "text", text: screenshotCaption(r.name, r.callId) },
+            {
+              type: "image_url",
+              image_url: { url: `data:${r.image.mediaType};base64,${r.image.dataBase64}` },
+            },
+          ]),
         });
       }
     }

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Initial test placement only. Contracts section 4 U-1 makes the allowed
+     window fullscreen at begin; foreign rectangles are redacted. These rules
+     do not provide screenshot privacy evidence or foreign click coordinates. -->
+<labwc_config>
+  <windowRules>
+    <windowRule identifier="foot" title="cu-*">
+      <action name="MoveTo" x="0" y="0" />
+      <action name="ResizeTo" width="400" height="300" />
+    </windowRule>
+    <windowRule identifier="*gimp*" title="*GIMP">
+      <action name="MoveTo" x="420" y="0" />
+      <action name="ResizeTo" width="860" height="780" />
+    </windowRule>
+  </windowRules>
+</labwc_config>

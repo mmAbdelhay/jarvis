@@ -5,6 +5,7 @@
 // order stay. The system text (and so the safety rules) is never touched.
 // Pure.
 import type { ProviderKind } from "./contract.js";
+import { IMAGE_TOKENS, withoutImage } from "./images.js";
 import { estimateTokens } from "./safety.js";
 import type { ModelMessage, ModelToolSpec } from "./types.js";
 
@@ -16,6 +17,9 @@ export const CONTEXT_TOKENS: Readonly<Record<ProviderKind, number>> = {
   "openai-compatible": 32_000,
   ollama: 8_192,
   gemini: 900_000,
+  // Plan Y: the smallest window among the four accounts' default models
+  // (Copilot routes some requests to 64k models); the CLI adds its own prompt.
+  account: 64_000,
 };
 export const RESPONSE_RESERVE_TOKENS = 2_048;
 export const MIN_HISTORY_TOKENS = 1_024;
@@ -41,7 +45,14 @@ function cutToTokens(text: string, maxTokens: number): string {
 
 function cutToolMessage(message: ModelMessage, maxTokens: number): ModelMessage {
   if (message.role !== "tool") return message;
-  const each = Math.max(1, Math.floor((maxTokens - PER_MESSAGE_TOKENS) / message.results.length));
+  const imageTokens = message.results.reduce(
+    (sum, result) => sum + (result.image === undefined ? 0 : IMAGE_TOKENS),
+    0,
+  );
+  const each = Math.max(
+    1,
+    Math.floor((maxTokens - PER_MESSAGE_TOKENS - imageTokens) / message.results.length),
+  );
   return {
     role: "tool",
     results: message.results.map((result) => ({
@@ -66,8 +77,11 @@ export function messageTokens(message: ModelMessage): number {
       );
     case "tool":
       return (
-        message.results.reduce((sum, result) => sum + estimateTokens(result.content), 0) +
-        PER_MESSAGE_TOKENS
+        message.results.reduce(
+          (sum, result) =>
+            sum + estimateTokens(result.content) + (result.image === undefined ? 0 : IMAGE_TOKENS),
+          0,
+        ) + PER_MESSAGE_TOKENS
       );
   }
 }
@@ -119,7 +133,10 @@ export function fitHistory(messages: readonly ModelMessage[], budget: number): M
     if (message?.role !== "tool" || i === lastTool) continue;
     const shorter: ModelMessage = {
       role: "tool",
-      results: message.results.map((result) => ({ ...result, content: ELIDED_TOOL_OUTPUT })),
+      results: message.results.map((result) => ({
+        ...withoutImage(result),
+        content: ELIDED_TOOL_OUTPUT,
+      })),
     };
     size -= messageTokens(message) - messageTokens(shorter);
     turn[i] = shorter;

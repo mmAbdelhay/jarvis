@@ -1,5 +1,5 @@
 import { USER_TEXT, type ModelProvider, ProviderError } from "@jarvis/core";
-import type { FetchLike } from "@jarvis/platform/model";
+import { type FetchLike, KeyringTimeoutError } from "@jarvis/platform/model";
 import { describe, expect, it } from "vitest";
 import { buildProvider, createLazyKeyProvider, unavailableProvider } from "./provider-factory.js";
 
@@ -181,6 +181,29 @@ describe("createLazyKeyProvider (contracts §6 #12)", () => {
     await expect(provider.listModels()).resolves.toEqual(["none"]);
     await expect(provider.listModels()).resolves.toEqual(["sk-later"]);
     expect(built).toEqual([undefined, "sk-later"]);
+  });
+
+  it("does not retry a keyring that timed out on a password prompt: the key is asked again", async () => {
+    let reads = 0;
+    const slept: number[] = [];
+    const built: (string | undefined)[] = [];
+    const provider = createLazyKeyProvider({
+      readKey: async () => {
+        reads++;
+        throw new KeyringTimeoutError(8);
+      },
+      build: (key) => {
+        built.push(key);
+        return stub(key ?? "none");
+      },
+      sleep: async (ms) => {
+        slept.push(ms);
+      },
+    });
+    await expect(provider.listModels()).resolves.toEqual(["none"]);
+    expect(reads).toBe(1);
+    expect(slept).toEqual([]);
+    expect(built).toEqual([undefined]);
   });
 
   it("builds without a key after the retries run out", async () => {

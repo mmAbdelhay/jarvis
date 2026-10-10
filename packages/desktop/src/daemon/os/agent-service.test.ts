@@ -699,7 +699,7 @@ describe("updates and model download (M2 contracts §2, §5)", () => {
   });
 });
 
-const KINDS = ["anthropic", "openai-compatible", "ollama", "gemini"];
+const KINDS = ["anthropic", "openai-compatible", "ollama", "gemini", "account"];
 const YAML = "/home/jarvis/.config/jarvis/jarvis.yaml";
 
 function okProvider(models: string[] = ["m"]): ModelProvider {
@@ -767,6 +767,8 @@ describe("provider list and failover (M2.5 contracts §1-§2, design §3.5)", ()
           baseUrl: "http://127.0.0.1:11434",
           model: "qwen3:8b",
           hasKey: false,
+          vision: false,
+          computerUse: { enabled: false, consentAt: null },
         },
         {
           id: "work",
@@ -774,6 +776,8 @@ describe("provider list and failover (M2.5 contracts §1-§2, design §3.5)", ()
           baseUrl: "https://api.anthropic.com",
           model: "claude-sonnet-5-5",
           hasKey: true,
+          vision: true,
+          computerUse: { enabled: false, consentAt: null },
         },
       ],
       activeId: "local",
@@ -1421,7 +1425,13 @@ function memoryOpener(): MemoryOpener & { rows: MemoryRecord[] } {
       rows.length = 0;
     },
   };
-  return { rows, open: async () => backend, reset: async () => {}, close: () => {} };
+  return {
+    rows,
+    open: async () => backend,
+    takeKeyringNotice: () => false,
+    reset: async () => {},
+    close: () => {},
+  };
 }
 
 describe("memory and tool search in jarvisd (design §3.8, §3.9)", () => {
@@ -1535,6 +1545,36 @@ describe("memory and tool search in jarvisd (design §3.8, §3.9)", () => {
       code: "unsupported",
       message: "Memory is off",
     });
+  });
+
+  it("says once that memory is off when the keyring timed out, and the turn still runs", async () => {
+    const memory = memoryOpener();
+    let notices = 1;
+    const h = harness({
+      memory: {
+        ...memory,
+        open: async () => null,
+        takeKeyringNotice: () => notices-- > 0,
+      },
+      makeProvider: () => recording([]),
+    });
+    h.files.set(YAML, LOCAL_YAML);
+    await h.agent.start();
+    const texts = (turnId: string) =>
+      h
+        .events()
+        .filter((e) => e.type === "text" && e.turnId === turnId)
+        .map((e) => (e as { delta: string }).delta)
+        .join("");
+    const first = h.agent.prompt("hello");
+    await h.until(() => h.events().some((e) => e.type === "turn-end" && e.turnId === first.turnId));
+    expect(texts(first.turnId)).toContain(USER_TEXT.en.memoryKeyringTimeout);
+    expect(texts(first.turnId)).toContain("talked");
+    const second = h.agent.prompt("hello again");
+    await h.until(() =>
+      h.events().some((e) => e.type === "turn-end" && e.turnId === second.turnId),
+    );
+    expect(texts(second.turnId)).not.toContain(USER_TEXT.en.memoryKeyringTimeout);
   });
 
   it("writes a summary at shutdown with a request that also ends with the rules", async () => {

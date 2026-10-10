@@ -3,11 +3,14 @@
 // memory is off — never stored in clear. A key is made only when no memory
 // file exists: a locked keyring answers "no such item", and making a new key
 // then would orphan every memory. Failures retry after a minute. Forget all
-// on an unreadable file removes the file and the key and starts over.
+// on an unreadable file removes the file and the key and starts over. A
+// keyring that does not answer (a password prompt is up) turns memory off
+// for the rest of the session, with one notice in the next turn, so no turn
+// ever waits on that prompt again.
 //
 // No electron here (core/no-electron.test.ts).
 import type { MemoryBackend } from "@jarvis/core";
-import { MEMORY_KEY_ACCOUNT, type SecretStore } from "@jarvis/platform/model";
+import { KeyringTimeoutError, MEMORY_KEY_ACCOUNT, type SecretStore } from "@jarvis/platform/model";
 import { MemoryKeyError, type MemoryStore, openMemoryStore } from "@jarvis/platform/store";
 
 export const MEMORY_RETRY_MS = 60_000;
@@ -62,6 +65,8 @@ function asBackend(store: MemoryStore): MemoryBackend {
 
 export type MemoryOpener = {
   open(): Promise<MemoryBackend | null>;
+  /** True once after the keyring timed out (memory is off until restart). */
+  takeKeyringNotice(): boolean;
   reset(): Promise<void>;
   close(): void;
 };
@@ -80,14 +85,31 @@ export function createMemoryBackendOpener(deps: {
   let backend: MemoryBackend | undefined;
   let opening: Promise<MemoryBackend | null> | undefined;
   let retryAt = 0;
+  let keyringNotice = false;
 
   async function tryOpen(): Promise<MemoryBackend | null> {
     if (deps.now() < retryAt) return null;
-    const key = await loadMemoryKey(deps);
+    let timedOut = false;
+    const noteTimeout = (error: unknown): never => {
+      if (error instanceof KeyringTimeoutError) timedOut = true;
+      throw error;
+    };
+    const key = await loadMemoryKey({
+      ...deps,
+      secrets: {
+        get: (account) => deps.secrets.get(account).catch(noteTimeout),
+        set: (account, secret) => deps.secrets.set(account, secret).catch(noteTimeout),
+        remove: (account) => deps.secrets.remove(account),
+      },
+    });
     if (key === null) {
-      retryAt = deps.now() + MEMORY_RETRY_MS;
+      if (timedOut) {
+        retryAt = Number.POSITIVE_INFINITY;
+        keyringNotice = true;
+      } else retryAt = deps.now() + MEMORY_RETRY_MS;
       return null;
     }
+
     try {
       store = openMemoryStore({ path: deps.path, key, newId: deps.newId, log: deps.log });
     } catch (error) {
@@ -110,6 +132,11 @@ export function createMemoryBackendOpener(deps: {
         opening = undefined;
       });
       return opening;
+    },
+    takeKeyringNotice() {
+      const take = keyringNotice;
+      keyringNotice = false;
+      return take;
     },
     async reset() {
       store?.close();

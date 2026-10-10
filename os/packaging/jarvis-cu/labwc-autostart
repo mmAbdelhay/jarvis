@@ -1,0 +1,9 @@
+# jarvis-cu line for labwc's autostart (Plan X owns /etc/xdg/labwc/autostart).
+# v1.1 contracts §1: a user service that needs WAYLAND_DISPLAY, so the
+# autostart sources this after its environment import. Full session only
+# (live boots included): computer use needs the shell's overlay (border,
+# step list, Take over), which the classic desktop does not have. Without
+# the helper's socket jarvisd offers no screen tools.
+if [ "${JARVIS_SESSION_MODE:-full}" = full ]; then
+  systemctl --user start --no-block jarvis-cu.service >/dev/null 2>&1 || true
+fi

@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "models": [
+    {
+      "id": "qwen3-vl-4b",
+      "ollamaTag": "qwen3-vl:4b",
+      "displayName": "Qwen3-VL 4B",
+      "sizeBytes": 3295636135,
+      "minRamGB": 8,
+      "tier": "small",
+      "languages": ["en", "ar", "zh", "fr", "de", "es"],
+      "probe": { "status": "untested", "runId": null, "date": null, "detail": "" }
+    },
+    {
+      "id": "qwen3-vl-8b",
+      "ollamaTag": "qwen3-vl:8b",
+      "displayName": "Qwen3-VL 8B",
+      "sizeBytes": 6140415879,
+      "minRamGB": 16,
+      "tier": "medium",
+      "languages": ["en", "ar", "zh", "fr", "de", "es"],
+      "probe": { "status": "untested", "runId": null, "date": null, "detail": "" }
+    },
+    {
+      "id": "qwen2.5vl-7b",
+      "ollamaTag": "qwen2.5vl:7b",
+      "displayName": "Qwen2.5-VL 7B",
+      "sizeBytes": 5969245856,
+      "minRamGB": 16,
+      "tier": "medium",
+      "languages": ["en", "ar", "zh", "fr", "de", "es"],
+      "probe": { "status": "untested", "runId": null, "date": null, "detail": "" }
+    },
+    {
+      "id": "mistral-small3.2-24b",
+      "ollamaTag": "mistral-small3.2:24b",
+      "displayName": "Mistral Small 3.2 24B",
+      "sizeBytes": 15177384862,
+      "minRamGB": 32,
+      "tier": "large",
+      "languages": ["en", "fr", "de", "es", "it", "pt", "ar"],
+      "probe": { "status": "untested", "runId": null, "date": null, "detail": "" }
+    }
+  ]
+}

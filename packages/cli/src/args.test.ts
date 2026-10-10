@@ -2,6 +2,35 @@ import { describe, expect, it } from "vitest";
 import { parseArgs } from "./args.js";
 
 describe("parseArgs", () => {
+  it("parses jarvis account", () => {
+    expect(parseArgs(["account"])).toEqual({ kind: "account", action: "status" });
+    expect(parseArgs(["account", "login", "gemini"])).toEqual({
+      kind: "account",
+      action: "login",
+      account: "gemini",
+    });
+    expect(parseArgs(["account", "remove", "copilot"])).toEqual({
+      kind: "account",
+      action: "remove",
+      account: "copilot",
+    });
+    expect(parseArgs(["account", "login"])).toMatchObject({ kind: "usage-error" });
+    expect(parseArgs(["account", "login", "bard"])).toMatchObject({ kind: "usage-error" });
+  });
+
+  it("parses every account action and rejects extra arguments", () => {
+    for (const action of ["install", "login", "logout", "remove"] as const) {
+      expect(parseArgs(["account", action, "chatgpt"])).toEqual({
+        kind: "account",
+        action,
+        account: "chatgpt",
+      });
+      expect(parseArgs(["account", action, "chatgpt", "extra"]).kind).toBe("usage-error");
+    }
+    expect(parseArgs(["account", "status"])).toEqual({ kind: "account", action: "status" });
+    expect(parseArgs(["account", "status", "extra"]).kind).toBe("usage-error");
+  });
+
   it("defaults to chat", () => {
     expect(parseArgs([])).toEqual({ kind: "chat" });
   });

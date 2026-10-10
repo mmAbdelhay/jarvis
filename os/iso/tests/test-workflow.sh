@@ -74,7 +74,7 @@ w = yaml.safe_load(open(sys.argv[1]))
 j = w["jobs"]
 d = lambda n: yaml.safe_dump(j[n])
 needs = lambda n: {j[n]["needs"]} if isinstance(j[n]["needs"], str) else set(j[n]["needs"])
-assert "jarvis-settings jarvis-apps jarvis-wl" in d("build-go")
+assert "jarvis-settings jarvis-apps jarvis-files jarvis-wl" in d("build-go")
 qt = d("build-qt")
 for s in ("os/lock/deps/debian-build.txt", "os/idle/deps/debian-build.txt", "os/lock/ci/test.sh",
           "os/idle/ci/test.sh", "jarvis-lock jarvis-idle"):
@@ -95,7 +95,6 @@ PY
 for j in i18n-gate build-backup-model backup-model-test classic-session-test build-workspace; do
   check "job $j" grep -qw "$j" <<<"$jobs"
 done
-check "M4 CI version" grep -qF "'0.4.0~ci{0}'" "$wf"
 check "electron-builder.yml triggers the workflow" grep -qF '"packages/desktop/electron-builder.yml"' "$wf"
 check "M4 wiring" python3 - "$wf" <<'PY'
 import sys, yaml
@@ -107,7 +106,7 @@ c = d("checks")
 for s in ("discover -s os/recipes/tests", "recipes.py validate", "check_sources.py", "backup_model.py check",
           "qt6-l10n-tools", "fonts-noto-core", "fonts-ibm-plex", "desktop-file-utils", "JARVIS_DPKG_INSTALL_TESTS"):
     assert s in c, s
-assert "jarvis-session jarvis-fonts jarvis-recipes" in d("build-distro")
+assert "jarvis-session jarvis-fonts jarvis-recipes jarvis-accounts" in d("build-distro")
 qt = d("build-qt")
 for s in ("os/classic/deps/debian-build.txt", "os/classic/ci/test.sh", "jarvis-classic jarvis-i18n", "qt6-l10n-tools"):
     assert s in qt, s
@@ -146,5 +145,38 @@ for s in ('= real ]', '[ -n "$SIGN" ]', "jarvis-apt/dists/trixie/InRelease",
     assert s in gate["run"], s
 build = next(i for i, s in enumerate(steps) if "build.sh" in s.get("run", "") and "jarvis-archive-keyring" in s.get("run", ""))
 assert ids.index("aptrepo") < build, "the gate must run before the keyring package is built"
+PY
+# --- Rafiq v1.1 Plan X ---
+for j in changes cu-test cu-kvm-test cu-labwc-e2e; do check "job $j" grep -qw "$j" <<<"$jobs"; done
+check "v1.1 CI version" grep -qF "'0.5.0~ci{0}'" "$wf"
+check "v1.1 wiring" python3 - "$wf" <<'PY'
+import sys, yaml
+w = yaml.safe_load(open(sys.argv[1]))
+j = w["jobs"]
+d = lambda n: yaml.safe_dump(j[n], width=1000)
+needs = lambda n: {j[n]["needs"]} if isinstance(j[n]["needs"], str) else set(j[n]["needs"])
+assert "jarvis-wl jarvis-cu" in d("build-go")
+assert "jarvis-apps jarvis-files" in d("build-go")
+assert "os/iso/smoke/assets/cu/*.test.mjs" in d("checks")
+assert "cu_changes.py" in d("changes") and "fetch-depth: 0" in d("changes")
+assert "cu" in j["changes"]["outputs"]
+for n in ("cu-test", "cu-kvm-test"):
+    assert "needs.changes.outputs.cu == 'true'" in j[n]["if"], n
+    assert "changes" in needs(n), n
+    assert "--privileged" not in d(n), n
+assert {"build-go", "build-daemon", "build-qt", "build-distro"} <= needs("cu-test")
+assert "os/iso/cu/run.sh" in d("cu-test")
+for a in ("debs-go", "debs-daemon", "debs-qt", "debs-distro"):
+    assert a in d("cu-test"), a
+assert "pattern: debs-*" not in d("cu-test"), "the voice and backup-model debs are not needed"
+assert {"build-iso", "build-distro"} <= needs("cu-kvm-test") and "run_cu.py" in d("cu-kvm-test")
+assert "computer-use tests need KVM" in d("cu-kvm-test")
+for n in ("repo", "release"):
+    assert {"cu-test", "cu-kvm-test", "cu-labwc-e2e"} <= needs(n), n
+# v1.1 final review: the labwc e2e runs in CI, and a release tag fails on BLOCKED criteria.
+assert "needs.changes.outputs.cu == 'true'" in j["cu-labwc-e2e"]["if"]
+assert "os/go/ci/cu-headless.sh" in d("cu-labwc-e2e")
+for n in ("cu-test", "cu-kvm-test"):
+    assert "CU_FAIL_ON_BLOCKED: ${{ startsWith(github.ref, 'refs/tags/os-v') && '1' || '0' }}" in d(n), n
 PY
 finish

@@ -91,15 +91,20 @@ export function toGeminiContents(
       // A turn with neither text nor calls has nothing Gemini accepts.
       if (parts.length > 0) out.push({ role: "model", parts });
     } else {
-      out.push({
-        role: "user",
-        parts: message.results.map((result) => ({
-          functionResponse: {
-            name: toGeminiName(result.name),
-            response: result.isError ? { error: result.content } : { output: result.content },
-          },
-        })),
-      });
+      const parts: unknown[] = message.results.map((result) => ({
+        functionResponse: {
+          name: toGeminiName(result.name),
+          response: result.isError ? { error: result.content } : { output: result.content },
+        },
+      }));
+      for (const result of message.results) {
+        if (result.image !== undefined) {
+          parts.push({
+            inlineData: { mimeType: result.image.mediaType, data: result.image.dataBase64 },
+          });
+        }
+      }
+      out.push({ role: "user", parts });
     }
   }
   return out;

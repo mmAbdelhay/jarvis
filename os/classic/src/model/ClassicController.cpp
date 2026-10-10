@@ -2,7 +2,7 @@
 
 #include <QFileInfo>
 
-#include "Launcher.h"
+#include "AppLauncher.h"
 
 #ifdef Q_OS_UNIX
 #include <unistd.h>
@@ -10,13 +10,13 @@
 
 using namespace Qt::StringLiterals;
 
-ClassicController::ClassicController(AppsModel* apps, Launcher* launcher, bool fallback, QObject* parent)
+ClassicController::ClassicController(AppsModel* apps, AppLauncher* launcher, bool fallback, QObject* parent)
     : QObject(parent)
     , m_apps(apps)
     , m_launcher(launcher)
     , m_fallback(fallback)
 {
-    connect(m_launcher, &Launcher::failed, this, &ClassicController::setNotice);
+    connect(m_launcher, &AppLauncher::failed, this, &ClassicController::setNotice);
 }
 
 void ClassicController::openTerminal() { m_launcher->launch(u"foot"_s); }

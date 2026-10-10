@@ -10,8 +10,11 @@
 
 #include "Language.h"
 #include "app/AppFont.h"
+#include "app/AppIconProvider.h"
 #include "app/ClassicRedirect.h"
+#include "app/CuOverlayManager.h"
 #include "app/ShellController.h"
+#include "app/ShellIdentity.h"
 #include "app/ShellSurface.h"
 #include "app/SingleInstance.h"
 #include "app/SettingsMode.h"
@@ -25,9 +28,22 @@ using namespace Qt::StringLiterals;
 
 int main(int argc, char* argv[])
 {
+    // Super+Esc (labwc) -> jarvis-session-key --cu-stop: Take over from
+    // computer use. Hand "cu-stop" to the running shell without starting a
+    // GUI (fast: the user is taking the screen back) and never summon it.
+    for (int i = 1; i < argc; ++i) {
+        if (qstrcmp(argv[i], "--cu-stop") == 0) {
+            QCoreApplication core(argc, argv);
+            SingleInstance running(SingleInstance::defaultName());
+            running.forward("cu-stop", 500);
+            return 0;
+        }
+    }
     QGuiApplication app(argc, argv);
     QGuiApplication::setApplicationName(u"jarvis-shell"_s);
     QGuiApplication::setApplicationVersion(QStringLiteral(JARVIS_SHELL_VERSION));
+    // Rafiq v1.1 contracts §1: jarvis-cu excludes the shell by this app_id.
+    jarvis::shell::applyShellIdentity();
 
     QCommandLineParser parser;
     parser.setApplicationDescription(u"The Jarvis OS shell."_s);
@@ -38,7 +54,8 @@ int main(int argc, char* argv[])
     // M3 contracts §5.15: Super+Space runs `jarvis-shell --voice`; --ptt is the older spelling.
     const QCommandLineOption pttOption(QStringList{u"voice"_s, u"ptt"_s},
                                        u"Push-to-talk: start, or send, a voice message (Super+Space)."_s);
-    parser.addOptions({focusOption, windowedOption, pttOption});
+    const QCommandLineOption cuStopOption(u"cu-stop"_s, u"Take over from computer use (Super+Esc)."_s);
+    parser.addOptions({focusOption, windowedOption, pttOption, cuStopOption});
     const QCommandLineOption settingsOption(u"settings"_s, u"Open Settings in its own window (classic mode)."_s);
     const QCommandLineOption quitAfterOption(u"quit-after"_s, u"With --settings: quit after <ms> (smoke tests)."_s, u"ms"_s);
     parser.addOptions({settingsOption, quitAfterOption});
@@ -78,6 +95,8 @@ int main(int argc, char* argv[])
                               language.language());
 
     QQmlApplicationEngine engine;
+    engine.addImageProvider(u"appicon"_s, new AppIconProvider);
+    QObject::connect(&language, &jarvis::ui::LanguageManager::languageChanged, shell->apps(), &AppsModel::retranslate);
     QObject::connect(&language, &jarvis::ui::LanguageManager::languageChanged, &engine, &QQmlEngine::retranslate);
 
     engine.setInitialProperties({{u"shell"_s, QVariant::fromValue(shell)}});
@@ -101,7 +120,17 @@ int main(int argc, char* argv[])
         });
     }
     ShellSurface surface(window, layerShell);
+    // Rafiq v1.1 design §2.3: border, pill and step panel while Jarvis controls the screen.
+    CuOverlayManager overlay(&engine, shell->cu(), layerShell);
+    QObject::connect(shell, &ShellController::summonRequested, &surface, [&surface, shell] {
+        surface.summon();
+        shell->setSurfaceShown(true);
+    });
     QObject::connect(&instance, &SingleInstance::messageReceived, &surface, [&surface, shell](const QByteArray& message) {
+        if (message == "cu-stop") { // the user takes the app back: do not cover it with the shell
+            shell->handleInstanceMessage(message);
+            return;
+        }
         surface.summon();
         shell->setSurfaceShown(true);
         shell->handleInstanceMessage(message);

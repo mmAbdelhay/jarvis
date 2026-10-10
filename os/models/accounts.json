@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "accounts": [
+    {
+      "account": "claude",
+      "package": "@anthropic-ai/claude-code",
+      "version": "2.1.280",
+      "integrity": "sha512-EZlX8jqNf+e7q9v+UoPbLYAbEGth7aDbcTytHzPYYohbP/fCfrjboCbcv85ZYGEq1Rq7Amm8hXLhuCKxLsabwA==",
+      "bin": "bin/claude.exe",
+      "postinstall": "install.cjs",
+      "omitOptional": false,
+      "platformPackage": {
+        "name": "@anthropic-ai/claude-code-linux-x64",
+        "version": "2.1.280",
+        "integrity": "sha512-dJHWFrDSIZ26hdLucnK3ehLmzdzYl3MsPC1RzUctAUaYnZlH5kfAZxnK8qYRAQ89GX3OPrLsnFdt/QnP+0Ck6Q=="
+      },
+      "models": [
+        { "id": "default", "vision": true },
+        { "id": "sonnet", "vision": true },
+        { "id": "opus", "vision": true },
+        { "id": "haiku", "vision": true }
+      ]
+    },
+    {
+      "account": "chatgpt",
+      "package": "@openai/codex",
+      "version": "0.159.2",
+      "integrity": "sha512-SE13C3nZCYoVL569BdegoOl6vwjb7o2sXOo7ivwVzaVoY0cswwi0/6pIE0TyO/C0vIkQh3jslExitET7PBTfIg==",
+      "bin": "bin/codex.js",
+      "postinstall": null,
+      "omitOptional": false,
+      "platformPackage": {
+        "name": "@openai/codex-linux-x64",
+        "version": "0.159.2-linux-x64",
+        "integrity": "sha512-RrCZ1X52wpa1lOsXtCtSyhjOFdQPh7LH5Ccv8HsKmd/2UXbUwxXFqWXFK3JzatquUNGtW/TLox5Y7qVOGkV0/Q=="
+      },
+      "models": [
+        { "id": "default", "vision": false },
+        { "id": "gpt-5.5", "vision": false },
+        { "id": "gpt-5.5-codex", "vision": false }
+      ]
+    },
+    {
+      "account": "gemini",
+      "package": "@google/gemini-cli",
+      "version": "0.62.0",
+      "integrity": "sha512-A1rw0Tf2sHLpGncfYdaq5WaJIufKAP8il4BmHD5Yw4ewmB/Wo0vRQb2bEvx7OqyaPFPZCh0hVhcMKsICZyIBww==",
+      "bin": "bundle/gemini.js",
+      "postinstall": null,
+      "omitOptional": true,
+      "platformPackage": null,
+      "models": [
+        { "id": "default", "vision": false },
+        { "id": "gemini-2.5-pro", "vision": false },
+        { "id": "gemini-2.5-flash", "vision": false }
+      ]
+    },
+    {
+      "account": "copilot",
+      "package": "@github/copilot",
+      "version": "1.0.89",
+      "integrity": "sha512-n91AC6rhWOYM2xmXi5eFq/elempGiHHlYviSYUPETj14bHy+bjLYdmn8OzpiIuYnv6d80xmXQ/t9OTBfmG5Ugg==",
+      "bin": "npm-loader.js",
+      "postinstall": null,
+      "omitOptional": false,
+      "platformPackage": {
+        "name": "@github/copilot-linux-x64",
+        "version": "1.0.89",
+        "integrity": "sha512-wkF+uILxEncP3HI6+ZhK4draB7UVuk043Emx3MGOtdbuS9Ug29w2wKCVdKafIAnc/wj27x32uItBPgv3K5WUug=="
+      },
+      "models": [{ "id": "default", "vision": false }, { "id": "auto", "vision": false }]
+    }
+  ]
+}

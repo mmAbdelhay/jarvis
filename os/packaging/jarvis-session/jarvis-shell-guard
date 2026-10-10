@@ -7,7 +7,7 @@
 # Daemon outages are handled by the shell banner, not this guard.
 # A clean exit (e.g. a second instance that only raised the first) never
 # counts. The loop's back-off spaces the relaunches.
-# Test hooks: JARVIS_SHELL, JARVIS_CLASSIC, JARVIS_NOW.
+# Test hooks: JARVIS_SHELL, JARVIS_CLASSIC, JARVIS_NOW, JARVIS_SYSTEMCTL.
 set -u
 shell=${JARVIS_SHELL:-jarvis-shell}
 classic=${JARVIS_CLASSIC:-/usr/bin/jarvis-classic}
@@ -17,16 +17,22 @@ marker=$state/classic-fallback
 failures=$state/shell-failures
 window=60
 limit=3
+systemctl_bin=${JARVIS_SYSTEMCTL:-systemctl}
+
+# Computer use (v1.1) needs jarvis-shell's overlay (border, step list, Take
+# over); the classic desktop has none, so the helper stops before it runs.
+stop_cu() { "$systemctl_bin" --user stop jarvis-cu.service >/dev/null 2>&1 || true; }
 
 private_state() { mkdir -p "$state" && chmod 0700 "$state"; }
 fall_back() { # fall_back REASON
   private_state
   printf 'reason=%s\nsince=%s\n' "$1" "$($now_cmd)" > "$marker"
   logger -t jarvis-session "switching to the classic desktop: $1" 2>/dev/null || true
+  stop_cu
 }
 
-if [ "${JARVIS_SESSION_MODE:-full}" = classic ]; then exec "$classic"; fi
-if [ -e "$marker" ]; then exec "$classic"; fi
+if [ "${JARVIS_SESSION_MODE:-full}" = classic ]; then stop_cu; exec "$classic"; fi
+if [ -e "$marker" ]; then stop_cu; exec "$classic"; fi
 
 "$shell"
 rc=$?

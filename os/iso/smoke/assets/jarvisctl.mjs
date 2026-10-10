@@ -9,12 +9,16 @@
 //   jarvisctl doctor [--approve-all | --deny-all] [--timeout S]
 //   jarvisctl snapshot --locked true|false [--timeout S]
 //   jarvisctl locked-confirm --text TEXT [--timeout S]
+//   jarvisctl cu --text TEXT [--begin approve|deny] [--consequential approve|deny]
+//                [--absent PATH] [--timeout S]          (v1.1 contracts §2)
+//   jarvisctl cu-enable --provider ID [--off] [--consent]
+//   jarvisctl cu-stop
 //   (all take --run-dir DIR; default ~/.config/jarvis/run)
 //
 // Prints one JSON line per event. Exit status: 0 success, 1 the turn or the
 // doctor ended badly, 2 timeout or connection failure, 64 usage.
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { connect } from "node:net";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -25,9 +29,9 @@ const PROTOCOL_VERSION = 1;
 const PROBE_BUILD = "jarvisctl-probe";
 const DEFAULT_STAMP = "/usr/lib/jarvis/daemon/build-stamp.json";
 const USAGE =
-  "usage: jarvisctl wait|prompt|doctor|snapshot|locked-confirm [--text T] [--locked true|false]" +
-  " [--approve-all|--deny-all] [--timeout S]" +
-  " [--run-dir D] [--build-stamp F]\n";
+  "usage: jarvisctl wait|prompt|doctor|snapshot|locked-confirm|cu|cu-enable|cu-stop [--text T]" +
+  " [--locked true|false] [--approve-all|--deny-all] [--begin approve|deny] [--consequential approve|deny]" +
+  " [--absent PATH] [--provider ID] [--off] [--consent] [--timeout S] [--run-dir D] [--build-stamp F]\n";
 
 export function encodeFrame(value) {
   const payload = Buffer.from(JSON.stringify(value), "utf8");
@@ -109,7 +113,10 @@ export function openSession({ runDir, build, timeoutMs = 5000 }) {
     });
     socket.on("error", fail);
     socket.on("close", () => {
-      for (const waiter of pending.values()) waiter.reject(new Error("control connection closed"));
+      for (const waiter of pending.values())
+        waiter.reject(
+          Object.assign(new Error("control connection closed"), { code: "ECONNRESET" }),
+        );
       pending.clear();
     });
     socket.on("data", (chunk) => {
@@ -320,6 +327,122 @@ export function runLockedConfirm(session, { text, timeoutMs, log = () => {} }) {
   });
 }
 
+/** v1.1 contracts §2: the session card carries a `cu.begin` item; a
+ *  consequential card carries only screen.* items. */
+export function cardKind(card) {
+  const tools = (card.items ?? []).map((item) => String(item.tool ?? ""));
+  if (tools.includes("cu.begin")) return "begin";
+  if (tools.length > 0 && tools.every((tool) => tool.startsWith("screen."))) return "consequential";
+  return "other";
+}
+
+/** One computer-use turn: answers the session card and consequential cards as
+ *  told, denies any other card of the turn, and logs every cu:state push with
+ *  the wall-clock time it arrived. With absentPath, records whether that file
+ *  already existed when the consequential card arrived (Review Focus 4). */
+export function runComputerUse(
+  session,
+  {
+    text,
+    begin = "approve",
+    consequential = "approve",
+    absentPath,
+    timeoutMs,
+    log = () => {},
+    wall = () => Date.now(),
+    exists = existsSync,
+  },
+) {
+  const started = wall();
+  return new Promise((resolve) => {
+    let turnId = null;
+    const early = [];
+    const cards = [];
+    let finished = false;
+    const finish = (result) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
+    const timer = setTimeout(() => finish({ code: 2, reason: "timeout", cards }), timeoutMs);
+    const handle = (event) => {
+      if (finished) return;
+      if (event.type === "card") {
+        const kind = cardKind(event.card);
+        const mine =
+          event.card.turnId === turnId || (event.card.turnId === null && kind !== "other");
+        if (!mine) return;
+        const decision =
+          kind === "begin" ? begin : kind === "consequential" ? consequential : "deny";
+        const entry = {
+          type: "cu-card",
+          kind,
+          decision,
+          wall: wall(),
+          titles: event.card.items.map((item) => item.title),
+        };
+        if (kind === "consequential" && absentPath !== undefined)
+          entry.pathExisted = exists(absentPath);
+        cards.push(entry);
+        log(entry);
+        session
+          .invoke("agent:confirm", [confirmation(event.card, decision)])
+          .catch((error) => log({ type: "confirm-error", message: error.message }));
+      }
+      if (event.type === "turn-end" && event.turnId === turnId) {
+        finish({
+          code: event.reason === "done" ? 0 : 1,
+          reason: event.reason,
+          error: event.error,
+          cards,
+        });
+      }
+    };
+    session.onPush((channel, payload) => {
+      if (finished) return;
+      if (channel === "cu:state") {
+        log({ type: "cu-state", wall: wall(), ...payload });
+        return;
+      }
+      if (channel !== "agent:events") return;
+      log(payload);
+      if (turnId === null) early.push(payload);
+      else handle(payload);
+    });
+    log({ type: "cu-start", wall: started });
+    session.invoke("agent:prompt", [{ text }]).then(
+      (result) => {
+        if (finished) return;
+        turnId = result.turnId;
+        for (const event of early.splice(0)) handle(event);
+      },
+      (error) => {
+        const disconnected = ["ECONNRESET", "ECONNREFUSED", "EPIPE", "ENOTCONN"].includes(
+          error.code,
+        );
+        finish({
+          code: disconnected ? 2 : 1,
+          reason: disconnected ? "connect" : "error",
+          error: error.message,
+          cards,
+        });
+      },
+    );
+  });
+}
+
+export async function setComputerUse(session, { providerId, enabled, consent = false }) {
+  await session.invoke("cu:setEnabled", [{ providerId, enabled }]);
+  if (consent) await session.invoke("cu:consent", [{ providerId }]);
+  return { code: 0, reason: enabled ? "enabled" : "disabled" };
+}
+
+export async function stopComputerUse(session) {
+  await session.invoke("cu:stop", []);
+  return { code: 0, reason: "stopped" };
+}
+
 /** Retries until the daemon answers provider:list. */
 export async function waitForDaemon({ runDir, buildStamp, timeoutMs, log = () => {} }) {
   const deadline = Date.now() + timeoutMs;
@@ -351,6 +474,12 @@ export async function main(argv) {
       "run-dir": { type: "string" },
       "build-stamp": { type: "string" },
       locked: { type: "string" },
+      begin: { type: "string", default: "approve" },
+      consequential: { type: "string", default: "approve" },
+      absent: { type: "string" },
+      provider: { type: "string" },
+      off: { type: "boolean" },
+      consent: { type: "boolean" },
     },
   });
   const command = positionals[0];
@@ -362,13 +491,25 @@ export async function main(argv) {
   if (values["deny-all"]) decision = "deny";
   const log = (event) => process.stdout.write(`${JSON.stringify(event)}\n`);
 
-  const known = ["wait", "prompt", "doctor", "snapshot", "locked-confirm"].includes(command);
+  const known = [
+    "wait",
+    "prompt",
+    "doctor",
+    "snapshot",
+    "locked-confirm",
+    "cu",
+    "cu-enable",
+    "cu-stop",
+  ].includes(command);
   const lockedArg = values.locked === "true" ? true : values.locked === "false" ? false : undefined;
+  const answer = (v) => v === "approve" || v === "deny";
   if (
     !known ||
     !Number.isFinite(timeoutMs) ||
-    ((command === "prompt" || command === "locked-confirm") && !values.text) ||
-    (command === "snapshot" && lockedArg === undefined)
+    ((command === "prompt" || command === "locked-confirm" || command === "cu") && !values.text) ||
+    (command === "snapshot" && lockedArg === undefined) ||
+    (command === "cu-enable" && !values.provider) ||
+    (command === "cu" && (!answer(values.begin) || !answer(values.consequential)))
   ) {
     process.stderr.write(USAGE);
     return 64;
@@ -385,14 +526,37 @@ export async function main(argv) {
     log({ type: "result", code: 2, reason: "connect", error: error.message });
     return 2;
   }
-  const result =
-    command === "prompt"
-      ? await runPrompt(session, { text: values.text, decision, timeoutMs, log })
-      : command === "doctor"
-        ? await runDoctor(session, { decision, timeoutMs, log })
-        : command === "snapshot"
-          ? await waitSnapshot(session, { locked: lockedArg, timeoutMs, log })
-          : await runLockedConfirm(session, { text: values.text, timeoutMs, log });
+  let result;
+  try {
+    if (command === "cu") {
+      result = await runComputerUse(session, {
+        text: values.text,
+        begin: values.begin,
+        consequential: values.consequential,
+        absentPath: values.absent,
+        timeoutMs,
+        log,
+      });
+    } else if (command === "cu-enable") {
+      result = await setComputerUse(session, {
+        providerId: values.provider,
+        enabled: values.off !== true,
+        consent: values.consent === true,
+      });
+    } else if (command === "cu-stop") {
+      result = await stopComputerUse(session);
+    } else if (command === "prompt") {
+      result = await runPrompt(session, { text: values.text, decision, timeoutMs, log });
+    } else if (command === "doctor") {
+      result = await runDoctor(session, { decision, timeoutMs, log });
+    } else if (command === "snapshot") {
+      result = await waitSnapshot(session, { locked: lockedArg, timeoutMs, log });
+    } else {
+      result = await runLockedConfirm(session, { text: values.text, timeoutMs, log });
+    }
+  } catch (error) {
+    result = { code: 1, reason: "error", error: `${error.code ?? ""} ${error.message}`.trim() };
+  }
   log({ type: "result", ...result });
   session.close();
   return result.code;

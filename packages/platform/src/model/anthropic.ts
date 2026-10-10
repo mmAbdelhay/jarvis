@@ -59,7 +59,20 @@ export function toAnthropicMessages(messages: readonly ModelMessage[]): unknown[
         message.results.map((result) => ({
           type: "tool_result",
           tool_use_id: result.callId,
-          content: result.content,
+          content:
+            result.image === undefined
+              ? result.content
+              : [
+                  { type: "text", text: result.content },
+                  {
+                    type: "image",
+                    source: {
+                      type: "base64",
+                      media_type: result.image.mediaType,
+                      data: result.image.dataBase64,
+                    },
+                  },
+                ],
           is_error: result.isError,
         })),
       );

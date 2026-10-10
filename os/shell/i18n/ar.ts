@@ -2,6 +2,130 @@
 <!DOCTYPE TS>
 <TS version="2.1" language="ar" sourcelanguage="en">
     <context>
+        <name>AccountPanel</name>
+        <message>
+            <source>Sign in</source>
+            <translation>تسجيل الدخول</translation>
+        </message>
+        <message>
+            <source>Set up and sign in</source>
+            <translation>الإعداد وتسجيل الدخول</translation>
+        </message>
+        <message>
+            <source>Sign out</source>
+            <translation>تسجيل الخروج</translation>
+        </message>
+        <message>
+            <source>Open this address, enter the code below and sign in. Your browser should already show it.</source>
+            <translation>افتح هذا العنوان، وأدخل الرمز أدناه، ثم سجّل الدخول. يُفترض أن يعرضه متصفحك الآن.</translation>
+        </message>
+        <message>
+            <source>Finish signing in in your browser. If it didn't open, open this address:</source>
+            <translation>أكمِل تسجيل الدخول في متصفحك. إن لم يُفتح، فافتح هذا العنوان:</translation>
+        </message>
+        <message>
+            <source>Copy</source>
+            <translation>نسخ</translation>
+        </message>
+        <message>
+            <source>Open browser</source>
+            <translation>فتح المتصفح</translation>
+        </message>
+        <message>
+            <source>Code</source>
+            <translation>الرمز</translation>
+        </message>
+    </context>
+    <context>
+        <name>AccountsModel</name>
+        <message>
+            <source>Signed in as %1</source>
+            <translation>تم تسجيل الدخول باسم %1</translation>
+        </message>
+        <message>
+            <source>Ready to sign in</source>
+            <translation>جاهز لتسجيل الدخول</translation>
+        </message>
+        <message>
+            <source>Not set up</source>
+            <translation>غير مُعدّ</translation>
+        </message>
+        <message>
+            <source>Getting %1 ready…</source>
+            <translation>جارٍ تجهيز %1…</translation>
+        </message>
+        <message>
+            <source>Starting %1 sign-in…</source>
+            <translation>جارٍ بدء تسجيل الدخول إلى %1…</translation>
+        </message>
+        <message>
+            <source>Finish signing in to %1 in your browser.</source>
+            <translation>أكمِل تسجيل الدخول إلى %1 في متصفحك.</translation>
+        </message>
+        <message>
+            <source>That didn't work. Try again.</source>
+            <translation>لم ينجح ذلك. حاول مرة أخرى.</translation>
+        </message>
+        <message>
+            <source>%1 is set up. Sign in to use it.</source>
+            <translation>%1 مُعدّ. سجّل الدخول لاستخدامه.</translation>
+        </message>
+        <message>
+            <source>%1 isn't set up yet. Jarvis installs the official %1 program for you.</source>
+            <translation>%1 غير مُعدّ بعد. يثبّت جارفيس برنامج %1 الرسمي لك.</translation>
+        </message>
+        <message>
+            <source>%1 sent a sign-in address Jarvis can't open.</source>
+            <translation>أرسل %1 عنوان تسجيل دخول لا يستطيع جارفيس فتحه.</translation>
+        </message>
+        <message>
+            <source>To revoke Google access after signing out, visit https://myaccount.google.com/connections.</source>
+            <translation>لإلغاء وصول Google بعد تسجيل الخروج، انتقل إلى https://myaccount.google.com/connections.</translation>
+        </message>
+        <message>
+            <source>To revoke GitHub Copilot access after signing out, visit https://github.com/settings/applications.</source>
+            <translation>لإلغاء وصول GitHub Copilot بعد تسجيل الخروج، انتقل إلى https://github.com/settings/applications.</translation>
+        </message>
+    </context>
+    <context>
+        <name>AccountsSection</name>
+        <message>
+            <source>Accounts you signed in with. Their sign-in stays inside each program's own folder on this computer; Jarvis never stores it.</source>
+            <translation>الحسابات التي سجّلت الدخول بها. تبقى بيانات تسجيل الدخول داخل مجلد كل برنامج على هذا الحاسوب؛ ولا يخزّنها جارفيس أبدًا.</translation>
+        </message>
+        <message>
+            <source>Sign out</source>
+            <translation>تسجيل الخروج</translation>
+        </message>
+        <message>
+            <source>Remove</source>
+            <translation>إزالة</translation>
+        </message>
+        <message>
+            <source>Remove %1</source>
+            <translation>إزالة %1</translation>
+        </message>
+        <message>
+            <source>To revoke Google access after signing out, visit https://myaccount.google.com/connections.</source>
+            <translation>لإلغاء إذن الوصول إلى حساب Google بعد تسجيل الخروج، انتقل إلى https://myaccount.google.com/connections.</translation>
+        </message>
+        <message>
+            <source>Signing out of GitHub Copilot deletes its sign-in data from this computer. To cancel its access completely, also remove "GitHub Copilot CLI" at github.com/settings/applications.</source>
+            <translation>يحذف تسجيل الخروج من GitHub Copilot بيانات تسجيل الدخول من هذا الحاسوب. لإلغاء إذن الوصول تمامًا، أزِل أيضًا "GitHub Copilot CLI" من github.com/settings/applications.</translation>
+        </message>
+    </context>
+    <context>
+        <name>AppLauncher</name>
+        <message>
+            <source>That app's launcher is broken, so it was not started.</source>
+            <translation>مُشغّل هذا التطبيق معطوب، لذا لم يُشغَّل.</translation>
+        </message>
+        <message>
+            <source>Couldn't start %1. Is it installed?</source>
+            <translation>تعذّر تشغيل %1. هل هو مثبّت؟</translation>
+        </message>
+    </context>
+    <context>
         <name>AuditModel</name>
         <message>
             <source>Approved</source>
@@ -236,6 +360,49 @@
         </message>
     </context>
     <context>
+        <name>ComputerUseSection</name>
+        <message>
+            <source>Jarvis can look at the screen and use the mouse and keyboard in apps you allow, for one task at a time. It's off until you turn it on for a model, and you can take over at any moment with Esc.</source>
+            <translation>يستطيع جارفيس أن ينظر إلى الشاشة ويستخدم الفأرة ولوحة المفاتيح في التطبيقات التي تسمح بها، لمهمة واحدة في كل مرة. هذه الميزة متوقفة حتى تشغّلها لنموذج، ويمكنك تولّي التحكم في أي لحظة بالضغط على Esc.</translation>
+        </message>
+        <message>
+            <source>No model providers yet.</source>
+            <translation>لا يوجد مزوّدو نماذج بعد.</translation>
+        </message>
+        <message>
+            <source>Let %1 use the screen</source>
+            <translation>اسمح لـ %1 باستخدام الشاشة</translation>
+        </message>
+        <message>
+            <source>Send screenshots to %1?</source>
+            <translation>إرسال لقطات الشاشة إلى %1؟</translation>
+        </message>
+        <message>
+            <source>While Jarvis uses the screen, screenshots of the allowed windows are sent to %1. Other windows are blacked out, and screenshots are never saved.</source>
+            <translation>أثناء استخدام جارفيس للشاشة، تُرسَل لقطات النوافذ المسموح بها إلى %1. تُحجَب النوافذ الأخرى بالأسود، ولا تُحفَظ لقطات الشاشة أبدًا.</translation>
+        </message>
+        <message>
+            <source>Cancel</source>
+            <translation>إلغاء</translation>
+        </message>
+        <message>
+            <source>Allow and turn on</source>
+            <translation>اسمح وشغّل</translation>
+        </message>
+        <message>
+            <source>Saving…</source>
+            <translation>جارٍ الحفظ…</translation>
+        </message>
+        <message>
+            <source>Never controlled</source>
+            <translation>لا يتحكم بها جارفيس أبدًا</translation>
+        </message>
+        <message>
+            <source>These are always protected and can't be removed.</source>
+            <translation>هذه محمية دائمًا ولا يمكن إزالتها.</translation>
+        </message>
+    </context>
+    <context>
         <name>ConfirmCard</name>
         <message>
             <source>Approval needed</source>
@@ -291,6 +458,162 @@
         <message>
             <source>Something went wrong: %1</source>
             <translation>حدث خطأ ما: %1</translation>
+        </message>
+    </context>
+    <context>
+        <name>CuOverlay</name>
+        <message>
+            <source>Take over (Super+Esc)</source>
+            <translation>تولَّ التحكم (Super+Esc)</translation>
+        </message>
+        <message>
+            <source>Resume</source>
+            <translation>استئناف</translation>
+        </message>
+        <message>
+            <source>Stop</source>
+            <translation>إيقاف</translation>
+        </message>
+        <message>
+            <source>Screen control</source>
+            <translation>التحكم في الشاشة</translation>
+        </message>
+        <message>
+            <source>Steps</source>
+            <translation>الخطوات</translation>
+        </message>
+        <message>
+            <source>%1: %2</source>
+            <translation>%1: %2</translation>
+        </message>
+        <message>
+            <source>Step %1</source>
+            <translation>الخطوة %1</translation>
+        </message>
+        <message>
+            <source>Screen control request failed.</source>
+            <translation>تعذّر تنفيذ طلب التحكم في الشاشة.</translation>
+        </message>
+    </context>
+    <context>
+        <name>CuOverlayWindow</name>
+        <message>
+            <source>Jarvis screen control</source>
+            <translation>تحكم جارفيس في الشاشة</translation>
+        </message>
+    </context>
+    <context>
+        <name>CuSessionModel</name>
+        <message>
+            <source>Couldn't stop Jarvis: %1</source>
+            <translation>تعذّر إيقاف جارفيس: %1</translation>
+        </message>
+        <message>
+            <source>Couldn't resume: %1</source>
+            <translation>تعذّر الاستئناف: %1</translation>
+        </message>
+        <message>
+            <source>, </source>
+            <translation>، </translation>
+        </message>
+        <message>
+            <source>Lost the connection to Jarvis. Reconnecting…</source>
+            <translation>انقطع الاتصال بجارفيس. جارٍ إعادة الاتصال…</translation>
+        </message>
+        <message>
+            <source>Paused · you have control</source>
+            <translation>متوقف مؤقتًا · التحكم لك</translation>
+        </message>
+        <message>
+            <source>Jarvis is controlling the screen · step %1 of %2</source>
+            <translation>جارفيس يتحكم في الشاشة · الخطوة %1 من %2</translation>
+        </message>
+        <message>
+            <source>You moved the mouse or typed.</source>
+            <translation>حرّكت الفأرة أو كتبت.</translation>
+        </message>
+        <message>
+            <source>You pressed Esc.</source>
+            <translation>ضغطت على Esc.</translation>
+        </message>
+        <message>
+            <source>A protected window has focus.</source>
+            <translation>نافذة محمية هي النشطة الآن.</translation>
+        </message>
+        <message>
+            <source>The screen locked.</source>
+            <translation>قُفلت الشاشة.</translation>
+        </message>
+        <message>
+            <source>Jarvis paused.</source>
+            <translation>أوقف جارفيس العمل مؤقتًا.</translation>
+        </message>
+        <message>
+            <source>Done</source>
+            <translation>تم</translation>
+        </message>
+        <message>
+            <source>Running</source>
+            <translation>قيد التنفيذ</translation>
+        </message>
+        <message>
+            <source>Failed</source>
+            <translation>فشل</translation>
+        </message>
+        <message>
+            <source>Waiting</source>
+            <translation>بانتظار الدور</translation>
+        </message>
+    </context>
+    <context>
+        <name>CuSettingsModel</name>
+        <message>
+            <source>This model can't see images, so it can't use the screen.</source>
+            <translation>هذا النموذج لا يرى الصور، لذا لا يستطيع استخدام الشاشة.</translation>
+        </message>
+        <message>
+            <source>Screenshots of the allowed windows go to %1.</source>
+            <translation>تُرسَل لقطات النوافذ المسموح بها إلى %1.</translation>
+        </message>
+        <message>
+            <source>Screenshots stay on this computer.</source>
+            <translation>تبقى لقطات الشاشة على هذا الحاسوب.</translation>
+        </message>
+        <message>
+            <source>a computer on your network</source>
+            <translation>حاسوب على شبكتك</translation>
+        </message>
+        <message>
+            <source>Jarvis apps, the shell and Settings</source>
+            <translation>تطبيقات جارفيس والواجهة والإعدادات</translation>
+        </message>
+        <message>
+            <source>Lock screen</source>
+            <translation>شاشة القفل</translation>
+        </message>
+        <message>
+            <source>Installer</source>
+            <translation>المثبّت</translation>
+        </message>
+        <message>
+            <source>Password and key prompts (polkit, keyrings, SSH)</source>
+            <translation>نوافذ كلمات المرور والمفاتيح (polkit وحلقات المفاتيح وSSH)</translation>
+        </message>
+        <message>
+            <source>Terminals</source>
+            <translation>الطرفيات</translation>
+        </message>
+        <message>
+            <source>Password fields in any app</source>
+            <translation>حقول كلمات المرور في أي تطبيق</translation>
+        </message>
+        <message>
+            <source>This version of Jarvis can't use the screen yet.</source>
+            <translation>لا يستطيع هذا الإصدار من جارفيس استخدام الشاشة بعد.</translation>
+        </message>
+        <message>
+            <source>Couldn't change computer use: %1</source>
+            <translation>تعذّر تغيير إعداد استخدام الحاسوب: %1</translation>
         </message>
     </context>
     <context>
@@ -474,6 +797,10 @@
     <context>
         <name>NavRail</name>
         <message>
+            <source>Apps</source>
+            <translation>التطبيقات</translation>
+        </message>
+        <message>
             <source>Chat</source>
             <translation>المحادثة</translation>
         </message>
@@ -621,6 +948,14 @@
             <translation>أقوى النماذج. يحتاج إلى الإنترنت ومفتاح API.</translation>
         </message>
         <message>
+            <source>Sign in with an account</source>
+            <translation>تسجيل الدخول بحساب</translation>
+        </message>
+        <message>
+            <source>Use your Claude, ChatGPT, Google or GitHub Copilot plan. No API key.</source>
+            <translation>استخدم اشتراكك في Claude أو ChatGPT أو Google أو GitHub Copilot. لا تحتاج إلى مفتاح API.</translation>
+        </message>
+        <message>
             <source>This computer</source>
             <translation>هذا الحاسوب</translation>
         </message>
@@ -737,6 +1072,10 @@
         <message>
             <source>On your network</source>
             <translation>على شبكتك</translation>
+        </message>
+        <message>
+            <source>Your messages and Jarvis's tool results go to %1 under your own account. The %1 program runs in a sandbox with its own tools turned off; Jarvis never sees your password.</source>
+            <translation>تُرسَل رسائلك ونتائج أدوات جارفيس إلى %1 عبر حسابك. يعمل برنامج %1 داخل بيئة معزولة وأدواته الخاصة معطّلة؛ ولا يرى جارفيس كلمة مرورك أبدًا.</translation>
         </message>
         <message>
             <source>When diagnosing problems, Jarvis sends short excerpts of system logs to %1. Passwords, keys and tokens are removed first.</source>
@@ -943,6 +1282,14 @@
             <translation>الهاتف</translation>
         </message>
         <message>
+            <source>Computer use</source>
+            <translation>استخدام الحاسوب</translation>
+        </message>
+        <message>
+            <source>Accounts</source>
+            <translation>الحسابات</translation>
+        </message>
+        <message>
             <source>Settings</source>
             <translation>الإعدادات</translation>
         </message>
@@ -953,6 +1300,13 @@
         <message>
             <source>No provider yet.</source>
             <translation>لا يوجد مزوّد بعد.</translation>
+        </message>
+    </context>
+    <context>
+        <name>SettingsWindow</name>
+        <message>
+            <source>Jarvis Settings</source>
+            <translation>إعدادات جارفيس</translation>
         </message>
     </context>
     <context>
@@ -1404,11 +1758,31 @@
             <translation>توقف مسجّل الميكروفون دون التقاط أي صوت.</translation>
         </message>
     </context>
-<context>
-    <name>SettingsWindow</name>
-    <message>
-        <source>Jarvis Settings</source>
-        <translation>إعدادات جارفيس</translation>
-    </message>
-</context>
+    <context>
+        <name>AppsView</name>
+        <message>
+            <source>Apps</source>
+            <translation>التطبيقات</translation>
+        </message>
+        <message>
+            <source>Search apps, or ask Jarvis</source>
+            <translation>ابحث في التطبيقات، أو اسأل جارفيس</translation>
+        </message>
+        <message>
+            <source>Search apps</source>
+            <translation>ابحث في التطبيقات</translation>
+        </message>
+        <message>
+            <source>No apps match “%1”.</source>
+            <translation>لا توجد تطبيقات تطابق «%1».</translation>
+        </message>
+        <message>
+            <source>No apps found.</source>
+            <translation>لم يُعثر على تطبيقات.</translation>
+        </message>
+        <message>
+            <source>Ask Jarvis: %1</source>
+            <translation>اسأل جارفيس: %1</translation>
+        </message>
+    </context>
 </TS>

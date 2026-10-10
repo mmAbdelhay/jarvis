@@ -8,6 +8,12 @@
 import { type Lang, parseLang } from "@jarvis/core";
 import { MAX_PROVIDERS, PROVIDER_ID_PATTERN, RESERVED_PROVIDER_IDS } from "@jarvis/wire";
 import { isMap, isScalar, parse, parseDocument } from "yaml";
+import {
+  type ComputerUseSettings,
+  computerUseNode,
+  emptyComputerUse,
+  parseComputerUse,
+} from "./cu-config.js";
 import { type ConfigIo, type ProviderSection, parseProviderSection } from "./provider-config.js";
 
 export type ProviderEntry = ProviderSection & { id: string };
@@ -16,6 +22,8 @@ export type OsBrainConfig = {
   allowCloudFallback: boolean;
   memoryEnabled: boolean;
   language: Lang | null;
+  /** v1.1 §2: per-provider computer-use enable and cloud consent. */
+  computerUse: ComputerUseSettings;
   /** True when the providers came from the legacy top-level `provider:` key. */
   migratedFromLegacy: boolean;
 };
@@ -28,6 +36,7 @@ export function emptyBrain(): OsBrainConfig {
     allowCloudFallback: false,
     memoryEnabled: true,
     language: null,
+    computerUse: emptyComputerUse(),
     migratedFromLegacy: false,
   };
 }
@@ -84,6 +93,7 @@ export function parseOsBrainConfig(root: unknown): OsBrainConfig {
     allowCloudFallback: allow === true,
     memoryEnabled,
     language: parseLang(section["language"]) ?? null,
+    computerUse: parseComputerUse(section["computerUse"]),
   };
   const list = section["providers"];
   if (list !== undefined && list !== null) {
@@ -124,6 +134,8 @@ function entryValue(entry: ProviderEntry): Record<string, unknown> {
     baseUrl: entry.baseUrl,
     model: entry.model,
   };
+  if (entry.kind === "account" && entry.account !== undefined) value["account"] = entry.account;
+
   if (!entry.supportsTools) value["tools"] = false;
   if (entry.auth === "subscription") value["auth"] = "subscription";
   return value;
@@ -131,7 +143,11 @@ function entryValue(entry: ProviderEntry): Record<string, unknown> {
 
 export async function writeOsProviders(
   path: string,
-  value: { providers: readonly ProviderEntry[]; allowCloudFallback: boolean },
+  value: {
+    providers: readonly ProviderEntry[];
+    allowCloudFallback: boolean;
+    computerUse?: ComputerUseSettings;
+  },
   io: ConfigIo,
 ): Promise<void> {
   let text = "";
@@ -147,6 +163,11 @@ export async function writeOsProviders(
   if (!isMap(document.get("os", true))) document.set("os", document.createNode({}));
   document.setIn(["os", "providers"], document.createNode(value.providers.map(entryValue)));
   document.setIn(["os", "allowCloudFallback"], value.allowCloudFallback);
+  // v1.1: pruned in the same write as the providers, so a changed endpoint
+  // never keeps the old endpoint's consent, even for a moment.
+  if (value.computerUse !== undefined) {
+    document.setIn(["os", "computerUse"], document.createNode(computerUseNode(value.computerUse)));
+  }
   if (document.has("provider")) {
     // A leading comment is attached to the first key; keep it when that key goes.
     const first = isMap(document.contents) ? document.contents.items[0] : undefined;

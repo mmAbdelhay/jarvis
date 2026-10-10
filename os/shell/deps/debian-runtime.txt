@@ -11,6 +11,10 @@ qml6-module-qtquick-controls
 # Shared controls (os/ui, contracts M2 §7):
 jarvis-ui
 # Platform and session:
+# Apps view icons (SVG theme icons, hicolor and Adwaita themes):
+qt6-svg-plugins
+hicolor-icon-theme
+adwaita-icon-theme
 # Push-to-talk capture (pacat; PipeWire's pulse server answers it):
 pulseaudio-utils
 qt6-wayland

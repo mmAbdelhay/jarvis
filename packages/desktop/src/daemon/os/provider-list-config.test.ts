@@ -49,6 +49,7 @@ describe("parseOsBrainConfig (M2.5 contracts §1)", () => {
       memoryEnabled: true,
       migratedFromLegacy: true,
       language: null,
+      computerUse: { enabled: {}, cloudConsent: {} },
     });
   });
 
@@ -225,5 +226,38 @@ describe("os.language and the reserved id (M4 §1, §3)", () => {
     expect(files.get("/c.yaml")).toContain("# mine");
     expect(files.get("/c.yaml")).toContain("allowCloudFallback: true");
     expect(files.get("/c.yaml")).toContain("language: ar");
+  });
+});
+
+it("writes an account provider with its account", async () => {
+  const files = new Map<string, string>();
+  const io = {
+    readFile: async (p: string) => files.get(p) ?? "",
+    writeFile: async (p: string, t: string) => void files.set(p, t),
+  };
+  await writeOsProviders(
+    "/c.yaml",
+    {
+      providers: [
+        {
+          id: "claude",
+          kind: "account",
+          account: "claude",
+          baseUrl: "https://claude.ai",
+          model: "default",
+          auth: "api-key",
+          supportsTools: true,
+        },
+      ],
+      allowCloudFallback: false,
+    },
+    io,
+  );
+  const brain = await readOsBrainConfig("/c.yaml", io);
+  expect(brain.providers[0]).toMatchObject({
+    id: "claude",
+    kind: "account",
+    account: "claude",
+    model: "default",
   });
 });

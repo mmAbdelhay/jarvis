@@ -7,3 +7,8 @@ QT_WAYLAND_DISABLE_WINDOWDECORATION=1
 # VMs and machines without a GPU driver render with llvmpipe; wlroots refuses
 # a software GL renderer unless told it is acceptable.
 WLR_RENDERER_ALLOW_SOFTWARE=1
+# Computer use (v1.1 contracts §1, gap G9): toolkits expose their widgets on
+# the AT-SPI bus so jarvis-cu can refuse typing into password fields.
+# GTK 3/4 apps do so by default; Firefox and Qt need these.
+GNOME_ACCESSIBILITY=1
+QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1

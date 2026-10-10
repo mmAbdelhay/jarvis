@@ -26,3 +26,8 @@ xdg-utils
 pcmanfm-qt
 fonts-noto-core
 fonts-ibm-plex
+
+# v1.1: AT-SPI password-field detection (contracts §1).
+at-spi2-core
+# v1.1: the XDG user folders (Pictures, Documents, ...), made at session start.
+xdg-user-dirs

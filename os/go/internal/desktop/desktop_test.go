@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"testing"
 )
 
@@ -116,5 +117,31 @@ func TestExpandExec(t *testing.T) {
 	e.Exec = "gnome-calculator"
 	if _, err := ExpandExec(e, []string{"/home/u/a.txt"}); !errors.Is(err, ErrNoFiles) {
 		t.Errorf("no file code: %v", err)
+	}
+}
+
+func TestIndexAllKeepsHiddenAndShadowedEntries(t *testing.T) {
+	user, sys := t.TempDir(), t.TempDir()
+	write := func(dir, name, body string) {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(sys, "foot.desktop", "[Desktop Entry]\nType=Application\nName=Foot\nExec=foot\nCategories=System;TerminalEmulator;\n")
+	write(sys, "footclient.desktop", "[Desktop Entry]\nType=Application\nName=Foot Client\nExec=footclient\nNoDisplay=true\nCategories=System;TerminalEmulator;\n")
+	write(user, "foot.desktop", "[Desktop Entry]\nType=Application\nName=Foot\nExec=foot\nHidden=true\n")
+	write(sys, "link.desktop", "[Desktop Entry]\nType=Link\nName=Site\nURL=https://example.com\n")
+	all := IndexAll([]Dir{{user, "user"}, {sys, "apt"}})
+	var ids []string
+	for _, e := range all {
+		ids = append(ids, e.Source+":"+e.ID)
+	}
+	sort.Strings(ids)
+	want := []string{"apt:foot", "apt:footclient", "user:foot"}
+	if !reflect.DeepEqual(ids, want) {
+		t.Fatalf("IndexAll = %v, want %v", ids, want)
+	}
+	if vis := Index([]Dir{{user, "user"}, {sys, "apt"}}); len(vis) != 0 {
+		t.Fatalf("Index must still hide hidden/shadowed entries: %+v", vis)
 	}
 }

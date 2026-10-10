@@ -96,6 +96,9 @@ mkdir -p "$tmp/jarvis-settings/usr/share/polkit-1/rules.d"
 cp "$packaging/jarvis-settings/51-jarvis-settings.rules" "$tmp/jarvis-settings/usr/share/polkit-1/rules.d/"
 stub jarvis-settings
 stub jarvis-apps
+# An ELF that exits, at the built-in server path jarvisd starts.
+install -D -m0755 /bin/true "$tmp/jarvis-files/usr/lib/jarvis/mcp/jarvis-files"
+stub jarvis-files
 stub jarvis-wl
 # An ELF that exits (cannot lock) and the real PAM service.
 install -D -m0755 /bin/true "$tmp/jarvis-lock/usr/bin/jarvis-lock"
@@ -117,7 +120,7 @@ stub jarvis-voice-engines
 # --- Rafiq M4 (Plan T) ---
 repo_root=$(cd "$packaging/../.." && pwd)
 # The arch-all packages are cheap: stage their real contents.
-for p in jarvis-session jarvis-fonts jarvis-recipes; do
+for p in jarvis-session jarvis-fonts jarvis-recipes jarvis-accounts; do
   mkdir -p "$tmp/$p"
   REPO_ROOT=$repo_root "$packaging/$p/stage.sh" "$tmp/$p"
   stub "$p"
@@ -135,3 +138,11 @@ done
 stub jarvis-i18n
 # No weights (verify-m4 warns on a ~stub version); the real postinst is kept.
 stub jarvis-backup-model "$packaging/jarvis-backup-model"
+
+# --- Rafiq v1.1 (Plan X) ---
+# jarvis-cu with its real unit and autostart fragment; the helper exits at once.
+cu_dist=$tmp/cu-dist
+install -D -m0755 /bin/true "$cu_dist/usr/libexec/jarvis/jarvis-cu"
+mkdir -p "$tmp/jarvis-cu"
+REPO_ROOT=$repo_root GO_DIST=$cu_dist "$packaging/jarvis-cu/stage.sh" "$tmp/jarvis-cu"
+stub jarvis-cu

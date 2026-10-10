@@ -1,0 +1,27 @@
+//go:build linux
+
+package server
+
+import (
+	"net"
+
+	"golang.org/x/sys/unix"
+)
+
+func peerCred(c *net.UnixConn) (int32, uint32, error) {
+	raw, err := c.SyscallConn()
+	if err != nil {
+		return 0, 0, err
+	}
+	var cred *unix.Ucred
+	var cerr error
+	if err := raw.Control(func(fd uintptr) {
+		cred, cerr = unix.GetsockoptUcred(int(fd), unix.SOL_SOCKET, unix.SO_PEERCRED)
+	}); err != nil {
+		return 0, 0, err
+	}
+	if cerr != nil {
+		return 0, 0, cerr
+	}
+	return cred.Pid, cred.Uid, nil
+}

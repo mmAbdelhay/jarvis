@@ -81,6 +81,7 @@ class VmConfig:
     accel: str
     memory_mb: int = 4096
     cpus: int = 2
+    extra: tuple[str, ...] = ()  # appended to the QEMU command line (e.g. a USB tablet)
 
 
 def qemu_argv(cfg: VmConfig) -> list[str]:
@@ -98,7 +99,7 @@ def qemu_argv(cfg: VmConfig) -> list[str]:
         "-vga", "none", "-device", "virtio-vga", "-display", "none",
         "-serial", f"unix:{cfg.serial_socket},server=on,wait=off",
         "-qmp", f"unix:{cfg.qmp_socket},server=on,wait=off",
-        "-monitor", "none", "-no-reboot",
+        "-monitor", "none", *cfg.extra, "-no-reboot",
     ]
 
 

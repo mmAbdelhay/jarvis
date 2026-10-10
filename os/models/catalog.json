@@ -12,7 +12,8 @@
       "toolCalling": "verified",
       "languages": ["en", "ar", "zh", "fr", "de", "es"],
       "recommendedFor": "Built-in backup: answers when every configured provider fails",
-      "role": "backup"
+      "role": "backup",
+      "vision": false
     },
     {
       "id": "llama3.2-3b",
@@ -25,7 +26,8 @@
       "toolCalling": "verified",
       "languages": ["en", "de", "fr", "it", "pt", "hi", "es", "th"],
       "recommendedFor": "Laptops with 8 GB of memory; quick everyday tasks",
-      "role": "main"
+      "role": "main",
+      "vision": false
     },
     {
       "id": "qwen3-4b",
@@ -38,7 +40,8 @@
       "toolCalling": "verified",
       "languages": ["en", "ar", "zh", "fr", "de", "es"],
       "recommendedFor": "8 GB machines; best small model for Arabic",
-      "role": "main"
+      "role": "main",
+      "vision": false
     },
     {
       "id": "qwen3-8b",
@@ -51,7 +54,8 @@
       "toolCalling": "verified",
       "languages": ["en", "ar", "zh", "fr", "de", "es"],
       "recommendedFor": "16 GB machines; the recommended default",
-      "role": "main"
+      "role": "main",
+      "vision": false
     },
     {
       "id": "llama3.1-8b",
@@ -64,7 +68,8 @@
       "toolCalling": "verified",
       "languages": ["en", "de", "fr", "it", "pt", "hi", "es", "th"],
       "recommendedFor": "16 GB machines; strong English tool use",
-      "role": "main"
+      "role": "main",
+      "vision": false
     },
     {
       "id": "qwen3-14b",
@@ -77,20 +82,22 @@
       "toolCalling": "verified",
       "languages": ["en", "ar", "zh", "fr", "de", "es"],
       "recommendedFor": "32 GB machines; more careful multi-step tasks",
-      "role": "main"
+      "role": "main",
+      "vision": false
     },
     {
       "id": "gpt-oss-20b",
       "ollamaTag": "gpt-oss:20b",
       "displayName": "gpt-oss 20B",
-      "sizeBytes": 13793441244,
+      "sizeBytes": 13793441566,
       "minRamGB": 32,
       "minVramGB": null,
       "tier": "large",
       "toolCalling": "verified",
       "languages": ["en"],
       "recommendedFor": "32 GB machines; strongest local reasoning",
-      "role": "main"
+      "role": "main",
+      "vision": false
     },
     {
       "id": "qwen3-30b-a3b",
@@ -103,7 +110,8 @@
       "toolCalling": "verified",
       "languages": ["en", "ar", "zh", "fr", "de", "es"],
       "recommendedFor": "Machines with a 24 GB graphics card",
-      "role": "main"
+      "role": "main",
+      "vision": false
     }
   ]
 }

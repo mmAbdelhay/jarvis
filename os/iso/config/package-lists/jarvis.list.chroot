@@ -14,10 +14,12 @@ jarvis-models-catalog
 jarvis-archive-keyring
 jarvis-branding
 jarvis-cli
+jarvis-accounts
 
 # Rafiq M3 runtime packages.
 jarvis-settings
 jarvis-apps
+jarvis-files
 jarvis-wl
 jarvis-lock
 jarvis-idle
@@ -31,3 +33,6 @@ jarvis-session
 jarvis-fonts
 jarvis-i18n
 jarvis-recipes
+
+# Rafiq v1.1 (contracts §1): computer use helper.
+jarvis-cu

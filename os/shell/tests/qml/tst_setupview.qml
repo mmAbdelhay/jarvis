@@ -102,4 +102,12 @@ TestCase {
         mouseClick(link)
         compare(doctor.count, 1)
     }
+
+    function test_disabledModelPickerIsDark() {
+        const c = makeView()
+        const picker = findChild(c.view, "modelPicker")
+        verify(!picker.enabled) // no models before the connection check
+        compare(picker.background.color.toString(), Theme.fieldDisabled.toString())
+        compare(picker.contentItem.color.toString(), Theme.textDisabled.toString())
+    }
 }

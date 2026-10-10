@@ -11,7 +11,7 @@
 #include "ClassicController.h"
 #include "DesktopEntry.h"
 #include "Language.h"
-#include "Launcher.h"
+#include "AppLauncher.h"
 #include "app/AppFont.h"
 #include "app/ShellController.h"
 #include "app/SingleInstance.h"
@@ -76,7 +76,7 @@ int main(int argc, char* argv[])
     shell.setLanguageApplier([&language](const QString& code) { return language.setLanguage(code); }, language.language());
 
     AppsModel apps(jarvis::ui::applicationDirectories(), AppsModel::currentDesktops());
-    Launcher launcher;
+    AppLauncher launcher;
     ClassicController controller(&apps, &launcher, ClassicController::fallbackActive(ClassicController::defaultMarkerPath()));
     controller.setShell(&shell);
 

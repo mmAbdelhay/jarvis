@@ -17,7 +17,14 @@
 // process or log line sees them.
 //
 // No electron here (core/no-electron.test.ts); process.platform read once, here.
-import { randomBytes } from "node:crypto";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { OS_CONTROL_PUSHES } from "@jarvis/wire";
+import { nodeAccountFs, readOpenUrlFile } from "./accounts/account-fs.js";
+import { accountSandboxArgv, accountSandboxProbe, accountUnitName } from "./accounts/sandbox.js";
+import { type AccountService, createAccountService } from "./accounts/service.js";
+
+import { createHash, randomBytes } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, rm, mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir, tmpdir, totalmem } from "node:os";
@@ -31,6 +38,9 @@ import {
   TRUSTED_MCP_SERVERS,
 } from "@jarvis/core";
 import {
+  ACCOUNT_PINS_PATH,
+  createNodeCliSpawner,
+  parseAccountPins,
   auditLogPath,
   createAuditLog,
   createSecretToolStore,
@@ -49,6 +59,7 @@ import {
 } from "@jarvis/platform/store";
 import { DAEMON_EXIT, DAEMON_USAGE, parseDaemonArgs } from "../args.js";
 import { nodeControlDeps } from "../control/deps.js";
+import { nodePeerCheck } from "../control/peer.js";
 import { runDirectoryFor } from "../control/endpoint.js";
 import { createControlServer } from "../control/server.js";
 import { takeDaemonEnv } from "../env.js";
@@ -62,6 +73,8 @@ import {
 } from "../log-file.js";
 import { loadRecipeFiles, parseOsReleaseId } from "./recipe-files.js";
 import { createOsAgent } from "./agent-service.js";
+import { CU_HELPER_PATH, connectUnix, createCuClient, cuSocketPath } from "./cu-client.js";
+import { readVisionTags, readOllamaVision } from "./catalog-vision.js";
 import { readBackupTag } from "./backup-model.js";
 import { createEnvKeyStore, takeEnvProviderKeys } from "./provider-keys.js";
 import { createMemoryBackendOpener } from "./memory-backend.js";
@@ -185,6 +198,9 @@ async function main(argv: readonly string[]): Promise<void> {
     info("JARVIS_PROVIDER_KEY_* is ignored outside the read-only tool profile");
   }
   const env = { ...process.env };
+  // One secret-tool runner for memory and provider keys: after a keyring
+  // timeout (a password prompt is up) every store fails fast for a while.
+  const keyringExec = nodeSecretToolExec(env);
   const mcpDir = mcpDirFrom(env);
   // Rafiq M3 §5.14: host servers get the graphical session's display and
   // desktop from the user manager, re-read before each turn (session-env.ts).
@@ -216,6 +232,56 @@ async function main(argv: readonly string[]): Promise<void> {
   };
   const runtimeDir =
     resolveRuntimeDir(env, process.getuid?.()) ?? `/run/user/${process.getuid?.() ?? 0}`;
+  const execFileP = promisify(execFile);
+  const unitHex = () => randomBytes(4).toString("hex");
+  // Plan Y: account CLIs (not in the Docker read-only profile).
+  const accounts: AccountService | undefined = readonlyProfile
+    ? undefined
+    : createAccountService({
+        home,
+        readPins: async () =>
+          parseAccountPins(JSON.parse(await readFile(ACCOUNT_PINS_PATH, "utf8"))),
+        spawn: createNodeCliSpawner({
+          // systemd-run itself needs jarvisd's own environment to reach the
+          // user manager; `env -i` inside the argv gives the CLI only its own.
+          wrap: (inv, unit) => ({
+            command: accountSandboxArgv(inv, { home, runtimeDir, unit }),
+            env: Object.fromEntries(
+              Object.entries(process.env).filter((e): e is [string, string] => e[1] !== undefined),
+            ),
+          }),
+          unitName: (inv) => accountUnitName(inv.account, unitHex),
+          stopUnit: async (unit) => {
+            await execFileP("systemctl", ["--user", "stop", unit]).catch(() => {});
+          },
+        }),
+        sandboxWorks: async (paths) => {
+          // The probe runs as a claude-named unit, whichever account asked first.
+          const [cmd, ...args] = accountSandboxProbe(
+            home,
+            runtimeDir,
+            paths,
+            accountUnitName("claude", unitHex),
+          );
+          return execFileP(cmd as string, args, { timeout: 30_000 }).then(
+            () => true,
+            () => false,
+          );
+        },
+        fs: nodeAccountFs(home),
+        readOpenUrl: readOpenUrlFile,
+        openBrowser: async (url) => {
+          await execFileP("xdg-open", [url], {
+            env: { ...process.env, ...sessionEnv.current() },
+            timeout: 15_000,
+          });
+        },
+        push: (state) => push(OS_CONTROL_PUSHES.accountState, state),
+        language: () => agent.language(),
+        randomBytes: (n) => randomBytes(n),
+        log: info,
+      });
+
   const registryServers = createRegistryServers({
     home,
     runtimeDir,
@@ -268,7 +334,7 @@ async function main(argv: readonly string[]): Promise<void> {
   });
   const memory = createMemoryBackendOpener({
     path: memoryDbPath(home),
-    secrets: createSecretToolStore(nodeSecretToolExec(env), { label: MEMORY_KEY_LABEL }),
+    secrets: createSecretToolStore(keyringExec, { label: MEMORY_KEY_LABEL }),
     fileExists: existsSync,
     removeFile: removeMemoryFile,
     randomKey: () => randomBytes(32),
@@ -356,13 +422,38 @@ async function main(argv: readonly string[]): Promise<void> {
     hostServers: new Set(TRUSTED_MCP_SERVERS),
     log: info,
   });
+  // Rafiq v1.1 §1: jarvis-cu on $XDG_RUNTIME_DIR/jarvis/cu.sock, spoken to
+  // only after the kernel names /usr/libexec/jarvis/jarvis-cu as the peer.
+  const cuPath = cuSocketPath(env);
+  const peerCheck = nodePeerCheck();
+  const cuClient =
+    readonlyProfile || cuPath === undefined
+      ? undefined
+      : createCuClient({
+          connect: () => connectUnix(cuPath),
+          verifyPeer: async (socket) => (await peerCheck.executableOf(socket)) === CU_HELPER_PATH,
+          timers,
+          log: info,
+        });
+  if (cuClient === undefined) info("computer use is off (read-only profile or no XDG_RUNTIME_DIR)");
   const agent = createOsAgent({
+    ...(cuClient === undefined
+      ? {}
+      : {
+          computerUse: {
+            client: cuClient,
+            hash: async (png: string) => createHash("sha256").update(png).digest("hex"),
+          },
+        }),
     ...(readonlyProfile ? {} : { recipes }),
     defaultLanguage: langFromLocale({ LANG: process.env["LANG"] }),
     // The Docker image (read-only profile) ships no model and no catalog.
     ...(readonlyProfile
       ? {}
       : {
+          readVisionTags: () =>
+            readVisionTags(MODEL_CATALOG_PATH, (path) => readFile(path, "utf8"), info),
+          readOllamaVision: (baseUrl, model) => readOllamaVision(baseUrl, model, fetch),
           readBackupTag: () =>
             readBackupTag(MODEL_CATALOG_PATH, (path) => readFile(path, "utf8"), info),
         }),
@@ -371,12 +462,10 @@ async function main(argv: readonly string[]): Promise<void> {
     configIo,
     ...(lockStore === undefined ? {} : { lockStore }),
     voiceAvailability: () => voice?.availability() ?? voiceIo.availability(),
-    secrets: readonlyProfile
-      ? createEnvKeyStore(new Map())
-      : createSecretToolStore(nodeSecretToolExec(env)),
+    secrets: readonlyProfile ? createEnvKeyStore(new Map()) : createSecretToolStore(keyringExec),
     providerKeys: readonlyProfile
       ? createEnvKeyStore(envKeys)
-      : createSecretToolStore(nodeSecretToolExec(env), {
+      : createSecretToolStore(keyringExec, {
           attribute: PROVIDER_KEY_ATTRIBUTE,
         }),
     ...(readonlyProfile ? { toolProfile: "readonly" as const } : {}),
@@ -384,6 +473,7 @@ async function main(argv: readonly string[]): Promise<void> {
       buildProvider(section, apiKey, {
         fetch: (url, init) => fetch(url, init),
         language: () => agent.language(),
+        ...(accounts === undefined ? {} : { account: (s) => accounts.provider(s) }),
       }),
     ...(fakeScript === undefined ? {} : { fakeScript }),
     connectMcp: async () => {
@@ -462,6 +552,7 @@ async function main(argv: readonly string[]): Promise<void> {
     agent,
     voice,
     remote,
+    ...(accounts === undefined ? {} : { accounts }),
     // Rafiq M3 §3: the kernel names the peer program; only jarvis-lock may lock or unlock.
     isLockClient: async (connection) => (await connection.peerExecutable?.()) === LOCK_CLIENT_PATH,
   });
@@ -500,7 +591,9 @@ async function main(argv: readonly string[]): Promise<void> {
         .stop()
         .catch((thrown: unknown) => error(`phone bridge stop: ${describe(thrown)}`));
       voice?.stop();
+      await accounts?.shutdown();
       await agent.shutdown();
+      cuClient?.close();
       vectorCache?.close();
     },
     closeControl: () => server.close(),

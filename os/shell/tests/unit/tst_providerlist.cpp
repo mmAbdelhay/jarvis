@@ -34,6 +34,16 @@ QString idAt(const ProviderListModel& m, int row) { return m.data(m.index(row), 
 class TestProviderList : public QObject {
     Q_OBJECT
 private slots:
+    void accountRowsKeepTheirAccount()
+    {
+        ProviderListModel list;
+        list.loadList(QJsonObject{{"providers", QJsonArray{QJsonObject{{"id", "claude"}, {"kind", "account"}, {"account", "claude"},
+                                                                       {"baseUrl", "https://claude.ai"}, {"model", "default"}, {"hasKey", false}}}},
+                                  {"activeId", "claude"}});
+        QCOMPARE(list.payload().value("providers").toArray().first().toObject().value("account").toString(), u"claude"_s);
+        QCOMPARE(list.config(0).value("account").toString(), u"claude"_s);
+    }
+
     void loadsTheOrderedListAndMarksTheActive()
     {
         ProviderListModel m;

@@ -122,7 +122,7 @@ private slots:
     {
         const ControlResult r = call(*m_client, u"provider:list"_s, {});
         QVERIFY2(r.ok, qPrintable(r.text));
-        QCOMPARE(r.value.toObject()["kinds"].toArray(), (QJsonArray{"anthropic", "openai-compatible", "ollama", "gemini"})); // M2 contracts §3 adds gemini
+        QCOMPARE(r.value.toObject()["kinds"].toArray(), (QJsonArray{"anthropic", "openai-compatible", "ollama", "gemini", "account"})); // M2 §3 gemini; v1.1 Plan Y §2.1 account
     }
 
     void promptStreamsTheFakeReply()

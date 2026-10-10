@@ -9,15 +9,17 @@ Item {
     LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft
     LayoutMirroring.childrenInherit: true
     required property ProviderModel provider
+    property AccountsModel accounts: null
     required property ProviderListModel providers
     property ShellController shell: null
     property MemoryModel memory: null
     property RegistryModel registry: null
     property VoiceModel voice: null
     property PhoneModel phone: null
+    property CuSettingsModel cuSettings: null
     property bool doctorAvailable: false // sys:snapshot says offline (contracts §6.8)
     property string section: "providers"
-    readonly property var sections: [{ id: "providers", label: qsTr("Model providers") }, { id: "memory", label: qsTr("Memory") }, { id: "tools", label: qsTr("Tools") }, { id: "voice", label: qsTr("Voice") }, { id: "phone", label: qsTr("Phone") }, { id: "language", label: qsTr("Language") }]
+    readonly property var sections: [{ id: "providers", label: qsTr("Model providers") }, { id: "accounts", label: qsTr("Accounts") }, { id: "memory", label: qsTr("Memory") }, { id: "tools", label: qsTr("Tools") }, { id: "computerUse", label: qsTr("Computer use") }, { id: "voice", label: qsTr("Voice") }, { id: "phone", label: qsTr("Phone") }, { id: "language", label: qsTr("Language") }]
     signal doctorRequested()
 
     Flickable {
@@ -87,9 +89,18 @@ Item {
                 Layout.fillWidth: true
                 visible: root.section === "providers"
                 provider: root.provider
+                accounts: root.accounts
                 providers: root.providers
                 doctorAvailable: root.doctorAvailable
                 onDoctorRequested: root.doctorRequested()
+            }
+
+            Loader {
+                objectName: "accountsSection"
+                Layout.fillWidth: true
+                visible: root.section === "accounts"
+                active: root.accounts !== null
+                sourceComponent: AccountsSection { accounts: root.accounts }
             }
 
             Loader {
@@ -106,6 +117,14 @@ Item {
                 visible: root.section === "tools"
                 active: root.registry !== null
                 sourceComponent: ToolsSection { registry: root.registry }
+            }
+
+            Loader {
+                objectName: "computerUseSection"
+                Layout.fillWidth: true
+                visible: root.section === "computerUse"
+                active: root.cuSettings !== null
+                sourceComponent: ComputerUseSection { settings: root.cuSettings }
             }
 
             Loader {

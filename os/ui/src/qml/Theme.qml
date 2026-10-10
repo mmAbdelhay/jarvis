@@ -15,6 +15,10 @@ QtObject {
     readonly property color muted: "#9AA4B1"
     readonly property color mutedSoft: "#8A94A1"
 
+    // Plan Y §4.2: disabled controls stay in the dark theme.
+    readonly property color fieldDisabled: surfaceDeep
+    readonly property color textDisabled: mutedSoft
+
     readonly property color accent: "#4FD8C4"
     readonly property color accentHover: "#8BE9DA"
     readonly property color accentInk: "#062A25"

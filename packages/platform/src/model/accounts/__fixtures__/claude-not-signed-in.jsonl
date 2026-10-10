@@ -1,0 +1,2 @@
+{"type":"system","subtype":"init","session_id":"5f1c","tools":[],"mcp_servers":[],"model":"claude-sonnet-5-5","apiKeySource":"none"}
+{"type":"result","subtype":"success","is_error":true,"duration_ms":120,"num_turns":0,"result":"Not logged in · Please run /login","session_id":"5f1c","total_cost_usd":0,"usage":{"input_tokens":0,"output_tokens":0}}

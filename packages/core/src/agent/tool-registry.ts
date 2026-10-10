@@ -66,6 +66,14 @@ export const HOST_FORCED_RISK: Readonly<Record<string, ToolRisk>> = {
   "users.add": "password",
   "users.remove": "password",
   "disks.format_removable": "password",
+  // Rafiq v1.1 §2: jarvisd's own computer-use tools; the session card is the approval.
+  "screen.look": "confirm",
+  "screen.click": "confirm",
+  "screen.type": "confirm",
+  "screen.key": "confirm",
+  "screen.scroll": "confirm",
+  "screen.drag": "confirm",
+  "screen.done": "confirm",
 };
 
 /** Name spaces only jarvisd's own servers (jarvis-pkg, jarvis-diag) may use. */
@@ -86,6 +94,8 @@ export const HOST_TOOL_PREFIXES: readonly string[] = [
   "apps.",
   "users.",
   "disks.",
+  "screen.",
+  "cu.",
 ];
 
 /** Compare what the model sees (separator and case folded), not the raw name. */

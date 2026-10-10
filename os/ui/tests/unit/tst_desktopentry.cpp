@@ -133,16 +133,19 @@ private slots:
         QVERIFY(!ids.contains(u"noname"_s)); // unparsable files are left out
     }
 
-    void applicationDirectoriesFollowXdg()
+    void applicationDirectoriesFollowXdgAndFlatpak()
     {
         qputenv("XDG_DATA_HOME", "/home/u/.local/share");
         qputenv("XDG_DATA_DIRS", "/usr/local/share:/usr/share:/var/lib/flatpak/exports/share");
         QCOMPARE(applicationDirectories(),
                  (QStringList{u"/home/u/.local/share/applications"_s, u"/usr/local/share/applications"_s,
-                              u"/usr/share/applications"_s, u"/var/lib/flatpak/exports/share/applications"_s}));
+                              u"/usr/share/applications"_s, u"/var/lib/flatpak/exports/share/applications"_s,
+                              u"/home/u/.local/share/flatpak/exports/share/applications"_s}));
         qunsetenv("XDG_DATA_DIRS");
         QCOMPARE(applicationDirectories().mid(1),
-                 (QStringList{u"/usr/local/share/applications"_s, u"/usr/share/applications"_s}));
+                 (QStringList{u"/usr/local/share/applications"_s, u"/usr/share/applications"_s,
+                              u"/home/u/.local/share/flatpak/exports/share/applications"_s,
+                              u"/var/lib/flatpak/exports/share/applications"_s}));
     }
 };
 

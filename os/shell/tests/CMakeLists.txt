@@ -19,6 +19,11 @@ foreach(source IN LISTS JARVIS_UNIT_TESTS)
   jarvis_add_cpp_test(${source} unit 60)
 endforeach()
 
+# The overlay manager loads Jarvis.Shell QML: link the plugin and find Jarvis.UI.
+target_link_libraries(tst_cuoverlaymanager PRIVATE jarvis_shell_coreplugin)
+target_compile_definitions(tst_cuoverlaymanager PRIVATE JARVIS_QML_DIR="${QT_QML_OUTPUT_DIRECTORY}")
+add_dependencies(tst_cuoverlaymanager jarvis_ui)
+
 file(GLOB JARVIS_INTEGRATION_TESTS CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/integration/tst_*.cpp)
 foreach(source IN LISTS JARVIS_INTEGRATION_TESTS)
   jarvis_add_cpp_test(${source} integration 180)
@@ -27,7 +32,7 @@ endforeach()
 # One QuickTest runner executes every tests/qml/tst_*.qml file.
 qt_add_executable(tst_qml qml/tst_qml.cpp)
 target_link_libraries(tst_qml PRIVATE jarvis_shell_core jarvis_shell_coreplugin Qt6::QuickTest)
-target_compile_definitions(tst_qml PRIVATE QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml" JARVIS_QML_DIR="${QT_QML_OUTPUT_DIRECTORY}" JARVIS_TEST_I18N_DIR="${JARVIS_I18N_BUILD_DIR}")
+target_compile_definitions(tst_qml PRIVATE JARVIS_SHELL_TEST_DATA="${CMAKE_CURRENT_SOURCE_DIR}/data" QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml" JARVIS_QML_DIR="${QT_QML_OUTPUT_DIRECTORY}" JARVIS_TEST_I18N_DIR="${JARVIS_I18N_BUILD_DIR}")
 add_dependencies(tst_qml jarvis_ui jarvis-ui_translations jarvis-shell_translations)
 add_test(NAME tst_qml COMMAND tst_qml)
 set_tests_properties(tst_qml PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" LABELS qml TIMEOUT 120)
@@ -74,3 +79,22 @@ set_tests_properties(settings_window_smoke PROPERTIES LABELS smoke TIMEOUT 30
   ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QML_IMPORT_PATH=${QT_QML_OUTPUT_DIRECTORY};XDG_RUNTIME_DIR=${CMAKE_CURRENT_BINARY_DIR}/settings-smoke;JARVIS_I18N_DIR=${JARVIS_I18N_BUILD_DIR}"
   FAIL_REGULAR_EXPRESSION "is not installed|is not a type|ReferenceError|TypeError|Cannot assign")
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/settings-smoke)
+
+# Rafiq v1.1 design §2.3 on a real compositor: the overlay on two headless
+# labwc outputs, click-through outside the pill, outputs coming and going.
+# Linux only; registered when every tool it drives is installed (CI checks it is).
+if(JARVIS_SHELL_LAYERSHELL)
+  find_program(JARVIS_LABWC labwc)
+  find_program(JARVIS_GRIM grim)
+  find_program(JARVIS_WLRCTL wlrctl)
+  find_program(JARVIS_WLR_RANDR wlr-randr)
+  if(JARVIS_LABWC AND JARVIS_GRIM AND JARVIS_WLRCTL AND JARVIS_WLR_RANDR)
+    qt_add_executable(tst_overlay_wayland wayland/tst_overlay_wayland.cpp)
+    target_link_libraries(tst_overlay_wayland PRIVATE jarvis_shell_core jarvis_shell_coreplugin Qt6::Test)
+    target_compile_definitions(tst_overlay_wayland PRIVATE JARVIS_QML_DIR="${QT_QML_OUTPUT_DIRECTORY}")
+    add_dependencies(tst_overlay_wayland jarvis_ui)
+    add_test(NAME overlay_wayland
+      COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/wayland/run-headless-labwc.sh $<TARGET_FILE:tst_overlay_wayland>)
+    set_tests_properties(overlay_wayland PROPERTIES LABELS wayland TIMEOUT 150)
+  endif()
+endif()

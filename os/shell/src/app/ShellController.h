@@ -9,6 +9,9 @@
 #include <QtQml/qqmlregistration.h>
 #include <functional>
 
+#include "models/AccountsModel.h"
+#include "models/AppsModel.h"
+#include "models/AppLauncher.h"
 #include "models/AuditModel.h"
 #include "models/CardModel.h"
 #include "models/Conversation.h"
@@ -21,6 +24,8 @@
 #include "models/PairingModel.h"
 #include "models/PhoneModel.h"
 #include "models/RegistryModel.h"
+#include "models/CuSessionModel.h"
+#include "models/CuSettingsModel.h"
 
 class ControlClient;
 struct ControlResult;
@@ -38,6 +43,9 @@ class ShellController : public QObject {
     Q_PROPERTY(CardModel* chatCard READ chatCard CONSTANT)
     Q_PROPERTY(bool locked READ locked NOTIFY lockedChanged)
     Q_PROPERTY(CardModel* doctorCard READ doctorCard CONSTANT)
+    Q_PROPERTY(AppsModel* apps READ apps CONSTANT)
+    Q_PROPERTY(QString appsNotice READ appsNotice NOTIFY appsNoticeChanged)
+    Q_PROPERTY(AccountsModel* accounts READ accounts CONSTANT)
     Q_PROPERTY(ProviderModel* provider READ provider CONSTANT)
     Q_PROPERTY(ProviderListModel* providers READ providers CONSTANT)
     Q_PROPERTY(DoctorModel* doctor READ doctor CONSTANT)
@@ -48,6 +56,8 @@ class ShellController : public QObject {
     Q_PROPERTY(PairingModel* pairing READ pairing CONSTANT)
     Q_PROPERTY(PhoneModel* phone READ phone CONSTANT)
     Q_PROPERTY(RegistryModel* registry READ registry CONSTANT)
+    Q_PROPERTY(CuSessionModel* cu READ cu CONSTANT)
+    Q_PROPERTY(CuSettingsModel* cuSettings READ cuSettings CONSTANT)
     Q_PROPERTY(bool offerDoctor READ offerDoctor NOTIFY providerStatusChanged)
     Q_PROPERTY(QString view READ view NOTIFY viewChanged)
     Q_PROPERTY(QString connection READ connection NOTIFY connectionChanged)
@@ -82,6 +92,7 @@ public:
     bool undoAvailable() const { return m_undoAvailable && !m_locked; }
     bool undoing() const { return m_undoing; }
     CardModel* doctorCard() const { return m_doctorCard; }
+    AccountsModel* accounts() const { return m_accounts; }
     ProviderModel* provider() const { return m_provider; }
     ProviderListModel* providers() const { return m_providers; }
     DoctorModel* doctor() const { return m_doctor; }
@@ -92,6 +103,8 @@ public:
     VoiceModel* voice() const { return m_voice; }
     PairingModel* pairing() const { return m_pairing; }
     PhoneModel* phone() const { return m_phone; }
+    CuSessionModel* cu() const { return m_cu; }
+    CuSettingsModel* cuSettings() const { return m_cuSettings; }
     Q_INVOKABLE void pushToTalk();
     bool handleInstanceMessage(const QByteArray& message);
     Q_INVOKABLE void setSurfaceShown(bool shown) { m_surfaceShown = shown; }
@@ -105,6 +118,12 @@ public:
     QString bannerText() const;
     bool updatesChecking() const { return m_updatesChecking; }
     QString updatesNote() const { return m_updatesNote; }
+
+    AppsModel* apps() const { return m_apps; }
+    QString appsNotice() const { return m_appsNotice; }
+    void setAppStarter(AppLauncher::Starter starter) { m_appLauncher->setStarter(std::move(starter)); }
+    Q_INVOKABLE void launchApp(const QString& id);
+    Q_INVOKABLE void askJarvis(const QString& text);
 
     void setLauncher(Launcher launcher) { m_launcher = std::move(launcher); }
 
@@ -135,6 +154,7 @@ public:
     Q_INVOKABLE void checkForUpdates();
 
 signals:
+    void appsNoticeChanged();
     void languageChanged();
     void undoChanged();
     void voiceStatePushed(const QJsonObject& state);
@@ -144,6 +164,8 @@ signals:
     void providerStatusChanged();
     void bannerChanged();
     void dismissRequested();
+    // A computer-use card must be seen at once, above the app Jarvis works in.
+    void summonRequested();
     void composerFocusRequested();
     void updatesChanged();
     void lockedChanged();
@@ -163,7 +185,7 @@ private:
     void onPush(const QString& channel, const QJsonValue& payload);
     void onAgentEvent(const QJsonObject& event);
     void refreshProviders();
-    void askJarvis(const QString& text);
+
     void maybeLeaveDoctor();
     void setView(QString view);
     void setConnection(const QString& connection);
@@ -179,6 +201,10 @@ private:
     bool m_undoAvailable = false;
     bool m_undoing = false;
     CardModel* m_doctorCard;
+    AccountsModel* m_accounts;
+    AppsModel* m_apps;
+    AppLauncher* m_appLauncher;
+    QString m_appsNotice;
     ProviderModel* m_provider;
     ProviderListModel* m_providers;
     QString m_fallbackReason;
@@ -190,6 +216,8 @@ private:
     VoiceModel* m_voice;
     PairingModel* m_pairing;
     PhoneModel* m_phone;
+    CuSessionModel* m_cu;
+    CuSettingsModel* m_cuSettings;
     bool m_surfaceShown = true;
     QString m_view = QStringLiteral("loading");
     QString m_connection = QStringLiteral("connecting");

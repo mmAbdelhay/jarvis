@@ -64,7 +64,16 @@ class Run:
 
 def run_checks(run: Run, args: argparse.Namespace) -> dict | None:
     sh = run.sh
-    sh("dmesg -n 1")
+    # Plymouth quits after the debug shell may already have answered, and
+    # flushes the console's pending input: a command typed just then is lost
+    # (no echo, no answer). Retry the first command until the console settles.
+    for attempt in range(4):
+        try:
+            run.shell.run_ok("dmesg -n 1", 20 * run.factor)
+            break
+        except SerialTimeout:
+            if attempt == 3:
+                raise
     if args.disable_jarvis_apt:
         sh(scenarios.DISABLE_JARVIS_APT)
     sh(scenarios.wait_for_user(150), 320)
@@ -86,6 +95,10 @@ def run_checks(run: Run, args: argparse.Namespace) -> dict | None:
         return sh(ctl("wait --timeout 60"), 70)
 
     run.check("jarvisd control socket", control_socket)
+    # v1.1 fixes: the live login keyring needs no prompt; jarvis-files is shipped.
+    run.check("v1.1: the live login keyring stores and reads a secret without a prompt",
+              lambda: sh(scenarios.keyring_roundtrip(uid), 60))
+    run.check("v1.1: built-in jarvis-files answers files.trash_list", lambda: sh(scenarios.files_trash_list(uid), 40))
 
     ram_report: dict = {}
 
