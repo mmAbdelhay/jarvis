@@ -14,6 +14,7 @@ sys.exit(1 if problems else 0)
 PY
 install -D -m0644 "$src" "$1/usr/share/jarvis/accounts/accounts.json"
 install -D -m0755 "$here/xdg-open" "$1/usr/lib/jarvis/accounts/bin/xdg-open"
+install -D -m0644 "$here/npmrc" "$1/usr/lib/jarvis/accounts/npmrc"
 for alias in sensible-browser x-www-browser www-browser; do
   ln -s xdg-open "$1/usr/lib/jarvis/accounts/bin/$alias"
 done

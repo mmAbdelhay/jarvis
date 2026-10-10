@@ -8,6 +8,7 @@ deb=$tmp/out/jarvis-accounts_${OS_VERSION}_all.deb
 check "pins at the contract path" deb_has "$deb" usr/share/jarvis/accounts/accounts.json
 check "pins identical to source" cmp -s <(dpkg-deb --fsys-tarfile "$deb" | tar -xO ./usr/share/jarvis/accounts/accounts.json) "$REPO_ROOT/os/models/accounts.json"
 check "pins 0644" test "$(deb_mode "$deb" usr/share/jarvis/accounts/accounts.json)" = "-rw-r--r--"
+check "empty npm user config for installs" test "$(deb_mode "$deb" usr/lib/jarvis/accounts/npmrc)" = "-rw-r--r--"
 check "browser shim executable" test "$(deb_mode "$deb" usr/lib/jarvis/accounts/bin/xdg-open)" = "-rwxr-xr-x"
 for alias in sensible-browser x-www-browser www-browser; do
   check "$alias goes to the shim" deb_has "$deb" "usr/lib/jarvis/accounts/bin/$alias"

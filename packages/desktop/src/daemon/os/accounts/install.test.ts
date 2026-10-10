@@ -81,7 +81,7 @@ describe("installInvocation", () => {
         "--omit=dev",
         "--omit=optional",
         "--userconfig",
-        "/dev/null",
+        "/usr/lib/jarvis/accounts/npmrc",
         "--globalconfig",
         "/dev/null",
         "--registry",

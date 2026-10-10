@@ -24,6 +24,10 @@ import {
 import type { AccountFs } from "./account-fs.js";
 
 export const NPM_REGISTRY = "https://registry.npmjs.org/";
+/** An empty, root-owned npmrc (package jarvis-accounts). npm refuses the same
+ *  file as both user and global config ("double-loading config"), so only the
+ *  global one is /dev/null; never a file in a dir the account CLIs can write. */
+export const NPM_USERCONFIG = "/usr/lib/jarvis/accounts/npmrc";
 
 export type InstallTexts = {
   downloading(label: string): string;
@@ -69,7 +73,7 @@ function npmBase(pin: AccountPin, paths: AccountPaths, purpose: CliInvocation["p
 
 const NPM_ISOLATION = [
   "--userconfig",
-  "/dev/null",
+  NPM_USERCONFIG,
   "--globalconfig",
   "/dev/null",
   "--registry",

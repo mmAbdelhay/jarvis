@@ -1,0 +1,2 @@
+# Empty on purpose: account CLI installs take no npm settings from the user
+# (jarvisd passes --userconfig here and --globalconfig /dev/null).
