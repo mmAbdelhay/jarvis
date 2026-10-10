@@ -163,6 +163,34 @@ describe("createLoginManager", () => {
     expect(opened).toHaveLength(1);
   });
 
+  it("never starts a new open-url read while one is still in flight", async () => {
+    let reads = 0;
+    const login = createLoginManager({
+      pins: PINS,
+      paths: (account) => accountPaths("/home/r", account),
+      spawn: scriptedSpawner({ login: { exitCode: null, hang: true } }),
+      readOpenUrl: () => {
+        reads += 1;
+        return new Promise<string | undefined>(() => {}); // a FIFO that never opens
+      },
+      openBrowser: async () => {},
+      push: () => {},
+      status: async (account) => ({
+        account,
+        installed: true,
+        version: "x",
+        signedIn: false,
+        identity: null,
+      }),
+      texts: TEXTS,
+      log: () => {},
+    });
+    await login.start("gemini");
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(reads).toBe(1);
+    await login.cancel("gemini");
+  });
+
   it("never opens an address outside the allowlist", async () => {
     const killed: CliInvocation[] = [];
     const { login, pushed, opened } = manager(

@@ -20,7 +20,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { OS_CONTROL_PUSHES } from "@jarvis/wire";
-import { nodeAccountFs } from "./accounts/account-fs.js";
+import { nodeAccountFs, readOpenUrlFile } from "./accounts/account-fs.js";
 import { accountSandboxArgv, accountSandboxProbe, accountUnitName } from "./accounts/sandbox.js";
 import { type AccountService, createAccountService } from "./accounts/service.js";
 
@@ -266,15 +266,7 @@ async function main(argv: readonly string[]): Promise<void> {
           );
         },
         fs: nodeAccountFs(home),
-        readOpenUrl: async (path) => {
-          try {
-            const url = (await readFile(path, "utf8")).trim().slice(0, 4096);
-            await rm(path, { force: true });
-            return url === "" ? undefined : url;
-          } catch {
-            return undefined;
-          }
-        },
+        readOpenUrl: readOpenUrlFile,
         openBrowser: async (url) => {
           await execFileP("xdg-open", [url], {
             env: { ...process.env, ...sessionEnv.current() },

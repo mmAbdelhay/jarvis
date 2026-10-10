@@ -119,19 +119,28 @@ export function createLoginManager(deps: {
       void proc.kill();
       finish({ account, phase: "failed", message: deps.texts.timedOut });
     }, LOGIN_TIMEOUT_MS);
+    // One read at a time: open-url sits in a dir the CLI can write, and a read
+    // it wedges must not pile up and starve libuv's threadpool.
+    let reading = false;
     const poll = setInterval(() => {
-      void deps.readOpenUrl(posix.join(paths.tmpDir, "open-url")).then((raw) => {
-        if (raw === undefined || session.done) return;
-        const checked = loginUrlFrom(account, raw);
-        if (checked === undefined) {
-          deps.log(`[accounts] ${account} asked to open an address outside its allowlist`);
-          void proc.kill();
-          finish({ account, phase: "failed", message: deps.texts.badUrl(label) });
-          return;
-        }
-        url ??= checked;
-        void announce();
-      });
+      if (reading) return;
+      reading = true;
+      void deps
+        .readOpenUrl(posix.join(paths.tmpDir, "open-url"))
+        .catch(() => undefined)
+        .then((raw) => {
+          reading = false;
+          if (raw === undefined || session.done) return;
+          const checked = loginUrlFrom(account, raw);
+          if (checked === undefined) {
+            deps.log(`[accounts] ${account} asked to open an address outside its allowlist`);
+            void proc.kill();
+            finish({ account, phase: "failed", message: deps.texts.badUrl(label) });
+            return;
+          }
+          url ??= checked;
+          void announce();
+        });
     }, OPEN_URL_POLL_MS);
     const session: Session = {
       proc,

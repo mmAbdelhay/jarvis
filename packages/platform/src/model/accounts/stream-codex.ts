@@ -1,7 +1,8 @@
-// `codex exec --json` (learn.chatgpt.com/docs/non-interactive-mode). Only
-// agent_message, reasoning and todo_list (the plan tool, which has no off
-// switch at 0.159.2 and touches nothing) may appear; any other item type is a
-// tool Codex started on its own — the tripwire, on item.started already.
+// `codex exec --json` (learn.chatgpt.com/docs/non-interactive-mode). Owner
+// ruling G2: the tripwire ends the turn on any non-message item. Only
+// agent_message and reasoning (the model's own text, not a tool) may appear;
+// todo_list is the plan tool, so it trips like every other item type, on
+// item.started already.
 import { isRecord } from "@jarvis/core";
 import {
   type CliStreamEvent,
@@ -12,11 +13,7 @@ import {
   parseJsonLine,
 } from "./stream-types.js";
 
-export const CODEX_ALLOWED_ITEMS: ReadonlySet<string> = new Set([
-  "agent_message",
-  "reasoning",
-  "todo_list",
-]);
+export const CODEX_ALLOWED_ITEMS: ReadonlySet<string> = new Set(["agent_message", "reasoning"]);
 
 export function createCodexStream(): CliStreamParser {
   let outcome = false;

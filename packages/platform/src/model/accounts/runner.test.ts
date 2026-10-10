@@ -1,7 +1,14 @@
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync } from "node:fs";
+import {
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { createNodeCliSpawner } from "./node-spawner.js";
@@ -57,6 +64,19 @@ describe("runCli with the fake CLI", () => {
     );
     expect(events.map((e) => e.kind)).toEqual(["progress", "text", "usage"]);
     expect(readFileSync(inv.files[0]?.path as string, "utf8")).toBe("system");
+  });
+
+  it("replaces a symlink the CLI planted at a file path instead of writing through it", async () => {
+    const inv = invocation({ FAKE_CLI_SCRIPT: fixture("claude-reply") });
+    const victim = join(mkdtempSync(join(tmpdir(), "jarvis-victim-")), "jarvis.yaml");
+    writeFileSync(victim, "owner: config\n");
+    const target = inv.files[0]?.path as string;
+    mkdirSync(dirname(target), { recursive: true });
+    symlinkSync(victim, target);
+    await collect(runCli(inv, spawner(), createClaudeStream(), new AbortController().signal));
+    expect(readFileSync(victim, "utf8")).toBe("owner: config\n");
+    expect(lstatSync(target).isFile()).toBe(true);
+    expect(readFileSync(target, "utf8")).toBe("system");
   });
 
   it("sends a 600 KiB transcript through stdin, never argv", async () => {

@@ -113,6 +113,14 @@ describe("Codex exec --json", () => {
     });
   });
 
+  it("trips on the plan tool: owner ruling G2 allows message items only", () => {
+    expect(
+      play(createCodexStream(), [
+        '{"type":"item.started","item":{"id":"item_0","type":"todo_list","items":[]}}',
+      ]).at(-1),
+    ).toEqual({ kind: "tripwire", reason: "chatgpt started its own tool (todo_list)" });
+  });
+
   it("maps an expired token to not-signed-in", () => {
     const events = play(createCodexStream(), fixture("codex-auth-failed"), 1);
     expect(events).toContainEqual({

@@ -2,8 +2,12 @@
 // spawns `wrap(inv)` (the systemd-run sandbox in jarvisd, the bare argv in
 // tests) with exactly the env it returns, writes stdin and closes it, and
 // reads stdout (and stderr, when the invocation merges them) line by line.
+// The files land in dirs the sandboxed CLI can write (threat A4), so each is
+// removed first and created with O_EXCL|O_NOFOLLOW: a symlink the CLI planted
+// is never followed, and a race that re-plants one fails the turn instead.
 import { spawn } from "node:child_process";
-import { mkdir, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { mkdir, open, rm } from "node:fs/promises";
 import { posix } from "node:path";
 import { createInterface } from "node:readline";
 import type { Readable } from "node:stream";
@@ -43,6 +47,20 @@ function lineQueue(streams: Readable[]): AsyncIterable<string> {
   };
 }
 
+async function writeFresh(path: string, content: string): Promise<void> {
+  await rm(path, { force: true });
+  const handle = await open(
+    path,
+    constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+    0o600,
+  );
+  try {
+    await handle.writeFile(content);
+  } finally {
+    await handle.close();
+  }
+}
+
 export function createNodeCliSpawner(options: {
   wrap(inv: CliInvocation, unit: string): { command: string[]; env: Record<string, string> };
   unitName(inv: CliInvocation): string;
@@ -51,7 +69,7 @@ export function createNodeCliSpawner(options: {
   return async (inv): Promise<CliProcess> => {
     for (const file of inv.files) {
       await mkdir(posix.dirname(file.path), { recursive: true, mode: 0o700 });
-      await writeFile(file.path, file.content, { mode: 0o600 });
+      await writeFresh(file.path, file.content);
     }
     const unit = options.unitName(inv);
     const { command, env } = options.wrap(inv, unit);
