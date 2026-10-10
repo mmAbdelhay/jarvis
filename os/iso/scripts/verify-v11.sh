@@ -15,7 +15,7 @@ field() { # field PACKAGE FIELD — from the image's dpkg status
 }
 installed() { [ "$(field "$1" Status)" = "install ok installed" ]; }
 
-for p in jarvis-cu at-spi2-core; do installed "$p" || problems+=("package $p is not installed"); done
+for p in jarvis-cu at-spi2-core xdg-user-dirs; do installed "$p" || problems+=("package $p is not installed"); done
 [ -x "$c/usr/libexec/jarvis/jarvis-cu" ] || problems+=("/usr/libexec/jarvis/jarvis-cu missing (contracts §1)")
 unit=$c/usr/lib/systemd/user/jarvis-cu.service
 if [ -f "$unit" ]; then
@@ -64,6 +64,10 @@ awk '
   problems+=("labwc rc.xml lacks the Super+Esc -> jarvis-session-key --cu-stop take-over bind")
 grep -q -- '--cu-stop' "$c/usr/libexec/jarvis/jarvis-session-key" 2>/dev/null ||
   problems+=("jarvis-session-key cannot stop computer use (Super+Esc)")
+for a in labwc labwc-classic; do
+  grep -qE '^[[:space:]]*xdg-user-dirs-update([[:space:]]|$)' "$c/etc/xdg/$a/autostart" 2>/dev/null ||
+    problems+=("/etc/xdg/$a/autostart does not run xdg-user-dirs-update (no Pictures or Documents folder)")
+done
 for v in GNOME_ACCESSIBILITY=1 QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1; do
   grep -qx "$v" "$c/etc/xdg/labwc/environment" 2>/dev/null ||
     problems+=("labwc environment lacks $v (password fields would be invisible to jarvis-cu)")

@@ -14,6 +14,9 @@ caught() {
 fresh; check "complete v1.1 chroot verifies" "$v" "$c"
 fresh; sed -i.bak '/^Package: jarvis-cu$/,/^$/d' "$c/var/lib/dpkg/status"; check "jarvis-cu not installed is caught" caught
 fresh; sed -i.bak '/^Package: at-spi2-core$/,/^$/d' "$c/var/lib/dpkg/status"; check "no AT-SPI is caught" caught
+fresh; sed -i.bak '/^Package: xdg-user-dirs$/,/^$/d' "$c/var/lib/dpkg/status"; check "no xdg-user-dirs is caught" caught
+fresh; sed -i.bak '/^xdg-user-dirs-update/d' "$c/etc/xdg/labwc/autostart"; check "a session without user folders is caught" caught
+fresh; sed -i.bak '/^xdg-user-dirs-update/d' "$c/etc/xdg/labwc-classic/autostart"; check "a classic session without user folders is caught" caught
 fresh; rm "$c/usr/libexec/jarvis/jarvis-cu"; check "missing helper binary is caught" caught
 fresh; sed -i.bak 's/^RestrictAddressFamilies=.*/RestrictAddressFamilies=AF_UNIX AF_INET/' "$c/usr/lib/systemd/user/jarvis-cu.service"
 check "network address family is caught" caught

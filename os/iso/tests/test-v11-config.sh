@@ -3,7 +3,7 @@
 source "$(dirname "$0")/lib.sh"
 lists=("$ISO_DIR"/config/package-lists/*.list.chroot)
 all=$(grep -hv '^\s*#' "${lists[@]}" | awk 'NF {print $1}')
-for p in jarvis-cu at-spi2-core; do check "lists include $p" grep -qx "$p" <<<"$all"; done
+for p in jarvis-cu at-spi2-core xdg-user-dirs; do check "lists include $p" grep -qx "$p" <<<"$all"; done
 check "no package listed twice" test -z "$(sort <<<"$all" | uniq -d)"
 req=$(sed -n '/^required="/,/"$/p' "$ISO_DIR/build.sh")
 check "build.sh requires jarvis-cu" grep -qw jarvis-cu <<<"$req"

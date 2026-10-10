@@ -5,7 +5,7 @@ v11_fixture() {
   local c=$1 p inc=$ISO_DIR/config/includes.chroot_after_packages/etc/xdg
   mkdir -p "$c/var/lib/dpkg" "$c/usr/libexec/jarvis" "$c/usr/lib/systemd/user" "$c/usr/share/jarvis-cu/labwc" \
     "$c/etc/xdg/labwc" "$c/etc/xdg/labwc-classic" "$c/usr/share/dbus-1/services" "$c/usr/share/jarvis/models"
-  for p in jarvis-cu at-spi2-core; do
+  for p in jarvis-cu at-spi2-core xdg-user-dirs; do
     printf 'Package: %s\nStatus: install ok installed\nVersion: 0.5.0~test\n\n' "$p" >> "$c/var/lib/dpkg/status"
   done
   install -m0755 /dev/null "$c/usr/libexec/jarvis/jarvis-cu"
