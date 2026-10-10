@@ -3,7 +3,7 @@ Version: @VERSION@
 Architecture: amd64
 Maintainer: Muhammad AbdElHay <mmAbdelhay@users.noreply.github.com>
 Installed-Size: @INSTALLED_SIZE@
-Depends: jarvisd (= @VERSION@), jarvis-ui (= @VERSION@)
+Depends: jarvisd (= @VERSION@), jarvis-ui (= @VERSION@), qt6-svg-plugins, hicolor-icon-theme, adwaita-icon-theme
 Section: x11
 Priority: optional
 Homepage: https://github.com/mmAbdelhay/jarvis

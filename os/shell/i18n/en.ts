@@ -793,6 +793,10 @@
     <context>
         <name>NavRail</name>
         <message>
+            <source>Apps</source>
+            <translation>Apps</translation>
+        </message>
+        <message>
             <source>Chat</source>
             <translation>Chat</translation>
         </message>
@@ -1740,6 +1744,33 @@
         <message>
             <source>The microphone recorder stopped without any audio.</source>
             <translation>The microphone recorder stopped without any audio.</translation>
+        </message>
+    </context>
+    <context>
+        <name>AppsView</name>
+        <message>
+            <source>Apps</source>
+            <translation>Apps</translation>
+        </message>
+        <message>
+            <source>Search apps, or ask Jarvis</source>
+            <translation>Search apps, or ask Jarvis</translation>
+        </message>
+        <message>
+            <source>Search apps</source>
+            <translation>Search apps</translation>
+        </message>
+        <message>
+            <source>No apps match “%1”.</source>
+            <translation>No apps match “%1”.</translation>
+        </message>
+        <message>
+            <source>No apps found.</source>
+            <translation>No apps found.</translation>
+        </message>
+        <message>
+            <source>Ask Jarvis: %1</source>
+            <translation>Ask Jarvis: %1</translation>
         </message>
     </context>
 </TS>

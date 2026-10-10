@@ -7,6 +7,7 @@
 
 #include "Language.h"
 #include "app/AppFont.h"
+#include "app/AppIconProvider.h"
 #include "app/ShellController.h"
 #include "control/ControlClient.h"
 #include "models/CuSessionModel.h"
@@ -15,7 +16,10 @@ Q_IMPORT_QML_PLUGIN(JarvisShellPlugin)
 
 class Setup : public QObject {
     Q_OBJECT
+    QList<QStringList> m_launched;
 public slots:
+    QStringList lastLaunch() const { return m_launched.isEmpty() ? QStringList{} : m_launched.last(); }
+    int launchCount() const { return int(m_launched.size()); }
     void applyCuRequestResult(CuSessionModel* session, bool ok, const QString& text)
     {
         session->applyRequestResult(ok, text);
@@ -23,6 +27,8 @@ public slots:
 
     void applicationAvailable()
     {
+        qputenv("XDG_DATA_DIRS", QByteArrayLiteral(JARVIS_SHELL_TEST_DATA "/xdg"));
+        qputenv("XDG_DATA_HOME", QByteArrayLiteral(JARVIS_SHELL_TEST_DATA "/xdg-home-empty"));
         QStandardPaths::setTestModeEnabled(true);
         QQuickStyle::setStyle(QStringLiteral("Basic"));
         applyShellFont();
@@ -52,6 +58,15 @@ public slots:
         auto* settingsShell = new ShellController(settingsClient, engine);
         engine->rootContext()->setContextProperty(QStringLiteral("testSettingsClient"), settingsClient);
         engine->rootContext()->setContextProperty(QStringLiteral("testSettingsShell"), settingsShell);
+        auto* appsShell = new ShellController(new ControlClient(options, engine), engine);
+        appsShell->setAppStarter([this](const QString& program, const QStringList& args) {
+            m_launched.append(QStringList{program} + args);
+            return true;
+        });
+        engine->addImageProvider(QStringLiteral("appicon"), new AppIconProvider);
+        QObject::connect(language, &jarvis::ui::LanguageManager::languageChanged, appsShell->apps(), &AppsModel::retranslate);
+        engine->rootContext()->setContextProperty(QStringLiteral("testAppsShell"), appsShell);
+        engine->rootContext()->setContextProperty(QStringLiteral("testApps"), this);
     }
 };
 

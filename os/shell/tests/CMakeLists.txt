@@ -32,7 +32,7 @@ endforeach()
 # One QuickTest runner executes every tests/qml/tst_*.qml file.
 qt_add_executable(tst_qml qml/tst_qml.cpp)
 target_link_libraries(tst_qml PRIVATE jarvis_shell_core jarvis_shell_coreplugin Qt6::QuickTest)
-target_compile_definitions(tst_qml PRIVATE QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml" JARVIS_QML_DIR="${QT_QML_OUTPUT_DIRECTORY}" JARVIS_TEST_I18N_DIR="${JARVIS_I18N_BUILD_DIR}")
+target_compile_definitions(tst_qml PRIVATE JARVIS_SHELL_TEST_DATA="${CMAKE_CURRENT_SOURCE_DIR}/data" QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml" JARVIS_QML_DIR="${QT_QML_OUTPUT_DIRECTORY}" JARVIS_TEST_I18N_DIR="${JARVIS_I18N_BUILD_DIR}")
 add_dependencies(tst_qml jarvis_ui jarvis-ui_translations jarvis-shell_translations)
 add_test(NAME tst_qml COMMAND tst_qml)
 set_tests_properties(tst_qml PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" LABELS qml TIMEOUT 120)

@@ -10,6 +10,7 @@
 
 #include "Language.h"
 #include "app/AppFont.h"
+#include "app/AppIconProvider.h"
 #include "app/ClassicRedirect.h"
 #include "app/CuOverlayManager.h"
 #include "app/ShellController.h"
@@ -94,6 +95,8 @@ int main(int argc, char* argv[])
                               language.language());
 
     QQmlApplicationEngine engine;
+    engine.addImageProvider(u"appicon"_s, new AppIconProvider);
+    QObject::connect(&language, &jarvis::ui::LanguageManager::languageChanged, shell->apps(), &AppsModel::retranslate);
     QObject::connect(&language, &jarvis::ui::LanguageManager::languageChanged, &engine, &QQmlEngine::retranslate);
 
     engine.setInitialProperties({{u"shell"_s, QVariant::fromValue(shell)}});

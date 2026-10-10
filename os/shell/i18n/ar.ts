@@ -797,6 +797,10 @@
     <context>
         <name>NavRail</name>
         <message>
+            <source>Apps</source>
+            <translation>التطبيقات</translation>
+        </message>
+        <message>
             <source>Chat</source>
             <translation>المحادثة</translation>
         </message>
@@ -1752,6 +1756,33 @@
         <message>
             <source>The microphone recorder stopped without any audio.</source>
             <translation>توقف مسجّل الميكروفون دون التقاط أي صوت.</translation>
+        </message>
+    </context>
+    <context>
+        <name>AppsView</name>
+        <message>
+            <source>Apps</source>
+            <translation>التطبيقات</translation>
+        </message>
+        <message>
+            <source>Search apps, or ask Jarvis</source>
+            <translation>ابحث في التطبيقات، أو اسأل جارفيس</translation>
+        </message>
+        <message>
+            <source>Search apps</source>
+            <translation>ابحث في التطبيقات</translation>
+        </message>
+        <message>
+            <source>No apps match “%1”.</source>
+            <translation>لا توجد تطبيقات تطابق «%1».</translation>
+        </message>
+        <message>
+            <source>No apps found.</source>
+            <translation>لم يُعثر على تطبيقات.</translation>
+        </message>
+        <message>
+            <source>Ask Jarvis: %1</source>
+            <translation>اسأل جارفيس: %1</translation>
         </message>
     </context>
 </TS>

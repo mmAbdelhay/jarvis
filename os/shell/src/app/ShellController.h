@@ -10,6 +10,8 @@
 #include <functional>
 
 #include "models/AccountsModel.h"
+#include "models/AppsModel.h"
+#include "models/AppLauncher.h"
 #include "models/AuditModel.h"
 #include "models/CardModel.h"
 #include "models/Conversation.h"
@@ -41,6 +43,8 @@ class ShellController : public QObject {
     Q_PROPERTY(CardModel* chatCard READ chatCard CONSTANT)
     Q_PROPERTY(bool locked READ locked NOTIFY lockedChanged)
     Q_PROPERTY(CardModel* doctorCard READ doctorCard CONSTANT)
+    Q_PROPERTY(AppsModel* apps READ apps CONSTANT)
+    Q_PROPERTY(QString appsNotice READ appsNotice NOTIFY appsNoticeChanged)
     Q_PROPERTY(AccountsModel* accounts READ accounts CONSTANT)
     Q_PROPERTY(ProviderModel* provider READ provider CONSTANT)
     Q_PROPERTY(ProviderListModel* providers READ providers CONSTANT)
@@ -115,6 +119,12 @@ public:
     bool updatesChecking() const { return m_updatesChecking; }
     QString updatesNote() const { return m_updatesNote; }
 
+    AppsModel* apps() const { return m_apps; }
+    QString appsNotice() const { return m_appsNotice; }
+    void setAppStarter(AppLauncher::Starter starter) { m_appLauncher->setStarter(std::move(starter)); }
+    Q_INVOKABLE void launchApp(const QString& id);
+    Q_INVOKABLE void askJarvis(const QString& text);
+
     void setLauncher(Launcher launcher) { m_launcher = std::move(launcher); }
 
     // Contracts §6.14: jarvisd unreachable for the grace period while the
@@ -144,6 +154,7 @@ public:
     Q_INVOKABLE void checkForUpdates();
 
 signals:
+    void appsNoticeChanged();
     void languageChanged();
     void undoChanged();
     void voiceStatePushed(const QJsonObject& state);
@@ -174,7 +185,7 @@ private:
     void onPush(const QString& channel, const QJsonValue& payload);
     void onAgentEvent(const QJsonObject& event);
     void refreshProviders();
-    void askJarvis(const QString& text);
+
     void maybeLeaveDoctor();
     void setView(QString view);
     void setConnection(const QString& connection);
@@ -191,6 +202,9 @@ private:
     bool m_undoing = false;
     CardModel* m_doctorCard;
     AccountsModel* m_accounts;
+    AppsModel* m_apps;
+    AppLauncher* m_appLauncher;
+    QString m_appsNotice;
     ProviderModel* m_provider;
     ProviderListModel* m_providers;
     QString m_fallbackReason;

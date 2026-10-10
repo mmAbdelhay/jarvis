@@ -1,6 +1,7 @@
 #include "app/ShellController.h"
 
 #include "Language.h"
+#include "DesktopEntry.h"
 #include <initializer_list>
 #include <QPointer>
 #include <QProcess>
@@ -29,6 +30,8 @@ ShellController::ShellController(ControlClient* client, QObject* parent)
     , m_chatCard(new CardModel(this))
     , m_doctorCard(new CardModel(this))
     , m_accounts(new AccountsModel(this))
+    , m_apps(new AppsModel(jarvis::ui::applicationDirectories(), AppsModel::currentDesktops(), this))
+    , m_appLauncher(new AppLauncher(this))
     , m_provider(new ProviderModel(this))
     , m_providers(new ProviderListModel(this))
     , m_doctor(new DoctorModel(this))
@@ -49,6 +52,10 @@ ShellController::ShellController(ControlClient* client, QObject* parent)
     m_daemonDownTimer->setInterval(15000);
     connect(m_daemonDownTimer, &QTimer::timeout, this, [this] { setDaemonDown(true); });
     m_daemonDownTimer->start(); // not connected yet
+    connect(m_appLauncher, &AppLauncher::failed, this, [this](const QString& message) {
+        m_appsNotice = message;
+        emit appsNoticeChanged();
+    });
     connect(client, &ControlClient::opened, this, &ShellController::onOpened);
     connect(client, &ControlClient::closed, this, &ShellController::onClosed);
     connect(client, &ControlClient::push, this, &ShellController::onPush);
@@ -574,7 +581,7 @@ void ShellController::escape()
         return stopSpeaking();
     if (m_conversation->busy())
         return stop();
-    if (m_view == u"audit" || m_view == u"settings" || m_view == u"doctor")
+    if (m_view == u"audit" || m_view == u"settings" || m_view == u"doctor" || m_view == u"apps")
         return setView(u"chat"_s);
     emit dismissRequested();
 }
@@ -672,8 +679,12 @@ void ShellController::showView(const QString& view)
 {
     if (view == u"doctor")
         return openDoctor();
-    if (view != u"chat" && view != u"audit" && view != u"settings")
+    if (view != u"chat" && view != u"audit" && view != u"settings" && view != u"apps")
         return;
+    if (view == u"apps") {
+        m_apps->setFilter(QString());
+        m_apps->reload();
+    }
     if (view == u"audit")
         m_audit->refresh();
     if (view == u"settings") {
@@ -740,12 +751,13 @@ void ShellController::checkForUpdates()
 
 void ShellController::askJarvis(const QString& text)
 {
-    setView(u"chat"_s);
     if (m_conversation->busy()) {
+        setView(u"chat"_s);
         m_conversation->addNotice(tr("Jarvis is busy. Try again when the reply finishes."));
         return;
     }
-    sendPrompt(text);
+    if (sendPrompt(text))
+        setView(u"chat"_s);
 }
 
 void ShellController::updateVoiceBlock()
@@ -916,4 +928,16 @@ void ShellController::refreshTranslatedText()
     emit bannerChanged();
     emit providerStatusChanged();
     emit updatesChanged();
+}
+
+void ShellController::launchApp(const QString& id)
+{
+    const auto entry = m_apps->entry(id);
+    if (!entry)
+        return;
+    if (m_appLauncher->launchEntry(*entry)) {
+        m_appsNotice.clear();
+        emit appsNoticeChanged();
+        emit dismissRequested();
+    }
 }

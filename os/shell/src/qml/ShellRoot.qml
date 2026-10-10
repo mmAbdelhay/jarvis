@@ -8,7 +8,7 @@ Rectangle {
     id: root
     required property ShellController shell
 
-    readonly property var viewNames: ["loading", "setup", "chat", "doctor", "audit", "settings"]
+    readonly property var viewNames: ["loading", "setup", "chat", "doctor", "audit", "settings", "apps"]
     readonly property bool framed: shell.view !== "setup" && shell.view !== "doctor"
 
     color: Theme.bg
@@ -115,6 +115,10 @@ Rectangle {
                 SettingsPage {
                     shell: root.shell
                     onDoctorRequested: root.shell.openDoctor()
+                }
+                AppsView {
+                    objectName: "appsView"
+                    shell: root.shell
                 }
             }
 
