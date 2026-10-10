@@ -88,6 +88,33 @@
         </message>
     </context>
     <context>
+        <name>AccountsSection</name>
+        <message>
+            <source>Accounts you signed in with. Their sign-in stays inside each program's own folder on this computer; Jarvis never stores it.</source>
+            <translation>Accounts you signed in with. Their sign-in stays inside each program's own folder on this computer; Jarvis never stores it.</translation>
+        </message>
+        <message>
+            <source>Sign out</source>
+            <translation>Sign out</translation>
+        </message>
+        <message>
+            <source>Remove</source>
+            <translation>Remove</translation>
+        </message>
+        <message>
+            <source>Remove %1</source>
+            <translation>Remove %1</translation>
+        </message>
+        <message>
+            <source>To revoke Google access after signing out, visit https://myaccount.google.com/connections.</source>
+            <translation>To revoke Google access after signing out, visit https://myaccount.google.com/connections.</translation>
+        </message>
+        <message>
+            <source>Signing out of GitHub Copilot deletes its sign-in data from this computer. To cancel its access completely, also remove "GitHub Copilot CLI" at github.com/settings/applications.</source>
+            <translation>Signing out of GitHub Copilot deletes its sign-in data from this computer. To cancel its access completely, also remove "GitHub Copilot CLI" at github.com/settings/applications.</translation>
+        </message>
+    </context>
+    <context>
         <name>AppLauncher</name>
         <message>
             <source>That app's launcher is broken, so it was not started.</source>
@@ -1249,6 +1276,10 @@
         <message>
             <source>Computer use</source>
             <translation>Computer use</translation>
+        </message>
+        <message>
+            <source>Accounts</source>
+            <translation>Accounts</translation>
         </message>
         <message>
             <source>Settings</source>

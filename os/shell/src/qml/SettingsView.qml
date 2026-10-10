@@ -19,7 +19,7 @@ Item {
     property CuSettingsModel cuSettings: null
     property bool doctorAvailable: false // sys:snapshot says offline (contracts §6.8)
     property string section: "providers"
-    readonly property var sections: [{ id: "providers", label: qsTr("Model providers") }, { id: "memory", label: qsTr("Memory") }, { id: "tools", label: qsTr("Tools") }, { id: "computerUse", label: qsTr("Computer use") }, { id: "voice", label: qsTr("Voice") }, { id: "phone", label: qsTr("Phone") }, { id: "language", label: qsTr("Language") }]
+    readonly property var sections: [{ id: "providers", label: qsTr("Model providers") }, { id: "accounts", label: qsTr("Accounts") }, { id: "memory", label: qsTr("Memory") }, { id: "tools", label: qsTr("Tools") }, { id: "computerUse", label: qsTr("Computer use") }, { id: "voice", label: qsTr("Voice") }, { id: "phone", label: qsTr("Phone") }, { id: "language", label: qsTr("Language") }]
     signal doctorRequested()
 
     Flickable {
@@ -93,6 +93,14 @@ Item {
                 providers: root.providers
                 doctorAvailable: root.doctorAvailable
                 onDoctorRequested: root.doctorRequested()
+            }
+
+            Loader {
+                objectName: "accountsSection"
+                Layout.fillWidth: true
+                visible: root.section === "accounts"
+                active: root.accounts !== null
+                sourceComponent: AccountsSection { accounts: root.accounts }
             }
 
             Loader {
