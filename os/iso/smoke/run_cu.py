@@ -8,10 +8,9 @@ real session: jarvis-cu started by the autostart under systemd, the peer
 check, the overlay border, real (QMP) pointer input pausing
 Jarvis, and Super+L ending it. The lock check is last: it leaves the screen locked.
 
-The GIMP export, the consequential card, the screen-action audit entries and the
-privacy-mask evidence are BLOCKED until the export script is restored on the
-dialog contract (v1.1 final review): recorded as not verified, never as passes;
-CU_FAIL_ON_BLOCKED=1 (set on release tags) turns them into a failing exit.
+The GIMP export runs mouse only through both Export dialogs (cu-gimp.json):
+the deny turn denies the consequential card and leaves no file, the export
+turn approves it and writes Pictures/beach.png (criteria 1 and 5).
 """
 
 from __future__ import annotations
@@ -34,8 +33,6 @@ from jarvis_smoke.qmp import Qmp  # noqa: E402
 from jarvis_smoke.serial_shell import SerialShell, SerialTimeout  # noqa: E402
 from run_smoke import BOOTAPPEND, Run, build_assets  # noqa: E402
 
-BLOCKED_REASON = ("export script not restored: jarvis-cu now makes a focused dialog the visible base "
-                  "(final review), but GTK3 key input (GIMP) is unproven; see os/go/internal/cu/e2e/README.md")
 USB_TABLET = ("-device", "qemu-xhci", "-device", "usb-tablet")
 
 
@@ -79,18 +76,28 @@ def run_checks(run: Run, args: argparse.Namespace, qmp: Qmp, out: Path) -> int:
     run.check("criterion 2: off by default, no screen tools reach the model", off)
     run.check("computer use enabled for the scripted provider", lambda: sh(cu.enable(uid), 60))
 
-    # Criteria 1 and 5 are BLOCKED (as in os/iso/cu/session.sh): cu-gimp.json's export turn
-    # still stops after look/done. jarvis-cu now makes a focused dialog the visible base, but
-    # GTK3 key input (GIMP) is unproven; nothing below claims an export, a card or an action.
+    # Criteria 1 and 5 (as in os/iso/cu/session.sh): GIMP's Export Image dialog's Export
+    # button is consequential; its card comes before the click.
+    def deny():
+        sh(cu.turn(uid, "deny", "cu-deny: export beach as PNG to Pictures",
+                   f"--consequential deny --absent {cu.PNG_TARGET}"), 700)
+        sh(cu.cucheck(uid, f"turn {cu.REPORT} deny --images"))
+
+    run.check("the deny turn ran as scripted (card denied, then Cancel)", deny)
+    run.check("criterion 5: a consequential card before the export click",
+              lambda: sh(cu.cucheck(uid, f"card {cu.log('deny')} consequential --absent --title-has Export")))
+    run.check("criterion 5: denying it leaves no file", lambda: sh(f"[ ! -e {cu.PNG_TARGET} ]"))
+
     def export():
-        sh(cu.turn(uid, "export", "open the GIMP image beach.xcf and export it as PNG to Pictures"), 700)
+        sh(cu.turn(uid, "export", "open the GIMP image beach.xcf and export it as PNG to Pictures",
+                   f"--absent {cu.PNG_TARGET}"), 700)
         sh(cu.cucheck(uid, f"turn {cu.REPORT} export --images"))
 
-    run.check("the export turn ran as scripted (no export attempted)", export)
-    for name in ("criterion 1: GIMP export to Pictures through computer use",
-                 "criterion 5: a consequential card before the export"):
-        run.results.append(report.blocked(name, BLOCKED_REASON))
-        print(f"[BLOCKED] {name}", flush=True)
+    run.check("the export turn ran as scripted", export)
+    run.check("criterion 5: the approved export asked first, before the file existed",
+              lambda: sh(cu.cucheck(uid, f"card {cu.log('export')} consequential --absent --title-has Export")))
+    run.check("criterion 1: GIMP export to Pictures through computer use",
+              lambda: sh(cu.wait(cu.cucheck(uid, f"png {cu.PNG_TARGET} 640 480"), 20), 40))
 
     def border_during():
         sh(cu.turn(uid, "physical", "cu-physical: hold the session", background=True))
@@ -122,11 +129,7 @@ def run_checks(run: Run, args: argparse.Namespace, qmp: Qmp, out: Path) -> int:
 
     run.check("criterion 3: Super+Esc takes over (computer use stops) within 2 s", takeover)
     run.check("criterion 8: the audit log has the goal", lambda: sh(cu.AUDIT_HAS_GOAL))
-    # No turn of this tier acts (export is stubbed, the others only look): a screen action in the
-    # audit log can only appear once X14 restores the real export script.
-    if not run.check("criterion 8: the audit log has the screen actions", lambda: sh(cu.AUDIT_HAS_ACTIONS)):
-        failed = run.results.pop()
-        run.results.append(report.blocked(failed["name"], f"{BLOCKED_REASON}; no screen action was driven"))
+    run.check("criterion 8: the audit log has the screen actions", lambda: sh(cu.AUDIT_HAS_ACTIONS))
     run.check("criterion 8: no screenshot stored in jarvis's directories, /tmp, the test logs or the journals",
               lambda: sh(cu.no_screenshots_stored(uid)))
     run.check("criterion 6: no screenshot leaked a foreign window, none outside computer-use turns",

@@ -50,17 +50,16 @@ class CommandsTest(unittest.TestCase):
         self.assertIn(f"http://127.0.0.1:{cu.PORT}", yaml_text)
 
 
-    # The plan's unconditional pin (gap G7). cu-gimp.json's export turn is a
-    # "blocked by U-1" stub from X10, so this fails today; expectedFailure keeps
-    # the suite green without any text sniffing. Once X14 restores the real
-    # export script this becomes an unexpected success (a failure): then remove
-    # the decorator.
-    @unittest.expectedFailure
+    # Gap G7: the click that writes the PNG declares intent save; the Export
+    # Image dialog's Export click declares nothing, so its card proves the
+    # label/AT-SPI detection (consequential.ts).
     def test_export_clicks_with_save_intent(self):
         script = json.loads((ASSETS / "cu-gimp.json").read_text())
         export = next(t for t in script["turns"] if t["name"] == "export")
-        self.assertTrue(any(s.get("input", {}).get("intent") == "save" for s in export["steps"]),
-                        "the export clicks with intent save (gap G7)")
+        clicks = [s for s in export["steps"] if s.get("call") == "screen_click" and s["input"]["target"] == "Export"]
+        self.assertEqual(len(clicks), 2)
+        self.assertNotIn("intent", clicks[0]["input"])
+        self.assertEqual(clicks[1]["input"].get("intent"), "save", "the export clicks with intent save (gap G7)")
 
 
 class PpmTest(unittest.TestCase):

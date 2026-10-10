@@ -38,6 +38,7 @@ trap cleanup EXIT
 mkdir -p "$HOME/.config/labwc" "$HOME/.config/GIMP/3.0" "$HOME/Pictures"
 cp "$cu/labwc-rules.xml" "$HOME/.config/labwc/rc.xml"
 sh "$cu/install-gimprc.sh" "$HOME/.config/GIMP/3.0"
+sh "$cu/install-user-dirs.sh" "$HOME"
 WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_HEADLESS_OUTPUTS=1 WLR_LIBINPUT_NO_DEVICES=1 \
   LABWC_KEYBOARD_FILE=/nonexistent /usr/local/bin/labwc > "$out/labwc.log" 2>&1 &
 pids+=($!)
@@ -84,7 +85,7 @@ pids+=($!)
 sleep 2
 gimp -n --no-splash "$HOME/beach.xcf" > "$out/gimp.log" 2>&1 &
 pids+=($!)
-check "GIMP runs" wait_for 90 pgrep -u "$(id -u)" -f gimp-3
+check "GIMP runs" wait_for 90 pgrep -u "$(id -u)" -f "gimp.* --no-splash $HOME/beach.xcf"
 sleep 30 # first start: fonts, plug-ins, the image window
 
 # 7. Criterion 2: off by default.
@@ -102,17 +103,22 @@ check "criterion 4: exactly one session card, 'Let Jarvis use … to: …'" cuc 
 # own refusal of input while a foreign window has focus). The privacy evidence is the all-black capture in section 11.
 check "the probe turn ran as scripted (a click beyond the screenshot is refused: outside)" cuc turn "$report" probe --images
 
-# 9-10. Criteria 1 and 5 (export, consequential card, deny leaves no file) are BLOCKED:
-# contracts U-1 makes the Export dialogs invisible to screen.look, so cu-gimp.json's
-# deny/export turns stop after begin/look/done. They run, but claim nothing.
-blocked_reason="export script not restored: dialogs are now the visible base, but GTK3 (GIMP) receives no virtual-keyboard input under headless labwc (os/go/internal/cu/e2e/README.md)"
-turn deny "cu-deny: export beach as PNG to Pictures"
-check "the deny turn ran as scripted (no export attempted)" cuc turn "$report" deny
-turn export "open the GIMP image beach.xcf and export it as PNG to Pictures"
-check "the export turn ran as scripted (no export attempted)" cuc turn "$report" export
-blocked "criterion 5: a consequential card before the export" "$blocked_reason"
-blocked "criterion 5: denying it leaves no file" "$blocked_reason"
-blocked "criterion 1: Pictures/beach.png is a 640x480 PNG" "$blocked_reason"
+# 9-10. Criteria 1 and 5: export through GIMP's two Export dialogs, mouse only
+# (GTK3 apps ignore virtual-keyboard keys under headless labwc, e2e README).
+# Export Image's Export button is consequential (save): its card comes before
+# the click. The deny turn denies it and cancels; the export turn approves it
+# and Export in "Export Image as PNG" (GIMP's file-png plug-in) writes the file.
+png=$HOME/Pictures/beach.png
+turn deny "cu-deny: export beach as PNG to Pictures" --consequential deny --absent "$png"
+check "the deny turn ran as scripted (card denied, then Cancel)" cuc turn "$report" deny
+check "criterion 5: a consequential card before the export click" \
+  cuc card "$out/turn-deny.log" consequential --absent --title-has Export
+check "criterion 5: denying it leaves no file" test ! -e "$png"
+turn export "open the GIMP image beach.xcf and export it as PNG to Pictures" --absent "$png"
+check "the export turn ran as scripted" cuc turn "$report" export
+check "criterion 5: the approved export asked first, before the file existed" \
+  cuc card "$out/turn-export.log" consequential --absent --title-has Export
+check "criterion 1: Pictures/beach.png is a 640x480 PNG" wait_for 20 cuc png "$png" 640 480
 
 # 11. Criteria 6 and 4 in one turn, built on merged U/V semantics (session.go
 # checkFocus, computer-use.ts run/waitForResume). GIMP is activated at begin, so
@@ -188,7 +194,8 @@ printf 'x iVBORw0KGgo y' > "$control/b64"; printf '\x89PNG\r\n' > "$control/raw"
 check "the privacy scan detects planted PNG data (with a missing directory in the list)" \
   test "$(png_hits "$control" /nonexistent-dir | wc -l)" -eq 2
 rm -rf "$control"
-check "the logs the privacy scan reads exist" test -s "$out/jarvisd.log" -a -e "$out/turn-probe.log"
+# jarvisd may write nothing to stdout (its log goes elsewhere): the file must exist; the turn logs must have content.
+check "the logs the privacy scan reads exist" test -e "$out/jarvisd.log" -a -s "$out/turn-probe.log"
 check "criterion 8: no screenshot is stored (no PNG data in jarvis's directories or the logs)" not_stored
 check "criterion 6: no screenshot outside computer-use turns, none leaked" cuc no-leaks "$report" --min-verified 1
 

@@ -22,8 +22,12 @@
 // evidence before asserting all images ok. Summary-only results cannot supply
 // target geometry; outside targets then fail closed and record a problem.
 // Strings in the script may use ${NAME} for environment variables (HOME, GIMP_APP).
+// CU_DUMP_DIR=DIR writes every screenshot of a computer-use turn there as
+// TURN-NN-SHA.png with the window list beside it (TURN-NN-SHA.json): the
+// frames used to calibrate the script's click targets. Test runs only.
 import { createHash } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { createServer } from "node:http";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
@@ -153,6 +157,11 @@ export function resolveTarget(target, windows) {
   const w = windows.find((x) => x?.allowed === true && pattern.test(String(x.title ?? "")));
   if (w === undefined) return null;
   const [dx, dy] = Array.isArray(target.inset) ? target.inset : [0, 0];
+  if (target.from === "top-left") return { x: Math.round(w.x + dx), y: Math.round(w.y + dy) };
+  if (target.from === "top-right")
+    return { x: Math.round(w.x + w.w - dx), y: Math.round(w.y + dy) };
+  if (target.from === "bottom-left")
+    return { x: Math.round(w.x + dx), y: Math.round(w.y + w.h - dy) };
   if (target.from === "bottom-right")
     return { x: Math.round(w.x + w.w - dx), y: Math.round(w.y + w.h - dy) };
   return { x: Math.round(w.x + w.w / 2 + dx), y: Math.round(w.y + w.h / 2 + dy) };
@@ -170,6 +179,21 @@ export function createFakeVision(script, { env = process.env } = {}) {
   };
   const seen = new Set();
   let active = null;
+
+  let dumped = 0;
+  function dump(record, id, b64, windows) {
+    const dir = env.CU_DUMP_DIR;
+    if (typeof dir !== "string" || dir === "") return;
+    try {
+      mkdirSync(dir, { recursive: true });
+      const base = join(dir, `${record.name}-${String(dumped).padStart(3, "0")}-${id}`);
+      dumped += 1;
+      writeFileSync(`${base}.png`, Buffer.from(b64, "base64"));
+      writeFileSync(`${base}.json`, `${JSON.stringify(windows ?? null, null, 2)}\n`);
+    } catch (error) {
+      record.dumpError = String(error?.message ?? error);
+    }
+  }
 
   function inspect(messages, record) {
     let info = null;
@@ -192,6 +216,7 @@ export function createFakeVision(script, { env = process.env } = {}) {
           continue;
         }
         const id = digest.slice(0, 16);
+        dump(record, id, String(b64), info?.windows);
         try {
           const image = decodePng(Buffer.from(String(b64), "base64"));
           const mask = substitute(
@@ -327,7 +352,14 @@ export function createFakeVision(script, { env = process.env } = {}) {
         text: substitute(turn.steps.find((step) => step.text !== undefined)?.text ?? "Done.", env),
       };
     }
-    if (active === null || active.promptCount !== prompts.length || active.prompt !== prompt) {
+    // jarvisd may trim older history between requests of one turn, so the
+    // number of prompts can change mid-turn: only a different prompt, or the
+    // same prompt again after its turn finished, starts a new turn.
+    const fresh =
+      active === null ||
+      active.prompt !== prompt ||
+      (active.record.finished && active.promptCount !== prompts.length);
+    if (fresh) {
       if (turn === undefined) {
         active = null;
         report.unexpected.push(prompt.slice(0, 200));

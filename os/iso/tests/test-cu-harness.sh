@@ -27,12 +27,12 @@ for case in "criterion 2: computer use is off by default (no screen tools offere
   "cu.sock is 0600"; do
   check "covers: $case" grep -qF "\"$case\"" "$h/session.sh"
 done
-# Contracts U-1 blocks the export/consequential-card criteria: they must be recorded
-# as BLOCKED, never claimed as checks.
-for case in "criterion 1: Pictures/beach.png is a 640x480 PNG" "criterion 5: a consequential card before the export" \
-  "criterion 5: denying it leaves no file"; do
-  check "blocked, not claimed: $case" bash -c 'grep -qF "blocked \"$1\"" "$2" && ! grep -qF "check \"$1\"" "$2"' _ "$case" "$h/session.sh"
+# Criteria 1 and 5 (final review): the export through GIMP's dialogs is checked, not parked.
+for case in "criterion 1: Pictures/beach.png is a 640x480 PNG" "criterion 5: a consequential card before the export click" \
+  "criterion 5: denying it leaves no file" "criterion 5: the approved export asked first, before the file existed"; do
+  check "covers: $case" bash -c 'grep -qF "check \"$1\"" "$2" && ! grep -qF "blocked \"$1\"" "$2"' _ "$case" "$h/session.sh"
 done
+check "the deny turn denies the consequential card" grep -qF -- '--consequential deny --absent' "$h/session.sh"
 check "the excluded turn holds an all-black look, a key refused by the helper (outside), then a held key" python3 - "$ISO_DIR/smoke/assets/cu/cu-gimp.json" <<'PY'
 import json, sys
 t = next(t for t in json.load(open(sys.argv[1]))["turns"] if t["name"] == "excluded")
