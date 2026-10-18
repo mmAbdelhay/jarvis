@@ -13,6 +13,7 @@ import { MESSAGES } from "../src/messages.js";
 import {
   initReviews,
   listTerminalPanes,
+  REVIEW_REPLY_MAX,
   REVIEW_WAIT_LABEL_KEYS,
   type ReviewsApi,
 } from "./reviews-view.js";
@@ -131,6 +132,15 @@ async function start(api: Fake, openPane = vi.fn()) {
   await view.refresh();
   await flush();
   return { view, openPane };
+}
+
+function composerField(): HTMLTextAreaElement {
+  return document.getElementById("reviews-reply-input") as HTMLTextAreaElement;
+}
+
+function type(field: HTMLTextAreaElement, value: string): void {
+  field.value = value;
+  field.dispatchEvent(new Event("input"));
 }
 
 function text(id: string): string {
@@ -413,15 +423,89 @@ describe("Reviews page — thread", () => {
     await view.open(KEY);
     await flush();
 
-    const input = document.getElementById("reviews-reply-input") as HTMLInputElement;
-    input.value = "Fixed in a1b2c3d";
+    type(composerField(), "Fixed in a1b2c3d\nAdded a test.");
     document
       .getElementById("reviews-reply")
       ?.dispatchEvent(new Event("submit", { cancelable: true }));
     await flush();
 
-    expect(api.reviewsReply).toHaveBeenCalledWith(KEY, "Fixed in a1b2c3d", undefined);
-    expect(input.value).toBe("");
+    expect(api.reviewsReply).toHaveBeenCalledWith(
+      KEY,
+      "Fixed in a1b2c3d\nAdded a test.",
+      undefined,
+    );
+    expect(composerField().value).toBe("");
+  });
+
+  it("is a multi-line field: Enter is a newline, Cmd/Ctrl+Enter sends", async () => {
+    const api = fakeApi({ thread: { pr: PR, link: LINKED, waitReason: null, comments: [] } });
+    const { view } = await start(api);
+    await view.open(KEY);
+    await flush();
+    const field = composerField();
+    expect(field.tagName).toBe("TEXTAREA");
+    expect(field.dir).toBe("auto");
+    type(field, "line one");
+
+    field.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", cancelable: true }));
+    await flush();
+    expect(api.reviewsReply).not.toHaveBeenCalled();
+
+    field.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, cancelable: true }),
+    );
+    await flush();
+    expect(api.reviewsReply).toHaveBeenCalledWith(KEY, "line one", undefined);
+  });
+
+  it("keeps a reply draft per PR: it never follows you to another PR", async () => {
+    const other = "mm/jarvis#16";
+    const api = fakeApi({});
+    api.reviewsThread.mockImplementation(async (key) => ({
+      pr: key === other ? { ...PR, number: 16 } : PR,
+      link: LINKED,
+      waitReason: null,
+      comments: [],
+    }));
+    const { view } = await start(api);
+    await view.open(KEY);
+    await flush();
+    type(composerField(), "draft for 18");
+
+    await view.open(other);
+    await flush();
+    expect(composerField().value).toBe("");
+    document
+      .getElementById("reviews-reply")
+      ?.dispatchEvent(new Event("submit", { cancelable: true }));
+    await flush();
+    expect(api.reviewsReply).not.toHaveBeenCalled();
+
+    await view.open(KEY);
+    await flush();
+    expect(composerField().value).toBe("draft for 18");
+  });
+
+  it("refuses a reply longer than GitHub allows, before any IPC", async () => {
+    const api = fakeApi({ thread: { pr: PR, link: LINKED, waitReason: null, comments: [] } });
+    const { view } = await start(api);
+    await view.open(KEY);
+    await flush();
+    const field = composerField();
+    expect(field.maxLength).toBe(REVIEW_REPLY_MAX);
+
+    // A programmatic value bypasses maxLength, as a paste path might.
+    type(field, "x".repeat(REVIEW_REPLY_MAX + 1));
+    document
+      .getElementById("reviews-reply")
+      ?.dispatchEvent(new Event("submit", { cancelable: true }));
+    await flush();
+
+    expect(api.reviewsReply).not.toHaveBeenCalled();
+    expect(text("reviews-notice")).toBe(MESSAGES.reviewsReplyTooLong(REVIEW_REPLY_MAX, "en"));
+    expect(MESSAGES.reviewsReplyTooLong(REVIEW_REPLY_MAX, "ar")).not.toBe(
+      MESSAGES.reviewsReplyTooLong(REVIEW_REPLY_MAX, "en"),
+    );
   });
 
   it("Post session summary and Open on GitHub call their channels", async () => {

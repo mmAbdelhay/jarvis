@@ -70,6 +70,8 @@ const STUCK: ReadonlySet<string> = new Set([
 ]);
 
 const UNLINK = "__unlink";
+/** GitHub's own limit on a comment body; longer is refused before IPC. */
+export const REVIEW_REPLY_MAX = 65_536;
 const L = PRIMARY_LANGUAGE;
 
 const $ = (id: string): HTMLElement => {
@@ -168,6 +170,9 @@ export function initReviews(deps: ReviewsViewDeps): ReviewsView {
   let checkedAt: number | undefined;
   /** The review comment the composer answers, or top level. */
   let replyTo: { id: string; author: string } | undefined;
+  /** Unsent reply text per PR, so a draft never follows the user to
+   *  another PR and switching back restores it. */
+  const drafts = new Map<string, string>();
   /** Change link picker open for the selected PR. */
   let picking = false;
   let notice: { text: string; bad: boolean } | undefined;
@@ -245,6 +250,7 @@ export function initReviews(deps: ReviewsViewDeps): ReviewsView {
       if (selected !== prKey) return;
       thread = next;
     } catch {
+      if (selected !== prKey) return;
       thread = undefined;
     }
     renderThread();
@@ -646,15 +652,22 @@ export function initReviews(deps: ReviewsViewDeps): ReviewsView {
     }
   }
 
-  async function sendReply(prKey: string, input: HTMLInputElement): Promise<void> {
+  async function sendReply(prKey: string, input: HTMLTextAreaElement): Promise<void> {
     const body = input.value.trim();
     if (body === "") return;
+    if (body.length > REVIEW_REPLY_MAX) {
+      showNotice(MESSAGES.reviewsReplyTooLong(REVIEW_REPLY_MAX, L), true);
+      return;
+    }
+    const target = replyTo?.id;
     try {
-      await api.reviewsReply(prKey, body, replyTo?.id);
-      input.value = "";
-      replyTo = undefined;
-      notice = undefined;
-      renderThread();
+      await api.reviewsReply(prKey, body, target);
+      drafts.delete(prKey);
+      if (selected === prKey) {
+        replyTo = undefined;
+        notice = undefined;
+        renderThread();
+      }
     } catch {
       showNotice(MESSAGES.reviewsReplyFailed(L), true);
     }
@@ -676,11 +689,24 @@ export function initReviews(deps: ReviewsViewDeps): ReviewsView {
     }
     const label = el("label", "reviews-sr", MESSAGES.reviewsReplyLabel(L));
     label.htmlFor = "reviews-reply-input";
-    const input = el("input", "reviews-input reviews-reply-input");
+    // A textarea: replies are often several lines. Enter is a newline;
+    // Cmd/Ctrl+Enter (or the Reply button) sends.
+    const input = el("textarea", "reviews-input reviews-reply-input");
     input.id = "reviews-reply-input";
-    input.type = "text";
     input.dir = "auto";
-    input.autocomplete = "off";
+    input.rows = 2;
+    input.maxLength = REVIEW_REPLY_MAX;
+    input.value = drafts.get(prKey) ?? "";
+    input.addEventListener("input", () => {
+      if (input.value === "") drafts.delete(prKey);
+      else drafts.set(prKey, input.value);
+    });
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+        event.preventDefault();
+        void sendReply(prKey, input);
+      }
+    });
     const login = status?.gh?.kind === "ok" ? status.gh.login : "";
     input.placeholder = MESSAGES.reviewsReplyPlaceholder(login, L);
     const submit = el("button", "reviews-btn reviews-btn--primary", MESSAGES.reviewsReply(L));
@@ -695,10 +721,8 @@ export function initReviews(deps: ReviewsViewDeps): ReviewsView {
 
   function renderThread(): void {
     const pane = $("reviews-thread");
-    // Keep a half-typed reply across a re-render (a reviews:changed push
-    // must not eat what the user is writing).
-    const draft =
-      (document.getElementById("reviews-reply-input") as HTMLInputElement | null)?.value ?? "";
+    // A half-typed reply survives re-renders through `drafts`, keyed by PR
+    // (a reviews:changed push must not eat what the user is writing).
     pane.replaceChildren();
     if (selected === undefined || thread === undefined) {
       pane.append(el("div", "reviews-empty", MESSAGES.reviewsPickPr(L)));
@@ -750,8 +774,6 @@ export function initReviews(deps: ReviewsViewDeps): ReviewsView {
     for (const entry of current.comments)
       comments.append(commentNode(prKey, entry, current.comments));
     pane.append(comments, composer(prKey));
-    const input = document.getElementById("reviews-reply-input") as HTMLInputElement | null;
-    if (input !== null && draft !== "") input.value = draft;
   }
 
   renderThread();

@@ -2176,6 +2176,10 @@ export const MESSAGES = {
   reviewsCancel: (language: "ar" | "en"): string => (language === "ar" ? "إلغاء" : "Cancel"),
   reviewsReplyFailed: (language: "ar" | "en"): string =>
     language === "ar" ? "لم يُنشر الرد." : "The reply was not posted.",
+  reviewsReplyTooLong: (max: number, language: "ar" | "en"): string =>
+    language === "ar"
+      ? `الرد أطول من الحد المسموح (${max} حرفًا). اختصره ثم أعد الإرسال.`
+      : `The reply is longer than GitHub allows (${max} characters). Shorten it and send again.`,
   reviewsActionFailed: (language: "ar" | "en"): string =>
     language === "ar" ? "لم ينجح ذلك. حاول مجددًا." : "That did not work. Try again.",
   reviewsSent: (language: "ar" | "en"): string =>

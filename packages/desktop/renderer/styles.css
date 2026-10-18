@@ -5414,5 +5414,5 @@
 .reviews-body { margin: 0; font-size: 14px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
 .reviews-composer { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: var(--s3) var(--s4); border-top: 1px solid var(--hairline); }
 .reviews-replying { flex: 1 0 100%; display: flex; gap: 10px; align-items: center; font-size: 12px; color: var(--text-secondary); }
-.reviews-reply-input { flex: 1 1 320px; height: 40px; }
+.reviews-reply-input { flex: 1 1 320px; height: auto; min-height: 40px; max-height: 200px; padding: var(--s2) var(--s3); line-height: 1.45; resize: vertical; }
 /* /Reviews page */
