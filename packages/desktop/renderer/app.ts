@@ -18,6 +18,7 @@ import {
   wireSyncBar,
 } from "./changes.js";
 import { showView, syncHostedView } from "./views.js";
+import { initReviews, listTerminalPanes, type ReviewsView } from "./reviews-view.js";
 import {
   focusTerminalPane,
   initWorkspace,
@@ -424,6 +425,28 @@ function wireNav(): void {
   document.getElementById("running-pill")?.addEventListener("click", () => {
     void renderSessionTable().then(() => reassertSessionSize());
     claimVoice();
+  });
+  // The Reviews page (Task 11). Guarded like initSettings below: a minimal
+  // harness may lay down none of its markup. It reads once now so the nav
+  // badge counts queued comments before the page is ever opened, then on
+  // every reviews:changed push.
+  let reviews: ReviewsView | undefined;
+  try {
+    reviews = initReviews({
+      api: window.jarvis,
+      panes: () => listTerminalPanes(window.jarvis),
+      openPane: (paneKey) => {
+        focusTerminalPane(paneKey);
+      },
+    });
+    void reviews.refresh();
+  } catch {
+    // The Reviews page's own markup is absent in this harness.
+  }
+  document.getElementById("nav-reviews")?.addEventListener("click", () => {
+    releaseVoice();
+    showView("reviews");
+    void reviews?.refresh();
   });
   document.getElementById("nav-workspace")?.addEventListener("click", () => {
     releaseVoice();

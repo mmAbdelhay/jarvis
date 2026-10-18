@@ -2083,6 +2083,162 @@ export const MESSAGES = {
           : `Your review was requested on ${prLabel}.`;
     }
   },
+  // ── Reviews page (renderer/reviews-view.ts, Task 11) ──────────────────
+  reviewsTitle: (language: "ar" | "en"): string => (language === "ar" ? "المراجعات" : "Reviews"),
+  reviewsSearch: (language: "ar" | "en"): string =>
+    language === "ar" ? "ابحث في طلبات الدمج" : "Search pull requests",
+  reviewsRepoLabel: (language: "ar" | "en"): string =>
+    language === "ar" ? "المستودع" : "Repository",
+  reviewsAllRepos: (language: "ar" | "en"): string =>
+    language === "ar" ? "كل المستودعات" : "All repos",
+  reviewsRoleLabel: (language: "ar" | "en"): string => (language === "ar" ? "الدور" : "Role"),
+  reviewsRoleAll: (language: "ar" | "en"): string =>
+    language === "ar" ? "طلباتي وطلبات المراجعة" : "My PRs + review requests",
+  reviewsRoleMine: (language: "ar" | "en"): string => (language === "ar" ? "طلباتي" : "My PRs"),
+  reviewsRoleRequested: (language: "ar" | "en"): string =>
+    language === "ar" ? "طلبات المراجعة" : "Review requests",
+  reviewsListening: (login: string, time: string, language: "ar" | "en"): string =>
+    language === "ar"
+      ? `يستمع · gh ${login} · آخر فحص ${time}`
+      : `listening · gh ${login} · checked ${time}`,
+  reviewsOff: (language: "ar" | "en"): string =>
+    language === "ar" ? "المراجعات متوقفة من الإعدادات" : "Reviews are off in Settings",
+  reviewsCheckNow: (language: "ar" | "en"): string =>
+    language === "ar" ? "افحص الآن" : "Check now",
+  reviewsColPr: (language: "ar" | "en"): string =>
+    language === "ar" ? "طلب الدمج" : "PULL REQUEST",
+  reviewsColState: (language: "ar" | "en"): string => (language === "ar" ? "الحالة" : "STATE"),
+  reviewsColLast: (language: "ar" | "en"): string => (language === "ar" ? "آخر نشاط" : "LAST"),
+  reviewsEmpty: (language: "ar" | "en"): string =>
+    language === "ar" ? "لا توجد طلبات دمج مفتوحة." : "No open pull requests.",
+  reviewsNoMatch: (language: "ar" | "en"): string =>
+    language === "ar" ? "لا شيء يطابق هذه التصفية." : "Nothing matches this filter.",
+  reviewsPickPr: (language: "ar" | "en"): string =>
+    language === "ar" ? "اختر طلب دمج لعرض تعليقاته." : "Pick a pull request to see its comments.",
+  reviewsStateQueued: (count: number, language: "ar" | "en"): string =>
+    language === "ar" ? `${count} في الانتظار` : `${count} queued`,
+  reviewsStateWaiting: (count: number, language: "ar" | "en"): string =>
+    language === "ar" ? `${count} معلّق` : `${count} waiting`,
+  reviewsStateDelivered: (language: "ar" | "en"): string =>
+    language === "ar" ? "سُلّم" : "delivered",
+  reviewsStateToReview: (language: "ar" | "en"): string =>
+    language === "ar" ? "للمراجعة" : "to review",
+  reviewsStateNone: (language: "ar" | "en"): string =>
+    language === "ar" ? "لا تعليقات" : "no comments",
+  reviewsChipLinked: (label: string, language: "ar" | "en"): string =>
+    language === "ar" ? `مرتبط · ${label}` : `linked · ${label}`,
+  reviewsChipNone: (language: "ar" | "en"): string =>
+    language === "ar" ? "بلا جلسة" : "no session",
+  reviewsChipAmbiguous: (language: "ar" | "en"): string =>
+    language === "ar" ? "اختر تبويبًا" : "pick a tab",
+  reviewsChipRequested: (author: string, language: "ar" | "en"): string =>
+    language === "ar" ? `مطلوب مراجعتك · @${author}` : `review requested · @${author}`,
+  reviewsLinkedAuto: (branch: string, language: "ar" | "en"): string =>
+    language === "ar"
+      ? `ربط تلقائي: نفس المستودع والفرع ${branch}`
+      : `auto-linked: same repo, branch ${branch}`,
+  reviewsLinkedManual: (language: "ar" | "en"): string =>
+    language === "ar" ? "ربطته أنت" : "linked by you",
+  reviewsAmbiguous: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "أكثر من تبويب يطابق طلب الدمج — اختر واحدًا:"
+      : "Several tabs match this PR — pick one:",
+  reviewsPaneFallback: (language: "ar" | "en"): string =>
+    language === "ar" ? "الطرفية" : "Terminal",
+  reviewsOpenTab: (language: "ar" | "en"): string =>
+    language === "ar" ? "افتح التبويب" : "Open tab",
+  reviewsChangeLink: (language: "ar" | "en"): string =>
+    language === "ar" ? "غيّر الربط" : "Change link",
+  reviewsLinkTab: (language: "ar" | "en"): string =>
+    language === "ar" ? "اربط تبويبًا" : "Link a tab",
+  reviewsChooseTab: (language: "ar" | "en"): string =>
+    language === "ar" ? "اختر تبويبًا…" : "Choose a tab…",
+  reviewsUnlink: (language: "ar" | "en"): string => (language === "ar" ? "ألغِ الربط" : "Unlink"),
+  reviewsNoTabs: (language: "ar" | "en"): string =>
+    language === "ar" ? "لا توجد تبويبات طرفية مفتوحة." : "No Terminal tabs are open.",
+  reviewsDeliverNow: (language: "ar" | "en"): string =>
+    language === "ar" ? "سلّم الآن" : "Deliver now",
+  reviewsPostSummary: (language: "ar" | "en"): string =>
+    language === "ar" ? "انشر ملخص الجلسة" : "Post session summary",
+  reviewsOpenGithub: (language: "ar" | "en"): string =>
+    language === "ar" ? "افتح على GitHub" : "Open on GitHub",
+  reviewsAskReview: (language: "ar" | "en"): string =>
+    language === "ar" ? "اطلب المراجعة من الجلسة" : "Ask the session to review",
+  reviewsSendToSession: (language: "ar" | "en"): string =>
+    language === "ar" ? "أرسل إلى الجلسة" : "Send to session",
+  reviewsReply: (language: "ar" | "en"): string => (language === "ar" ? "رد" : "Reply"),
+  reviewsReplyLabel: (language: "ar" | "en"): string =>
+    language === "ar" ? "رد على GitHub" : "Reply on GitHub",
+  reviewsReplyPlaceholder: (login: string, language: "ar" | "en"): string =>
+    language === "ar" ? `رد على GitHub باسم ${login}…` : `Reply on GitHub as ${login}…`,
+  reviewsReplyingTo: (author: string, language: "ar" | "en"): string =>
+    language === "ar" ? `رد على @${author}` : `Replying to @${author}`,
+  reviewsCancel: (language: "ar" | "en"): string => (language === "ar" ? "إلغاء" : "Cancel"),
+  reviewsReplyFailed: (language: "ar" | "en"): string =>
+    language === "ar" ? "لم يُنشر الرد." : "The reply was not posted.",
+  reviewsActionFailed: (language: "ar" | "en"): string =>
+    language === "ar" ? "لم ينجح ذلك. حاول مجددًا." : "That did not work. Try again.",
+  reviewsSent: (language: "ar" | "en"): string =>
+    language === "ar" ? "أُرسل إلى الجلسة." : "Sent to the session.",
+  reviewsNotSent: (reason: string, language: "ar" | "en"): string =>
+    language === "ar" ? `لم يُرسل: ${reason}` : `Not sent: ${reason}`,
+  reviewsRequeued: (language: "ar" | "en"): string =>
+    language === "ar" ? "أُضيف إلى انتظار الجلسة." : "Queued for the session.",
+  reviewsCommentQueued: (time: string, language: "ar" | "en"): string =>
+    language === "ar" ? `في الانتظار ${time}` : `queued ${time}`,
+  reviewsCommentDelivered: (time: string, language: "ar" | "en"): string =>
+    language === "ar" ? `✓ سُلّم ${time}` : `✓ delivered ${time}`,
+  reviewsCommentReplied: (language: "ar" | "en"): string =>
+    language === "ar" ? "تم الرد" : "replied",
+  reviewsCommentHistory: (language: "ar" | "en"): string =>
+    language === "ar" ? "سابق · لم يُرسل" : "earlier · not sent",
+  reviewsYou: (language: "ar" | "en"): string => (language === "ar" ? "أنت" : "you"),
+  reviewsKindIssue: (language: "ar" | "en"): string =>
+    language === "ar" ? "تعليق على الطلب" : "PR comment",
+  reviewsKindReview: (language: "ar" | "en"): string => (language === "ar" ? "مراجعة" : "review"),
+  reviewsSetupNoGh: (language: "ar" | "en"): string =>
+    language === "ar" ? "أداة GitHub (gh) غير مثبتة" : "GitHub CLI (gh) not installed",
+  reviewsSetupNoGhHint: (language: "ar" | "en"): string =>
+    language === "ar" ? "ثبّت gh ثم شغّل gh auth login." : "Install gh, then run gh auth login.",
+  reviewsSetupLoggedOut: (language: "ar" | "en"): string =>
+    language === "ar" ? "gh غير مسجّل الدخول" : "gh not signed in",
+  reviewsSetupLoggedOutHint: (language: "ar" | "en"): string =>
+    language === "ar" ? "شغّل gh auth login في الطرفية." : "Run gh auth login in a terminal.",
+  reviewsSetupChecking: (language: "ar" | "en"): string =>
+    language === "ar" ? "جارٍ فحص gh…" : "Checking gh…",
+  reviewsSetupNote: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "تستخدم المراجعات تسجيل دخول gh. لا يخزّن جارفيس أي رمز."
+      : "Reviews uses your gh login. Jarvis stores no token.",
+  reviewsCheckAgain: (language: "ar" | "en"): string =>
+    language === "ar" ? "افحص مجددًا" : "Check again",
+  /** Why a PR's queued comments are not pasted yet (core's DeliveryWait),
+   *  plus "unsupported": an agent whose idle state Jarvis cannot read. */
+  reviewsWait: (reason: string, language: "ar" | "en"): string => {
+    const labels: Record<string, { ar: string; en: string }> = {
+      "no-link": { en: "no linked tab", ar: "لا يوجد تبويب مرتبط" },
+      ambiguous: { en: "several tabs match — pick one", ar: "أكثر من تبويب مطابق — اختر واحدًا" },
+      "no-agent": { en: "agent not running in this tab", ar: "لا يعمل وكيل في هذا التبويب" },
+      "approval-prompt": {
+        en: "agent is waiting for an approval",
+        ar: "الوكيل بانتظار موافقة",
+      },
+      busy: { en: "agent busy · pastes when idle", ar: "الوكيل مشغول · يُلصق عند التفرغ" },
+      typing: { en: "you are typing · pastes after a pause", ar: "أنت تكتب · يُلصق بعد توقفك" },
+      batching: {
+        en: "collecting comments · pastes shortly",
+        ar: "جارٍ جمع التعليقات · يُلصق قريبًا",
+      },
+      paused: { en: "delivery paused for this tab", ar: "التسليم متوقف لهذا التبويب" },
+      nothing: { en: "nothing queued", ar: "لا شيء في الانتظار" },
+      unsupported: {
+        en: "agent not supported for auto-delivery",
+        ar: "الوكيل غير مدعوم للتسليم التلقائي",
+      },
+    };
+    const label = labels[reason];
+    return label === undefined ? reason : label[language];
+  },
   // The only `registered: false` text the laptop ever sends (PushRegisterResult,
   // @jarvis/wire's push.ts) — the phone builds every other registration line
   // (laptop off, pending, denied…) from its own i18n table plus the boolean
