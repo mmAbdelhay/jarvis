@@ -52,4 +52,5 @@ export * from "./chat.js";
 export * from "./workflows.js";
 export * from "./plans.js";
 export * from "./plan-comments.js";
+export * from "./gh-reviews.js";
 export * from "./review-store.js";
