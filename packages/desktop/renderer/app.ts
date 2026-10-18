@@ -448,6 +448,15 @@ function wireNav(): void {
     showView("reviews");
     void reviews?.refresh();
   });
+  // Task 12: the Terminal tab's Reviews dock, "Open in Reviews" — the
+  // dock only names the PR; this page shows its whole thread.
+  window.addEventListener("jarvis:open-reviews", (event) => {
+    const prKey = (event as CustomEvent<unknown>).detail;
+    if (typeof prKey !== "string") return;
+    releaseVoice();
+    showView("reviews");
+    void reviews?.open(prKey);
+  });
   document.getElementById("nav-workspace")?.addEventListener("click", () => {
     releaseVoice();
     showView("workspace");

@@ -61,6 +61,184 @@ export const MESSAGES = {
   // and goes through MESSAGES from the start.
   planPanelToggle: (language: "ar" | "en"): string =>
     language === "ar" ? "تبديل لوحة الخطة" : "Toggle plan panel",
+  // ---- Reviews (Task 12): the Terminal tab's dock, its PR link chip and
+  // the Settings section. Comment bodies never pass through here.
+  reviewsDockToggle: (language: "ar" | "en"): string =>
+    language === "ar" ? "تبديل لوحة المراجعات" : "Toggle reviews dock",
+  reviewsDockToggleText: (language: "ar" | "en"): string =>
+    language === "ar" ? "المراجعات" : "Reviews",
+  reviewsDockHeading: (number: number, language: "ar" | "en"): string =>
+    language === "ar" ? `طلب الدمج #${number} · التعليقات` : `PR #${number} · COMMENTS`,
+  reviewsDockOpenInReviews: (language: "ar" | "en"): string =>
+    language === "ar" ? "فتح في المراجعات" : "Open in Reviews",
+  reviewsDockClose: (language: "ar" | "en"): string => (language === "ar" ? "إغلاق" : "Close"),
+  reviewsDockEmpty: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "لا يوجد طلب دمج مرتبط بهذا التبويب."
+      : "No pull request is linked to this tab.",
+  reviewsDockEmptyHint: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "يرتبط التبويب تلقائيًا عندما يطابق فرعه أحد طلبات الدمج المفتوحة لديك."
+      : "A tab links itself when its branch matches one of your open PRs.",
+  reviewsDockNoComments: (language: "ar" | "en"): string =>
+    language === "ar" ? "لا توجد تعليقات بعد." : "No comments yet.",
+  reviewsDockWait: (
+    reason:
+      | "no-link"
+      | "ambiguous"
+      | "no-agent"
+      | "approval-prompt"
+      | "busy"
+      | "typing"
+      | "batching"
+      | "paused",
+    language: "ar" | "en",
+  ): string => {
+    const ar = language === "ar";
+    switch (reason) {
+      case "no-link":
+        return ar ? "لا يوجد تبويب مرتبط. التعليقات تنتظر." : "No tab is linked. Comments wait.";
+      case "ambiguous":
+        return ar
+          ? "أكثر من تبويب على هذا الفرع. اختر واحدًا."
+          : "More than one tab is on this branch. Pick one.";
+      case "no-agent":
+        return ar
+          ? "لا يعمل وكيل في هذا التبويب. التعليقات تنتظر."
+          : "No agent is running in this tab. Comments wait.";
+      case "approval-prompt":
+        return ar
+          ? "الوكيل ينتظر ردك بنعم/لا. يُلصق التعليق التالي بعد هذا الدور."
+          : "Agent is waiting on your y/n. The next comment pastes after this turn.";
+      case "busy":
+        return ar
+          ? "الوكيل يعمل. تُلصق التعليقات عندما ينتظر إدخالك."
+          : "Agent is working. Comments paste when it waits for input.";
+      case "typing":
+        return ar
+          ? "أنت تكتب في هذا التبويب. تُلصق التعليقات بعد توقفك."
+          : "You are typing in this tab. Comments paste once you stop.";
+      case "batching":
+        return ar
+          ? "في انتظار تعليقات أخرى لإرسالها في رسالة واحدة."
+          : "Waiting for more comments to send in one message.";
+      case "paused":
+        return ar ? "الإرسال متوقف مؤقتًا لهذا التبويب." : "Delivery is paused for this tab.";
+      default:
+        // A wait reason newer than this table (e.g. an agent whose idle
+        // state cannot be read).
+        return ar ? "التعليقات تنتظر." : "Comments wait.";
+    }
+  },
+  reviewsDockStateDelivered: (time: string, language: "ar" | "en"): string =>
+    language === "ar" ? `✓ أُرسل ${time}` : `✓ delivered ${time}`,
+  reviewsDockStateQueued: (language: "ar" | "en"): string =>
+    language === "ar" ? "في الانتظار" : "queued",
+  reviewsDockStateHistory: (language: "ar" | "en"): string =>
+    language === "ar" ? "سابق" : "earlier",
+  reviewsDockStateOwn: (language: "ar" | "en"): string => (language === "ar" ? "أنت" : "you"),
+  reviewsDockDeliverNow: (language: "ar" | "en"): string =>
+    language === "ar" ? "أرسل الآن" : "Deliver now",
+  reviewsDockChipLabel: (number: number, paused: boolean, language: "ar" | "en"): string => {
+    if (language === "ar") return `طلب #${number} · ${paused ? "متوقف" : "مرتبط"} ▾`;
+    return `PR #${number} · ${paused ? "paused" : "linked"} ▾`;
+  },
+  reviewsDockTabBadge: (number: number, language: "ar" | "en"): string =>
+    language === "ar" ? `طلب #${number}` : `PR #${number}`,
+  reviewsDockChipMenu: (language: "ar" | "en"): string =>
+    language === "ar" ? "ربط طلب الدمج" : "PR link",
+  reviewsDockChipHow: (how: "auto" | "manual", number: number, language: "ar" | "en"): string => {
+    if (language === "ar") {
+      return how === "auto"
+        ? `مرتبط تلقائيًا: الفرع يطابق الطلب #${number}`
+        : `ربطته أنت بالطلب #${number}`;
+    }
+    return how === "auto"
+      ? `Auto-linked: branch matches PR #${number}`
+      : `Linked by you to PR #${number}`;
+  },
+  reviewsDockChipLinkOther: (language: "ar" | "en"): string =>
+    language === "ar" ? "ربط بطلب آخر…" : "Link to another PR…",
+  reviewsDockChipNoOther: (language: "ar" | "en"): string =>
+    language === "ar" ? "لا توجد طلبات دمج أخرى." : "No other pull requests.",
+  reviewsDockChipPause: (paused: boolean, language: "ar" | "en"): string => {
+    if (language === "ar") return paused ? "استئناف الإرسال" : "إيقاف الإرسال مؤقتًا";
+    return paused ? "Resume delivery" : "Pause delivery";
+  },
+  reviewsDockChipUnlink: (language: "ar" | "en"): string =>
+    language === "ar" ? "إلغاء الربط" : "Unlink",
+  reviewsSettingsTitle: (language: "ar" | "en"): string =>
+    language === "ar" ? "المراجعات" : "REVIEWS",
+  reviewsSettingsGhLabel: (language: "ar" | "en"): string =>
+    language === "ar" ? "حساب GitHub" : "GitHub login",
+  reviewsSettingsGhState: (
+    state: "unknown" | "no-gh" | "logged-out" | "ok",
+    login: string,
+    language: "ar" | "en",
+  ): string => {
+    const ar = language === "ar";
+    switch (state) {
+      case "unknown":
+        return ar ? "جارٍ فحص gh…" : "Checking gh…";
+      case "no-gh":
+        return ar ? "gh غير مثبت" : "gh is not installed";
+      case "logged-out":
+        return ar ? "gh غير مسجل الدخول" : "gh not signed in";
+      case "ok":
+        return ar ? `مسجل الدخول باسم ${login}` : `signed in as ${login}`;
+    }
+  },
+  reviewsSettingsRunLogin: (language: "ar" | "en"): string =>
+    language === "ar" ? "تشغيل gh auth login" : "Run gh auth login",
+  reviewsSettingsCheckAgain: (language: "ar" | "en"): string =>
+    language === "ar" ? "فحص مجددًا" : "Check again",
+  reviewsSettingsNoProject: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "أضف مشروعًا أولًا — يعمل الأمر في طرفية أحد المشاريع."
+      : "Add a project first — the command runs in one of its terminals.",
+  reviewsSettingsGhNote: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "تستخدم المراجعات تسجيل دخول gh. لا يخزن Jarvis أي رمز. «تشغيل» يفتح تبويب طرفية فيه الأمر."
+      : 'Reviews uses your gh login. Jarvis stores no token. "Run" opens a Terminal tab with the command.',
+  reviewsSettingsListen: (language: "ar" | "en"): string =>
+    language === "ar" ? "الاستماع للتعليقات" : "listen for comments",
+  reviewsSettingsOnOff: (on: boolean, language: "ar" | "en"): string => {
+    if (language === "ar") return on ? "يعمل" : "متوقف";
+    return on ? "On" : "Off";
+  },
+  reviewsSettingsInterval: (language: "ar" | "en"): string =>
+    language === "ar" ? "الفحص كل (ثانية)" : "check every (seconds)",
+  reviewsSettingsRepos: (language: "ar" | "en"): string =>
+    language === "ar" ? "المستودعات المراقبة" : "watched repos",
+  reviewsSettingsReposEmpty: (language: "ar" | "en"): string =>
+    language === "ar" ? "لم يُرصد أي مستودع GitHub بعد." : "No GitHub repository seen yet.",
+  reviewsSettingsReposNote: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "المشاريع التي لها مستودع على GitHub. أضف المزيد من المشاريع."
+      : "Projects with a GitHub remote. Add more under Projects.",
+  reviewsSettingsAuthors: (language: "ar" | "en"): string =>
+    language === "ar" ? "فقط من" : "only from",
+  reviewsSettingsAuthorsNote: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "فارغ = أي شخص عداك. أسماء مستخدمي GitHub مفصولة بفواصل."
+      : "Empty = anyone except you. Comma-separated GitHub logins.",
+  reviewsSettingsRequire: (language: "ar" | "en"): string =>
+    language === "ar" ? "فقط إن احتوى على" : "only if it contains",
+  reviewsSettingsIgnoreBots: (language: "ar" | "en"): string =>
+    language === "ar" ? "تجاهل الروبوتات" : "ignore bots",
+  reviewsSettingsAutoLink: (language: "ar" | "en"): string =>
+    language === "ar" ? "ربط الطرفية تلقائيًا حسب الفرع" : "auto-link terminal by branch",
+  reviewsSettingsDeliveryNote: (seconds: number, language: "ar" | "en"): string =>
+    language === "ar"
+      ? `تُلصق التعليقات فقط عندما ينتظر الوكيل إدخالًا. التعليقات خلال ${seconds} ث تُرسل في رسالة واحدة.`
+      : `Comments are pasted only when the agent is waiting for input. Comments within ${seconds} s go in one message.`,
+  reviewsSettingsPush: (language: "ar" | "en"): string =>
+    language === "ar" ? "الإشعارات" : "push notifications",
+  reviewsSettingsPushNote: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "تعليق جديد، تعليق ينتظر بلا جلسة، طلب مراجعة. لا يحمل الإشعار نص التعليق أبدًا."
+      : "New comment, comment waiting with no session, review requested. A notification never carries the comment text.",
+  // ---- end Reviews (Task 12)
   planEmptyTitle: (language: "ar" | "en"): string =>
     language === "ar" ? "لا توجد خطة لهذه الجلسة بعد" : "No plan for this session yet",
   planEmptyHint: (language: "ar" | "en"): string =>

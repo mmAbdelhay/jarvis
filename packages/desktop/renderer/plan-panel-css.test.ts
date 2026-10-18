@@ -39,4 +39,17 @@ describe("plan panel CSS", () => {
     expect(panel).toContain("max-width: 60%");
     expect(gutter).toContain("width: 40px");
   });
+
+  it("keeps the reviews dock a side panel like the plan panel, colours from tokens", () => {
+    const dock = css.match(/\.reviews-dock\s*\{([^}]*)\}/)?.[1] ?? "";
+    expect(dock).toContain("min-width: 280px");
+    expect(dock).toContain("max-width: 60%");
+    const handle = css.match(/\.reviews-dock-handle\s*\{([^}]*)\}/)?.[1] ?? "";
+    expect(handle).toContain("cursor: col-resize");
+    const rules = [...css.matchAll(/[^{}]*\.reviews-(?:dock|chip|toggle)[^{}]*\{([^}]*)\}/g)];
+    expect(rules.length).toBeGreaterThan(0);
+    for (const [, declarations] of rules) {
+      expect(declarations ?? "").not.toMatch(/#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(/);
+    }
+  });
 });

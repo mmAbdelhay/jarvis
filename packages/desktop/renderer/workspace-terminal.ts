@@ -6,6 +6,15 @@ import { attachCompletion, type Completion } from "./terminal-completion.js";
 import { createTerminalExplorer, type TerminalExplorer } from "./terminal-explorer.js";
 import { hostPlatform } from "./keys.js";
 import { createPlanPanel, type PlanPanel } from "./plan-panel.js";
+import type { ReviewListItem } from "../src/review-service.js";
+import {
+  applyTabPrBadge,
+  createLinkChip,
+  createReviewsDock,
+  linkedItemFor,
+  type LinkChip,
+  type ReviewsDock,
+} from "./reviews-dock.js";
 import { createPane, type TerminalPane } from "./terminal-pane.js";
 import { createSplitTree, type SplitTree } from "./terminal-splits.js";
 
@@ -66,6 +75,12 @@ type Pane = {
   /** The tab's own visible way to the plan panel: pressed while it is
    *  open, marked while `sessionPlanPath` names a plan. */
   planToggle: HTMLButtonElement;
+  /** Reviews (Task 12): the tab's Reviews dock, right of the plan panel,
+   *  its toggle beside the plan toggle, and one PR link chip per pane
+   *  that a PR is linked to (keyed by pane key). */
+  reviewsDock: ReviewsDock;
+  reviewsToggle: HTMLButtonElement;
+  linkChips: Map<string, LinkChip>;
 };
 
 /** The one place `sessionPlanPath` is written, so the toggle button's
@@ -139,6 +154,113 @@ function savePlanPanelWidth(tabId: string, width: number): void {
   } catch {
     // Not remembering is not worth interrupting anyone over.
   }
+}
+
+// ----------------------------------------------------------- Reviews dock
+
+/** The reviews dock's width: 280px…60% of the container, the same "no
+ *  real layout drops the ceiling" rule as clampPlanPanelWidth. */
+export function clampReviewsDockWidth(width: number, containerWidth: number): number {
+  const max = containerWidth > 0 ? containerWidth * 0.6 : Number.POSITIVE_INFINITY;
+  return Math.min(max, Math.max(280, width));
+}
+
+function reviewsDockWidthKey(tabId: string): string {
+  return `jarvis.reviewsDockWidth.${tabId}`;
+}
+
+function loadReviewsDockWidth(tabId: string): number | undefined {
+  try {
+    const raw = window.localStorage.getItem(reviewsDockWidthKey(tabId));
+    if (raw === null) return undefined;
+    const value = Number(raw);
+    return Number.isFinite(value) ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function saveReviewsDockWidth(tabId: string, width: number): void {
+  try {
+    window.localStorage.setItem(reviewsDockWidthKey(tabId), String(width));
+  } catch {
+    // Same as the plan panel: not remembering is fine.
+  }
+}
+
+/** Every PR reviews:list last answered with — one read for all tabs. */
+let reviewItems: ReviewListItem[] = [];
+let reviewsTimer: ReturnType<typeof setTimeout> | undefined;
+let reviewsRequestId = 0;
+/** How long a burst of reviews:changed pushes waits before one re-read. */
+const REVIEWS_REFRESH_DEBOUNCE_MS = 150;
+
+/** Re-reads reviews:list (debounced) and redraws every tab's dock, chips
+ *  and badge. A preload without the channel leaves everything empty. */
+function scheduleReviewsRefresh(delay = REVIEWS_REFRESH_DEBOUNCE_MS): void {
+  if (reviewsTimer !== undefined) clearTimeout(reviewsTimer);
+  reviewsTimer = setTimeout(() => {
+    reviewsTimer = undefined;
+    const id = ++reviewsRequestId;
+    let request: Promise<ReviewListItem[]>;
+    try {
+      request = Promise.resolve(window.jarvis.reviewsList());
+    } catch {
+      return;
+    }
+    void request
+      .then((items) => {
+        if (id !== reviewsRequestId) return; // a newer read is on its way
+        reviewItems = Array.isArray(items) ? items : [];
+        for (const [tabId, pane] of panes) applyReviews(tabId, pane);
+      })
+      .catch(() => {
+        // Last known state stays on screen.
+      });
+  }, delay);
+}
+
+/** Draws `reviewItems` into one tab: the dock's PR, the toggle's queued
+ *  count, a link chip in each linked pane's chip row, the tab's badge. */
+function applyReviews(tabId: string, pane: Pane): void {
+  const item = linkedItemFor(reviewItems, tabId);
+  void pane.reviewsDock.setItem(item);
+
+  const count = pane.reviewsToggle.querySelector<HTMLElement>(".reviews-toggle__count");
+  if (count !== null) {
+    const queued = item?.queued ?? 0;
+    count.textContent = queued > 0 ? String(queued) : "";
+    count.hidden = queued === 0;
+  }
+  pane.reviewsToggle.classList.toggle("reviews-toggle--linked", item !== undefined);
+
+  const live = new Set<string>();
+  for (const leaf of pane.tree.panes()) {
+    const paneKey = paneKeys.get(leaf);
+    if (paneKey === undefined) continue;
+    const linked = reviewItems.find(
+      (candidate) => candidate.link.kind === "linked" && candidate.link.paneKey === paneKey,
+    );
+    if (linked === undefined) {
+      leaf.setChipExtra(undefined);
+      continue;
+    }
+    live.add(paneKey);
+    let chip = pane.linkChips.get(paneKey);
+    if (chip === undefined) {
+      chip = createLinkChip({ api: window.jarvis, paneKey });
+      pane.linkChips.set(paneKey, chip);
+    }
+    chip.update(linked, reviewItems);
+    leaf.setChipExtra(chip.element);
+  }
+  for (const [paneKey, chip] of pane.linkChips) {
+    if (live.has(paneKey)) continue;
+    chip.dispose();
+    pane.linkChips.delete(paneKey);
+  }
+
+  applyTabPrBadge(tabId, item?.pr.number);
 }
 
 /**
@@ -287,9 +409,35 @@ function wirePlanPanelHandle(
   tabId: string,
   tree: SplitTree,
 ): void {
+  wireSideHandle(handle, panelElement, container, tree, clampPlanPanelWidth, (width) =>
+    savePlanPanelWidth(tabId, width),
+  );
+}
+
+/** How much of the container's right side the visible siblings after
+ *  `panel` take (Reviews, Task 12: the dock and its handle sit right of the
+ *  plan panel) — a dragged panel's right edge is the container's minus
+ *  this. Hidden siblings, and jsdom's zero-sized boxes, add nothing. */
+function trailingWidth(panel: HTMLElement): number {
+  let total = 0;
+  for (let next = panel.nextElementSibling; next !== null; next = next.nextElementSibling) {
+    if (next instanceof HTMLElement && !next.hidden) total += next.getBoundingClientRect().width;
+  }
+  return total;
+}
+
+/** The drag behind both side panels' handles (plan panel, reviews dock). */
+function wireSideHandle(
+  handle: HTMLElement,
+  panelElement: HTMLElement,
+  container: HTMLElement,
+  tree: SplitTree,
+  clamp: (width: number, containerWidth: number) => number,
+  save: (width: number) => void,
+): void {
   handle.addEventListener("mousedown", (event) => {
     event.preventDefault();
-    let width = clampPlanPanelWidth(
+    let width = clamp(
       panelElement.getBoundingClientRect().width,
       container.getBoundingClientRect().width,
     );
@@ -297,14 +445,14 @@ function wirePlanPanelHandle(
     const onMove = (move: MouseEvent): void => {
       const box = container.getBoundingClientRect();
       if (box.width === 0) return;
-      width = clampPlanPanelWidth(box.right - move.clientX, box.width);
+      width = clamp(box.right - trailingWidth(panelElement) - move.clientX, box.width);
       panelElement.style.width = `${Math.round(width)}px`;
       for (const leaf of tree.panes()) leaf.refit();
     };
     const onUp = (): void => {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
-      savePlanPanelWidth(tabId, Math.round(width));
+      save(Math.round(width));
     };
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
@@ -327,12 +475,18 @@ if (planPanelResizeHost.__reassertPlanPanelWidthOnResize__ !== undefined) {
 }
 const handlePlanPanelWindowResize = (): void => {
   for (const pane of panes.values()) {
-    const current = pane.planPanel.element.getBoundingClientRect().width;
-    if (current <= 0) continue; // no real layout (every jsdom test that never stubs it)
-    const clamped = Math.round(clampPlanPanelWidth(current, pane.element.clientWidth));
-    if (clamped === Math.round(current)) continue;
-    pane.planPanel.element.style.width = `${clamped}px`;
-    for (const leaf of pane.tree.panes()) leaf.refit();
+    const sides: [HTMLElement, (width: number, containerWidth: number) => number][] = [
+      [pane.planPanel.element, clampPlanPanelWidth],
+      [pane.reviewsDock.element, clampReviewsDockWidth],
+    ];
+    for (const [side, clamp] of sides) {
+      const current = side.getBoundingClientRect().width;
+      if (current <= 0) continue; // no real layout (every jsdom test that never stubs it)
+      const clamped = Math.round(clamp(current, pane.element.clientWidth));
+      if (clamped === Math.round(current)) continue;
+      side.style.width = `${clamped}px`;
+      for (const leaf of pane.tree.panes()) leaf.refit();
+    }
   }
 };
 planPanelResizeHost.__reassertPlanPanelWidthOnResize__ = handlePlanPanelWindowResize;
@@ -429,6 +583,15 @@ export function initWorkspaceTerminals(): void {
       }
     }
   });
+
+  // Reviews (Task 12): any PR's state changed — one debounced re-read
+  // redraws every tab's dock, chips and badge. Guarded: a preload without
+  // the channel is a terminal with no reviews, never one that throws.
+  try {
+    window.jarvis.onReviewsChanged(() => scheduleReviewsRefresh());
+  } catch {
+    // No reviews channel.
+  }
 }
 
 /**
@@ -492,6 +655,8 @@ export function renderWorkspaceTerminals(
     // already no-ops in that case, but there is no reason to leave the
     // timer running for a tab that is gone).
     pane.planPanel.dispose();
+    pane.reviewsDock.dispose();
+    for (const chip of pane.linkChips.values()) chip.dispose();
     if (pane.sessionPlanTimer !== undefined) clearTimeout(pane.sessionPlanTimer);
     pane.element.remove();
     panes.delete(tabId);
@@ -513,6 +678,13 @@ export function renderWorkspaceTerminals(
     ensurePane(showing, selectedProject, host, active?.detail === LOGIN_TERMINAL_DETAIL);
   }
   for (const [tabId, pane] of panes) pane.element.hidden = tabId !== showing;
+  // Reviews: workspace.ts may have just rebuilt a tab's element, badge and
+  // all — re-applied after the strip's own render has run.
+  queueMicrotask(() => {
+    for (const tabId of panes.keys()) {
+      applyTabPrBadge(tabId, linkedItemFor(reviewItems, tabId)?.pr.number);
+    }
+  });
 
   // Fix round 1, Important 3: reasserting on *every* render (every
   // workspace:update push, whether or not the visible pane actually
@@ -821,6 +993,52 @@ function ensurePane(
     builtPanel.element.style.width = `${clampPlanPanelWidth(savedWidth, element.clientWidth)}px`;
   }
 
+  // Reviews (Task 12): the dock and its handle, right of the plan panel —
+  // DOM order explorer | splits | plan handle | plan | dock handle | dock.
+  const reviewsHandle = document.createElement("div");
+  reviewsHandle.className = "reviews-dock-handle";
+  reviewsHandle.hidden = true;
+
+  const reviewsToggle = document.createElement("button");
+  reviewsToggle.type = "button";
+  reviewsToggle.className = "reviews-toggle";
+  reviewsToggle.title = planPanelT("reviewsDockToggle");
+  reviewsToggle.setAttribute("aria-label", planPanelT("reviewsDockToggle"));
+  reviewsToggle.setAttribute("aria-pressed", "false");
+  const reviewsToggleText = document.createElement("span");
+  reviewsToggleText.textContent = "PR";
+  const reviewsCount = document.createElement("span");
+  reviewsCount.className = "reviews-toggle__count";
+  reviewsCount.hidden = true;
+  reviewsToggle.append(reviewsToggleText, reviewsCount);
+  built.element.append(reviewsToggle);
+
+  const reviewsDock = createReviewsDock({
+    api: window.jarvis,
+    onToggle: (open) => {
+      reviewsHandle.hidden = !open;
+      reviewsToggle.setAttribute("aria-pressed", String(open));
+      for (const leaf of built.panes()) leaf.refit();
+    },
+    // The top-nav Reviews page owns the PR's full thread; app.ts listens.
+    onOpenInReviews: (prKey) =>
+      window.dispatchEvent(new CustomEvent("jarvis:open-reviews", { detail: prKey })),
+  });
+  reviewsToggle.addEventListener("click", () => reviewsDock.toggle());
+  element.append(reviewsHandle, reviewsDock.element);
+  wireSideHandle(
+    reviewsHandle,
+    reviewsDock.element,
+    element,
+    built,
+    clampReviewsDockWidth,
+    (width) => saveReviewsDockWidth(tabId, width),
+  );
+  const savedDockWidth = loadReviewsDockWidth(tabId);
+  if (savedDockWidth !== undefined) {
+    reviewsDock.element.style.width = `${clampReviewsDockWidth(savedDockWidth, element.clientWidth)}px`;
+  }
+
   const pane: Pane = {
     element,
     tree: built,
@@ -833,8 +1051,15 @@ function ensurePane(
     focusedCwd: undefined,
     dismissedPlanPath: undefined,
     planToggle,
+    reviewsDock,
+    reviewsToggle,
+    linkChips: new Map(),
   };
   panes.set(tabId, pane);
+  // What this tab shows comes from the shared list: drawn from it now, and
+  // re-read soon so a brand-new tab need not wait for the next push.
+  applyReviews(tabId, pane);
+  scheduleReviewsRefresh(0);
   return pane;
 }
 

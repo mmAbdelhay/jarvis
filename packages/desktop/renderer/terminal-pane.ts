@@ -197,6 +197,9 @@ export type TerminalPane = {
    *  — undefined exactly when `readInput` and `applyInput` have nothing to
    *  work with either. */
   editorElement(): HTMLElement | undefined;
+  /** Reviews (Task 12): a chip of the caller's own at the end of this
+   *  pane's chip row (the PR link chip), or `undefined` to remove it. */
+  setChipExtra(node: HTMLElement | undefined): void;
   /** Whether the shell is sitting at a prompt with nothing running.
    *
    *  Completion needs this because it cannot see it for itself here: in
@@ -1311,6 +1314,7 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
     readInput: () => (editor?.isVisible() ? editor.value() : undefined),
     applyInput: (line) => attempt(() => editor?.setValue(line)),
     editorElement: () => editor?.element,
+    setChipExtra: (node) => chipRow.setExtra(node),
     atPrompt: () => idle(),
     // Unconditional — no state check here. That is the whole point: the
     // palette must open whether a command is running, the alt screen is

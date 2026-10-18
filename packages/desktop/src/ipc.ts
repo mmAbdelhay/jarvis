@@ -767,9 +767,9 @@ export type RendererApi = {
    *  for a project that declares none, and for Personal. */
   chatNames(project: string): Promise<string[]>;
   /** Opens a terminal tab for `project` and starts its shell. The new tab
-   *  arrives through the ordinary workspace:update, so nothing is returned
-   *  but success or a localised failure. */
-  openTerminal(project: string, directory?: string): Promise<GitViewResult<void>>;
+   *  arrives through the ordinary workspace:update; the value is its id
+   *  (Reviews' "Run gh auth login" types into it), or a localised failure. */
+  openTerminal(project: string, directory?: string): Promise<GitViewResult<string>>;
   /** Suggestions for what is typed at `paneKey`'s prompt, best first. Each
    *  one is a whole replacement line. `path` is the pane's own live
    *  directory — the same OSC 7 report `terminalChips` takes — and is used

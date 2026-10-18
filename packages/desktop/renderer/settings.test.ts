@@ -3219,3 +3219,137 @@ describe("Settings: owner account (Phase 0)", () => {
     expect(toggle.disabled).toBe(true);
   });
 });
+
+describe("reviews section", () => {
+  function withReviewsDom(config: JarvisConfig = sample()): Recorded[] {
+    const { calls } = harness(config);
+    document.body.insertAdjacentHTML(
+      "beforeend",
+      `<div id="settings-reviews-title"></div><div id="settings-reviews"></div>`,
+    );
+    const jarvis = (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
+    jarvis["reviewsStatus"] = () => {
+      calls.push({ call: "reviewsStatus", args: [] });
+      return Promise.resolve({
+        gh: { kind: "logged-out" },
+        enabled: true,
+        repoErrors: { "me/rafiq": "boom" },
+      });
+    };
+    jarvis["reviewsList"] = () =>
+      Promise.resolve([
+        {
+          pr: {
+            repo: "me/jarvis",
+            number: 18,
+            title: "x",
+            headRef: "b",
+            author: "me",
+            url: "",
+            isDraft: false,
+            role: "mine",
+          },
+          link: { kind: "none" },
+          queued: 0,
+          delivered: 0,
+          waitReason: null,
+          lastActivity: 0,
+        },
+      ]);
+    jarvis["reviewsPollNow"] = () => {
+      calls.push({ call: "reviewsPollNow", args: [] });
+      return Promise.resolve();
+    };
+    jarvis["openTerminal"] = (...args: unknown[]) => {
+      calls.push({ call: "openTerminal", args });
+      return Promise.resolve({ ok: true, value: "tab-9" });
+    };
+    jarvis["sendTerminalInput"] = (...args: unknown[]) => {
+      calls.push({ call: "sendTerminalInput", args });
+      return Promise.resolve();
+    };
+    initSettings();
+    return calls;
+  }
+
+  async function saved(calls: Recorded[]): Promise<JarvisConfig> {
+    document.getElementById("settings-save")?.click();
+    await Promise.resolve();
+    return savedConfig(calls.find((entry) => entry.call === "saveSettings"));
+  }
+
+  it("saves reviews.authors as an array from a change event", async () => {
+    const calls = withReviewsDom();
+    await openSettings();
+    const authors = document.querySelector<HTMLInputElement>("#settings-reviews-authors");
+    expect(authors).not.toBeNull();
+    authors!.value = " colleague, @other ,, ";
+    change(authors!);
+
+    const config = await saved(calls);
+    expect(config.reviews?.authors).toEqual(["colleague", "other"]);
+  });
+
+  it("commits the interval, required text and toggles on change", async () => {
+    const calls = withReviewsDom();
+    await openSettings();
+    const interval = document.querySelector<HTMLInputElement>("#settings-reviews-interval")!;
+    interval.value = "90";
+    change(interval);
+    const require = document.querySelector<HTMLInputElement>("#settings-reviews-require")!;
+    require.value = "@jarvis";
+    change(require);
+    const bots = document.querySelector<HTMLInputElement>("#settings-reviews-ignore-bots")!;
+    bots.checked = false;
+    change(bots);
+    const push = document.querySelector<HTMLInputElement>("#settings-reviews-push")!;
+    push.checked = false;
+    change(push);
+
+    const config = await saved(calls);
+    expect(config.reviews?.intervalSeconds).toBe(90);
+    expect(config.reviews?.requireText).toBe("@jarvis");
+    expect(config.reviews?.ignoreBots).toBe(false);
+    expect(config.reviews?.notify).toEqual({ comment: false, queued: false, requested: false });
+  });
+
+  it("lists repos it has seen and saves a toggled-off one as false", async () => {
+    const calls = withReviewsDom();
+    await openSettings();
+    await flush();
+    const boxes = [
+      ...document.querySelectorAll<HTMLInputElement>("#settings-reviews input[data-repo]"),
+    ];
+    expect(boxes.map((box) => box.dataset["repo"])).toEqual(["me/jarvis", "me/rafiq"]);
+    boxes[0]!.checked = false;
+    change(boxes[0]!);
+
+    const config = await saved(calls);
+    expect(config.reviews?.repos).toEqual({ "me/jarvis": false });
+  });
+
+  it("shows the gh state, and Check again polls before re-reading it", async () => {
+    const calls = withReviewsDom();
+    await openSettings();
+    await flush();
+    expect(document.getElementById("settings-reviews-gh")?.textContent).toBe("gh not signed in");
+
+    document.getElementById("settings-reviews-check")?.click();
+    await flush();
+    const order = calls.map((entry) => entry.call).filter((c) => c.startsWith("reviews"));
+    expect(order.slice(-2)).toEqual(["reviewsPollNow", "reviewsStatus"]);
+  });
+
+  it("Run gh auth login opens a Terminal tab with the command typed but not run", async () => {
+    const calls = withReviewsDom();
+    await openSettings();
+    document.getElementById("settings-reviews-login")?.click();
+    await flush();
+
+    expect(calls.find((entry) => entry.call === "openTerminal")?.args).toEqual(["acme"]);
+    expect(calls.find((entry) => entry.call === "sendTerminalInput")?.args).toEqual([
+      "tab-9",
+      "gh auth login",
+    ]);
+  });
+});
