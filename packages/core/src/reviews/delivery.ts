@@ -10,6 +10,8 @@ export const DELIVERY_TYPING_MS = 10_000;
 // Mirrors Task 3's resolveLink result; the controller unifies the two once both land.
 export type PaneState = {
   hasAgent: boolean;
+  /** A detected agent whose vendor has no idle markers. */
+  unsupported?: boolean;
   input: AgentInputState;
   draft: boolean;
   quietMs: number;
@@ -20,6 +22,7 @@ export type PaneState = {
 export type DeliveryWait =
   | "no-link"
   | "ambiguous"
+  | "unsupported"
   | "no-agent"
   | "approval-prompt"
   | "busy"
@@ -34,7 +37,8 @@ export type DeliveryPlan = { send: QueuedComment[] } | { wait: DeliveryWait };
 export function canPaste(
   pane: PaneState | undefined,
   force: boolean,
-): "send" | "no-agent" | "approval-prompt" | "busy" | "typing" {
+): "send" | "unsupported" | "no-agent" | "approval-prompt" | "busy" | "typing" {
+  if (pane?.unsupported) return "unsupported";
   if (!pane?.hasAgent) return "no-agent";
   if (pane.input === "approval-prompt") return "approval-prompt";
   if (!force) {

@@ -214,8 +214,28 @@ describe("the PR link chip", () => {
     expect(fake.reviewsPause).toHaveBeenCalledWith("tab-1", true);
   });
 
+  it("uses paused status even when no queued comment has a paused wait reason", async () => {
+    const fake = api();
+    const chip = createLinkChip({ api: fake, paneKey: "tab-1" });
+    chip.update(item({ waitReason: null }), [item()], ["tab-1"]);
+    const resume = [...openMenu(chip).querySelectorAll("button")].find(
+      (b) => b.textContent === "Resume delivery",
+    );
+    expect(resume).toBeDefined();
+    resume?.click();
+    await settle();
+    expect(fake.reviewsPause).toHaveBeenCalledWith("tab-1", false);
+  });
+
   it("links the pane to another PR picked from reviews:list", async () => {
     const fake = api();
+    let finishUnlink = () => {};
+    fake.reviewsLink.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishUnlink = resolve;
+        }),
+    );
     const other = item({
       pr: { ...pr, number: 21, title: "Other <b>thing</b>" },
       link: { kind: "none" },
@@ -231,7 +251,13 @@ describe("the PR link chip", () => {
     expect(menu.querySelector("b")).toBeNull();
     choices[0]?.click();
     await settle();
-    expect(fake.reviewsLink).toHaveBeenCalledWith("me/jarvis#21", "tab-1");
+    expect(fake.reviewsLink.mock.calls).toEqual([["me/jarvis#18", null]]);
+    finishUnlink();
+    await settle();
+    expect(fake.reviewsLink.mock.calls).toEqual([
+      ["me/jarvis#18", null],
+      ["me/jarvis#21", "tab-1"],
+    ]);
   });
 
   it("hides itself with no linked PR", () => {
@@ -240,3 +266,19 @@ describe("the PR link chip", () => {
     expect(chip.element.hidden).toBe(true);
   });
 });
+
+it.each(["en", "ar"] as const)(
+  "renders unsupported agent wait in the %s dock",
+  async (language) => {
+    const fake = api();
+    fake.reviewsThread.mockResolvedValue({ ...thread, waitReason: "unsupported" });
+    const dock = createReviewsDock({ api: fake, language });
+    dock.open();
+    await dock.setItem(item({ waitReason: "unsupported" }));
+    expect(dock.element.querySelector(".reviews-dock__wait")?.textContent).toBe(
+      language === "en"
+        ? "agent not supported for auto-delivery"
+        : "الوكيل غير مدعوم للتسليم التلقائي",
+    );
+  },
+);

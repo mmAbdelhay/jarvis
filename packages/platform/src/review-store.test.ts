@@ -15,10 +15,7 @@ async function tempFile(): Promise<string> {
   return join(dir, "reviews.json");
 }
 
-function comment(
-  id: string,
-  overrides: Partial<ReviewComment> = {},
-): ReviewComment {
+function comment(id: string, overrides: Partial<ReviewComment> = {}): ReviewComment {
   return {
     id,
     kind: "issue",
@@ -94,11 +91,7 @@ describe("createReviewStore", () => {
     await store.upsertComments(PR, [comment("c2")], "history");
 
     await store.upsertComments(PR, [comment("c1")], "history");
-    await store.upsertComments(
-      PR,
-      [comment("c2", { body: "edited on GitHub" })],
-      "queued",
-    );
+    await store.upsertComments(PR, [comment("c2", { body: "edited on GitHub" })], "queued");
 
     expect(await store.thread(PR)).toEqual([
       { prKey: PR, comment: comment("c1"), state: "queued" },
@@ -122,9 +115,11 @@ describe("createReviewStore", () => {
     expect(await store.requeue(key(PR, comment("c3")))).toBe(false);
     expect(await store.requeue(`${PR}|issue|missing`)).toBe(false);
 
-    expect(
-      (await createReviewStore(file).thread(PR)).map((entry) => entry.state),
-    ).toEqual(["queued", "queued", "own"]);
+    expect((await createReviewStore(file).thread(PR)).map((entry) => entry.state)).toEqual([
+      "queued",
+      "queued",
+      "own",
+    ]);
   });
 
   it("keys comments by PR, kind and id so equal ids of different kinds do not collide", async () => {
@@ -145,9 +140,7 @@ describe("createReviewStore", () => {
     await store.markOwn(PR, comment("c3"));
     await store.upsertComments(PR, [comment("c3")], "queued");
 
-    expect(await store.thread(PR)).toEqual([
-      { prKey: PR, comment: comment("c3"), state: "own" },
-    ]);
+    expect(await store.thread(PR)).toEqual([{ prKey: PR, comment: comment("c3"), state: "own" }]);
     expect(await store.listQueued()).toEqual([]);
   });
 
@@ -156,11 +149,7 @@ describe("createReviewStore", () => {
     await store.upsertComments(PR, [comment("c9"), comment("c2")], "queued");
     await store.markOwn(PR, comment("c5"));
 
-    expect((await store.thread(PR)).map((entry) => entry.comment.id)).toEqual([
-      "c2",
-      "c5",
-      "c9",
-    ]);
+    expect((await store.thread(PR)).map((entry) => entry.comment.id)).toEqual(["c2", "c5", "c9"]);
   });
 
   it("persists cursors, seeding, links, pauses and notifications", async () => {

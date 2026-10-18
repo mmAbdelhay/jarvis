@@ -98,6 +98,8 @@ export type ReviewThread = {
 };
 
 export type ReviewStatus = {
+  paused: string[];
+  repos: string[];
   gh: GhStatus | null;
   enabled: boolean;
   /** The last poll error per repository, cleared when it lists PRs again. */
@@ -129,7 +131,7 @@ export type ReviewServiceDeps = {
 };
 
 export type ReviewService = {
-  status(): ReviewStatus;
+  status(): Promise<ReviewStatus>;
   list(): Promise<ReviewListItem[]>;
   thread(prKey: PrKey): Promise<ReviewThread | undefined>;
   reply(prKey: PrKey, body: string, inReplyTo?: string): Promise<ReviewComment>;
@@ -305,9 +307,15 @@ export function createReviewService(deps: ReviewServiceDeps): ReviewService {
     return {
       agentPresent: found !== undefined,
       idleSupported: vendor !== undefined && Object.hasOwn(AGENT_INPUT_MARKERS, vendor),
-      // Review delivery still refuses vendors whose input cannot be read,
-      // including forced delivery. Plans use the process facts above.
-      hasAgent: found !== undefined && vendor !== undefined && input !== "unknown",
+      // Unsupported vendors are a distinct refusal, even for forced delivery.
+      // Plans continue to use agentPresent and idleSupported independently.
+      unsupported:
+        found !== undefined &&
+        (vendor === undefined || !Object.hasOwn(AGENT_INPUT_MARKERS, vendor)),
+      hasAgent:
+        found !== undefined &&
+        vendor !== undefined &&
+        (input !== "unknown" || !Object.hasOwn(AGENT_INPUT_MARKERS, vendor)),
       input,
       draft: vendor === undefined ? false : inputLineHasDraft(tail, vendor),
       quietMs: now - (lastOutput.get(paneKey) ?? startedAt),
@@ -632,7 +640,9 @@ export function createReviewService(deps: ReviewServiceDeps): ReviewService {
   }
 
   return {
-    status: () => ({
+    status: async () => ({
+      paused: [...(await deps.store.paused())],
+      repos: pollRepos(),
       gh: ghStatus,
       enabled: deps.config().enabled,
       repoErrors: Object.fromEntries(repoErrors),

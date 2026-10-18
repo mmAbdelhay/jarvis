@@ -247,7 +247,13 @@ function stubJarvis(overrides: Partial<RendererApi>): RendererApi {
     onPlansChanged: vi.fn(),
     onTabPlans: vi.fn(),
     plansOpenLink: vi.fn(async () => {}),
-    reviewsStatus: vi.fn(async () => ({ gh: null, enabled: false, repoErrors: {} })),
+    reviewsStatus: vi.fn(async () => ({
+      gh: null,
+      enabled: false,
+      repoErrors: {},
+      paused: [],
+      repos: [],
+    })),
     reviewsList: vi.fn(async () => []),
     reviewsThread: vi.fn(async () => undefined),
     reviewsReply: vi.fn(async () => ({

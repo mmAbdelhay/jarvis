@@ -338,3 +338,12 @@ describe("createReviewsStore", () => {
     expect(client.unsubscribe).toHaveBeenCalledWith("reviews:changed");
   });
 });
+
+it("preserves unsupported waits in list and thread and marks queued cards blocked", () => {
+  const parsed = parseReviewList([{ ...item, waitReason: "unsupported" }])[0];
+  expect(parsed?.waitReason).toBe("unsupported");
+  expect(
+    parseReviewThread({ pr, link: item.link, comments: [], waitReason: "unsupported" })?.waitReason,
+  ).toBe("unsupported");
+  expect(reviewCardModel(parsed!).tone).toBe("danger");
+});

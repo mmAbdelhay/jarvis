@@ -86,6 +86,7 @@ export const MESSAGES = {
     reason:
       | "no-link"
       | "ambiguous"
+      | "unsupported"
       | "no-agent"
       | "approval-prompt"
       | "busy"
@@ -102,6 +103,8 @@ export const MESSAGES = {
         return ar
           ? "أكثر من تبويب على هذا الفرع. اختر واحدًا."
           : "More than one tab is on this branch. Pick one.";
+      case "unsupported":
+        return ar ? "الوكيل غير مدعوم للتسليم التلقائي" : "agent not supported for auto-delivery";
       case "no-agent":
         return ar
           ? "لا يعمل وكيل في هذا التبويب. التعليقات تنتظر."

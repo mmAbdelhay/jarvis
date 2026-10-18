@@ -44,10 +44,8 @@ export type ReviewsView = {
   open(prKey: string): Promise<void>;
 };
 
-/** Every wait reason the page has a label for: core's DeliveryWait, plus
- *  "unsupported" (controller ruling — an agent whose idle state cannot be
- *  read, e.g. Copilot). */
-export const REVIEW_WAIT_LABEL_KEYS: readonly (DeliveryWait | "unsupported")[] = [
+/** Every core delivery wait, including detected agents without idle markers. */
+export const REVIEW_WAIT_LABEL_KEYS: readonly DeliveryWait[] = [
   "no-link",
   "ambiguous",
   "no-agent",

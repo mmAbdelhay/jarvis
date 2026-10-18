@@ -388,12 +388,25 @@ describe("review service delivery", () => {
     expect(h.scans).toBeGreaterThan(before);
   });
 
+  it("reports paused pane keys and every watched repository without requiring a PR", async () => {
+    const h = harness();
+    h.config.repos["me/empty"] = true;
+    await h.store.setPaused("other:p1", true);
+    expect(await h.service.status()).toMatchObject({
+      paused: ["other:p1"],
+      repos: expect.arrayContaining(["me/empty"]),
+    });
+    await h.service.pause("other:p1", false);
+    expect((await h.service.status()).paused).toEqual([]);
+  });
+
   it("treats an agent with an unknown vendor as never pasteable, even for deliverNow", async () => {
     const h = harness();
     h.setAgents([agentIn(PANE, "copilot")]);
     await withQueued(h);
     const outcome = await h.service.deliverNow(PR_KEY);
-    expect(outcome.sent).toBe(false);
+    expect(outcome).toEqual({ sent: false, wait: "unsupported" });
+    expect((await h.service.list())[0]?.waitReason).toBe("unsupported");
     expect(h.writes).toHaveLength(0);
   });
 
@@ -401,8 +414,9 @@ describe("review service delivery", () => {
     const h = harness();
     h.setAgents([agentIn(PANE, "copilot")]);
     expect(await h.service.paneStateOf(PANE)).toMatchObject({
-      hasAgent: false,
+      hasAgent: true,
       agentPresent: true,
+      unsupported: true,
       idleSupported: false,
     });
     h.setAgents([]);

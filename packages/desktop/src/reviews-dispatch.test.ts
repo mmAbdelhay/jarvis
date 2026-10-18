@@ -64,10 +64,16 @@ const BAD_KEYS: unknown[] = [
 
 describe("reviews:* dispatch: routing", () => {
   it("reviews:status and reviews:list return the service's own values", async () => {
-    const status = { gh: null, enabled: true, repoErrors: { "acme/web": "boom" } };
+    const status = {
+      gh: null,
+      enabled: true,
+      paused: [],
+      repos: ["acme/web"],
+      repoErrors: { "acme/web": "boom" },
+    };
     const items = [{ pr: PULL, link: { kind: "none" }, queued: 1, delivered: 0 }];
     const table = createDispatchTable(
-      withReviews({ status: vi.fn(() => status), list: vi.fn(async () => items as never) }),
+      withReviews({ status: vi.fn(async () => status), list: vi.fn(async () => items as never) }),
     );
     expect(await call(table, "reviews:status")).toBe(status);
     expect(await call(table, "reviews:list")).toBe(items);

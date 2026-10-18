@@ -2147,6 +2147,7 @@ describe("the terminal tab's reviews dock", () => {
   const settle = (): Promise<unknown> => new Promise((resolve) => setTimeout(resolve, 0));
   let reviewsChanged: ((prKey: string | null) => void) | undefined;
   let listed: unknown[];
+  let paused: string[];
 
   const linkedItem = {
     pr: {
@@ -2171,6 +2172,9 @@ describe("the terminal tab's reviews dock", () => {
     jarvis["terminalSettings"] = () =>
       Promise.resolve({ blocks: true, inputEditor: false, notifyAfterSeconds: 0, home: "/h" });
     listed = [];
+    paused = [];
+    jarvis["reviewsStatus"] = () =>
+      Promise.resolve({ enabled: true, lastPollAt: null, gh: "ok", paused, repos: [] });
     reviewsChanged = undefined;
     jarvis["reviewsList"] = () => {
       calls.push({ call: "reviewsList", args: [] });
@@ -2252,6 +2256,83 @@ describe("the terminal tab's reviews dock", () => {
     expect(dock()?.style.width).toBe("350px");
   });
 
+  it.each([
+    ["plan", 300, 400, 0, "510px"],
+    ["reviews", 400, 300, 0, "510px"],
+    ["plan", 300, 400, 220, "290px"],
+    ["reviews", 400, 300, 220, "290px"],
+  ])(
+    "reserves terminal space when dragging the %s beside the other panel",
+    async (side, planWidth, dockWidth, explorerWidth, expected) => {
+      const { renderWorkspaceTerminals } = await tabWithDock();
+      renderWorkspaceTerminals([tab()], "tab-1", "acme");
+      await settle();
+      document.querySelector<HTMLButtonElement>(".plan-toggle")?.click();
+      toggle()?.click();
+      await settle();
+      tabPane()!.getBoundingClientRect = () => rect(1000, 1000);
+      planPanel()!.getBoundingClientRect = () =>
+        rect(Number.parseFloat(planPanel()!.style.width) || Number(planWidth), 600);
+      dock()!.getBoundingClientRect = () =>
+        rect(Number.parseFloat(dock()!.style.width) || Number(dockWidth), 1000);
+      planHandle()!.getBoundingClientRect = () => rect(5, 600);
+      dockHandle()!.getBoundingClientRect = () => rect(5, 1000);
+      const explorer = document.querySelector<HTMLElement>(".terminal-explorer")!;
+      explorer.hidden = explorerWidth === 0;
+      explorer.getBoundingClientRect = () => rect(Number(explorerWidth), Number(explorerWidth));
+      const handle = side === "plan" ? planHandle() : dockHandle();
+      handle!.dispatchEvent(new MouseEvent("mousedown", { clientX: 500, bubbles: true }));
+      window.dispatchEvent(new MouseEvent("mousemove", { clientX: 0, bubbles: true }));
+      window.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+      expect((side === "plan" ? planPanel() : dock())?.style.width).toBe(expected);
+    },
+  );
+
+  it("reclaims panel width when the file sidebar opens beside both panels", async () => {
+    const { renderWorkspaceTerminals } = await tabWithDock();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    await settle();
+    dataListener?.("tab-1", "\u001b]7;file:///proj\u0007");
+    await settle();
+    const runSidebarAction = () => {
+      FakeTerminal.instances[0]?.pressKey({ key: "p", metaKey: true });
+      const input = document.querySelector<HTMLInputElement>(".terminal-palette input")!;
+      input.value = "Toggle file sidebar";
+      input.dispatchEvent(new Event("input"));
+      input.dispatchEvent(
+        new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }),
+      );
+    };
+    runSidebarAction();
+    document.querySelector<HTMLButtonElement>(".plan-toggle")?.click();
+    toggle()?.click();
+    await settle();
+    Object.defineProperty(tabPane()!, "clientWidth", { configurable: true, value: 1000 });
+    planPanel()!.getBoundingClientRect = () =>
+      rect(Number.parseFloat(planPanel()!.style.width) || 400, 600);
+    dock()!.getBoundingClientRect = () => rect(Number.parseFloat(dock()!.style.width) || 400, 1000);
+    planHandle()!.getBoundingClientRect = () => rect(5, 600);
+    dockHandle()!.getBoundingClientRect = () => rect(5, 1000);
+    const explorer = document.querySelector<HTMLElement>(".terminal-explorer")!;
+    explorer.getBoundingClientRect = () => rect(220, 220);
+    expect(explorer.hidden).toBe(true);
+    runSidebarAction();
+    expect(explorer.hidden).toBe(false);
+    expect(planPanel()?.style.width).toBe("290px");
+  });
+
+  it("uses persisted pause status even while the linked PR is waiting on a busy agent", async () => {
+    const { renderWorkspaceTerminals } = await tabWithDock();
+    listed = [linkedItem];
+    paused = ["tab-1"];
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    await settle();
+    await settle();
+    const chip = document.querySelector<HTMLButtonElement>(".reviews-chip");
+    chip?.click();
+    expect(document.querySelector(".reviews-chip__menu")?.textContent).toContain("Resume");
+  });
+
   it("restores the dock width this tab was last dragged to", async () => {
     const { renderWorkspaceTerminals } = await tabWithDock();
     window.localStorage.setItem("jarvis.reviewsDockWidth.tab-1", "333");
@@ -2270,6 +2351,7 @@ describe("the terminal tab's reviews dock", () => {
     expect(document.querySelector(".terminal-chips .reviews-chip")?.textContent).toBe(
       "PR #18 · linked ▾",
     );
+    expect(toggle()?.querySelector("span")?.textContent).toBe("Reviews");
     expect(toggle()?.querySelector(".reviews-toggle__count")?.textContent).toBe("2");
 
     // reviews:changed re-reads the list; an unlinked PR takes the chip away.

@@ -66,6 +66,7 @@ export const WAIT_REASONS = [
   "no-link",
   "ambiguous",
   "no-agent",
+  "unsupported",
   "approval-prompt",
   "busy",
   "typing",
@@ -269,7 +270,12 @@ export function parseReviewThread(value: unknown): ReviewThread | undefined {
 
 /** Nothing can receive the comments: no pane, several panes, or no agent. */
 function blocked(reason: ReviewWaitReason | undefined): boolean {
-  return reason === "no-link" || reason === "ambiguous" || reason === "no-agent";
+  return (
+    reason === "no-link" ||
+    reason === "ambiguous" ||
+    reason === "no-agent" ||
+    reason === "unsupported"
+  );
 }
 
 export type ReviewCardChip =

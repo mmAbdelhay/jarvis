@@ -46,6 +46,12 @@ function plan(overrides: Partial<Args> = {}) {
 }
 
 describe("planDelivery", () => {
+  it.each([false, true])("never delivers to unsupported agents with force=%s", (force) => {
+    const unsupported = { ...pane(), unsupported: true };
+    expect(canPaste(unsupported, force)).toBe("unsupported");
+    expect(plan({ pane: unsupported, force })).toEqual({ wait: "unsupported" });
+  });
+
   it("waits with nothing when no comment is queued", () => {
     expect(plan({ queued: [] })).toEqual({ wait: "nothing" });
   });

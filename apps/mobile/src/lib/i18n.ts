@@ -1529,6 +1529,10 @@ export const STRINGS = {
     en: "link one on the laptop to deliver",
     ar: "اربط واحدة على الحاسوب للتسليم",
   },
+  "reviews.wait.unsupported": {
+    en: "agent not supported for auto-delivery",
+    ar: "الوكيل غير مدعوم للتسليم التلقائي",
+  },
   "reviews.wait.noAgent": {
     en: "no agent running · start one to deliver",
     ar: "لا يوجد وكيل يعمل · شغّل واحدًا للتسليم",

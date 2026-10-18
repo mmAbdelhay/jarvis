@@ -3234,6 +3234,8 @@ describe("reviews section", () => {
         gh: { kind: "logged-out" },
         enabled: true,
         repoErrors: { "me/rafiq": "boom" },
+        paused: [],
+        repos: ["me/empty", "me/jarvis", "me/rafiq"],
       });
     };
     jarvis["reviewsList"] = () =>
@@ -3320,12 +3322,12 @@ describe("reviews section", () => {
     const boxes = [
       ...document.querySelectorAll<HTMLInputElement>("#settings-reviews input[data-repo]"),
     ];
-    expect(boxes.map((box) => box.dataset["repo"])).toEqual(["me/jarvis", "me/rafiq"]);
+    expect(boxes.map((box) => box.dataset["repo"])).toEqual(["me/empty", "me/jarvis", "me/rafiq"]);
     boxes[0]!.checked = false;
     change(boxes[0]!);
 
     const config = await saved(calls);
-    expect(config.reviews?.repos).toEqual({ "me/jarvis": false });
+    expect(config.reviews?.repos).toEqual({ "me/empty": false });
   });
 
   it("shows the gh state, and Check again polls before re-reading it", async () => {

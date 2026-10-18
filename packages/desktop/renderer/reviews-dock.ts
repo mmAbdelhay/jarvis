@@ -266,7 +266,11 @@ export type LinkChip = {
   element: HTMLElement;
   /** `item` is the PR linked to this pane (none hides the chip); `all` is
    *  every PR reviews:list knows — the "Link to another PR…" choices. */
-  update(item: ReviewListItem | undefined, all: readonly ReviewListItem[]): void;
+  update(
+    item: ReviewListItem | undefined,
+    all: readonly ReviewListItem[],
+    paused?: readonly string[],
+  ): void;
   dispose(): void;
 };
 
@@ -287,7 +291,8 @@ export function createLinkChip(deps: LinkChipDeps): LinkChip {
   let item: ReviewListItem | undefined;
   let all: readonly ReviewListItem[] = [];
 
-  const paused = (): boolean => item?.waitReason === "paused";
+  let pausedPanes: readonly string[] = [];
+  const paused = (): boolean => pausedPanes.includes(deps.paneKey);
 
   function closeMenu(): void {
     menu.hidden = true;
@@ -358,7 +363,13 @@ export function createLinkChip(deps: LinkChipDeps): LinkChip {
       menu.append(
         menuItem(
           `#${other.pr.number} ${other.pr.title} (${other.pr.repo})`,
-          () => act(() => deps.api.reviewsLink(key, deps.paneKey)),
+          () =>
+            act(async () => {
+              if (current?.link.kind === "linked" && current.link.paneKey === deps.paneKey) {
+                await deps.api.reviewsLink(prKeyOf(current), null);
+              }
+              await deps.api.reviewsLink(key, deps.paneKey);
+            }),
           "reviews-chip__pr",
         ),
       );
@@ -379,7 +390,8 @@ export function createLinkChip(deps: LinkChipDeps): LinkChip {
 
   return {
     element: wrap,
-    update(next, nextAll) {
+    update(next, nextAll, nextPaused = []) {
+      pausedPanes = nextPaused;
       item = next;
       all = nextAll;
       if (next === undefined || next.link.kind !== "linked") {

@@ -39,6 +39,7 @@ const WAIT_KEY: Record<ReviewWaitReason, MessageKey> = {
   "no-link": "reviews.wait.noLink",
   ambiguous: "reviews.wait.ambiguous",
   "no-agent": "reviews.wait.noAgent",
+  unsupported: "reviews.wait.unsupported",
   "approval-prompt": "reviews.wait.approvalPrompt",
   busy: "reviews.wait.busy",
   typing: "reviews.wait.typing",
@@ -212,7 +213,12 @@ function threadTitle(thread: ReviewThread): string {
 }
 
 function blocked(reason: ReviewWaitReason | undefined): boolean {
-  return reason === "no-link" || reason === "ambiguous" || reason === "no-agent";
+  return (
+    reason === "no-link" ||
+    reason === "ambiguous" ||
+    reason === "no-agent" ||
+    reason === "unsupported"
+  );
 }
 
 function LinkCard(props: { language: Language; thread: ReviewThread }) {

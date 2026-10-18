@@ -16,7 +16,7 @@ import {
   type ReviewsDock,
 } from "./reviews-dock.js";
 import { createPane, type TerminalPane } from "./terminal-pane.js";
-import { createSplitTree, type SplitTree } from "./terminal-splits.js";
+import { createSplitTree, MIN_PANE_PX, type SplitTree } from "./terminal-splits.js";
 
 // The Workspace's Terminal tabs.
 //
@@ -125,8 +125,15 @@ const SESSION_PLAN_DEBOUNCE_MS = 300;
  *  jsdom test and the first paint before the tab's own box has a size —
  *  drops the upper bound rather than clamping against a width that is not
  *  really zero. */
-export function clampPlanPanelWidth(width: number, containerWidth: number): number {
-  const max = containerWidth > 0 ? containerWidth * 0.6 : Number.POSITIVE_INFINITY;
+export function clampPlanPanelWidth(
+  width: number,
+  containerWidth: number,
+  otherPanelWidth = 0,
+): number {
+  const max =
+    containerWidth > 0
+      ? Math.max(0, Math.min(containerWidth * 0.6, containerWidth - otherPanelWidth - MIN_PANE_PX))
+      : Number.POSITIVE_INFINITY;
   return Math.min(max, Math.max(300, width));
 }
 
@@ -160,8 +167,15 @@ function savePlanPanelWidth(tabId: string, width: number): void {
 
 /** The reviews dock's width: 280px…60% of the container, the same "no
  *  real layout drops the ceiling" rule as clampPlanPanelWidth. */
-export function clampReviewsDockWidth(width: number, containerWidth: number): number {
-  const max = containerWidth > 0 ? containerWidth * 0.6 : Number.POSITIVE_INFINITY;
+export function clampReviewsDockWidth(
+  width: number,
+  containerWidth: number,
+  otherPanelWidth = 0,
+): number {
+  const max =
+    containerWidth > 0
+      ? Math.max(0, Math.min(containerWidth * 0.6, containerWidth - otherPanelWidth - MIN_PANE_PX))
+      : Number.POSITIVE_INFINITY;
   return Math.min(max, Math.max(280, width));
 }
 
@@ -190,6 +204,7 @@ function saveReviewsDockWidth(tabId: string, width: number): void {
 
 /** Every PR reviews:list last answered with — one read for all tabs. */
 let reviewItems: ReviewListItem[] = [];
+let pausedReviewPanes: string[] = [];
 let reviewsTimer: ReturnType<typeof setTimeout> | undefined;
 let reviewsRequestId = 0;
 /** How long a burst of reviews:changed pushes waits before one re-read. */
@@ -202,16 +217,17 @@ function scheduleReviewsRefresh(delay = REVIEWS_REFRESH_DEBOUNCE_MS): void {
   reviewsTimer = setTimeout(() => {
     reviewsTimer = undefined;
     const id = ++reviewsRequestId;
-    let request: Promise<ReviewListItem[]>;
+    let request: Promise<[ReviewListItem[], { paused: string[] } | undefined]>;
     try {
-      request = Promise.resolve(window.jarvis.reviewsList());
+      request = Promise.all([window.jarvis.reviewsList(), window.jarvis.reviewsStatus?.()]);
     } catch {
       return;
     }
     void request
-      .then((items) => {
+      .then(([items, status]) => {
         if (id !== reviewsRequestId) return; // a newer read is on its way
         reviewItems = Array.isArray(items) ? items : [];
+        pausedReviewPanes = status?.paused ?? [];
         for (const [tabId, pane] of panes) applyReviews(tabId, pane);
       })
       .catch(() => {
@@ -251,7 +267,7 @@ function applyReviews(tabId: string, pane: Pane): void {
       chip = createLinkChip({ api: window.jarvis, paneKey });
       pane.linkChips.set(paneKey, chip);
     }
-    chip.update(linked, reviewItems);
+    chip.update(linked, reviewItems, pausedReviewPanes);
     leaf.setChipExtra(chip.element);
   }
   for (const [paneKey, chip] of pane.linkChips) {
@@ -426,13 +442,29 @@ function trailingWidth(panel: HTMLElement): number {
   return total;
 }
 
+/** Fixed siblings (panels, handles and explorer) share the terminal budget. */
+function otherPanelWidth(panel: HTMLElement, container: HTMLElement): number {
+  let total = 0;
+  for (const side of container.children) {
+    if (
+      side instanceof HTMLElement &&
+      side !== panel &&
+      !side.hidden &&
+      !side.classList.contains("terminal-split")
+    ) {
+      total += side.getBoundingClientRect().width;
+    }
+  }
+  return total;
+}
+
 /** The drag behind both side panels' handles (plan panel, reviews dock). */
 function wireSideHandle(
   handle: HTMLElement,
   panelElement: HTMLElement,
   container: HTMLElement,
   tree: SplitTree,
-  clamp: (width: number, containerWidth: number) => number,
+  clamp: (width: number, containerWidth: number, otherPanelWidth?: number) => number,
   save: (width: number) => void,
 ): void {
   handle.addEventListener("mousedown", (event) => {
@@ -440,12 +472,18 @@ function wireSideHandle(
     let width = clamp(
       panelElement.getBoundingClientRect().width,
       container.getBoundingClientRect().width,
+      otherPanelWidth(panelElement, container),
     );
 
     const onMove = (move: MouseEvent): void => {
       const box = container.getBoundingClientRect();
       if (box.width === 0) return;
-      width = clamp(box.right - trailingWidth(panelElement) - move.clientX, box.width);
+      width = clamp(
+        box.right - trailingWidth(panelElement) - move.clientX,
+        box.width,
+        otherPanelWidth(panelElement, container),
+      );
+      panelElement.style.minWidth = "0";
       panelElement.style.width = `${Math.round(width)}px`;
       for (const leaf of tree.panes()) leaf.refit();
     };
@@ -475,15 +513,22 @@ if (planPanelResizeHost.__reassertPlanPanelWidthOnResize__ !== undefined) {
 }
 const handlePlanPanelWindowResize = (): void => {
   for (const pane of panes.values()) {
-    const sides: [HTMLElement, (width: number, containerWidth: number) => number][] = [
+    const sides: [
+      HTMLElement,
+      (width: number, containerWidth: number, otherPanelWidth?: number) => number,
+    ][] = [
       [pane.planPanel.element, clampPlanPanelWidth],
       [pane.reviewsDock.element, clampReviewsDockWidth],
     ];
     for (const [side, clamp] of sides) {
+      if (side.hidden) continue;
       const current = side.getBoundingClientRect().width;
       if (current <= 0) continue; // no real layout (every jsdom test that never stubs it)
-      const clamped = Math.round(clamp(current, pane.element.clientWidth));
+      const clamped = Math.round(
+        clamp(current, pane.element.clientWidth, otherPanelWidth(side, pane.element)),
+      );
       if (clamped === Math.round(current)) continue;
+      side.style.minWidth = "0";
       side.style.width = `${clamped}px`;
       for (const leaf of pane.tree.panes()) leaf.refit();
     }
@@ -892,7 +937,10 @@ function ensurePane(
           }
         },
         // The sidebar's only way out: no chord, one palette action.
-        () => explorer.toggle(),
+        () => {
+          explorer.toggle();
+          handlePlanPanelWindowResize();
+        },
         // A re-read now, keeping open folders open. The prompt and the
         // sidebar's own on-screen check already do this; the palette entry
         // is for not wanting to wait.
@@ -960,6 +1008,7 @@ function ensurePane(
     // what keeps an auto-open from stealing the terminal's keys.
     onToggle: (open) => {
       planHandle.hidden = !open;
+      if (open) handlePlanPanelWindowResize();
       planToggle.setAttribute("aria-pressed", String(open));
       for (const leaf of built.panes()) leaf.refit();
       // Controller ruling (fix round 1): every close reaching this hook is
@@ -1006,7 +1055,7 @@ function ensurePane(
   reviewsToggle.setAttribute("aria-label", planPanelT("reviewsDockToggle"));
   reviewsToggle.setAttribute("aria-pressed", "false");
   const reviewsToggleText = document.createElement("span");
-  reviewsToggleText.textContent = "PR";
+  reviewsToggleText.textContent = "Reviews";
   const reviewsCount = document.createElement("span");
   reviewsCount.className = "reviews-toggle__count";
   reviewsCount.hidden = true;
@@ -1017,6 +1066,7 @@ function ensurePane(
     api: window.jarvis,
     onToggle: (open) => {
       reviewsHandle.hidden = !open;
+      if (open) handlePlanPanelWindowResize();
       reviewsToggle.setAttribute("aria-pressed", String(open));
       for (const leaf of built.panes()) leaf.refit();
     },

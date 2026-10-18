@@ -244,6 +244,7 @@ async function loadReviewsStatus(): Promise<void> {
     listed = [];
   }
   reviewsSeenRepos = [
+    ...(reviewsStatusCache?.repos ?? []),
     ...listed.map((entry) => entry.pr.repo),
     ...Object.keys(reviewsStatusCache?.repoErrors ?? {}),
   ];

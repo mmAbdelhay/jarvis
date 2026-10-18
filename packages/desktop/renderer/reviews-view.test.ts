@@ -77,6 +77,8 @@ function item(over: Partial<ReviewListItem> = {}): ReviewListItem {
 }
 
 const OK_STATUS: ReviewStatus = {
+  paused: [],
+  repos: [],
   gh: { kind: "ok", login: "mmAbdelhay" },
   enabled: true,
   repoErrors: {},
@@ -208,7 +210,9 @@ describe("Reviews page — list", () => {
   });
 
   it("shows the gh setup state instead of the board when gh is not ok", async () => {
-    const api = fakeApi({ status: { gh: { kind: "logged-out" }, enabled: true, repoErrors: {} } });
+    const api = fakeApi({
+      status: { gh: { kind: "logged-out" }, enabled: true, repoErrors: {}, paused: [], repos: [] },
+    });
     await start(api);
 
     expect(document.getElementById("reviews-setup")?.hidden).toBe(false);
@@ -277,7 +281,7 @@ describe("Reviews page — thread", () => {
     ]);
   });
 
-  it.each(REVIEW_WAIT_LABEL_KEYS.filter((k) => k !== "unsupported" && k !== "nothing"))(
+  it.each(REVIEW_WAIT_LABEL_KEYS.filter((k) => k !== "nothing"))(
     "renders the %s wait reason's label in the link bar",
     async (reason) => {
       const api = fakeApi({

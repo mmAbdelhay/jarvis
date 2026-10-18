@@ -2,12 +2,7 @@ import { randomBytes } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { reviewCommentKey } from "@jarvis/core";
-import type {
-  PrKey,
-  QueuedComment,
-  ReviewComment,
-  ReviewsStore,
-} from "@jarvis/core";
+import type { PrKey, QueuedComment, ReviewComment, ReviewsStore } from "@jarvis/core";
 
 /** The port plus `requeue`, which the controller adds to `ReviewsStore`. */
 export type ReviewStore = ReviewsStore & {
@@ -45,9 +40,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isStringArray(value: unknown): value is string[] {
-  return (
-    Array.isArray(value) && value.every((item) => typeof item === "string")
-  );
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
 
 function isCursor(value: unknown): value is Cursor {
@@ -81,8 +74,7 @@ function isQueuedComment(value: unknown): value is QueuedComment {
     typeof value.state === "string" &&
     STATES.has(value.state) &&
     isComment(value.comment) &&
-    (value.deliveredTo === undefined ||
-      typeof value.deliveredTo === "string") &&
+    (value.deliveredTo === undefined || typeof value.deliveredTo === "string") &&
     (value.deliveredAt === undefined || typeof value.deliveredAt === "number")
   );
 }
@@ -99,9 +91,7 @@ function isFileShape(value: unknown): value is FileShape {
     isRecord(value.comments) &&
     Object.values(value.comments).every(isQueuedComment) &&
     isRecord(value.manualLinks) &&
-    Object.values(value.manualLinks).every(
-      (link) => link === null || typeof link === "string",
-    ) &&
+    Object.values(value.manualLinks).every((link) => link === null || typeof link === "string") &&
     isStringArray(value.paused) &&
     isStringArray(value.notified)
   );
@@ -128,10 +118,7 @@ function byCreatedAt(a: QueuedComment, b: QueuedComment): number {
  * refreshes the comment content. `requeue` is the one way back from
  * `history` to `queued`.
  */
-export function createReviewStore(
-  filePath: string,
-  now: () => number = Date.now,
-): ReviewStore {
+export function createReviewStore(filePath: string, now: () => number = Date.now): ReviewStore {
   let tail: Promise<unknown> = Promise.resolve();
 
   function enqueue<T>(task: () => Promise<T>): Promise<T> {
@@ -150,8 +137,7 @@ export function createReviewStore(
     try {
       text = await readFile(filePath, "utf8");
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT")
-        return emptyFile();
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return emptyFile();
       throw error;
     }
     let parsed: unknown;
@@ -168,10 +154,7 @@ export function createReviewStore(
   async function writeAll(data: FileShape): Promise<void> {
     const dir = dirname(filePath);
     await mkdir(dir, { recursive: true });
-    const tempPath = join(
-      dir,
-      `.${basename(filePath)}.tmp-${randomBytes(8).toString("hex")}`,
-    );
+    const tempPath = join(dir, `.${basename(filePath)}.tmp-${randomBytes(8).toString("hex")}`);
     try {
       await writeFile(tempPath, JSON.stringify(data, null, 2), "utf8");
       await rename(tempPath, filePath);
@@ -186,7 +169,7 @@ export function createReviewStore(
   }
 
   /** `change` returns false when nothing changed, so no write happens. */
-  function modify(change: (data: FileShape) => boolean | void): Promise<void> {
+  function modify(change: (data: FileShape) => boolean | undefined): Promise<void> {
     return enqueue(async () => {
       const data = await readAll();
       if (change(data) === false) return;
@@ -230,9 +213,7 @@ export function createReviewStore(
           // An existing entry keeps its state and delivery fields; only the
           // content is refreshed, so an edited comment shows its latest body.
           data.comments[key] =
-            existing === undefined
-              ? { prKey, comment, state }
-              : { ...existing, comment };
+            existing === undefined ? { prKey, comment, state } : { ...existing, comment };
         }
       });
     },
@@ -259,8 +240,7 @@ export function createReviewStore(
       return enqueue(async () => {
         const data = await readAll();
         const existing = data.comments[key];
-        if (existing === undefined || existing.state !== "history")
-          return false;
+        if (existing === undefined || existing.state !== "history") return false;
         data.comments[key] = { ...existing, state: "queued" };
         await writeAll(data);
         return true;
@@ -281,9 +261,7 @@ export function createReviewStore(
       return read((data) =>
         Object.values(data.comments)
           .filter(
-            (entry) =>
-              entry.state === "queued" &&
-              (prKey === undefined || entry.prKey === prKey),
+            (entry) => entry.state === "queued" && (prKey === undefined || entry.prKey === prKey),
           )
           .sort(byCreatedAt),
       );
