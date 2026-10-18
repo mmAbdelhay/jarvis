@@ -1,0 +1,24 @@
+# synthetic — built from Claude Code's UI (input box between rules, empty "> " prompt, status line below); launching claude makes network calls.
+> run the unit tests for the session package
+
+⏺ I'll run the session package tests.
+
+⏺ Bash(pnpm vitest run packages/core/src/session)
+  ⎿   ✓ packages/core/src/session/awaiting-input.test.ts (14 tests) 6ms
+      ✓ packages/core/src/session/label.test.ts (9 tests) 4ms
+      ✓ packages/core/src/session/manager.test.ts (31 tests) 41ms
+
+      Test Files  3 passed (3)
+           Tests  54 passed (54)
+        Start at  14:02:11
+        Duration  1.12s
+
+⏺ All 54 tests in the session package pass across the three test files. No
+  failures or skipped tests.
+
+✻ Worked for 18s
+
+────────────────────────────────────────────────────────────────────────────────
+> 
+────────────────────────────────────────────────────────────────────────────────
+  ? for shortcuts

@@ -1,0 +1,14 @@
+# synthetic — built from Claude Code's UI (spinner line with "esc to interrupt" above the input box while a turn runs); launching claude makes network calls.
+> run the unit tests for the session package
+
+⏺ I'll run the session package tests.
+
+⏺ Bash(pnpm vitest run packages/core/src/session)
+  ⎿  Running…
+
+✶ Percolating… (12s · ↑ 1.4k tokens · esc to interrupt)
+
+────────────────────────────────────────────────────────────────────────────────
+> 
+────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ accept edits on (shift+tab to cycle)

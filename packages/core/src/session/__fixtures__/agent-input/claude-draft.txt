@@ -1,0 +1,15 @@
+# synthetic — built from Claude Code's UI (the idle input box with half-typed text after "> "); launching claude makes network calls.
+> run the unit tests for the session package
+
+⏺ Bash(pnpm vitest run packages/core/src/session)
+  ⎿   Test Files  3 passed (3)
+           Tests  54 passed (54)
+
+⏺ All 54 tests in the session package pass.
+
+✻ Worked for 18s
+
+────────────────────────────────────────────────────────────────────────────────
+> now fix the lint warning in label.ts and
+────────────────────────────────────────────────────────────────────────────────
+  ? for shortcuts

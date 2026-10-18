@@ -1,0 +1,16 @@
+# synthetic — built from Claude Code's Bash permission dialog ("Do you want to proceed?" / "❯ 1. Yes"); launching claude makes network calls.
+> delete the build output and rebuild
+
+⏺ I'll remove the stale build output first.
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ Bash command                                                                 │
+│                                                                              │
+│   rm -rf packages/desktop/dist                                               │
+│   Remove the stale desktop build output                                      │
+│                                                                              │
+│ Do you want to proceed?                                                      │
+│ ❯ 1. Yes                                                                     │
+│   2. Yes, and don't ask again for rm commands in /Users/me/projects/jarvis   │
+│   3. No, and tell Claude what to do differently (esc)                        │
+╰──────────────────────────────────────────────────────────────────────────────╯
