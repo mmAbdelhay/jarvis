@@ -592,7 +592,11 @@ describe("plans:send", () => {
   };
 
   function sendDeps(
-    overrides: { list?: (typeof comment)[]; paneExited?: boolean; state?: Partial<PaneState> } = {},
+    overrides: {
+      list?: (typeof comment)[];
+      paneExited?: boolean;
+      state?: Partial<PaneState> & { agentPresent?: boolean; idleSupported?: boolean };
+    } = {},
   ) {
     const write = vi.fn();
     const markSent = vi.fn(async () => undefined);
@@ -655,10 +659,56 @@ describe("plans:send", () => {
       const allowed = state.input === "busy";
       expect(
         await call(createDispatchTable(deps), "plans:send", "pane-1", "/plans/x.md", ["c1"], true),
-      ).toEqual(allowed ? { ok: true, sent: 1 } : { ok: false, reason: "busy" });
+      ).toEqual(
+        allowed
+          ? { ok: true, sent: 1 }
+          : { ok: false, reason: state.input === "approval-prompt" ? "approval" : "no-agent" },
+      );
       expect(write).toHaveBeenCalledTimes(allowed ? 1 : 0);
       expect(markSent).toHaveBeenCalledTimes(allowed ? 1 : 0);
     }
+  });
+
+  it.each([
+    [{ paused: true }, { ok: true, sent: 1 }],
+    [
+      { hasAgent: false, agentPresent: true, idleSupported: false, input: "unknown" },
+      { ok: true, sent: 1 },
+    ],
+    [
+      { hasAgent: false, agentPresent: false, idleSupported: false },
+      { ok: false, reason: "no-agent" },
+    ],
+    [{ input: "approval-prompt" }, { ok: false, reason: "approval" }],
+    [{ draft: true }, { ok: false, reason: "busy" }],
+    [{ quietMs: 1999 }, { ok: false, reason: "busy" }],
+  ] as const)("uses the plan-specific gate for %j", async (state, expected) => {
+    const { deps, write, markSent } = sendDeps({ state });
+    expect(
+      await call(createDispatchTable(deps), "plans:send", "pane-1", "/plans/x.md", ["c1"]),
+    ).toEqual(expected);
+    expect(write).toHaveBeenCalledTimes(expected.ok ? 1 : 0);
+    expect(markSent).toHaveBeenCalledTimes(expected.ok ? 1 : 0);
+  });
+
+  it("registers a successful paste before marking sent, but not a failed write", async () => {
+    const { deps, write, markSent } = sendDeps();
+    const notePaste = vi.fn();
+    deps.reviews.notePaste = notePaste;
+    await call(createDispatchTable(deps), "plans:send", "pane-1", "/plans/x.md", ["c1"]);
+    expect(notePaste).toHaveBeenCalledWith("pane-1");
+    expect(write.mock.invocationCallOrder[0]).toBeLessThan(notePaste.mock.invocationCallOrder[0]!);
+    expect(notePaste.mock.invocationCallOrder[0]).toBeLessThan(
+      markSent.mock.invocationCallOrder[0]!,
+    );
+    notePaste.mockClear();
+    write.mockImplementation(() => {
+      throw new Error("write failed");
+    });
+    await expect(
+      call(createDispatchTable(deps), "plans:send", "pane-1", "/plans/x.md", ["c1"]),
+    ).rejects.toThrow();
+    expect(notePaste).not.toHaveBeenCalled();
   });
 
   it("does not mark sent when writing throws", async () => {

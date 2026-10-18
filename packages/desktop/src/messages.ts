@@ -315,8 +315,14 @@ export const MESSAGES = {
     language === "ar" ? "حدث خطأ ما. حاول مرة أخرى." : "Something went wrong. Try again.",
   planSendErrorBusy: (language: "ar" | "en"): string =>
     language === "ar"
-      ? "الوكيل مشغول — سيتم الإرسال عندما يصبح جاهزًا"
-      : "Agent busy — will send when idle",
+      ? "الوكيل مشغول — حاول مجددًا عندما يصبح جاهزًا"
+      : "Agent busy — try again when idle",
+  planSendErrorApproval: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "الوكيل ينتظر موافقة — أجب عنها في الطرفية أولًا"
+      : "The agent is waiting for an approval — answer it in the terminal first",
+  planSendErrorNoAgent: (language: "ar" | "en"): string =>
+    language === "ar" ? "لا يوجد وكيل يعمل في هذه اللوحة" : "No agent is running in this pane",
   planSendAnyway: (language: "ar" | "en"): string =>
     language === "ar" ? "إرسال على أي حال" : "Send anyway",
   planSendErrorNoComments: (language: "ar" | "en"): string =>

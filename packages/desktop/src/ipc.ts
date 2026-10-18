@@ -1113,8 +1113,13 @@ export type RendererApi = {
     paneKey: string,
     path: string,
     commentIds: string[],
+    force?: boolean,
   ): Promise<
-    { ok: true; sent: number } | { ok: false; reason: "no-comments" | "forbidden" | "no-pane" }
+    | { ok: true; sent: number }
+    | {
+        ok: false;
+        reason: "no-comments" | "forbidden" | "no-pane" | "busy" | "approval" | "no-agent";
+      }
   >;
   /** A plan file main is watching changed on disk. `path` is the file
    *  itself, never its contents — the renderer re-reads with

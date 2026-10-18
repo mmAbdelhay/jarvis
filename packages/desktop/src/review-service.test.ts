@@ -397,6 +397,36 @@ describe("review service delivery", () => {
     expect(h.writes).toHaveLength(0);
   });
 
+  it("exposes process presence separately from unsupported idle markers", async () => {
+    const h = harness();
+    h.setAgents([agentIn(PANE, "copilot")]);
+    expect(await h.service.paneStateOf(PANE)).toMatchObject({
+      hasAgent: false,
+      agentPresent: true,
+      idleSupported: false,
+    });
+    h.setAgents([]);
+    expect(await h.service.paneStateOf(PANE)).toMatchObject({
+      hasAgent: false,
+      agentPresent: false,
+    });
+    h.service.dispose();
+  });
+
+  it("holds review delivery after an external plan paste until fresh output", async () => {
+    const h = harness();
+    await h.advance(3000);
+    h.service.notePaste(PANE);
+    await withQueued(h);
+    await h.advance(3000);
+    expect(h.writes).toHaveLength(0);
+    expect((await h.service.paneStateOf(PANE)).input).toBe("busy");
+    h.output(PANE, IDLE_TAIL);
+    await h.advance(2000);
+    expect(h.writes).toHaveLength(1);
+    h.service.dispose();
+  });
+
   it("reads Codex panes with the openai markers", async () => {
     const h = harness();
     h.setAgents([agentIn(PANE, "codex")]);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { planDelivery } from "./delivery.js";
+import { canPaste, planDelivery } from "./delivery.js";
 import type { PaneState } from "./delivery.js";
 import type { QueuedComment } from "./types.js";
 
@@ -138,5 +138,21 @@ describe("planDelivery", () => {
     ];
     const result = plan({ queued: list });
     expect(result).toEqual({ send: [list[0], list[3]] });
+  });
+});
+
+describe("canPaste", () => {
+  it.each([
+    [{}, false, "send"],
+    [{ paused: true }, false, "send"],
+    [{ hasAgent: false }, true, "no-agent"],
+    [{ input: "approval-prompt" }, true, "approval-prompt"],
+    [{ input: "busy" }, false, "busy"],
+    [{ quietMs: 1999 }, false, "busy"],
+    [{ sinceKeystrokeMs: 9999 }, false, "typing"],
+    [{ draft: true }, false, "typing"],
+    [{ input: "busy", draft: true, quietMs: 0 }, true, "send"],
+  ] as const)("gates pane %j with force=%s", (state, force, expected) => {
+    expect(canPaste(pane(state), force)).toBe(expected);
   });
 });

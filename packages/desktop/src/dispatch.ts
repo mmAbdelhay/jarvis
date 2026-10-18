@@ -18,8 +18,7 @@
 import {
   anchorComments,
   formatFeedback,
-  planDelivery,
-  prKey,
+  canPaste,
   isSessionState,
   readPrompt,
   type HandleOptions,
@@ -412,6 +411,7 @@ export type DispatchDeps = {
   reviews: Pick<
     ReviewService,
     | "paneStateOf"
+    | "notePaste"
     | "status"
     | "list"
     | "thread"
@@ -1627,35 +1627,33 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
         // Use the service's fresh process scan and idle/typing/hold state.
         // Plan comments are explicitly selected, so they need no review batching delay.
         const state = await deps.reviews.paneStateOf(paneKeyArg);
-        const delivery = planDelivery({
-          now: Date.now(),
-          queued: [
-            {
-              prKey: prKey("jarvis/plan", 1),
-              comment: {
-                id: "plan-feedback",
-                kind: "issue",
-                author: "",
-                isBot: false,
-                body: feedback,
-                createdAt: 0,
-              },
-              state: "queued",
-            },
-          ],
-          link: { kind: "linked", paneKey: paneKeyArg, how: "manual" },
-          pane: state,
-          batchMs: 0,
-          force: forceArg === true,
-        });
-        if ("wait" in delivery) return { ok: false, reason: "busy" };
+        const agentPresent = state.agentPresent ?? state.hasAgent;
+        if (!agentPresent) return { ok: false, reason: "no-agent" };
+        // Vendors without idle markers retain the pre-gate plan send behavior.
+        if (state.idleSupported !== false) {
+          const delivery = canPaste({ ...state, hasAgent: agentPresent }, forceArg === true);
+          if (delivery !== "send") {
+            return {
+              ok: false,
+              reason:
+                delivery === "approval-prompt"
+                  ? "approval"
+                  : delivery === "no-agent"
+                    ? "no-agent"
+                    : "busy",
+            };
+          }
+        }
       }
 
       // The same path terminal:input writes through — ShellManager.write —
       // so a plan comment lands in the pane exactly as if the user had
       // pasted it themselves.
       if (sessionTarget !== undefined) sessions.write(sessionTarget, bracketedSubmit(feedback));
-      else deps.shells.write(paneKeyArg, bracketedSubmit(feedback));
+      else {
+        deps.shells.write(paneKeyArg, bracketedSubmit(feedback));
+        deps.reviews.notePaste(paneKeyArg);
+      }
       try {
         await deps.plans.comments.markSent(selected.map((comment) => comment.id));
       } catch (error) {

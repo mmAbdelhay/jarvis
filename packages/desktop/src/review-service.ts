@@ -7,6 +7,7 @@
 // delays, a wrong one types into a shell or answers an approval menu.
 
 import {
+  AGENT_INPUT_MARKERS,
   buildCommentsMessage,
   planDelivery,
   prKey as makePrKey,
@@ -140,8 +141,14 @@ export type ReviewService = {
   postSummary(prKey: PrKey): Promise<DeliveryOutcome>;
   pollNow(): Promise<void>;
   /** The delivery gate's view of one pane, from a fresh process scan. Shared
-   *  with the Plan panel's send (Task 14). */
-  paneStateOf(paneKey: string): Promise<PaneState>;
+   *  with the Plan panel's send (Task 14). agentPresent and idleSupported
+   *  distinguish an absent process from a vendor without idle markers;
+   *  hasAgent keeps the conservative review-delivery interpretation. */
+  paneStateOf(
+    paneKey: string,
+  ): Promise<PaneState & { agentPresent?: boolean; idleSupported?: boolean }>;
+  /** Register any successful external paste so reviews wait for fresh output. */
+  notePaste(paneKey: string): void;
   onChanged(cb: (prKey: PrKey | null) => void): () => void;
   onNotify(cb: (e: ReviewNotify) => void): () => void;
   /** Resolves once no evaluation is running or queued. */
@@ -277,7 +284,7 @@ export function createReviewService(deps: ReviewServiceDeps): ReviewService {
     );
   }
 
-  async function paneStateOf(paneKey: string): Promise<PaneState> {
+  async function paneStateOf(paneKey: string): ReturnType<ReviewService["paneStateOf"]> {
     const [processes, paused] = await Promise.all([deps.scanAgents(), deps.store.paused()]);
     const now = deps.now();
     // The newest agent in the pane is the one at its prompt (an agent
@@ -296,9 +303,10 @@ export function createReviewService(deps: ReviewServiceDeps): ReviewService {
     const input = holding && read === "idle-input" ? "busy" : read;
     const keystroke = deps.terminal.lastKeystrokeAt(paneKey);
     return {
-      // An agent whose vendor has no idle markers can never be read as
-      // idle, and "Deliver now" skips the idle check — so it counts as no
-      // agent at all, the one state no path ever pastes into.
+      agentPresent: found !== undefined,
+      idleSupported: vendor !== undefined && Object.hasOwn(AGENT_INPUT_MARKERS, vendor),
+      // Review delivery still refuses vendors whose input cannot be read,
+      // including forced delivery. Plans use the process facts above.
       hasAgent: found !== undefined && vendor !== undefined && input !== "unknown",
       input,
       draft: vendor === undefined ? false : inputLineHasDraft(tail, vendor),
@@ -308,15 +316,19 @@ export function createReviewService(deps: ReviewServiceDeps): ReviewService {
     };
   }
 
+  function notePaste(paneKey: string): void {
+    const at = deps.now();
+    lastOutput.set(paneKey, at);
+    awaitingOutput.set(paneKey, at);
+  }
+
   /** Writes `text` as one bracketed paste; false when the write threw. */
   function paste(paneKey: string, text: string): boolean {
     // dispose() may have run while this evaluation awaited the scan.
     if (disposed) return false;
     try {
       deps.shells.write(paneKey, bracketedSubmit(text));
-      const at = deps.now();
-      lastOutput.set(paneKey, at);
-      awaitingOutput.set(paneKey, at);
+      notePaste(paneKey);
       return true;
     } catch (error) {
       console.error(
@@ -730,6 +742,7 @@ export function createReviewService(deps: ReviewServiceDeps): ReviewService {
     },
 
     paneStateOf,
+    notePaste,
 
     onChanged(cb) {
       changedListeners.add(cb);

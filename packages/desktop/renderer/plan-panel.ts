@@ -28,7 +28,10 @@ export type PlanPanelApi = {
     force?: boolean,
   ): Promise<
     | { ok: true; sent: number }
-    | { ok: false; reason: "no-comments" | "forbidden" | "no-pane" | "busy" }
+    | {
+        ok: false;
+        reason: "no-comments" | "forbidden" | "no-pane" | "busy" | "approval" | "no-agent";
+      }
   >;
 };
 
@@ -305,6 +308,10 @@ function planSendErrorKey(reason: PlanSendError["reason"]): MessageKey {
   switch (reason) {
     case "busy":
       return "planSendErrorBusy";
+    case "approval":
+      return "planSendErrorApproval";
+    case "no-agent":
+      return "planSendErrorNoAgent";
     case "no-comments":
       return "planSendErrorNoComments";
     case "forbidden":

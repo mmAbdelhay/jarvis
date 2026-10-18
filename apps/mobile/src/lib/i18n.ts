@@ -394,6 +394,18 @@ export const STRINGS = {
   "plans.repo": { en: "Repository", ar: "المستودع" },
   "plans.noPlans": { en: "No plans found.", ar: "لم يتم العثور على خطط." },
   "plans.loadFailed": { en: "Couldn't load plans.", ar: "تعذّر تحميل الخطط." },
+  "plans.error.busy": {
+    en: "Agent busy — try again when idle",
+    ar: "الوكيل مشغول — حاول مجددًا عندما يصبح جاهزًا",
+  },
+  "plans.error.approval": {
+    en: "The agent is waiting for an approval — answer it in the terminal first",
+    ar: "الوكيل ينتظر موافقة — أجب عنها في الطرفية أولًا",
+  },
+  "plans.error.noAgent": {
+    en: "No agent is running in this pane",
+    ar: "لا يوجد وكيل يعمل في هذه اللوحة",
+  },
   "plans.error.sendFailed": { en: "Couldn't send comments.", ar: "تعذّر إرسال التعليقات." },
   "plans.error.saveFailed": { en: "Couldn't save changes.", ar: "تعذّر حفظ التغييرات." },
   "plans.error.conflict": { en: "Changed on disk", ar: "تغيّرت الخطة على القرص" },

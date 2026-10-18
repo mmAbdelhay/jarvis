@@ -239,6 +239,7 @@ export function fakeDeps(overrides: Partial<DispatchDeps> = {}): DispatchDeps {
     },
     openExternal: vi.fn(async () => {}),
     reviews: {
+      notePaste: vi.fn(),
       paneStateOf: vi.fn(async () => ({
         hasAgent: true,
         input: "idle-input" as const,

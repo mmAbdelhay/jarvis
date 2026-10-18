@@ -1008,3 +1008,19 @@ describe("MESSAGES: daemon", () => {
     );
   });
 });
+
+it("explains plan send refusals in both languages", () => {
+  expect(MESSAGES.planSendErrorBusy("en")).toBe("Agent busy — try again when idle");
+  expect(MESSAGES.planSendErrorApproval("en")).toBe(
+    "The agent is waiting for an approval — answer it in the terminal first",
+  );
+  expect(MESSAGES.planSendErrorNoAgent("en")).toBe("No agent is running in this pane");
+  for (const key of [
+    "planSendErrorBusy",
+    "planSendErrorApproval",
+    "planSendErrorNoAgent",
+  ] as const) {
+    expect(MESSAGES[key]("ar")).toBeTruthy();
+    expect(MESSAGES[key]("ar")).not.toBe(MESSAGES[key]("en"));
+  }
+});

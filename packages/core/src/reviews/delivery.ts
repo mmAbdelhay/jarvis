@@ -30,6 +30,20 @@ export type DeliveryWait =
 
 export type DeliveryPlan = { send: QueuedComment[] } | { wait: DeliveryWait };
 
+/** Shared pane safety gate. Review pause and batching belong to the caller. */
+export function canPaste(
+  pane: PaneState | undefined,
+  force: boolean,
+): "send" | "no-agent" | "approval-prompt" | "busy" | "typing" {
+  if (!pane?.hasAgent) return "no-agent";
+  if (pane.input === "approval-prompt") return "approval-prompt";
+  if (!force) {
+    if (pane.input !== "idle-input" || pane.quietMs < DELIVERY_QUIET_MS) return "busy";
+    if (pane.sinceKeystrokeMs < DELIVERY_TYPING_MS || pane.draft) return "typing";
+  }
+  return "send";
+}
+
 /**
  * Decides whether the queued comments for one PR may be pasted into its pane now.
  * `force` ("Deliver now") skips the busy, quiet, typing and batching checks, but never
@@ -52,13 +66,10 @@ export function planDelivery(args: {
   if (link.kind === "none") return { wait: "no-link" };
   if (link.kind === "ambiguous") return { wait: "ambiguous" };
   if (pane?.paused) return { wait: "paused" };
-  if (!pane?.hasAgent) return { wait: "no-agent" };
-  if (pane.input === "approval-prompt") return { wait: "approval-prompt" };
+  const paste = canPaste(pane, force);
+  if (paste !== "send") return { wait: paste };
 
   if (!force) {
-    if (pane.input !== "idle-input") return { wait: "busy" };
-    if (pane.quietMs < DELIVERY_QUIET_MS) return { wait: "busy" };
-    if (pane.sinceKeystrokeMs < DELIVERY_TYPING_MS || pane.draft) return { wait: "typing" };
     const newest = Math.max(...pending.map((q) => q.comment.createdAt));
     if (now - newest < batchMs) return { wait: "batching" };
   }
