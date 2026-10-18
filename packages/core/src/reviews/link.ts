@@ -7,23 +7,33 @@ export type PaneFacts = {
   exited: boolean;
 };
 
+export type LinkResult =
+  | { kind: "linked"; paneKey: string; how: "manual" | "auto" }
+  | { kind: "none" }
+  | { kind: "ambiguous"; paneKeys: string[] };
+
 export function resolveLink(
   pr: PullRequest,
   panes: PaneFacts[],
-  manual: ReadonlyMap<PrKey, string>,
+  manual: ReadonlyMap<PrKey, string | null>,
   autoLink: boolean,
-):
-  | { kind: "linked"; paneKey: string; how: "manual" | "auto" }
-  | { kind: "none" }
-  | { kind: "ambiguous"; paneKeys: string[] } {
-  const manualKey = manual.get(prKey(pr.repo, pr.number));
-  if (manualKey !== undefined && panes.some((pane) => pane.paneKey === manualKey && !pane.exited)) {
+): LinkResult {
+  const key = prKey(pr.repo, pr.number);
+  const manualKey = manual.get(key);
+  if (manual.has(key) && manualKey === null) return { kind: "none" };
+  if (
+    typeof manualKey === "string" &&
+    panes.some((pane) => pane.paneKey === manualKey && !pane.exited)
+  ) {
     return { kind: "linked", paneKey: manualKey, how: "manual" };
   }
   if (!autoLink) return { kind: "none" };
 
   const matches = panes.filter(
-    (pane) => !pane.exited && pane.repo === pr.repo && pane.branch === pr.headRef,
+    (pane) =>
+      !pane.exited &&
+      pane.repo?.toLowerCase() === pr.repo.toLowerCase() &&
+      pane.branch === pr.headRef,
   );
   const match = matches[0];
   if (matches.length > 1) {

@@ -21,6 +21,20 @@ const matching: PaneFacts = {
 };
 
 describe("resolveLink", () => {
+  it("matches repo owner and name case-insensitively", () => {
+    expect(resolveLink(pr, [{ ...matching, repo: "Owner/Name" }], new Map(), true)).toEqual({
+      kind: "linked",
+      paneKey: "matching",
+      how: "auto",
+    });
+  });
+
+  it("honors an explicit unlink even when a live pane matches", () => {
+    expect(resolveLink(pr, [matching], new Map([["owner/name#42", null]]), true)).toEqual({
+      kind: "none",
+    });
+  });
+
   it("prefers a manual link to a live pane over a branch match", () => {
     expect(
       resolveLink(
