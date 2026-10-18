@@ -2,8 +2,12 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { inputLineHasDraft, readAgentInputState } from "./agent-input-state.js";
 
+// Drops the "# synthetic" provenance line, so it is never part of a tail.
 const fixture = (name: string): string =>
-  readFileSync(new URL(`./__fixtures__/agent-input/${name}.txt`, import.meta.url), "utf8");
+  readFileSync(new URL(`./__fixtures__/agent-input/${name}.txt`, import.meta.url), "utf8").replace(
+    /^# synthetic.*\n/,
+    "",
+  );
 
 // Re-colours every line and erases it first, the way a TUI redraw arrives
 // in a pane's raw output: the verdict must not depend on the escapes.
@@ -19,6 +23,7 @@ const CASES = [
   { name: "claude-approval", vendor: "anthropic", state: "approval-prompt" },
   { name: "codex-idle", vendor: "openai", state: "idle-input" },
   { name: "codex-busy", vendor: "openai", state: "busy" },
+  { name: "codex-approval", vendor: "openai", state: "approval-prompt" },
 ] as const;
 
 describe("readAgentInputState", () => {
@@ -82,6 +87,77 @@ describe("readAgentInputState", () => {
     expect(readAgentInputState(`${fixture("claude-idle")}${noise}\n`, "anthropic")).not.toBe(
       "idle-input",
     );
+  });
+});
+
+describe("readAgentInputState — long turns, drafts and menus", () => {
+  // A running Claude turn with its todo list and queued messages between
+  // the spinner and the box pushes the spinner far above any fixed window.
+  it("reads a spinner above 18 todo lines and 3 queued messages as busy", () => {
+    const todos = Array.from({ length: 18 }, (_, i) => `     ☐ Step ${i + 1} of the plan`);
+    const tail = [
+      "> work through the plan",
+      "",
+      "✶ Percolating… (2m 4s · ↓ 8.1k tokens · esc to interrupt)",
+      "  ⎿  ☒ Read the spec",
+      ...todos,
+      "",
+      "> also check the docs",
+      "> and the changelog",
+      "> then push",
+      "",
+      "─".repeat(80),
+      "> ",
+      "─".repeat(80),
+      "  ? for shortcuts",
+    ].join("\n");
+    expect(readAgentInputState(tail, "anthropic")).toBe("busy");
+  });
+
+  it("reads an old spinner as finished once a completed-turn line follows it", () => {
+    const tail = fixture("claude-idle").replace(
+      "✻ Worked for 18s",
+      "✶ Percolating… (12s · esc to interrupt)\n✻ Worked for 18s",
+    );
+    expect(readAgentInputState(tail, "anthropic")).toBe("idle-input");
+  });
+
+  it("reads a spinner after the completed-turn line as busy", () => {
+    const tail = fixture("claude-idle").replace(
+      "✻ Worked for 18s",
+      "✻ Worked for 18s\n\n> next\n\n✶ Percolating… (1s · esc to interrupt)",
+    );
+    expect(readAgentInputState(tail, "anthropic")).toBe("busy");
+  });
+
+  it("reads a half-typed Codex draft as busy", () => {
+    const tail = fixture("codex-idle").replace(
+      "› Ask Codex to do anything",
+      "› refactor the auth mod",
+    );
+    expect(readAgentInputState(tail, "openai")).toBe("busy");
+    expect(inputLineHasDraft(tail, "openai")).toBe(true);
+  });
+
+  it("reads a Codex placeholder as an empty composer", () => {
+    for (const placeholder of ["Explain this codebase", "Implement {feature}"]) {
+      const tail = fixture("codex-idle").replace("› Ask Codex to do anything", `› ${placeholder}`);
+      expect(readAgentInputState(tail, "openai")).toBe("idle-input");
+      expect(inputLineHasDraft(tail, "openai")).toBe(false);
+    }
+  });
+
+  // bite-proof: without its "esc to cancel" footer the menu is no longer a
+  // looksLikePrompt match; its "› 1." row must still never pass for a composer.
+  // It must read as approval-prompt, not just busy: that is the state that
+  // also blocks "Deliver now".
+  it("reads a Codex approval menu without its footer as approval-prompt", () => {
+    const tail = fixture("codex-approval").replace(
+      "  Press enter to confirm or esc to cancel\n",
+      "",
+    );
+    expect(tail).not.toContain("esc to cancel");
+    expect(readAgentInputState(tail, "openai")).toBe("approval-prompt");
   });
 });
 
