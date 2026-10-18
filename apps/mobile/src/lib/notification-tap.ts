@@ -12,6 +12,7 @@
 // that fails `parsePushData` — the route string is always built from the
 // already-validated id, never the raw notification payload.
 import { type PushData, parsePushData } from "@jarvis/wire";
+import { isPrKey, reviewRoute } from "./reviews-store";
 
 export const NOTIFICATION_NAV_WAIT_MS = 15_000;
 
@@ -26,10 +27,30 @@ function sessionPlan(data: PushData, sessionIds: ReadonlySet<string>): TapPlan {
   return { route: undefined, reason: "unknown-session" };
 }
 
+const REVIEW_KINDS: ReadonlySet<unknown> = new Set([
+  "review-comment",
+  "review-queued",
+  "review-requested",
+]);
+
+/** A `review-*` push goes to its PR's thread, the route built from the
+ * validated key only; a malformed `pr` falls back to the dashboard.
+ * Checked on the raw value so it works whichever `PushKind`s this build's
+ * wire knows about. */
+function reviewPlan(data: unknown): TapPlan | undefined {
+  if (typeof data !== "object" || data === null || Array.isArray(data)) return undefined;
+  const raw = data as Record<string, unknown>;
+  if (!REVIEW_KINDS.has(raw["kind"])) return undefined;
+  const pr = raw["pr"];
+  return isPrKey(pr) ? { route: reviewRoute(pr) } : { route: undefined, reason: "dashboard" };
+}
+
 /** Rule 8. `data` is whatever `expo-notifications` handed back for a
  * tapped notification's `data` field — still `unknown` until
  * {@link parsePushData} validates it. */
 export function planNavigation(data: unknown, sessionIds: ReadonlySet<string>): TapPlan {
+  const review = reviewPlan(data);
+  if (review !== undefined) return review;
   const parsed = parsePushData(data);
   if (parsed === undefined) {
     return { route: undefined, reason: "invalid" };
@@ -41,7 +62,7 @@ export function planNavigation(data: unknown, sessionIds: ReadonlySet<string>): 
     case "session-failed":
     case "session-waiting":
       return sessionPlan(parsed, sessionIds);
-    case "command-finished":
+    default:
       return { route: undefined, reason: "dashboard" };
   }
 }

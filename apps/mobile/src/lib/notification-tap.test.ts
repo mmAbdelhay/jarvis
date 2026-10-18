@@ -73,6 +73,30 @@ describe("planNavigation (rule 8)", () => {
   });
 });
 
+describe("planNavigation: review pushes", () => {
+  test("a review-comment push routes to /reviews/<encoded pr>", () => {
+    const plan = planNavigation({ kind: "review-comment", pr: "owner/name#18" }, new Set());
+    expect(plan).toEqual({ route: "/reviews/owner%2Fname%2318" });
+  });
+
+  test("review-queued and review-requested route the same way", () => {
+    for (const kind of ["review-queued", "review-requested"]) {
+      expect(planNavigation({ kind, pr: "owner/name#18" }, new Set())).toEqual({
+        route: "/reviews/owner%2Fname%2318",
+      });
+    }
+  });
+
+  test("a malformed pr goes to the dashboard [bite-proof: skip the key check]", () => {
+    for (const pr of ["../x#1", "owner/name", "owner/name#18/../../x", 18, undefined]) {
+      expect(planNavigation({ kind: "review-comment", pr }, new Set())).toEqual({
+        route: undefined,
+        reason: "dashboard",
+      });
+    }
+  });
+});
+
 test("NOTIFICATION_NAV_WAIT_MS is 15_000", () => {
   expect(NOTIFICATION_NAV_WAIT_MS).toBe(15_000);
 });
