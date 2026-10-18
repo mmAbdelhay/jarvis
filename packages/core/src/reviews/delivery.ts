@@ -1,4 +1,5 @@
 import type { AgentInputState } from "../session/agent-input-state.js";
+import type { LinkResult } from "./link.js";
 import type { QueuedComment } from "./types.js";
 
 /** Pane output must be quiet this long before a paste. */
@@ -7,11 +8,6 @@ export const DELIVERY_QUIET_MS = 2_000;
 export const DELIVERY_TYPING_MS = 10_000;
 
 // Mirrors Task 3's resolveLink result; the controller unifies the two once both land.
-type LinkResult =
-  | { kind: "linked"; paneKey: string; how: "manual" | "auto" }
-  | { kind: "none" }
-  | { kind: "ambiguous"; paneKeys: string[] };
-
 export type PaneState = {
   hasAgent: boolean;
   input: AgentInputState;
