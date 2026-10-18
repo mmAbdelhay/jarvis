@@ -18,6 +18,8 @@
 import {
   anchorComments,
   formatFeedback,
+  planDelivery,
+  prKey,
   isSessionState,
   readPrompt,
   type HandleOptions,
@@ -409,6 +411,7 @@ export type DispatchDeps = {
   // and the notifier) nor dispose.
   reviews: Pick<
     ReviewService,
+    | "paneStateOf"
     | "status"
     | "list"
     | "thread"
@@ -1568,7 +1571,7 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
     // pane is checked only once there is something worth writing to it,
     // so an unknown pane with no selected comments still answers
     // "no-comments", not "no-pane" — the more specific reason of the two.
-    "plans:send": async ([paneKeyArg, pathArg, idsArg]) => {
+    "plans:send": async ([paneKeyArg, pathArg, idsArg, forceArg]) => {
       if (typeof paneKeyArg !== "string" || paneKeyArg.length > MAX_PLAN_ARG_CHARS) {
         return { ok: false, reason: "no-pane" };
       }
@@ -1619,6 +1622,34 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
       // proven non-empty above, and formatFeedback only ever throws on an
       // empty comment list.
       const feedback = formatFeedback(pathArg, anchored);
+
+      if (sessionTarget === undefined) {
+        // Use the service's fresh process scan and idle/typing/hold state.
+        // Plan comments are explicitly selected, so they need no review batching delay.
+        const state = await deps.reviews.paneStateOf(paneKeyArg);
+        const delivery = planDelivery({
+          now: Date.now(),
+          queued: [
+            {
+              prKey: prKey("jarvis/plan", 1),
+              comment: {
+                id: "plan-feedback",
+                kind: "issue",
+                author: "",
+                isBot: false,
+                body: feedback,
+                createdAt: 0,
+              },
+              state: "queued",
+            },
+          ],
+          link: { kind: "linked", paneKey: paneKeyArg, how: "manual" },
+          pane: state,
+          batchMs: 0,
+          force: forceArg === true,
+        });
+        if ("wait" in delivery) return { ok: false, reason: "busy" };
+      }
 
       // The same path terminal:input writes through — ShellManager.write —
       // so a plan comment lands in the pane exactly as if the user had

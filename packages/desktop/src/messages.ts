@@ -313,6 +313,12 @@ export const MESSAGES = {
   // more specific detail to translate than "that didn't work".
   planActionError: (language: "ar" | "en"): string =>
     language === "ar" ? "حدث خطأ ما. حاول مرة أخرى." : "Something went wrong. Try again.",
+  planSendErrorBusy: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "الوكيل مشغول — سيتم الإرسال عندما يصبح جاهزًا"
+      : "Agent busy — will send when idle",
+  planSendAnyway: (language: "ar" | "en"): string =>
+    language === "ar" ? "إرسال على أي حال" : "Send anyway",
   planSendErrorNoComments: (language: "ar" | "en"): string =>
     language === "ar" ? "لا يوجد شيء في الانتظار لإرساله." : "There is nothing queued to send.",
   planSendErrorForbidden: (language: "ar" | "en"): string =>

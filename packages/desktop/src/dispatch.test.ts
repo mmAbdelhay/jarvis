@@ -239,6 +239,14 @@ export function fakeDeps(overrides: Partial<DispatchDeps> = {}): DispatchDeps {
     },
     openExternal: vi.fn(async () => {}),
     reviews: {
+      paneStateOf: vi.fn(async () => ({
+        hasAgent: true,
+        input: "idle-input" as const,
+        draft: false,
+        quietMs: 3000,
+        sinceKeystrokeMs: 20000,
+        paused: false,
+      })),
       status: vi.fn(() => ({ gh: null, enabled: true, repoErrors: {} })),
       list: vi.fn(async () => []),
       thread: vi.fn(async () => undefined),

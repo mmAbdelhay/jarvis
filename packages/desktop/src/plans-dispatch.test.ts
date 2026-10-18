@@ -6,7 +6,7 @@
 // this file only overrides what each test cares about, the same pattern
 // remote-workspace.integration.test.ts already follows for a different
 // channel group.
-import type { PlanBlock } from "@jarvis/core";
+import type { PaneState, PlanBlock } from "@jarvis/core";
 import { describe, expect, it, vi } from "vitest";
 import { CHANNEL_POLICY, REMOTE_EFFECT } from "./remote-policy.js";
 import { createDispatchTable, DESKTOP_ORIGIN, type Origin } from "./dispatch.js";
@@ -586,15 +586,29 @@ describe("plans:send", () => {
     id: "c1",
     path: "/plans/x.md",
     blockId: "b1",
-    quote: "",
+    quote: "Do the thing.",
     body: "looks good",
     createdAt: 1,
   };
 
-  function sendDeps(overrides: { list?: (typeof comment)[]; paneExited?: boolean } = {}) {
+  function sendDeps(
+    overrides: { list?: (typeof comment)[]; paneExited?: boolean; state?: Partial<PaneState> } = {},
+  ) {
     const write = vi.fn();
     const markSent = vi.fn(async () => undefined);
     const deps = fakeDeps({
+      reviews: {
+        ...fakeDeps().reviews,
+        paneStateOf: vi.fn(async () => ({
+          hasAgent: true,
+          input: "idle-input" as const,
+          draft: false,
+          quietMs: 3000,
+          sinceKeystrokeMs: 20000,
+          paused: false,
+          ...overrides.state,
+        })),
+      },
       shells: {
         log: vi.fn(() => ""),
         snapshot: vi.fn(() => ({ text: "", end: 0 })),
@@ -621,6 +635,43 @@ describe("plans:send", () => {
     return { deps, write, markSent };
   }
 
+  it("keeps busy comments unsent without writing", async () => {
+    const { deps, write, markSent } = sendDeps({ state: { input: "busy" } });
+    expect(
+      await call(createDispatchTable(deps), "plans:send", "pane-1", "/plans/x.md", ["c1"]),
+    ).toEqual({ ok: false, reason: "busy" });
+    expect(write).not.toHaveBeenCalled();
+    expect(markSent).not.toHaveBeenCalled();
+    expect((await deps.plans.comments.list("/plans/x.md"))[0]?.sentAt).toBeUndefined();
+  });
+
+  it("force sends through busy but never approval prompts or missing agents", async () => {
+    for (const state of [
+      { input: "busy" as const },
+      { input: "approval-prompt" as const },
+      { hasAgent: false },
+    ]) {
+      const { deps, write, markSent } = sendDeps({ state });
+      const allowed = state.input === "busy";
+      expect(
+        await call(createDispatchTable(deps), "plans:send", "pane-1", "/plans/x.md", ["c1"], true),
+      ).toEqual(allowed ? { ok: true, sent: 1 } : { ok: false, reason: "busy" });
+      expect(write).toHaveBeenCalledTimes(allowed ? 1 : 0);
+      expect(markSent).toHaveBeenCalledTimes(allowed ? 1 : 0);
+    }
+  });
+
+  it("does not mark sent when writing throws", async () => {
+    const { deps, write, markSent } = sendDeps();
+    write.mockImplementation(() => {
+      throw new Error("write failed");
+    });
+    await expect(
+      call(createDispatchTable(deps), "plans:send", "pane-1", "/plans/x.md", ["c1"]),
+    ).rejects.toThrow("write failed");
+    expect(markSent).not.toHaveBeenCalled();
+  });
+
   it("writes exactly the bracketed-paste bytes to the fake shell and marks the comment sent", async () => {
     const { deps, write, markSent } = sendDeps();
     const table = createDispatchTable(deps);
@@ -634,9 +685,10 @@ describe("plans:send", () => {
     expect(bytes.startsWith("\u001b[200~")).toBe(true);
     expect(bytes.endsWith("\u001b[201~\r")).toBe(true);
     expect(bytes).toBe(
-      `\u001b[200~Comments on /plans/x.md:\n\n1. On the section "Do the thing.": looks good\n\nPlease update the plan to address these.\u001b[201~\r`,
+      `\u001b[200~Comments on /plans/x.md:\n\n1. On "Do the thing.": looks good\n\nPlease update the plan to address these.\u001b[201~\r`,
     );
     expect(markSent).toHaveBeenCalledWith(["c1"]);
+    expect(write.mock.invocationCallOrder[0]).toBeLessThan(markSent.mock.invocationCallOrder[0]!);
   });
 
   it("sends to a live session by its id when no terminal pane has that key", async () => {
@@ -674,7 +726,7 @@ describe("plans:send", () => {
     await call(table, "plans:send", "pane-1", "/plans/x.md", ["c1"]);
 
     const [, bytes] = write.mock.calls[0] as [string, string];
-    expect(bytes).toContain('2. On the section "Do the thing.": looks good');
+    expect(bytes).toContain('2. On "Do the thing.": looks good');
     expect(bytes).not.toContain("1. ");
   });
 
