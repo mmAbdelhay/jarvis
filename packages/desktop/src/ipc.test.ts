@@ -2207,6 +2207,47 @@ describe("terminal handlers", () => {
     };
   }
 
+  // Reviews seams (Task 9): where a pane's shell is now, and when it was
+  // last typed into.
+  function reviewSeams(log: string, realPath: (path: string) => string = (path) => path) {
+    const { manager } = shells();
+    const handlers = createTerminalHandlers({
+      shells: { ...manager, log: () => log },
+      openTerminalTab: () => "tab-7",
+      projects: { acme: "/p/acme" },
+      language: "en",
+      terminal: terminalConfig,
+      terminalScrollback: 5000,
+      files: { readDir: () => [], realPath },
+    });
+    handlers.open("acme");
+    return handlers;
+  }
+
+  it("paneCwd is the start directory until the shell reports one with OSC 7", () => {
+    expect(reviewSeams("$ ls\r\n").paneCwd("tab-7")).toBe("/p/acme");
+    expect(reviewSeams("").paneCwd("nope")).toBeUndefined();
+  });
+
+  it("paneCwd follows the last valid OSC 7 report", () => {
+    const log = "\u001b]7;file:///p/acme/a\u0007$ cd b\r\n\u001b]7;file:///p/acme/b\u0007$ ";
+    expect(reviewSeams(log).paneCwd("tab-7")).toBe("/p/acme/b");
+  });
+
+  it("paneCwd is unknown when the last OSC 7 report leaves the pane's project", () => {
+    const log = "\u001b]7;file:///p/acme/a\u0007$ \u001b]7;file:///etc\u0007$ ";
+    expect(reviewSeams(log).paneCwd("tab-7")).toBeUndefined();
+  });
+
+  it("lastKeystrokeAt records terminal input per pane", () => {
+    const handlers = reviewSeams("");
+    expect(handlers.lastKeystrokeAt("tab-7")).toBeUndefined();
+    const before = Date.now();
+    handlers.input("tab-7", "x");
+    expect(handlers.lastKeystrokeAt("tab-7")).toBeGreaterThanOrEqual(before);
+    expect(handlers.lastKeystrokeAt("tab-8")).toBeUndefined();
+  });
+
   it("opens a terminal tab and starts a shell in the project's directory", () => {
     const { manager, started } = shells();
     const opened: string[] = [];

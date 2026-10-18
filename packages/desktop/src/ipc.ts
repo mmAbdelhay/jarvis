@@ -2246,6 +2246,17 @@ export type TerminalHandlers = {
    *  under a project actually open in a terminal — never every configured
    *  project, and never one that used to be open and has since closed. */
   paneStartDirs(): readonly string[];
+  /** Where `paneKey`'s shell is now, for the Reviews PR link: the last OSC 7
+   *  report in the pane's retained output, else its start directory. A
+   *  report is honoured only inside the pane's project (resolveWithin, as
+   *  `chips` does); when the last one is outside it, `undefined` — the
+   *  pane is somewhere this process will not describe, and an older report
+   *  or the start directory would name a repository it has left. A pane in
+   *  no configured project takes any absolute report. */
+  paneCwd(paneKey: string): string | undefined;
+  /** When `paneKey` last received a `terminal:input` write (desktop or
+   *  phone), epoch ms; `undefined` if never in this process. */
+  lastKeystrokeAt(paneKey: string): number | undefined;
 };
 
 /** The chip row above a terminal's prompt — a runtime version, the
@@ -2530,6 +2541,8 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
   // only a tab id, and both directory affinity and path completion are
   // meaningless without the cwd behind it.
   const directories = new Map<string, string>();
+  // Last `terminal:input` per pane key — the Reviews "user is typing" gate.
+  const keystrokes = new Map<string, number>();
 
   /** Where a tab's shells are running. The tab's own key first; failing
    *  that, any pane the tab has split off — closing the first pane of a
@@ -2686,6 +2699,7 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
       // Both arguments cross an untyped IPC boundary; a keystroke stream is
       // no reason to relax that.
       if (!isString(tabId) || !isString(data)) return;
+      keystrokes.set(tabId, Date.now());
       deps.shells.write(tabId, data);
     },
 
@@ -3132,7 +3146,45 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
     paneStartDirs() {
       return [...new Set(directories.values())];
     },
+
+    paneCwd(paneKey) {
+      if (!isString(paneKey)) return undefined;
+      const start = directories.get(paneKey) ?? directoryOf(paneKey.split(":")[0] ?? paneKey);
+      if (start === undefined) return undefined;
+      const reported = lastOsc7(deps.shells.log(paneKey));
+      if (reported === undefined) return start;
+      if (projectFor(start) === undefined) return isAbsolute(reported) ? reported : undefined;
+      return liveCwd(start, reported);
+    },
+
+    lastKeystrokeAt(paneKey) {
+      return isString(paneKey) ? keystrokes.get(paneKey) : undefined;
+    },
   };
+}
+
+const OSC7_START = "\u001b]7;file://";
+
+/** The path of the last complete OSC 7 report (`ESC ] 7 ; file://<path>`
+ *  ended by BEL or ESC \\) in `log` — the form the shell integrations
+ *  print at every prompt — or undefined when there is none. */
+function lastOsc7(log: string): string | undefined {
+  let from = log.length;
+  while (from > 0) {
+    const at = log.lastIndexOf(OSC7_START, from - 1);
+    if (at === -1) return undefined;
+    const rest = log.slice(at + OSC7_START.length, at + OSC7_START.length + 4096);
+    const bel = rest.indexOf("\u0007");
+    const st = rest.indexOf("\u001b\\");
+    const end = bel === -1 ? st : st === -1 ? bel : Math.min(bel, st);
+    if (end !== -1) {
+      const path = rest.slice(0, end);
+      return path === "" ? undefined : path;
+    }
+    // Cut off mid-sequence (the shell is still printing it): the one before.
+    from = at;
+  }
+  return undefined;
 }
 
 export type ApiHandlers = ApiEditHandlers & {

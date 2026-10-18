@@ -71,6 +71,7 @@ import { createWebManifestLoader, nodeWebExportFs } from "../web-export.js";
 import { disableRemoteOnDisk } from "../remote-idle.js";
 import { obtainCertificate, type TailscaleCertDeps } from "../tailscale-cert.js";
 import { createNotifier } from "../notify.js";
+import { createReviewService } from "../review-service.js";
 import { createDockerFollowers } from "../docker-followers.js";
 import { createSetupHandlers } from "../ipc.js";
 import {
@@ -83,6 +84,8 @@ import {
   SessionManager,
   greetingText,
   scanDirtyProjects,
+  createReviewPoller,
+  DEFAULT_REVIEWS_CONFIG,
 } from "@jarvis/core";
 import type { Session as CoreSession, TabKind, WorkspaceTab } from "@jarvis/core";
 import {
@@ -127,6 +130,8 @@ import {
   shellCommand,
   createSessionImporter,
   listAgentProcesses,
+  createGhReviews,
+  createReviewStore,
   resolveProject,
   transcriptsForProcesses,
   createShellManager,
@@ -1234,6 +1239,75 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     () => terminal.paneStartDirs(),
   );
 
+  // Reviews (Task 9): PR review comments pasted into the agent session
+  // already running in a linked Terminal pane, only when it is idle. `gh`
+  // runs with the login-shell PATH (agentEnv) and never prompts.
+  const runGh = (
+    args: string[],
+    cwd: string,
+    input?: string,
+  ): Promise<{ code: number; stdout: string; stderr: string }> =>
+    new Promise((resolvePromise, reject) => {
+      const child = spawn("gh", args, {
+        cwd,
+        env: { ...agentEnv, GH_PROMPT_DISABLED: "1" },
+        stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
+      });
+      let stdout = "";
+      let stderr = "";
+      const timer = setTimeout(() => {
+        child.kill();
+        reject(new Error("gh timed out"));
+      }, 60_000);
+      child.stdout?.setEncoding("utf8").on("data", (chunk: string) => {
+        stdout += chunk;
+      });
+      child.stderr?.setEncoding("utf8").on("data", (chunk: string) => {
+        stderr += chunk;
+      });
+      child.on("error", (error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+      child.on("close", (code) => {
+        clearTimeout(timer);
+        resolvePromise({ code: code ?? 1, stdout, stderr });
+      });
+      if (input !== undefined) child.stdin?.end(input);
+    });
+  const reviews = createReviewService({
+    shells,
+    terminal,
+    branchOf: async (cwd) => {
+      const outcome = await git.changes(cwd);
+      return outcome.ok ? outcome.value.branch : undefined;
+    },
+    gh: createGhReviews({ gh: (args, cwd) => runGh(args, cwd), stdinGh: runGh }),
+    store: createReviewStore(join(homedir(), ".config/jarvis/reviews.json")),
+    // A fresh scan every time — never refreshSessions()'s cached result,
+    // which only refreshes when a window asks (spec §4.3 rule 2).
+    scanAgents: () =>
+      listAgentProcesses({
+        exec: (command, args) => runCommand(command, args),
+        platform,
+        agents: registry.list(),
+        ownedPids: () => sessions.ownedPids(),
+        jarvisPid: process.pid,
+        terminalShells: () => shells.shellPids(),
+        now: () => Date.now(),
+      }),
+    agents: () => registry.list(),
+    config: () => config.reviews ?? DEFAULT_REVIEWS_CONFIG,
+    projectDirs: () => Object.values(config.projects),
+    createPoller: (options) => createReviewPoller(options),
+    now: () => Date.now(),
+    schedule: (fn, ms) => {
+      const timer = setTimeout(fn, ms);
+      timer.unref();
+      return () => clearTimeout(timer);
+    },
+  });
+
   // Sessions the process scan (process-scan.ts) found running outside
   // Jarvis, keyed by "ext-<pid>" — rebuilt wholesale on every
   // refreshSessions() call, never written to sessionStore (session-
@@ -1853,6 +1927,8 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     });
     // And the importer holds an fs watch per transcript directory.
     safely("session importer", () => sessionImporter.stop());
+    // The review poller's timer and the delivery timers.
+    safely("reviews", () => reviews.dispose());
     // A recording started but never stopped holds ffmpeg — and the
     // microphone — open indefinitely.
     safely("recorder", () => recorder.abort());

@@ -5,8 +5,14 @@ import { isIP } from "node:net";
 import { isAbsolute, join, normalize, sep } from "node:path";
 import { parse } from "yaml";
 import { DEFAULT_IMPORT_WINDOW_DAYS, parseSessions } from "./sessions-config.js";
-import { DEFAULT_GREETING } from "@jarvis/core";
-import type { AgentConfig, ProviderVendor, RegistryConfig, RoutingRule } from "@jarvis/core";
+import { DEFAULT_GREETING, DEFAULT_REVIEWS_CONFIG } from "@jarvis/core";
+import type {
+  AgentConfig,
+  ProviderVendor,
+  RegistryConfig,
+  ReviewsConfig,
+  RoutingRule,
+} from "@jarvis/core";
 import type {
   BrainConfig,
   ChatConfig,
@@ -253,6 +259,10 @@ export type JarvisConfig = {
   remote: RemoteConfig;
   /** The `daemon:` section — see DaemonConfig. */
   daemon: DaemonConfig;
+  /** The `reviews:` section (PR comments into terminal sessions). Always
+   *  set by parseConfig; optional only because Settings drafts from an
+   *  older renderer reach toRawConfig without it. */
+  reviews?: ReviewsConfig;
   // Beside jarvis.yaml itself, not user-configurable — see the note on
   // defaultSessionsDbPath().
   sessionsDbPath: string;
@@ -414,6 +424,7 @@ export function parseConfig(raw: unknown): JarvisConfig {
     sessions,
     remote,
     daemon,
+    reviews: parseReviews(root["reviews"]),
     sessionsDbPath: defaultSessionsDbPath(),
   };
 }
@@ -863,6 +874,119 @@ function parseRemoteTls(rawTls: unknown): RemoteConfig["tls"] {
 
 /** The `daemon:` section as it stands with nothing in jarvis.yaml. */
 export const DEFAULT_DAEMON: DaemonConfig = { enabled: false };
+
+const REVIEW_REPO = /^[\w.-]+\/[\w.-]+$/;
+
+function reviewsBoolean(value: unknown, key: string, fallback: boolean): boolean {
+  if (value === undefined) return fallback;
+  if (typeof value !== "boolean")
+    throw new Error(`Config \`reviews.${key}\` must be true or false`);
+  return value;
+}
+
+function reviewsWhole(
+  value: unknown,
+  key: string,
+  min: number,
+  max: number,
+  fallback: number,
+): number {
+  if (value === undefined) return fallback;
+  if (typeof value !== "number" || !Number.isInteger(value) || value < min || value > max) {
+    throw new Error(`Config \`reviews.${key}\` must be a whole number from ${min} to ${max}`);
+  }
+  return value;
+}
+
+/**
+ * The `reviews:` section. Absent or null is every default
+ * (DEFAULT_REVIEWS_CONFIG, @jarvis/core); each key is optional and keeps
+ * its default when left out. A fresh object every time — never the shared
+ * default, whose nested `repos`/`notify` a caller could otherwise mutate.
+ */
+export function parseReviews(raw: unknown): ReviewsConfig {
+  const defaults = DEFAULT_REVIEWS_CONFIG;
+  const fresh: ReviewsConfig = {
+    ...defaults,
+    repos: { ...defaults.repos },
+    authors: [...defaults.authors],
+    notify: { ...defaults.notify },
+  };
+  if (raw === undefined || raw === null) return fresh;
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error("Config `reviews` must be an object");
+  }
+  const section = raw as Record<string, unknown>;
+
+  const repos: Record<string, boolean> = fresh.repos;
+  const rawRepos = section["repos"];
+  if (rawRepos !== undefined) {
+    if (typeof rawRepos !== "object" || rawRepos === null || Array.isArray(rawRepos)) {
+      throw new Error("Config `reviews.repos` must be an object");
+    }
+    for (const [repo, enabled] of Object.entries(rawRepos)) {
+      if (!REVIEW_REPO.test(repo)) {
+        throw new Error("Config `reviews.repos` keys must look like owner/name");
+      }
+      if (typeof enabled !== "boolean") {
+        throw new Error(`Config \`reviews.repos.${repo}\` must be true or false`);
+      }
+      repos[repo] = enabled;
+    }
+  }
+
+  const rawAuthors = section["authors"];
+  let authors = fresh.authors;
+  if (rawAuthors !== undefined) {
+    if (!Array.isArray(rawAuthors) || !rawAuthors.every((a) => typeof a === "string")) {
+      throw new Error("Config `reviews.authors` must be an array of strings");
+    }
+    authors = [...(rawAuthors as string[])];
+  }
+
+  const rawRequire = section["requireText"];
+  if (rawRequire !== undefined && typeof rawRequire !== "string") {
+    throw new Error("Config `reviews.requireText` must be a string");
+  }
+
+  const rawNotify = section["notify"];
+  let notify = fresh.notify;
+  if (rawNotify !== undefined && rawNotify !== null) {
+    if (typeof rawNotify !== "object" || Array.isArray(rawNotify)) {
+      throw new Error("Config `reviews.notify` must be an object");
+    }
+    const n = rawNotify as Record<string, unknown>;
+    notify = {
+      comment: reviewsBoolean(n["comment"], "notify.comment", defaults.notify.comment),
+      queued: reviewsBoolean(n["queued"], "notify.queued", defaults.notify.queued),
+      requested: reviewsBoolean(n["requested"], "notify.requested", defaults.notify.requested),
+    };
+  }
+
+  return {
+    enabled: reviewsBoolean(section["enabled"], "enabled", defaults.enabled),
+    intervalSeconds: reviewsWhole(
+      section["intervalSeconds"],
+      "intervalSeconds",
+      15,
+      86_400,
+      defaults.intervalSeconds,
+    ),
+    repos,
+    authors,
+    requireText: typeof rawRequire === "string" ? rawRequire : defaults.requireText,
+    ignoreBots: reviewsBoolean(section["ignoreBots"], "ignoreBots", defaults.ignoreBots),
+    autoLink: reviewsBoolean(section["autoLink"], "autoLink", defaults.autoLink),
+    batchSeconds: reviewsWhole(
+      section["batchSeconds"],
+      "batchSeconds",
+      0,
+      3_600,
+      defaults.batchSeconds,
+    ),
+    notify,
+  };
+}
 
 /** In the style of parseRemotePush: absent or null is the default, anything
  *  but an object is refused, and `enabled` must be a real boolean. */

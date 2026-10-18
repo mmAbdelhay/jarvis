@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse } from "yaml";
 import { describe, expect, it } from "vitest";
+import { DEFAULT_REVIEWS_CONFIG } from "@jarvis/core";
 import { parseConfig, type JarvisConfig } from "./config.js";
 import { toRawConfig, validateDraft, writeSettingsFile } from "./settings-io.js";
 
@@ -100,6 +101,17 @@ const fullDraft: JarvisConfig = {
     idleDisableMinutes: 30,
   },
   daemon: { enabled: true },
+  reviews: {
+    enabled: true,
+    intervalSeconds: 120,
+    repos: { "acme/app": true },
+    authors: ["alice"],
+    requireText: "",
+    ignoreBots: false,
+    autoLink: true,
+    batchSeconds: 10,
+    notify: { comment: true, queued: false, requested: true },
+  },
 };
 
 /**
@@ -135,6 +147,7 @@ const FILE_KEYS: Record<keyof JarvisConfig, readonly string[] | null> = {
   sessions: ["sessions"],
   remote: ["remote"],
   daemon: ["daemon"],
+  reviews: ["reviews"],
   // Computed by parseConfig from the config directory, never a source of
   // truth. See toRawConfig's own note.
   sessionsDbPath: null,
@@ -173,6 +186,12 @@ describe("toRawConfig covers every section", () => {
     expect(reparsed.remote).toEqual(fullDraft.remote);
     expect(reparsed.prayer).toEqual(fullDraft.prayer);
     expect(reparsed.daemon).toEqual(fullDraft.daemon);
+    expect(reparsed.reviews).toEqual(fullDraft.reviews);
+  });
+
+  it("omits reviews from the file at its defaults", () => {
+    const raw = toRawConfig({ ...draft, reviews: { ...DEFAULT_REVIEWS_CONFIG } });
+    expect(raw).not.toHaveProperty("reviews");
   });
 
   it("round-trips prayer.notify, and omits it from the file when unset (defaults apply)", () => {

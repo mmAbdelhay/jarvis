@@ -7,6 +7,7 @@ export * from "./session/types.js";
 export * from "./session/manager.js";
 export * from "./session/label.js";
 export * from "./session/awaiting-input.js";
+export * from "./session/agent-input-state.js";
 export * from "./platform/types.js";
 export * from "./orchestrator/types.js";
 export * from "./orchestrator/orchestrator.js";
