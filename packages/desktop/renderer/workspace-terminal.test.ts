@@ -2288,6 +2288,31 @@ describe("the terminal tab's reviews dock", () => {
     },
   );
 
+  it.each(["plan", "reviews"])(
+    "clamps only the newly opened %s panel against the already-open panel",
+    async (side) => {
+      const { renderWorkspaceTerminals } = await tabWithDock();
+      renderWorkspaceTerminals([tab()], "tab-1", "acme");
+      await settle();
+      const planToggle = document.querySelector<HTMLButtonElement>(".plan-toggle")!;
+      const existing = side === "plan" ? dock()! : planPanel()!;
+      const opened = side === "plan" ? planPanel()! : dock()!;
+      (side === "plan" ? toggle()! : planToggle).click();
+      existing.style.width = "600px";
+      opened.style.width = "420px";
+      Object.defineProperty(tabPane()!, "clientWidth", { configurable: true, value: 1000 });
+      existing.getBoundingClientRect = () => rect(Number.parseFloat(existing.style.width), 1000);
+      opened.getBoundingClientRect = () => rect(Number.parseFloat(opened.style.width), 1000);
+      planHandle()!.getBoundingClientRect = () => rect(5, 600);
+      dockHandle()!.getBoundingClientRect = () => rect(5, 1000);
+
+      (side === "plan" ? planToggle : toggle()!).click();
+
+      expect(existing.style.width).toBe("600px");
+      expect(opened.style.width).toBe("310px");
+    },
+  );
+
   it("reclaims panel width when the file sidebar opens beside both panels", async () => {
     const { renderWorkspaceTerminals } = await tabWithDock();
     renderWorkspaceTerminals([tab()], "tab-1", "acme");
@@ -2330,6 +2355,26 @@ describe("the terminal tab's reviews dock", () => {
     await settle();
     const chip = document.querySelector<HTMLButtonElement>(".reviews-chip");
     chip?.click();
+    expect(document.querySelector(".reviews-chip__menu")?.textContent).toContain("Resume");
+  });
+
+  it("refreshes the review list after a status rejection and keeps the last pause status", async () => {
+    const { renderWorkspaceTerminals } = await tabWithDock();
+    listed = [linkedItem];
+    paused = ["tab-1"];
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    await settle();
+    await settle();
+    expect(document.querySelector(".reviews-toggle__count")?.textContent).toBe("2");
+    const jarvis = (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
+    jarvis["reviewsStatus"] = () => Promise.reject(new Error("status unavailable"));
+    listed = [{ ...linkedItem, queued: 7 }];
+    reviewsChanged?.("me/jarvis#18");
+    await new Promise((resolve) => setTimeout(resolve, 180));
+    await settle();
+
+    expect(document.querySelector(".reviews-toggle__count")?.textContent).toBe("7");
+    document.querySelector<HTMLButtonElement>(".reviews-chip")?.click();
     expect(document.querySelector(".reviews-chip__menu")?.textContent).toContain("Resume");
   });
 

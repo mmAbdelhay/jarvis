@@ -217,17 +217,24 @@ function scheduleReviewsRefresh(delay = REVIEWS_REFRESH_DEBOUNCE_MS): void {
   reviewsTimer = setTimeout(() => {
     reviewsTimer = undefined;
     const id = ++reviewsRequestId;
-    let request: Promise<[ReviewListItem[], { paused: string[] } | undefined]>;
+    let request: Promise<
+      [
+        PromiseSettledResult<ReviewListItem[]>,
+        PromiseSettledResult<{ paused: string[] } | undefined>,
+      ]
+    >;
     try {
-      request = Promise.all([window.jarvis.reviewsList(), window.jarvis.reviewsStatus?.()]);
+      request = Promise.allSettled([window.jarvis.reviewsList(), window.jarvis.reviewsStatus?.()]);
     } catch {
       return;
     }
     void request
       .then(([items, status]) => {
         if (id !== reviewsRequestId) return; // a newer read is on its way
-        reviewItems = Array.isArray(items) ? items : [];
-        pausedReviewPanes = status?.paused ?? [];
+        if (items.status === "fulfilled") {
+          reviewItems = Array.isArray(items.value) ? items.value : [];
+        }
+        if (status.status === "fulfilled") pausedReviewPanes = status.value?.paused ?? [];
         for (const [tabId, pane] of panes) applyReviews(tabId, pane);
       })
       .catch(() => {
@@ -511,7 +518,7 @@ const planPanelResizeHost = window as PlanPanelResizeHost;
 if (planPanelResizeHost.__reassertPlanPanelWidthOnResize__ !== undefined) {
   window.removeEventListener("resize", planPanelResizeHost.__reassertPlanPanelWidthOnResize__);
 }
-const handlePlanPanelWindowResize = (): void => {
+const handlePlanPanelWindowResize = (openedPanel?: HTMLElement): void => {
   for (const pane of panes.values()) {
     const sides: [
       HTMLElement,
@@ -521,7 +528,7 @@ const handlePlanPanelWindowResize = (): void => {
       [pane.reviewsDock.element, clampReviewsDockWidth],
     ];
     for (const [side, clamp] of sides) {
-      if (side.hidden) continue;
+      if (side.hidden || (openedPanel !== undefined && side !== openedPanel)) continue;
       const current = side.getBoundingClientRect().width;
       if (current <= 0) continue; // no real layout (every jsdom test that never stubs it)
       const clamped = Math.round(
@@ -534,8 +541,9 @@ const handlePlanPanelWindowResize = (): void => {
     }
   }
 };
-planPanelResizeHost.__reassertPlanPanelWidthOnResize__ = handlePlanPanelWindowResize;
-window.addEventListener("resize", handlePlanPanelWindowResize);
+const reassertPlanPanelWidths = (): void => handlePlanPanelWindowResize();
+planPanelResizeHost.__reassertPlanPanelWidthOnResize__ = reassertPlanPanelWidths;
+window.addEventListener("resize", reassertPlanPanelWidths);
 
 let wired = false;
 
@@ -1008,7 +1016,7 @@ function ensurePane(
     // what keeps an auto-open from stealing the terminal's keys.
     onToggle: (open) => {
       planHandle.hidden = !open;
-      if (open) handlePlanPanelWindowResize();
+      if (open) handlePlanPanelWindowResize(builtPanel.element);
       planToggle.setAttribute("aria-pressed", String(open));
       for (const leaf of built.panes()) leaf.refit();
       // Controller ruling (fix round 1): every close reaching this hook is
@@ -1066,7 +1074,7 @@ function ensurePane(
     api: window.jarvis,
     onToggle: (open) => {
       reviewsHandle.hidden = !open;
-      if (open) handlePlanPanelWindowResize();
+      if (open) handlePlanPanelWindowResize(reviewsDock.element);
       reviewsToggle.setAttribute("aria-pressed", String(open));
       for (const leaf of built.panes()) leaf.refit();
     },

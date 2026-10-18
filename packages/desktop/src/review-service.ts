@@ -208,7 +208,7 @@ export function createReviewService(deps: ReviewServiceDeps): ReviewService {
   const quietTimers = new Map<string, () => void>();
   const repoCache = new Map<string, Promise<string | undefined>>();
   const branchCache = new Map<string, { at: number; value: Promise<string | undefined> }>();
-  /** First time each queued comment was seen waiting on no-link/no-agent. */
+  /** First time each queued comment was seen waiting on no-link/no-agent/unsupported. */
   const waitingSince = new Map<string, number>();
 
   let disposed = false;
@@ -429,7 +429,7 @@ export function createReviewService(deps: ReviewServiceDeps): ReviewService {
     wait: DeliveryWait,
   ): Promise<void> {
     const ids = queued.map((q) => reviewCommentKey(q.prKey, q.comment.kind, q.comment.id));
-    if (wait !== "no-link" && wait !== "no-agent") {
+    if (wait !== "no-link" && wait !== "no-agent" && wait !== "unsupported") {
       for (const id of ids) waitingSince.delete(id);
       return;
     }

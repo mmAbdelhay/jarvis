@@ -494,6 +494,21 @@ describe("review service notifications", () => {
     ]);
   });
 
+  it("notifies review-queued once after 120 s with an unsupported linked agent", async () => {
+    const h = harness();
+    h.setAgents([agentIn(PANE, "copilot")]);
+    await withQueued(h);
+    await h.advance(100_000);
+    expect(h.notifies.filter((n) => n.kind === "review-queued")).toEqual([]);
+    await h.advance(30_000);
+    expect(h.notifies.filter((n) => n.kind === "review-queued")).toEqual([
+      { kind: "review-queued", pr: PR_KEY },
+    ]);
+    await h.advance(120_000);
+    expect(h.notifies.filter((n) => n.kind === "review-queued")).toHaveLength(1);
+    expect(h.writes).toHaveLength(0);
+  });
+
   it("forwards new comments and review requests as notifications", async () => {
     const h = harness();
     h.emit({ kind: "comments", prKey: PR_KEY, added: 2 });
