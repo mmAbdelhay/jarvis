@@ -25,3 +25,4 @@ export * from "./workspace/tabs.js";
 export * from "./greeting/greeting.js";
 export * from "./greeting/scan.js";
 export * from "./plans/index.js";
+export * from "./reviews/index.js";
