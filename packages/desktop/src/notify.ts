@@ -1,9 +1,11 @@
-// M10 Task 3: the push decision, the notifier and its five generic
-// notification kinds. This is the one place that decides what text is
-// allowed to leave the laptop as a push notification — every string comes
-// from messages.ts's `pushTitle`/`pushBody`, whose only interpolated value
-// is the project name (and only when `includeProjectNames` is true). Never
-// a session summary, a command line, a path, a device name or a token.
+// M10 Task 3: the push decision, the notifier and its notification kinds
+// (the five generic ones, plus Reviews' three review-* kinds). This is the
+// one place that decides what text is allowed to leave the laptop as a push
+// notification — every string comes from messages.ts's `pushTitle`/
+// `pushBody`, whose only interpolated values are the project name and a
+// review push's PR (its repo only when `includeProjectNames` is true; its
+// number always). Never a session summary, a comment, a command line, a
+// path, a device name or a token.
 //
 // `shouldNotify` and `buildPushMessage` are pure — an injected clock, no
 // timers, no I/O — so the coalescing and payload-shape rules are testable
@@ -227,9 +229,10 @@ export function buildPushMessage(
   const data: Record<string, string> = { kind: event.kind };
   if (sessionId !== undefined) data.sessionId = sessionId;
   if (project !== undefined) data.project = project;
-  // Always, unlike `project`: the phone needs it to open the PR's thread
-  // on tap (notification-tap.ts), and it is a bounded identifier.
-  if (pr !== undefined) data.pr = pr;
+  // Gated exactly like `project`: `owner/name` is a repo name, and with
+  // project names off it must not reach Expo/APNs/FCM at all. Without it
+  // the phone opens the Reviews list instead of the PR's thread.
+  if (pr !== undefined && includeProjectNames) data.pr = pr;
 
   return {
     to: target.token,

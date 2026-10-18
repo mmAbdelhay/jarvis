@@ -88,11 +88,21 @@ describe("planNavigation: review pushes", () => {
   });
 
   test("a malformed pr goes to the dashboard [bite-proof: skip the key check]", () => {
-    for (const pr of ["../x#1", "owner/name", "owner/name#18/../../x", 18, undefined]) {
+    for (const pr of ["../x#1", "owner/name", "owner/name#18/../../x", 18, null, ""]) {
       expect(planNavigation({ kind: "review-comment", pr }, new Set())).toEqual({
         route: undefined,
         reason: "dashboard",
       });
+    }
+  });
+});
+
+describe("planNavigation: review pushes without a pr", () => {
+  // The laptop omits `pr` when project names are off — the list, not the
+  // dashboard, is the closest place to what the push was about.
+  test("each review kind with no pr routes to the Reviews list", () => {
+    for (const kind of ["review-comment", "review-queued", "review-requested"]) {
+      expect(planNavigation({ kind }, new Set())).toEqual({ route: "/reviews" });
     }
   });
 });

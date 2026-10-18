@@ -219,14 +219,19 @@ describe("buildPushMessage", () => {
     expect(message.data).toEqual({ kind: "reply" });
   });
 
-  it("carries exactly {kind, pr} in a review push's data and names #18 in the body", () => {
+  it("keeps the repo out of a review push entirely when includeProjectNames is off", () => {
     const event: NotifyEvent = { kind: "review-comment", pr: "acme/web#18" };
     const message = buildPushMessage(d1, event, false);
-    expect(message.data).toEqual({ kind: "review-comment", pr: "acme/web#18" });
+    expect(message.data).toEqual({ kind: "review-comment" });
     expect(message.body).toContain("#18");
-    // The repo stays out of the visible text unless project names are on.
-    expect(message.body).not.toContain("acme");
-    expect(buildPushMessage(d1, event, true).body).toContain("acme/web#18");
+    expect(JSON.stringify(message)).not.toContain("acme");
+  });
+
+  it("carries exactly {kind, pr} and names acme/web#18 when includeProjectNames is on", () => {
+    const event: NotifyEvent = { kind: "review-comment", pr: "acme/web#18" };
+    const message = buildPushMessage(d1, event, true);
+    expect(message.data).toEqual({ kind: "review-comment", pr: "acme/web#18" });
+    expect(message.body).toContain("acme/web#18");
   });
 
   it("sets `to` to the target's token", () => {
@@ -512,7 +517,7 @@ describe("createNotifier", () => {
   });
 
   it("review emits a review push with data exactly {kind, pr}, coalesced per PR", () => {
-    const { notifier, sent, auditCalls } = makeNotifier();
+    const { notifier, sent, auditCalls } = makeNotifier({ includeProjectNames: true });
     notifier.review({ kind: "review-comment", pr: "acme/web#18" });
     notifier.review({ kind: "review-comment", pr: "acme/web#18" });
     notifier.review({ kind: "review-comment", pr: "acme/web#19" });

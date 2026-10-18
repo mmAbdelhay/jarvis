@@ -34,7 +34,9 @@ const REVIEW_KINDS: ReadonlySet<unknown> = new Set([
 ]);
 
 /** A `review-*` push goes to its PR's thread, the route built from the
- * validated key only; a malformed `pr` falls back to the dashboard.
+ * validated key only. No `pr` at all (the laptop leaves it out when
+ * project names are off) opens the Reviews list; a malformed one falls
+ * back to the dashboard.
  * Checked on the raw value so it works whichever `PushKind`s this build's
  * wire knows about. */
 function reviewPlan(data: unknown): TapPlan | undefined {
@@ -42,6 +44,7 @@ function reviewPlan(data: unknown): TapPlan | undefined {
   const raw = data as Record<string, unknown>;
   if (!REVIEW_KINDS.has(raw["kind"])) return undefined;
   const pr = raw["pr"];
+  if (pr === undefined) return { route: "/reviews" };
   return isPrKey(pr) ? { route: reviewRoute(pr) } : { route: undefined, reason: "dashboard" };
 }
 

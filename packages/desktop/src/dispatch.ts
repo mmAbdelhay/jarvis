@@ -1685,13 +1685,14 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
       return deps.reviews.requeue(keyArg, idArg);
     },
     // Desktop-only by policy. The URL comes from the poller's own record
-    // of the PR, never the caller, and only an https one is opened.
+    // of the PR, never the caller, and only a github.com one is opened —
+    // the service knows no other (GHE) host to allow.
     "reviews:openOnGithub": async ([keyArg]) => {
       const key = reviewKey("reviews:openOnGithub", keyArg);
       const thread = await deps.reviews.thread(key);
       const url = thread?.pr.url;
-      if (url === undefined || !url.startsWith("https://")) {
-        throw new Error("reviews:openOnGithub: no https URL for this pull request");
+      if (url === undefined || !url.startsWith("https://github.com/")) {
+        throw new Error("reviews:openOnGithub: no GitHub URL for this pull request");
       }
       await deps.openExternal(url);
     },

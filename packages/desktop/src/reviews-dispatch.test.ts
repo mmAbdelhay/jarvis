@@ -122,15 +122,19 @@ describe("reviews:* dispatch: routing", () => {
     expect(deps.openExternal).toHaveBeenCalledWith(PULL.url);
   });
 
-  it("reviews:openOnGithub refuses a non-https URL and an unknown PR", async () => {
+  it("reviews:openOnGithub refuses a non-GitHub URL and an unknown PR", async () => {
     const thread = vi
       .fn()
       .mockResolvedValueOnce({ pr: { ...PULL, url: "file:///etc/passwd" } })
+      .mockResolvedValueOnce({ pr: { ...PULL, url: "https://evil.example/acme/web/pull/18" } })
+      .mockResolvedValueOnce({ pr: { ...PULL, url: "https://github.com.evil.example/x" } })
+      .mockResolvedValueOnce({ pr: { ...PULL, url: "http://github.com/acme/web/pull/18" } })
       .mockResolvedValueOnce(undefined);
     const deps = withReviews({ thread });
     const table = createDispatchTable(deps);
-    await expect(call(table, "reviews:openOnGithub", PR)).rejects.toThrow();
-    await expect(call(table, "reviews:openOnGithub", PR)).rejects.toThrow();
+    for (let i = 0; i < 5; i++) {
+      await expect(call(table, "reviews:openOnGithub", PR)).rejects.toThrow();
+    }
     expect(deps.openExternal).not.toHaveBeenCalled();
   });
 });
