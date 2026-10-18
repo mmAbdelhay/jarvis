@@ -25,6 +25,22 @@ export function isPrKey(value: unknown): value is PrKey {
   );
 }
 
+/** A `[pr]` route param as expo-router hands it back: possibly an array,
+ *  possibly still percent-encoded. A bad escape answers undefined. */
+export function prKeyFromParam(value: unknown): PrKey | undefined {
+  const first = Array.isArray(value) ? value[0] : value;
+  if (typeof first !== "string") return undefined;
+  let decoded = first;
+  if (first.includes("%")) {
+    try {
+      decoded = decodeURIComponent(first);
+    } catch {
+      return undefined;
+    }
+  }
+  return isPrKey(decoded) ? decoded : undefined;
+}
+
 /** The thread route for an already-validated key, as one path segment. */
 export function reviewRoute(key: PrKey): string {
   return `/reviews/${encodeURIComponent(key)}`;
@@ -352,7 +368,7 @@ export function reviewThreadEntries(thread: ReviewThread): ReviewThreadEntry[] {
 
 // ---- store -----------------------------------------------------------------
 
-export type ReviewsErrorCode = "loadFailed" | "replyFailed" | "deliverFailed";
+export type ReviewsErrorCode = "loadFailed" | "notFound" | "replyFailed" | "deliverFailed";
 export type ReviewsError = { code: ReviewsErrorCode; detail?: string };
 
 export type ReviewsState = {
@@ -410,7 +426,7 @@ export function createReviewsStore(deps: ReviewsStoreDeps): ReviewsStore {
 
   async function openThread(key: string): Promise<void> {
     if (!isPrKey(key)) {
-      state.error = { code: "loadFailed" };
+      state.error = { code: "notFound" };
       emit();
       return;
     }
@@ -419,11 +435,18 @@ export function createReviewsStore(deps: ReviewsStoreDeps): ReviewsStore {
     const sequence = ++threadSequence;
     const result = await deps.client.call("reviews:thread", [key]);
     if (sequence !== threadSequence) return;
-    const thread = result.ok ? parseReviewThread(result.value) : undefined;
-    if (thread === undefined) state.error = rpcError(result, "loadFailed");
-    else {
+    const parsed = result.ok ? parseReviewThread(result.value) : undefined;
+    // A thread for some other PR is as good as none.
+    const thread = parsed?.key === key ? parsed : undefined;
+    if (!result.ok) state.error = rpcError(result, "loadFailed");
+    else if (thread === undefined) {
+      state.thread = undefined;
+      state.error = { code: "notFound" };
+    } else {
       state.thread = thread;
-      if (state.error?.code === "loadFailed") state.error = undefined;
+      if (state.error?.code === "loadFailed" || state.error?.code === "notFound") {
+        state.error = undefined;
+      }
     }
     emit();
   }
@@ -433,6 +456,10 @@ export function createReviewsStore(deps: ReviewsStoreDeps): ReviewsStore {
     args: unknown[],
     code: ReviewsErrorCode,
   ): Promise<boolean> {
+    if (state.error !== undefined) {
+      state.error = undefined;
+      emit();
+    }
     const result = await deps.client.call(channel, args);
     const refused = result.ok ? refusal(result.value) : undefined;
     if (!result.ok || refused !== undefined) {

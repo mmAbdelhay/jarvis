@@ -21,7 +21,7 @@ import { keyboardAvoidingBehavior, keyboardBottomPadding } from "@/lib/keyboard-
 import { useLanguage } from "@/lib/language-context";
 import {
   createReviewsStore,
-  isPrKey,
+  prKeyFromParam,
   type ReviewCardModel,
   type ReviewThread,
   type ReviewThreadComment,
@@ -60,8 +60,8 @@ type ReplyTarget = { id: string; author: string };
 // each comment with its state (Deliver now on queued ones), and a reply
 // box that posts on GitHub.
 export default function ReviewThreadRoute() {
-  const params = useLocalSearchParams<{ pr: string }>();
-  const key = typeof params.pr === "string" && isPrKey(params.pr) ? params.pr : undefined;
+  // The param may come back still percent-encoded, or as an array.
+  const key = prKeyFromParam(useLocalSearchParams().pr);
   const language = useLanguage();
   const router = useRouter();
   const client = useRpcClient();
@@ -99,7 +99,14 @@ export default function ReviewThreadRoute() {
     await store.deliverNow();
     setBusy(false);
   };
-  const missing = key === undefined || (thread === undefined && state.error?.code === "loadFailed");
+  // A real miss (bad key, or the laptop doesn't watch this PR) reads
+  // differently from a call that failed.
+  const missing = key === undefined || (thread === undefined && state.error?.code === "notFound");
+  const loadFailed = thread === undefined && state.error?.code === "loadFailed";
+  const actionError =
+    state.error?.code === "replyFailed" || state.error?.code === "deliverFailed"
+      ? state.error.code
+      : undefined;
   return (
     <WideShell>
       <WidePanel title={t(language, "reviews.title")}>
@@ -121,6 +128,7 @@ export default function ReviewThreadRoute() {
           )}
           <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
             {missing && <Text style={styles.empty}>{t(language, "reviews.notFound")}</Text>}
+            {loadFailed && <Text style={styles.error}>{t(language, "reviews.loadFailed")}</Text>}
             {thread !== undefined && (
               <>
                 <LinkCard language={language} thread={thread} />
@@ -141,11 +149,11 @@ export default function ReviewThreadRoute() {
                 ))}
               </>
             )}
-            {state.error !== undefined && state.error.code !== "loadFailed" && (
+            {actionError !== undefined && (
               <Text style={styles.error}>
                 {t(
                   language,
-                  state.error.code === "replyFailed"
+                  actionError === "replyFailed"
                     ? "reviews.error.replyFailed"
                     : "reviews.error.deliverFailed",
                 )}
@@ -171,7 +179,10 @@ export default function ReviewThreadRoute() {
               <View style={styles.composerRow}>
                 <TextInput
                   value={draft}
-                  onChangeText={setDraft}
+                  onChangeText={(text) => {
+                    setDraft(text);
+                    if (actionError !== undefined) store.clearError();
+                  }}
                   placeholder={t(language, "reviews.replyPlaceholder")}
                   placeholderTextColor={theme.colors.textDim}
                   accessibilityLabel={t(language, "reviews.replyLabel")}

@@ -4,6 +4,7 @@ import {
   createReviewsStore,
   isPrKey,
   parseReviewList,
+  prKeyFromParam,
   parseReviewThread,
   reviewAge,
   reviewCardModel,
@@ -79,6 +80,21 @@ describe("isPrKey / reviewRoute", () => {
 
   it("encodes the key into one path segment", () => {
     expect(reviewRoute("owner/name#18")).toBe("/reviews/owner%2Fname%2318");
+  });
+});
+
+describe("prKeyFromParam", () => {
+  it("decoded and still-encoded route params reach the same key", () => {
+    expect(prKeyFromParam("owner/name#18")).toBe("owner/name#18");
+    expect(prKeyFromParam("owner%2Fname%2318")).toBe("owner/name#18");
+    expect(prKeyFromParam(["owner%2Fname%2318", "x"])).toBe("owner/name#18");
+  });
+
+  it("answers undefined for a malformed escape or key, without throwing", () => {
+    expect(prKeyFromParam("%E0%A4%A")).toBeUndefined();
+    expect(prKeyFromParam("owner%2Fname")).toBeUndefined();
+    expect(prKeyFromParam(undefined)).toBeUndefined();
+    expect(prKeyFromParam([])).toBeUndefined();
   });
 });
 
@@ -232,12 +248,53 @@ describe("createReviewsStore", () => {
     expect(store.state.thread?.comments).toHaveLength(1);
   });
 
+  it("treats a thread for a different PR as not found", async () => {
+    const client = fakeClient([
+      ok({ pr: { ...pr, number: 19 }, link: { kind: "none" }, comments: [] }),
+    ]);
+    const store = createReviewsStore({ client: client as never });
+    await store.openThread("owner/jarvis#18");
+    expect(store.state.thread).toBeUndefined();
+    expect(store.state.error?.code).toBe("notFound");
+  });
+
+  it("tells a failed call (loadFailed) from a missing thread (notFound)", async () => {
+    const failed = fakeClient([{ ok: false, error: { kind: "remote", text: "x" } } as RpcResult]);
+    const a = createReviewsStore({ client: failed as never });
+    await a.openThread("owner/jarvis#18");
+    expect(a.state.error?.code).toBe("loadFailed");
+    const empty = fakeClient([ok(null)]);
+    const b = createReviewsStore({ client: empty as never });
+    await b.openThread("owner/jarvis#18");
+    expect(b.state.error?.code).toBe("notFound");
+  });
+
+  it("clears a stale action error when an action is retried", async () => {
+    const thread = { pr, link: { kind: "none" }, comments: [comment] };
+    const seen: (string | undefined)[] = [];
+    const client = fakeClient([ok(thread), ok({ ok: false, reason: "no-agent" })]);
+    const store = createReviewsStore({ client: client as never });
+    await store.openThread("owner/jarvis#18");
+    await store.deliverNow();
+    expect(store.state.error?.code).toBe("deliverFailed");
+    store.subscribe(() => seen.push(store.state.error?.code));
+    let release: (value: RpcResult) => void = () => {};
+    client.call.mockImplementationOnce(
+      () => new Promise<RpcResult>((resolve) => (release = resolve)),
+    );
+    const pending = store.deliverNow();
+    expect(store.state.error).toBeUndefined();
+    release(ok({ ok: false, reason: "no-agent" }));
+    await pending;
+    expect(seen[0]).toBeUndefined();
+  });
+
   it("never calls the laptop for a malformed key", async () => {
     const client = fakeClient([]);
     const store = createReviewsStore({ client: client as never });
     await store.openThread("nope");
     expect(client.call).not.toHaveBeenCalled();
-    expect(store.state.error?.code).toBe("loadFailed");
+    expect(store.state.error?.code).toBe("notFound");
   });
 
   it("replies and delivers on the open thread", async () => {
