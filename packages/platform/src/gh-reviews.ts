@@ -23,6 +23,17 @@ type GhPr = {
 };
 type PageCursor = { etag?: string; next?: string };
 
+function validatePathPart(value: string, pattern: RegExp, label: string): void {
+  if (typeof value !== "string" || pattern.exec(value)?.[0] !== value) {
+    throw new Error(`Invalid ${label}`);
+  }
+}
+
+function validatePr(pr: PullRequest): void {
+  validatePathPart(pr.repo, /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/, "repository");
+  validatePathPart(String(pr.number), /^\d+$/, "PR number");
+}
+
 function comment(value: GhComment, kind: ReviewComment["kind"]): ReviewComment {
   return {
     id: String(value.id),
@@ -132,9 +143,16 @@ export function createGhReviews({
       return prs;
     },
     async listComments(pr, cursor) {
+      validatePr(pr);
       let previous: Record<string, PageCursor> = {};
       // The port has one opaque cursor; each REST page has its own validator.
-      if (cursor.etag?.startsWith("{")) previous = JSON.parse(cursor.etag);
+      if (cursor.etag?.startsWith("{")) {
+        try {
+          previous = JSON.parse(cursor.etag);
+        } catch {
+          previous = {};
+        }
+      }
       const validators: Record<string, PageCursor> = {};
       const comments: ReviewComment[] = [];
       let changed = false;
@@ -160,7 +178,13 @@ export function createGhReviews({
           const result = await gh(args, cwd);
           const response = parseResponse(result.stdout);
           const { status, headers } = response;
-          if (status === 403 || status === 429) {
+          if (
+            status === 429 ||
+            (status === 403 &&
+              (headers.has("retry-after") ||
+                headers.get("x-ratelimit-remaining") === "0" ||
+                /rate limit/i.test(response.body)))
+          ) {
             const retry = headers.get("retry-after");
             const reset = headers.get("x-ratelimit-reset");
             const retryAt =
@@ -215,9 +239,12 @@ export function createGhReviews({
         : { kind: "unchanged" };
     },
     postComment(pr, body) {
+      validatePr(pr);
       return post(`repos/${pr.repo}/issues/${pr.number}/comments`, body, "issue");
     },
     replyToReviewComment(pr, commentId, body) {
+      validatePr(pr);
+      validatePathPart(commentId, /^\d+$/, "comment ID");
       return post(
         `repos/${pr.repo}/pulls/${pr.number}/comments/${commentId}/replies`,
         body,

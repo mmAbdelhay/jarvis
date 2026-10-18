@@ -117,6 +117,77 @@ describe("createGhReviews", () => {
     ).toEqual({ kind: "rate-limited", retryAt: 200_000 });
   });
 
+  it("surfaces permission 403 responses with remaining quota", async () => {
+    await expect(
+      client(async () =>
+        response(403, { message: "Resource not accessible" }, "X-RateLimit-Remaining: 100"),
+      ).listComments(pr, {}),
+    ).rejects.toThrow("gh API HTTP 403");
+  });
+
+  it("treats a 403 with exhausted quota as rate-limited", async () => {
+    expect(
+      await client(async () =>
+        response(403, {}, "X-RateLimit-Remaining: 0\r\nX-RateLimit-Reset: 200"),
+      ).listComments(pr, {}),
+    ).toEqual({ kind: "rate-limited", retryAt: 200_000 });
+  });
+
+  it("recognizes rate limit text case-insensitively in a 403 body", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(100_000);
+    expect(
+      await client(async () =>
+        response(403, { message: "Secondary RATE LIMIT exceeded" }),
+      ).listComments(pr, {}),
+    ).toEqual({ kind: "rate-limited", retryAt: 160_000 });
+  });
+
+  it("ignores malformed JSON cursors and fetches without validators", async () => {
+    const gh = vi.fn<GhRunner>(async () => response(200));
+    expect(await client(gh).listComments(pr, { etag: "{invalid" })).toMatchObject({
+      kind: "ok",
+      comments: [],
+    });
+    expect(gh).toHaveBeenCalledTimes(3);
+    for (const [args] of gh.mock.calls) expect(args).not.toContain("-H");
+  });
+
+  it.each(["1/../../user/repos", "-1", "1.5", "", "1?x=2", "1\n"])(
+    "rejects invalid comment ID %j without running gh",
+    async (commentId) => {
+      const gh = vi.fn<GhRunner>();
+      const stdinGh = vi.fn<GhRunner>();
+      const api = createGhReviews({ gh, stdinGh });
+      await expect(async () => api.replyToReviewComment(pr, commentId, "body")).rejects.toThrow(
+        "Invalid comment ID",
+      );
+      expect(gh).not.toHaveBeenCalled();
+      expect(stdinGh).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    { ...pr, repo: "owner/project/../../user/repos" },
+    { ...pr, repo: "owner" },
+    { ...pr, repo: "owner/project?x=2" },
+    { ...pr, repo: "owner/project\n" },
+    { ...pr, number: -1 },
+    { ...pr, number: 1.5 },
+    { ...pr, number: NaN },
+    { ...pr, number: "1/../../user/repos" as unknown as number },
+  ])("rejects invalid PR path inputs %j before reads or writes", async (invalidPr) => {
+    const gh = vi.fn<GhRunner>();
+    const stdinGh = vi.fn<GhRunner>();
+    const api = createGhReviews({ gh, stdinGh });
+    await expect(api.listComments(invalidPr, {})).rejects.toThrow("Invalid");
+    await expect(async () => api.postComment(invalidPr, "body")).rejects.toThrow("Invalid");
+    await expect(async () => api.replyToReviewComment(invalidPr, "99", "body")).rejects.toThrow(
+      "Invalid",
+    );
+    expect(gh).not.toHaveBeenCalled();
+    expect(stdinGh).not.toHaveBeenCalled();
+  });
+
   it("maps all comment kinds, drops empty reviews and reports remaining ratio", async () => {
     const gh = vi.fn<GhRunner>(async (args) =>
       response(
