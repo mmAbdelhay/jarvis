@@ -1,12 +1,20 @@
 import { randomBytes } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
+import { reviewCommentKey } from "@jarvis/core";
 import type {
   PrKey,
   QueuedComment,
   ReviewComment,
   ReviewsStore,
 } from "@jarvis/core";
+
+/** The port plus `requeue`, which the controller adds to `ReviewsStore`. */
+export type ReviewStore = ReviewsStore & {
+  /** Moves a `history` entry (by reviewCommentKey) to `queued`. Resolves
+   *  false, writing nothing, for any other state or an unknown key. */
+  requeue(key: string): Promise<boolean>;
+};
 
 type Cursor = { etag?: string; since: number };
 
@@ -31,26 +39,6 @@ function emptyFile(): FileShape {
     notified: [],
   };
 }
-
-// TODO(controller): switch to `reviewCommentKey` from @jarvis/core once it
-// lands in reviews/types.ts — same format, `${prKey}|${kind}|${id}`.
-function reviewCommentKey(
-  prKey: PrKey,
-  kind: ReviewComment["kind"],
-  id: string,
-): string {
-  return `${prKey}|${kind}|${id}`;
-}
-
-/** Higher rank wins on upsert, so an existing entry is never downgraded:
- *  `history` may be promoted to `queued` (a requeue), but `queued` is never
- *  pushed back to `history`, and `delivered` / `own` are never touched. */
-const RANK: Record<QueuedComment["state"], number> = {
-  history: 0,
-  queued: 1,
-  delivered: 2,
-  own: 3,
-};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -129,14 +117,21 @@ function byCreatedAt(a: QueuedComment, b: QueuedComment): number {
  * so concurrent calls read-modify-write the whole file in order, and writes
  * are atomic (temp file in the same directory, then renamed into place).
  *
- * An unreadable or corrupt file is renamed `<file>.bad-<now()>` and the
- * store starts empty, so its bytes are preserved. A missing file (ENOENT)
- * is simply empty, with nothing renamed.
+ * A corrupt file (bad JSON or bad shape) is renamed `<file>.bad-<now()>`
+ * and the store starts empty, so its bytes are preserved. If that rename
+ * fails the call throws and the file stays in place — continuing empty
+ * would let the next write replace it. A missing file (ENOENT) is simply
+ * empty. Any other read error (EACCES, EMFILE, ...) is rethrown, like
+ * plan-comments.ts, so the call fails without writing anything.
+ *
+ * `upsertComments` never changes an existing entry's state; it only
+ * refreshes the comment content. `requeue` is the one way back from
+ * `history` to `queued`.
  */
 export function createReviewStore(
   filePath: string,
   now: () => number = Date.now,
-): ReviewsStore {
+): ReviewStore {
   let tail: Promise<unknown> = Promise.resolve();
 
   function enqueue<T>(task: () => Promise<T>): Promise<T> {
@@ -145,12 +140,9 @@ export function createReviewStore(
     return run;
   }
 
+  // A failed rename propagates: the corrupt file must not be overwritten.
   async function moveAside(): Promise<void> {
-    try {
-      await rename(filePath, `${filePath}.bad-${now()}`);
-    } catch {
-      // Best effort — start empty even if the rename itself fails.
-    }
+    await rename(filePath, `${filePath}.bad-${now()}`);
   }
 
   async function readAll(): Promise<FileShape> {
@@ -160,18 +152,17 @@ export function createReviewStore(
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT")
         return emptyFile();
-      await moveAside();
-      return emptyFile();
+      throw error;
     }
+    let parsed: unknown;
     try {
-      const parsed: unknown = JSON.parse(text);
-      if (!isFileShape(parsed))
-        throw new Error("unrecognised reviews file shape");
-      return parsed;
+      parsed = JSON.parse(text);
     } catch {
-      await moveAside();
-      return emptyFile();
+      parsed = undefined;
     }
+    if (isFileShape(parsed)) return parsed;
+    await moveAside();
+    return emptyFile();
   }
 
   async function writeAll(data: FileShape): Promise<void> {
@@ -236,13 +227,12 @@ export function createReviewStore(
         for (const comment of comments) {
           const key = reviewCommentKey(prKey, comment.kind, comment.id);
           const existing = data.comments[key];
-          if (existing === undefined || RANK[state] > RANK[existing.state]) {
-            data.comments[key] = { prKey, comment, state };
-          } else {
-            // Keep the state (and delivery fields); refresh the content so an
-            // edited comment shows its latest body.
-            data.comments[key] = { ...existing, comment };
-          }
+          // An existing entry keeps its state and delivery fields; only the
+          // content is refreshed, so an edited comment shows its latest body.
+          data.comments[key] =
+            existing === undefined
+              ? { prKey, comment, state }
+              : { ...existing, comment };
         }
       });
     },
@@ -262,6 +252,18 @@ export function createReviewStore(
           changed = true;
         }
         return changed;
+      });
+    },
+
+    requeue(key) {
+      return enqueue(async () => {
+        const data = await readAll();
+        const existing = data.comments[key];
+        if (existing === undefined || existing.state !== "history")
+          return false;
+        data.comments[key] = { ...existing, state: "queued" };
+        await writeAll(data);
+        return true;
       });
     },
 

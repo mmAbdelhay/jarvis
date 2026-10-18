@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import type { ReviewComment } from "@jarvis/core";
@@ -88,18 +88,43 @@ describe("createReviewStore", () => {
     expect(await store.listQueued()).toEqual([]);
   });
 
-  it("never downgrades queued to history, but promotes history to queued", async () => {
+  it("never changes the state of an existing entry on upsert", async () => {
     const store = createReviewStore(await tempFile());
     await store.upsertComments(PR, [comment("c1")], "queued");
     await store.upsertComments(PR, [comment("c2")], "history");
 
     await store.upsertComments(PR, [comment("c1")], "history");
-    await store.upsertComments(PR, [comment("c2")], "queued");
+    await store.upsertComments(
+      PR,
+      [comment("c2", { body: "edited on GitHub" })],
+      "queued",
+    );
 
-    expect((await store.thread(PR)).map((entry) => entry.state)).toEqual([
-      "queued",
-      "queued",
+    expect(await store.thread(PR)).toEqual([
+      { prKey: PR, comment: comment("c1"), state: "queued" },
+      {
+        prKey: PR,
+        comment: comment("c2", { body: "edited on GitHub" }),
+        state: "history",
+      },
     ]);
+  });
+
+  it("requeues only a history entry", async () => {
+    const file = await tempFile();
+    const store = createReviewStore(file);
+    await store.upsertComments(PR, [comment("c1")], "history");
+    await store.upsertComments(PR, [comment("c2")], "queued");
+    await store.markOwn(PR, comment("c3"));
+
+    expect(await store.requeue(key(PR, comment("c1")))).toBe(true);
+    expect(await store.requeue(key(PR, comment("c2")))).toBe(false);
+    expect(await store.requeue(key(PR, comment("c3")))).toBe(false);
+    expect(await store.requeue(`${PR}|issue|missing`)).toBe(false);
+
+    expect(
+      (await createReviewStore(file).thread(PR)).map((entry) => entry.state),
+    ).toEqual(["queued", "queued", "own"]);
   });
 
   it("keys comments by PR, kind and id so equal ids of different kinds do not collide", async () => {
@@ -195,6 +220,41 @@ describe("createReviewStore", () => {
 
     expect(await store.isFirstRun("acme/app")).toBe(true);
     expect(await readFile(`${file}.bad-43`, "utf8")).toBe(original);
+  });
+
+  it("throws and leaves a corrupt file in place when it cannot be moved aside", async () => {
+    const file = await tempFile();
+    const dir = dirname(file);
+    await writeFile(file, "garbage", "utf8");
+    await chmod(dir, 0o555);
+    try {
+      const store = createReviewStore(file, () => 45);
+
+      await expect(store.markNotified("n1")).rejects.toThrow();
+      await expect(store.listQueued()).rejects.toThrow();
+    } finally {
+      await chmod(dir, 0o755);
+    }
+    expect(await readFile(file, "utf8")).toBe("garbage");
+    expect(await readdir(dir)).toEqual([basename(file)]);
+  });
+
+  it("rethrows a read error other than ENOENT without moving the file", async () => {
+    const file = await tempFile();
+    const original = JSON.stringify({ v: 1 });
+    await writeFile(file, original, "utf8");
+    await chmod(file, 0o000);
+    try {
+      const store = createReviewStore(file, () => 46);
+
+      await expect(store.markNotified("n1")).rejects.toMatchObject({
+        code: "EACCES",
+      });
+    } finally {
+      await chmod(file, 0o644);
+    }
+    expect(await readdir(dirname(file))).toEqual([basename(file)]);
+    expect(await readFile(file, "utf8")).toBe(original);
   });
 
   it("works normally after recovering from a corrupt file", async () => {
