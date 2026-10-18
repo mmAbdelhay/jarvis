@@ -13,7 +13,7 @@ import type { JarvisConfig } from "../src/config.js";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 import { PERSONAL_PROJECT } from "../src/personal.js";
 import type { BindChoice, OwnerStatus, RemoteDeviceStatus, RemoteStatus } from "@jarvis/remote";
-import { isMeshAddress, primaryBindChoices } from "./remote-bind.js";
+import { isMeshAddress, primaryBindChoices, proposedBindAddress } from "./remote-bind.js";
 import { latestRemoteStatus, onRemoteStatusChange, withNameInBdi } from "./remote-status.js";
 import { remoteDeviceClient, remoteWebState, remoteWebUrl } from "../src/remote-web.js";
 import { encodeQr, qrToCanvas } from "./vendor/qr.js";
@@ -1998,21 +1998,18 @@ function clearRemoteCertError(): void {
   error.hidden = true;
 }
 
-/** Round 3: the saved address still being the config default means nobody
- *  has ever picked one, so the picker proposes the best one rather than
- *  making a first-time user hunt for Tailscale/Wi-Fi behind Advanced… —
- *  Tailscale first, Wi-Fi when this machine has no tailnet address. Called
- *  only once per open, right after a fresh bindChoiceList arrives (see
- *  loadBindChoices): re-running it on every render would fight a later,
- *  deliberate pick of "This machine only" back to loopback's own literal
- *  address, since that pick is indistinguishable on disk from "never
- *  touched". Nothing here reaches jarvis.yaml on its own — like every other
- *  field in this file, it only changes what Save would write. */
+/** Round 3: on a first-time setup (remote access off, address still the
+ *  config default) the picker proposes the best address rather than making
+ *  the user hunt for Tailscale/Wi-Fi behind Advanced… — see
+ *  proposedBindAddress for why an enabled loopback bind is left alone.
+ *  Called only once per open, right after a fresh bindChoiceList arrives
+ *  (see loadBindChoices). Nothing here reaches jarvis.yaml on its own — like
+ *  every other field in this file, it only changes what Save would write. */
 function applyDefaultBindSelection(): void {
-  if (draft === undefined || draft.remote.bindAddress !== DEFAULT_BIND_ADDRESS) return;
-  const { tailscale, wifi } = primaryBindChoices(bindChoiceList);
-  const preferred = tailscale ?? wifi;
-  if (preferred !== undefined) draft.remote.bindAddress = preferred.address;
+  if (draft === undefined || savedBaseline === undefined) return;
+  if (draft.remote.bindAddress !== DEFAULT_BIND_ADDRESS) return;
+  const proposed = proposedBindAddress(savedBaseline.remote, DEFAULT_BIND_ADDRESS, bindChoiceList);
+  if (proposed !== undefined) draft.remote.bindAddress = proposed;
 }
 
 function renderBindChoices(): void {

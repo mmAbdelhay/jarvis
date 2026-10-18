@@ -68,3 +68,20 @@ export function primaryBindChoices(choices: readonly BindChoice[]): PrimaryBindC
 
   return { tailscale, wifi, rest };
 }
+
+/** The address Settings proposes in place of the saved one when it opens, or
+ *  undefined to keep the saved one. Only a first-time setup gets a proposal:
+ *  remote access still off and the address still the loopback default. Once
+ *  remote access is on, loopback is a deliberate pick — "This machine only",
+ *  or a relay such as `tailscale serve` forwarding to 127.0.0.1 — and
+ *  swapping it for the Tailscale address would ride along on the next Save
+ *  of any unrelated setting, taking remote access down with it. */
+export function proposedBindAddress(
+  saved: { enabled: boolean; bindAddress: string },
+  defaultAddress: string,
+  choices: readonly BindChoice[],
+): string | undefined {
+  if (saved.enabled || saved.bindAddress !== defaultAddress) return undefined;
+  const { tailscale, wifi } = primaryBindChoices(choices);
+  return (tailscale ?? wifi)?.address;
+}
