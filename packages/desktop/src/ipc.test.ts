@@ -2248,6 +2248,18 @@ describe("terminal handlers", () => {
     expect(handlers.lastKeystrokeAt("tab-8")).toBeUndefined();
   });
 
+  it("forgets a pane's last keystroke when the pane or its tab closes", () => {
+    const handlers = reviewSeams("");
+    handlers.input("tab-7", "x");
+    handlers.input("tab-7:p2", "y");
+    handlers.input("tab-9", "z");
+    handlers.closePane("tab-9");
+    expect(handlers.lastKeystrokeAt("tab-9")).toBeUndefined();
+    handlers.close("tab-7");
+    expect(handlers.lastKeystrokeAt("tab-7")).toBeUndefined();
+    expect(handlers.lastKeystrokeAt("tab-7:p2")).toBeUndefined();
+  });
+
   it("opens a terminal tab and starts a shell in the project's directory", () => {
     const { manager, started } = shells();
     const opened: string[] = [];

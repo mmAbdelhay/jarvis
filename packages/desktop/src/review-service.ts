@@ -41,6 +41,9 @@ export const REVIEW_SAFETY_MS = 5_000;
 export const REVIEW_QUEUED_NOTIFY_MS = 120_000;
 /** Lines of a pane's raw log fed to the idle reader. */
 export const REVIEW_TAIL_LINES = 400;
+/** A pane pasted into reads busy until it prints again — or, if it never
+ *  does, for at most this long. */
+export const REVIEW_PASTE_HOLD_MS = 60_000;
 /** How long a pane directory's branch is reused before git is asked again. */
 const BRANCH_TTL_MS = 10_000;
 
@@ -187,6 +190,11 @@ export function createReviewService(deps: ReviewServiceDeps): ReviewService {
   const pending = new Map<string, PendingInstruction>();
 
   const lastOutput = new Map<string, number>();
+  /** Panes pasted into that have printed nothing since, with the paste time. */
+  const awaitingOutput = new Map<string, number>();
+  /** Comment keys pasted in this process — never pasted again, even when the
+   *  store failed to record the delivery. */
+  const pastedIds = new Set<string>();
   const seenPanes = new Set<string>();
   const quietTimers = new Map<string, () => void>();
   const repoCache = new Map<string, Promise<string | undefined>>();
@@ -280,7 +288,12 @@ export function createReviewService(deps: ReviewServiceDeps): ReviewService {
     const vendor =
       found === undefined ? undefined : deps.agents().find((a) => a.id === found.agentId)?.vendor;
     const tail = lastLinesOf(deps.shells.log(paneKey), REVIEW_TAIL_LINES);
-    const input = readAgentInputState(tail, vendor ?? "");
+    const pastedAt = awaitingOutput.get(paneKey);
+    // The paste is not on screen yet: the tail still shows the box it was
+    // pasted into, empty. Until the pane prints again it is busy.
+    const holding = pastedAt !== undefined && now - pastedAt < REVIEW_PASTE_HOLD_MS;
+    const read = readAgentInputState(tail, vendor ?? "");
+    const input = holding && read === "idle-input" ? "busy" : read;
     const keystroke = deps.terminal.lastKeystrokeAt(paneKey);
     return {
       // An agent whose vendor has no idle markers can never be read as
@@ -297,8 +310,13 @@ export function createReviewService(deps: ReviewServiceDeps): ReviewService {
 
   /** Writes `text` as one bracketed paste; false when the write threw. */
   function paste(paneKey: string, text: string): boolean {
+    // dispose() may have run while this evaluation awaited the scan.
+    if (disposed) return false;
     try {
       deps.shells.write(paneKey, bracketedSubmit(text));
+      const at = deps.now();
+      lastOutput.set(paneKey, at);
+      awaitingOutput.set(paneKey, at);
       return true;
     } catch (error) {
       console.error(
@@ -336,11 +354,15 @@ export function createReviewService(deps: ReviewServiceDeps): ReviewService {
       fmtTime,
     );
     if (!paste(link.paneKey, message)) return { sent: false, wait: "busy" };
-    await deps.store.markDelivered(
-      plan.send.map((q) => reviewCommentKey(q.prKey, q.comment.kind, q.comment.id)),
-      link.paneKey,
-      deps.now(),
-    );
+    const ids = plan.send.map((q) => reviewCommentKey(q.prKey, q.comment.kind, q.comment.id));
+    for (const id of ids) pastedIds.add(id);
+    try {
+      await deps.store.markDelivered(ids, link.paneKey, deps.now());
+    } catch (error) {
+      console.error(
+        `reviews: pasted but could not record delivery: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
     return { sent: true };
   }
 
@@ -419,6 +441,7 @@ export function createReviewService(deps: ReviewServiceDeps): ReviewService {
     const byPr = new Map<string, QueuedComment[]>();
     for (const q of queuedAll) {
       if (q.state !== "queued") continue;
+      if (pastedIds.has(reviewCommentKey(q.prKey, q.comment.kind, q.comment.id))) continue;
       const key = lower(q.prKey);
       const list = byPr.get(key) ?? [];
       list.push(q);
@@ -537,6 +560,7 @@ export function createReviewService(deps: ReviewServiceDeps): ReviewService {
   const stopOutput = deps.shells.onOutput(({ paneKey }) => {
     if (disposed) return;
     lastOutput.set(paneKey, deps.now());
+    awaitingOutput.delete(paneKey);
     if (!seenPanes.has(paneKey)) {
       seenPanes.add(paneKey);
       void requestEvaluation();
@@ -554,6 +578,7 @@ export function createReviewService(deps: ReviewServiceDeps): ReviewService {
     if (disposed) return;
     seenPanes.delete(paneKey);
     lastOutput.delete(paneKey);
+    awaitingOutput.delete(paneKey);
     quietTimers.get(paneKey)?.();
     quietTimers.delete(paneKey);
     void requestEvaluation();

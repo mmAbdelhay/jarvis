@@ -161,6 +161,7 @@ function harness(opts: { store?: ReturnType<typeof memoryStore>; start?: number 
   const keystrokes = new Map<string, number>();
   let agents: ExternalAgentProcess[] = [agentIn(PANE)];
   let scans = 0;
+  let scanGate: Promise<void> | undefined;
   const notifies: ReviewNotify[] = [];
   let pollerOptions: ReviewPollerOptions | undefined;
   const config: ReviewsConfig = { ...DEFAULT_REVIEWS_CONFIG, batchSeconds: 30 };
@@ -196,6 +197,7 @@ function harness(opts: { store?: ReturnType<typeof memoryStore>; start?: number 
     store,
     scanAgents: async () => {
       scans++;
+      if (scanGate !== undefined) await scanGate;
       return agents;
     },
     agents: () => AGENTS,
@@ -229,6 +231,17 @@ function harness(opts: { store?: ReturnType<typeof memoryStore>; start?: number 
     config,
     get scans() {
       return scans;
+    },
+    /** Holds every process scan until the returned release is called. */
+    holdScans(): () => void {
+      let release = () => {};
+      scanGate = new Promise<void>((resolve) => {
+        release = () => {
+          scanGate = undefined;
+          resolve();
+        };
+      });
+      return release;
     },
     setAgents(next: ExternalAgentProcess[]) {
       agents = next;
@@ -499,5 +512,72 @@ describe("review service actions", () => {
     });
     h.setAgents([]);
     expect((await h.service.paneStateOf(PANE)).hasAgent).toBe(false);
+  });
+});
+
+describe("review service fix round 1", () => {
+  const PR2: PullRequest = { ...PR, number: 19, headRef: "feat/y", url: `${PR.url}9` };
+  const PR2_KEY: PrKey = "Acme/App#19";
+
+  it("pastes once per pane per pass: queued comments first, the pending instruction on a later idle pass", async () => {
+    const h = harness();
+    h.logs.set(PANE, BUSY_TAIL);
+    await withQueued(h);
+    expect(await h.service.sendReview(PR_KEY, PANE)).toEqual({ sent: false, wait: "busy" });
+    h.logs.set(PANE, IDLE_TAIL);
+    await h.advance(5_000);
+    expect(h.writes).toHaveLength(1);
+    expect(h.writes[0]?.data).toContain("New review comments");
+
+    // Still no new output from the pane: it must not read idle yet.
+    await h.advance(10_000);
+    expect(h.writes).toHaveLength(1);
+
+    // The agent answers, then goes quiet at its prompt again.
+    h.output(PANE, "agent reply");
+    await h.advance(3_000);
+    expect(h.writes).toHaveLength(2);
+    expect(h.writes[1]?.data).toContain("Review PR #18");
+  });
+
+  it("two PRs linked to one pane get one write per pass", async () => {
+    const h = harness();
+    h.emit({ kind: "prs", prs: [PR, PR2] });
+    await h.service.link(PR_KEY, PANE);
+    await h.service.link(PR2_KEY, PANE);
+    await h.store.upsertComments(PR_KEY, [comment("a", h.now - 60_000)], "queued");
+    await h.store.upsertComments(PR2_KEY, [comment("b", h.now - 60_000)], "queued");
+    await h.advance(5_000);
+    expect(h.writes).toHaveLength(1);
+    h.output(PANE, "agent reply");
+    await h.advance(3_000);
+    expect(h.writes).toHaveLength(2);
+    expect(h.writes[0]?.data).not.toEqual(h.writes[1]?.data);
+  });
+
+  it("never pastes the same comments twice when markDelivered fails after the write", async () => {
+    const h = harness();
+    h.store.markDelivered = async () => {
+      throw new Error("disk full");
+    };
+    await withQueued(h);
+    await h.advance(5_000);
+    expect(h.writes).toHaveLength(1);
+    h.output(PANE, "agent reply");
+    await h.advance(30_000);
+    await h.service.deliverNow(PR_KEY);
+    expect(h.writes).toHaveLength(1);
+  });
+
+  it("writes nothing once disposed, even mid-evaluation", async () => {
+    const h = harness();
+    await withQueued(h);
+    const release = h.holdScans();
+    const outcome = h.service.deliverNow(PR_KEY);
+    await Promise.resolve();
+    h.service.dispose();
+    release();
+    await outcome;
+    expect(h.writes).toHaveLength(0);
   });
 });

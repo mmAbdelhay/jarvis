@@ -2712,6 +2712,10 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
       if (!isString(tabId)) return;
       directories.delete(tabId);
       deps.shells.kill(tabId);
+      keystrokes.delete(tabId);
+      for (const key of [...keystrokes.keys()]) {
+        if (key.startsWith(`${tabId}:`)) keystrokes.delete(key);
+      }
       // And every shell the tab's splits are running. The colon is what
       // makes this exact rather than a prefix match over tab ids: "tab-7"
       // must never take "tab-70" down with it.
@@ -2736,6 +2740,7 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
       if (!isString(paneKey)) return;
       directories.delete(paneKey);
       deps.shells.kill(paneKey);
+      keystrokes.delete(paneKey);
     },
 
     async suggest(paneKey, input, path, remote) {
