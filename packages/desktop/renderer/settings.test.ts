@@ -1715,6 +1715,13 @@ describe("remote access section", () => {
     expect(loopback?.checked).toBe(true);
   });
 
+  it("keeps a loopback bind once remote access is on, so an unrelated Save never swaps in the Tailscale address", async () => {
+    const calls = await open(withRemote({ enabled: true, bindAddress: "127.0.0.1" }));
+
+    expect(tailscaleRadio().checked).toBe(false);
+    expect((await save(calls)).remote.bindAddress).toBe("127.0.0.1");
+  });
+
   it("commits a typed address on change, never on input, and keeps Other… picked", async () => {
     const calls = await open(withRemote({ bindAddress: "10.1.2.3" }));
 
