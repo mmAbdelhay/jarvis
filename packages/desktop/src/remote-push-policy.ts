@@ -123,6 +123,10 @@ export const REMOTE_PUSH_POLICY: {
   // has open (it re-derives what to do with each payload itself: reload
   // the open doc if the path matches, refresh the list either way).
   "plans:changed": { kind: "reliable" },
+  // Reviews (Task 10): unkeyed, like plans:changed — reviews-store.ts
+  // (mobile) subscribes to the bare channel and decides from the payload
+  // whether its open thread needs a re-read.
+  "reviews:changed": { kind: "reliable" },
   // Keyed, unlike the six reliable channels above: a phone that only cares
   // about one pane subscribes to that pane's exit, not every pane's.
   "terminal:exit": { kind: "reliable", keyOf: (payload) => stringField(payload, "paneKey") },

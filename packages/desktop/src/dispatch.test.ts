@@ -238,6 +238,19 @@ export function fakeDeps(overrides: Partial<DispatchDeps> = {}): DispatchDeps {
       projectRoots: vi.fn(() => []),
     },
     openExternal: vi.fn(async () => {}),
+    reviews: {
+      status: vi.fn(() => ({ gh: null, enabled: true, repoErrors: {} })),
+      list: vi.fn(async () => []),
+      thread: vi.fn(async () => undefined),
+      reply: vi.fn(async () => ({}) as never),
+      link: vi.fn(async () => undefined),
+      pause: vi.fn(async () => undefined),
+      requeue: vi.fn(async () => false),
+      deliverNow: vi.fn(async () => ({ sent: true as const })),
+      sendReview: vi.fn(async () => ({ sent: true as const })),
+      postSummary: vi.fn(async () => ({ sent: true as const })),
+      pollNow: vi.fn(async () => undefined),
+    },
     ...overrides,
   } as DispatchDeps;
 }

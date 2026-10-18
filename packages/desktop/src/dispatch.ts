@@ -32,6 +32,7 @@ import { isWithin } from "@jarvis/platform";
 import { bracketedSubmit } from "./bracketed.js";
 import {
   isFileId,
+  isPrKey,
   isSubscriptionKey,
   parsePushRegistration,
   type PushRegisterResult,
@@ -47,6 +48,7 @@ import {
   type SetOwnerPasswordResult,
 } from "@jarvis/remote";
 import type { InvokeChannel } from "./channels.js";
+import type { ReviewService } from "./review-service.js";
 import type { IpLocateResult } from "./ip-locate.js";
 import type { TabHost } from "./core/tab-host.js";
 import type { UsageHistory } from "./usage-history.js";
@@ -401,6 +403,24 @@ export type DispatchDeps = {
   // window inside Jarvis. Only remote:openWebClient calls it, with a URL
   // built from the bridge's own status.
   openExternal(url: string): Promise<void>;
+  // Reviews (Task 10): review-service.ts's createReviewService, built once
+  // in compose.ts. Narrowed to the calls the reviews:* channels make —
+  // never onChanged/onNotify (compose.ts wires those to the broadcaster
+  // and the notifier) nor dispose.
+  reviews: Pick<
+    ReviewService,
+    | "status"
+    | "list"
+    | "thread"
+    | "reply"
+    | "link"
+    | "pause"
+    | "requeue"
+    | "deliverNow"
+    | "sendReview"
+    | "postSummary"
+    | "pollNow"
+  >;
 };
 
 /** A terminal/session pty resize dimension: a plain positive integer, no
@@ -430,6 +450,22 @@ const MAX_PLAN_ARG_CHARS = 4096;
  *  this becomes, so a source this large is refused before it is even
  *  handed to the write queue. */
 const MAX_PLAN_SOURCE_BYTES = 1024 * 1024;
+
+/** Cap on a reviews:reply body — GitHub's own comment limit. A caller
+ *  sending more is refused, never truncated. */
+export const MAX_REVIEW_BODY_CHARS = 65_536;
+
+/** A GitHub comment id as the store keeps it: decimal digits only, so it
+ *  can never smuggle a path segment into a `gh api` route. */
+const REVIEW_COMMENT_ID = /^\d{1,20}$/;
+
+/** A reviews:* `prKey`: @jarvis/wire's own `owner/name#N` check (the one
+ *  a push's `pr` passes), plus no owner or name made only of dots — `..`
+ *  is never a GitHub name, and the key ends up in a `gh api` route. The
+ *  phone's reviews-store.ts applies the same extra rule. */
+function isReviewKey(value: unknown): value is string {
+  return isPrKey(value) && !/(^|\/)\.+(\/|#)/.test(value);
+}
 
 /**
  * plans:list's own `cwd` argument: used only when it is a string, at most
@@ -464,6 +500,22 @@ async function resolvePlansCwd(
 }
 
 export function createDispatchTable(deps: DispatchDeps): DispatchTable {
+  // Reviews: every argument a reviews:* channel takes, proven here before
+  // the service sees it. A refusal throws (plans:addComment's style) —
+  // these channels' own return types have no failure shape to carry one.
+  function reviewKey(channel: string, value: unknown): string {
+    if (!isReviewKey(value)) throw new Error(`${channel}: invalid prKey`);
+    return value;
+  }
+  function livePane(channel: string, value: unknown): string {
+    const pane =
+      typeof value === "string"
+        ? deps.shells.panes().find((candidate) => candidate.paneKey === value)
+        : undefined;
+    if (pane === undefined || pane.exited) throw new Error(`${channel}: invalid paneKey`);
+    return pane.paneKey;
+  }
+
   const {
     setup,
     orchestrator,
@@ -1582,6 +1634,66 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
         console.error(`plans:send: markSent failed: ${errorMessage(error)}`);
       }
       return { ok: true, sent: selected.length };
+    },
+
+    "reviews:status": () => deps.reviews.status(),
+    "reviews:list": () => deps.reviews.list(),
+    // `undefined` already means "no such PR", so a malformed key answers
+    // that rather than throwing.
+    "reviews:thread": async ([keyArg]) =>
+      isReviewKey(keyArg) ? deps.reviews.thread(keyArg) : undefined,
+    "reviews:reply": async ([keyArg, bodyArg, inReplyToArg]) => {
+      const key = reviewKey("reviews:reply", keyArg);
+      if (
+        typeof bodyArg !== "string" ||
+        bodyArg.trim() === "" ||
+        bodyArg.length > MAX_REVIEW_BODY_CHARS
+      ) {
+        throw new Error("reviews:reply: invalid body");
+      }
+      if (
+        inReplyToArg !== undefined &&
+        (typeof inReplyToArg !== "string" || !REVIEW_COMMENT_ID.test(inReplyToArg))
+      ) {
+        throw new Error("reviews:reply: invalid inReplyTo");
+      }
+      return deps.reviews.reply(key, bodyArg, inReplyToArg);
+    },
+    "reviews:link": async ([keyArg, paneArg]) => {
+      const key = reviewKey("reviews:link", keyArg);
+      const pane = paneArg === null ? null : livePane("reviews:link", paneArg);
+      return deps.reviews.link(key, pane);
+    },
+    "reviews:pause": async ([paneArg, pausedArg]) => {
+      const pane = livePane("reviews:pause", paneArg);
+      if (typeof pausedArg !== "boolean") throw new Error("reviews:pause: invalid paused");
+      return deps.reviews.pause(pane, pausedArg);
+    },
+    "reviews:deliverNow": async ([keyArg]) =>
+      deps.reviews.deliverNow(reviewKey("reviews:deliverNow", keyArg)),
+    "reviews:sendReview": async ([keyArg, paneArg]) => {
+      const key = reviewKey("reviews:sendReview", keyArg);
+      return deps.reviews.sendReview(key, livePane("reviews:sendReview", paneArg));
+    },
+    "reviews:postSummary": async ([keyArg]) =>
+      deps.reviews.postSummary(reviewKey("reviews:postSummary", keyArg)),
+    "reviews:pollNow": () => deps.reviews.pollNow(),
+    // `false` already means "nothing was requeued".
+    "reviews:requeue": async ([keyArg, idArg]) => {
+      if (!isReviewKey(keyArg)) return false;
+      if (typeof idArg !== "string" || !REVIEW_COMMENT_ID.test(idArg)) return false;
+      return deps.reviews.requeue(keyArg, idArg);
+    },
+    // Desktop-only by policy. The URL comes from the poller's own record
+    // of the PR, never the caller, and only an https one is opened.
+    "reviews:openOnGithub": async ([keyArg]) => {
+      const key = reviewKey("reviews:openOnGithub", keyArg);
+      const thread = await deps.reviews.thread(key);
+      const url = thread?.pr.url;
+      if (url === undefined || !url.startsWith("https://")) {
+        throw new Error("reviews:openOnGithub: no https URL for this pull request");
+      }
+      await deps.openExternal(url);
     },
   } satisfies Record<TableChannel, Handler>;
 }

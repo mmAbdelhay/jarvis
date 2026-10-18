@@ -17,6 +17,12 @@ export const PUSH_KINDS = [
   "session-waiting",
   "command-finished",
   "reply",
+  // Reviews: a new PR comment, one still waiting for a pane after two
+  // minutes, and a review request. Each carries only `pr` — never the
+  // comment's own text.
+  "review-comment",
+  "review-queued",
+  "review-requested",
 ] as const;
 export type PushKind = (typeof PUSH_KINDS)[number];
 
@@ -28,13 +34,18 @@ export const EXPO_PUSH_TOKEN_PATTERN = /^Expo(nent)?PushToken\[[A-Za-z0-9_-]{8,1
 
 export const MAX_PUSH_PROJECT_CHARS = 64;
 
+// A review push's `pr`: `owner/name#number`, bounded so a hostile value
+// can't grow unbounded. The same shape @jarvis/core's `prKey` builds.
+export const PR_KEY_PATTERN = /^[\w.-]+\/[\w.-]+#\d+$/;
+export const MAX_PR_KEY_CHARS = 140;
+
 export const PUSH_REGISTER_CHANNEL = "remote:registerPush";
 export const PUSH_UNREGISTER_CHANNEL = "remote:unregisterPush";
 
 export type PushPlatform = "ios" | "android";
 export type PushLanguage = "ar" | "en";
 
-export type PushData = { kind: PushKind; sessionId?: string; project?: string };
+export type PushData = { kind: PushKind; sessionId?: string; project?: string; pr?: string };
 
 export type PushRegistration = { token: string; platform: PushPlatform; language: PushLanguage };
 
@@ -57,6 +68,14 @@ export function isExpoPushToken(value: unknown): value is string {
   return typeof value === "string" && EXPO_PUSH_TOKEN_PATTERN.test(value);
 }
 
+/** True iff `value` is an `owner/name#number` string of at most
+ *  {@link MAX_PR_KEY_CHARS} characters — never coerced from any other type. */
+export function isPrKey(value: unknown): value is string {
+  return (
+    typeof value === "string" && value.length <= MAX_PR_KEY_CHARS && PR_KEY_PATTERN.test(value)
+  );
+}
+
 function isPushLanguage(value: unknown): value is PushLanguage {
   return value === "ar" || value === "en";
 }
@@ -73,7 +92,8 @@ function isValidPushProject(value: unknown): value is string {
  * received notification — field-by-field rebuild, same discipline as
  * every other parser here: an unknown `kind`, a `sessionId` that fails
  * {@link isSubscriptionKey}, or a `project` that isn't 1-{@link
- * MAX_PUSH_PROJECT_CHARS} control-character-free characters all answer
+ * MAX_PUSH_PROJECT_CHARS} control-character-free characters, or a `pr`
+ * that fails {@link isPrKey} all answer
  * `undefined` for the whole value. Any other key on the input is dropped.
  */
 export function parsePushData(value: unknown): PushData | undefined {
@@ -97,10 +117,18 @@ export function parsePushData(value: unknown): PushData | undefined {
     project = projectRaw;
   }
 
+  const prRaw = raw["pr"];
+  let pr: string | undefined;
+  if (prRaw !== undefined) {
+    if (!isPrKey(prRaw)) return undefined;
+    pr = prRaw;
+  }
+
   return {
     kind,
     ...(sessionId !== undefined ? { sessionId } : {}),
     ...(project !== undefined ? { project } : {}),
+    ...(pr !== undefined ? { pr } : {}),
   };
 }
 

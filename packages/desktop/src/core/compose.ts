@@ -1684,6 +1684,14 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     log: (line) => console.error(line),
   });
 
+  // Reviews (Task 10): the service's change notices reach the renderer and,
+  // via REMOTE_PUSH_POLICY's reliable "reviews:changed", a paired phone;
+  // its notify events go through the same notifier (focus, watching and
+  // coalescing rules, audit) every other push kind does. Both listeners
+  // are cleared by reviews.dispose() at shutdown.
+  reviews.onChanged((prKey) => broadcast.send("reviews:changed", prKey));
+  reviews.onNotify((event) => notifier.review(event));
+
   const settings = createSettingsHandlers({
     readConfig: () => loadConfig(DEFAULT_CONFIG_PATH),
     // The same hoisted writeConfig instance createRemoteAccess's own
@@ -2232,6 +2240,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     writeConfig,
     // Phase 1: remote:openWebClient's system browser (dispatch.ts).
     openExternal: (url) => host.openExternal(url),
+    reviews,
     plans: {
       files: planFiles,
       comments: planComments,

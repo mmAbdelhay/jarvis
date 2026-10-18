@@ -12,10 +12,10 @@
 // can trigger a push, and owns exactly the timers behind the
 // "waiting for you" quiet-period heuristic.
 import { looksLikePrompt, PROMPT_TAIL_CHARS } from "@jarvis/core";
-import type { Session, SessionManager, Turn } from "@jarvis/core";
+import type { PrKey, Session, SessionManager, Turn } from "@jarvis/core";
 import type { ExpoPushMessage } from "@jarvis/remote";
 import { PUSH_TTL_SECONDS } from "@jarvis/remote";
-import { MAX_PUSH_PROJECT_CHARS } from "@jarvis/wire";
+import { isPrKey, MAX_PUSH_PROJECT_CHARS } from "@jarvis/wire";
 import type { PushKind } from "@jarvis/wire";
 import { MESSAGES } from "./messages.js";
 
@@ -35,7 +35,15 @@ export type NotifyEvent =
       project: string | null;
     }
   | { kind: "command-finished"; paneKey: string; seconds: number; ok: boolean }
-  | { kind: "reply"; replyTo: string };
+  | { kind: "reply"; replyTo: string }
+  // Reviews (review-service.ts's onNotify): only the PR's own key — never
+  // a comment's author or text.
+  | ReviewNotifyEvent;
+
+export type ReviewNotifyEvent = {
+  kind: "review-comment" | "review-queued" | "review-requested";
+  pr: PrKey;
+};
 
 export type PushTarget = {
   deviceId: string;
@@ -68,6 +76,10 @@ function eventKeyOf(event: NotifyEvent): string {
       return event.paneKey;
     case "reply":
       return "";
+    case "review-comment":
+    case "review-queued":
+    case "review-requested":
+      return event.pr;
   }
 }
 
@@ -82,6 +94,9 @@ function projectOf(event: NotifyEvent): string | null {
       return event.project;
     case "command-finished":
     case "reply":
+    case "review-comment":
+    case "review-queued":
+    case "review-requested":
       return null;
   }
 }
@@ -100,6 +115,9 @@ function sessionIdOf(event: NotifyEvent): string | undefined {
       return event.sessionId;
     case "command-finished":
     case "reply":
+    case "review-comment":
+    case "review-queued":
+    case "review-requested":
       return undefined;
   }
 }
@@ -116,6 +134,11 @@ export function relevantChannels(event: NotifyEvent): { channel: string; key?: s
       return [{ channel: "terminal:data", key: event.paneKey }];
     case "reply":
       return [{ channel: "turn:new" }];
+    // A phone with the Reviews list or a thread open already sees it.
+    case "review-comment":
+    case "review-queued":
+    case "review-requested":
+      return [{ channel: "reviews:changed" }];
   }
 }
 
@@ -188,15 +211,30 @@ export function buildPushMessage(
     includeProjectNames && rawProject ? rawProject.slice(0, MAX_PUSH_PROJECT_CHARS) : undefined;
   const detail = detailOf(event);
   const sessionId = sessionIdOf(event);
+  const pr = prOf(event);
+  // The body names the PR number always, its `owner/name` only under the
+  // same includeProjectNames switch that gates a project name — the repo
+  // is the same kind of "what am I working on" detail.
+  const hash = pr === undefined ? -1 : pr.lastIndexOf("#");
+  const prLabel =
+    pr === undefined
+      ? undefined
+      : {
+          number: Number(pr.slice(hash + 1)),
+          ...(includeProjectNames ? { repo: pr.slice(0, hash) } : {}),
+        };
 
   const data: Record<string, string> = { kind: event.kind };
   if (sessionId !== undefined) data.sessionId = sessionId;
   if (project !== undefined) data.project = project;
+  // Always, unlike `project`: the phone needs it to open the PR's thread
+  // on tap (notification-tap.ts), and it is a bounded identifier.
+  if (pr !== undefined) data.pr = pr;
 
   return {
     to: target.token,
     title: MESSAGES.pushTitle(target.language),
-    body: MESSAGES.pushBody(event.kind, project, target.language, detail),
+    body: MESSAGES.pushBody(event.kind, project, target.language, detail, prLabel),
     data,
     sound: "default",
     priority: "high",
@@ -220,8 +258,24 @@ export type NotifierDeps = {
 
 export type Notifier = {
   commandFinished(paneKey: string, seconds: number, ok: boolean): void;
+  /** Reviews: review-service.ts's onNotify, routed here by compose.ts. */
+  review(event: ReviewNotifyEvent): void;
   dispose(): void;
 };
+
+/** A review event's validated PR key, or undefined for every other kind
+ *  (and for a key that fails @jarvis/wire's own `isPrKey` — a push never
+ *  carries a `pr` the phone would refuse). */
+function prOf(event: NotifyEvent): PrKey | undefined {
+  switch (event.kind) {
+    case "review-comment":
+    case "review-queued":
+    case "review-requested":
+      return isPrKey(event.pr) ? event.pr : undefined;
+    default:
+      return undefined;
+  }
+}
 
 /** Logging's `suppressed=` word (behaviour rule 6) — counts and category
  *  only, never a reason that could carry a project name or similar. */
@@ -358,6 +412,11 @@ export function createNotifier(deps: NotifierDeps): Notifier {
     emit({ kind: "command-finished", paneKey, seconds, ok });
   }
 
+  function review(event: ReviewNotifyEvent): void {
+    if (disposed) return;
+    emit({ kind: event.kind, pr: event.pr });
+  }
+
   function dispose(): void {
     disposed = true;
     unsubscribeChange();
@@ -368,5 +427,5 @@ export function createNotifier(deps: NotifierDeps): Notifier {
     waitingFlagged.clear();
   }
 
-  return { commandFinished, dispose };
+  return { commandFinished, review, dispose };
 }

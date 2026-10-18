@@ -59,6 +59,7 @@ describe("REMOTE_PUSH_POLICY", () => {
     expect(REMOTE_PUSH_POLICY["voice:speaking"]).toEqual({ kind: "reliable" });
     expect(REMOTE_PUSH_POLICY["voice:notice"]).toEqual({ kind: "reliable" });
     expect(REMOTE_PUSH_POLICY["workspace:update"]).toEqual({ kind: "reliable" });
+    expect(REMOTE_PUSH_POLICY["reviews:changed"]).toEqual({ kind: "reliable" });
 
     const exitPolicy = REMOTE_PUSH_POLICY["terminal:exit"] as ReliablePolicy;
     expect(exitPolicy.kind).toBe("reliable");

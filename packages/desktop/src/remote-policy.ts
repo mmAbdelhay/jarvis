@@ -293,6 +293,23 @@ export const CHANNEL_POLICY = {
   // Electron-bound channel in this table already is. A paired phone opens
   // a plan's links with its own OS, not this one's.
   "plans:openLink": "desktop-only",
+  // Reviews (Task 10): remote, all but openOnGithub — the phone reads and
+  // answers PR conversations the same as the desktop page. Every argument
+  // (prKey shape, body size, paneKey liveness) is re-checked in
+  // dispatch.ts regardless of origin.
+  "reviews:status": "remote",
+  "reviews:list": "remote",
+  "reviews:thread": "remote",
+  "reviews:reply": "remote",
+  "reviews:link": "remote",
+  "reviews:pause": "remote",
+  "reviews:deliverNow": "remote",
+  "reviews:sendReview": "remote",
+  "reviews:postSummary": "remote",
+  "reviews:pollNow": "remote",
+  "reviews:requeue": "remote",
+  // Desktop-only: opens the laptop's own browser, plans:openLink's reason.
+  "reviews:openOnGithub": "desktop-only",
   // The updater replaces and quits the laptop's own app; never a phone's
   // call to make.
   "update:check": "desktop-only",
@@ -468,6 +485,20 @@ export const REMOTE_EFFECT = {
   "plans:updateComment": "mutate",
   "plans:deleteComment": "mutate",
   "plans:send": "input",
+  // Reviews: three reads; every other channel posts to GitHub, persists
+  // to reviews.json, pastes into a pane or spends a `gh` poll — always
+  // audited, never first-per-key (none of them is a keystroke stream).
+  "reviews:status": "read",
+  "reviews:list": "read",
+  "reviews:thread": "read",
+  "reviews:reply": "mutate",
+  "reviews:link": "mutate",
+  "reviews:pause": "mutate",
+  "reviews:deliverNow": "mutate",
+  "reviews:sendReview": "mutate",
+  "reviews:postSummary": "mutate",
+  "reviews:pollNow": "mutate",
+  "reviews:requeue": "mutate",
 } as const satisfies Record<RemoteChannel, "read" | "mutate" | "input">;
 
 /** M12 Task 3: how often `channel`'s outcome gets a `remote-call` audit

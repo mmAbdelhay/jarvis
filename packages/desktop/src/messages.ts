@@ -2004,7 +2004,17 @@ export const MESSAGES = {
     project: string | undefined,
     language: "ar" | "en",
     detail?: { ok: boolean; seconds: number },
+    // Reviews: the PR a review-* push is about — its number always, its
+    // `owner/name` only when notify.ts passed it (includeProjectNames).
+    // Never the comment's own text: this builder is never handed it.
+    pr?: { number: number; repo?: string },
   ): string => {
+    const prLabel =
+      pr === undefined
+        ? language === "ar"
+          ? "طلب دمج"
+          : "a pull request"
+        : `${pr.repo ?? ""}#${pr.number}`;
     switch (kind) {
       case "session-done":
         return language === "ar"
@@ -2047,6 +2057,18 @@ export const MESSAGES = {
       }
       case "reply":
         return language === "ar" ? "ردّ جارفيس على رسالتك." : "Jarvis replied to your message.";
+      case "review-comment":
+        return language === "ar"
+          ? `تعليق مراجعة جديد على ${prLabel}.`
+          : `New review comment on ${prLabel}.`;
+      case "review-queued":
+        return language === "ar"
+          ? `تعليق مراجعة على ${prLabel} ينتظر جلسة تستلمه.`
+          : `A review comment on ${prLabel} is waiting for a session.`;
+      case "review-requested":
+        return language === "ar"
+          ? `طُلبت مراجعتك على ${prLabel}.`
+          : `Your review was requested on ${prLabel}.`;
     }
   },
   // The only `registered: false` text the laptop ever sends (PushRegisterResult,

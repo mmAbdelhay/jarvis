@@ -49,6 +49,11 @@ export type PushChannels = IpcChannels & {
   // follow — so the renderer (and, via REMOTE_PUSH_POLICY, a paired phone)
   // re-reads with plansRead/plansComments on receipt.
   "plans:changed": string;
+  // Reviews (Task 10): the review service's own onChanged — the PR whose
+  // state moved, or null for "anything may have" (a pause, a poll). The
+  // payload is a key, never comment text; the renderer and a paired phone
+  // re-read with reviewsList/reviewsThread on receipt.
+  "reviews:changed": string | null;
   // The updater's state (updater.ts), after every change. Local to this
   // window: a phone has no business installing the laptop's app.
   "update:state": UpdateState;
@@ -280,6 +285,22 @@ export const INVOKE_CHANNELS = {
   // (remote-policy.ts) — see desktop-only.ts's own handler for the scheme
   // and length gate before shell.openExternal ever runs.
   plansOpenLink: "plans:openLink",
+  // Reviews (Task 10): the review service's own surface. Every one but
+  // openOnGithub is remote-legal (remote-policy.ts); dispatch.ts checks
+  // every argument first regardless of origin.
+  reviewsStatus: "reviews:status",
+  reviewsList: "reviews:list",
+  reviewsThread: "reviews:thread",
+  reviewsReply: "reviews:reply",
+  reviewsLink: "reviews:link",
+  reviewsPause: "reviews:pause",
+  reviewsDeliverNow: "reviews:deliverNow",
+  reviewsSendReview: "reviews:sendReview",
+  reviewsPostSummary: "reviews:postSummary",
+  reviewsPollNow: "reviews:pollNow",
+  reviewsRequeue: "reviews:requeue",
+  // Desktop-only: opens the PR in the laptop's own browser.
+  reviewsOpenOnGithub: "reviews:openOnGithub",
   // The updater (updater.ts). Electron-bound and desktop-only: they act on
   // this app's own install and quit it.
   updateCheck: "update:check",
@@ -314,6 +335,7 @@ export const PUSH_CHANNELS = {
   onRemoteStatus: "remote:update",
   onTabRename: "workspace:tabRename",
   onPlansChanged: "plans:changed",
+  onReviewsChanged: "reviews:changed",
   onTabPlans: "workspace:tabPlans",
   onUpdateState: "update:state",
 } as const satisfies Record<PushKey, string>;

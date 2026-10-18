@@ -50,6 +50,7 @@ describe("the channel table", () => {
       "plans:changed",
       "providers:update",
       "remote:update",
+      "reviews:changed",
       "session:output",
       "sessions:update",
       "setup:output",
