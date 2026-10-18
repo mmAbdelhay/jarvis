@@ -14,41 +14,52 @@ const wrapInAnsi = (tail: string): string =>
     .join("\n");
 
 const CASES = [
-  { name: "claude-idle", agentId: "claude", state: "idle-input" },
-  { name: "claude-busy", agentId: "claude", state: "busy" },
-  { name: "claude-approval", agentId: "claude", state: "approval-prompt" },
-  { name: "codex-idle", agentId: "codex", state: "idle-input" },
-  { name: "codex-busy", agentId: "codex", state: "busy" },
+  { name: "claude-idle", vendor: "anthropic", state: "idle-input" },
+  { name: "claude-busy", vendor: "anthropic", state: "busy" },
+  { name: "claude-approval", vendor: "anthropic", state: "approval-prompt" },
+  { name: "codex-idle", vendor: "openai", state: "idle-input" },
+  { name: "codex-busy", vendor: "openai", state: "busy" },
 ] as const;
 
 describe("readAgentInputState", () => {
-  for (const { name, agentId, state } of CASES) {
+  for (const { name, vendor, state } of CASES) {
     it(`reads ${name} as ${state}`, () => {
-      expect(readAgentInputState(fixture(name), agentId)).toBe(state);
+      expect(readAgentInputState(fixture(name), vendor)).toBe(state);
     });
 
     it(`reads ${name} wrapped in ANSI colour codes as ${state}`, () => {
-      expect(readAgentInputState(wrapInAnsi(fixture(name)), agentId)).toBe(state);
+      expect(readAgentInputState(wrapInAnsi(fixture(name)), vendor)).toBe(state);
     });
   }
 
   it("never reads a half-typed draft as idle-input", () => {
-    expect(readAgentInputState(fixture("claude-draft"), "claude")).not.toBe("idle-input");
-    expect(readAgentInputState(wrapInAnsi(fixture("claude-draft")), "claude")).not.toBe(
+    expect(readAgentInputState(fixture("claude-draft"), "anthropic")).not.toBe("idle-input");
+    expect(readAgentInputState(wrapInAnsi(fixture("claude-draft")), "anthropic")).not.toBe(
       "idle-input",
     );
   });
 
-  it("gives unknown for an agent it has no markers for", () => {
-    expect(readAgentInputState(fixture("claude-idle"), "aider")).toBe("unknown");
+  it("gives unknown for a vendor it has no markers for", () => {
+    expect(readAgentInputState(fixture("claude-idle"), "github")).toBe("unknown");
   });
 
-  it("gives approval-prompt for any agent, even one it has no markers for", () => {
-    expect(readAgentInputState(fixture("claude-approval"), "aider")).toBe("approval-prompt");
+  // Keyed by vendor, not by the user's config key: "claude-mm" and "claude"
+  // are agent ids, never marker keys.
+  it("gives unknown for an agent id passed where a vendor belongs", () => {
+    expect(readAgentInputState(fixture("claude-idle"), "claude")).toBe("unknown");
+    expect(readAgentInputState(fixture("claude-idle"), "claude-mm")).toBe("unknown");
+  });
+
+  it("gives unknown for a prototype key", () => {
+    expect(readAgentInputState(fixture("claude-idle"), "constructor")).toBe("unknown");
+  });
+
+  it("gives approval-prompt for any vendor, even one it has no markers for", () => {
+    expect(readAgentInputState(fixture("claude-approval"), "github")).toBe("approval-prompt");
   });
 
   it("gives unknown for an empty tail", () => {
-    expect(readAgentInputState("", "claude")).toBe("unknown");
+    expect(readAgentInputState("", "anthropic")).toBe("unknown");
   });
 
   // bite-proof: the idle fixture's own box with the agent's busy line put
@@ -58,17 +69,17 @@ describe("readAgentInputState", () => {
       "✻ Worked for 18s",
       "✻ Thinking… (3s · esc to interrupt)",
     );
-    expect(readAgentInputState(tail, "claude")).toBe("busy");
+    expect(readAgentInputState(tail, "anthropic")).toBe("busy");
   });
 
   it("reads a Claude spinner line without esc-to-interrupt as busy", () => {
     const tail = fixture("claude-idle").replace("✻ Worked for 18s", "✢ Thinking…");
-    expect(readAgentInputState(tail, "claude")).toBe("busy");
+    expect(readAgentInputState(tail, "anthropic")).toBe("busy");
   });
 
   it("is not idle once the input box is pushed away from the end of the tail", () => {
     const noise = Array.from({ length: 10 }, (_, i) => `  line ${i} of agent output`).join("\n");
-    expect(readAgentInputState(`${fixture("claude-idle")}${noise}\n`, "claude")).not.toBe(
+    expect(readAgentInputState(`${fixture("claude-idle")}${noise}\n`, "anthropic")).not.toBe(
       "idle-input",
     );
   });
@@ -76,14 +87,14 @@ describe("readAgentInputState", () => {
 
 describe("inputLineHasDraft", () => {
   it("is true for the Claude draft fixture", () => {
-    expect(inputLineHasDraft(fixture("claude-draft"), "claude")).toBe(true);
+    expect(inputLineHasDraft(fixture("claude-draft"), "anthropic")).toBe(true);
   });
 
   it("is true for the Claude draft fixture wrapped in ANSI colour codes", () => {
-    expect(inputLineHasDraft(wrapInAnsi(fixture("claude-draft")), "claude")).toBe(true);
+    expect(inputLineHasDraft(wrapInAnsi(fixture("claude-draft")), "anthropic")).toBe(true);
   });
 
   it("is false for the empty Claude input box", () => {
-    expect(inputLineHasDraft(fixture("claude-idle"), "claude")).toBe(false);
+    expect(inputLineHasDraft(fixture("claude-idle"), "anthropic")).toBe(false);
   });
 });

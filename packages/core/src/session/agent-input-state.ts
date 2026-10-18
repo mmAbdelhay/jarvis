@@ -36,32 +36,33 @@ type AgentInputMarkers = {
   draftReadable: boolean;
 };
 
-// One entry per agent id, as `listAgentProcesses` reports it (the config
-// key: `claude` on a first-run config). An agent with no entry is
-// "unknown" — never guessed idle.
+// One entry per agent vendor (`AgentConfig.vendor`), not per agent id: ids
+// are the user's config keys ("claude-mm", "claude-work") and any number of
+// them run the same CLI. A vendor with no entry — or an agent with no
+// vendor — is "unknown", never guessed idle.
 export const AGENT_INPUT_MARKERS: Readonly<Record<string, AgentInputMarkers>> = {
-  // Claude Code: the input box is "> " between two rules (or inside "│ … │"
+  // anthropic — Claude Code: the input box is "> " between two rules (or inside "│ … │"
   // on older builds); while a turn runs a spinner line — one of its glyphs,
   // a gerund, "…", usually "(12s · esc to interrupt)" — sits above it. The
   // finished-turn line ("✻ Worked for 18s") has no "…", so it is not busy.
-  claude: {
+  anthropic: {
     inputLine: /^│?\s*>(?:\s+(.*?))?\s*│?$/,
     busy: [/esc to interrupt/i, /^[·✢✳✶✻✽*]\s+\S.*…/],
     draftReadable: true,
   },
-  // Codex CLI: the composer is "› " (or "▌" on older builds) and shows a
+  // openai — Codex CLI: the composer is "› " (or "▌" on older builds) and shows a
   // placeholder when empty; a running turn shows "• Working (8s • esc to
   // interrupt)" above it.
-  codex: {
+  openai: {
     inputLine: /^[›▌]\s*(.*)$/,
     busy: [/esc to interrupt/i, /\bWorking\s*\(/],
     draftReadable: false,
   },
 };
 
-function markersFor(agentId: string): AgentInputMarkers | undefined {
-  // Own keys only, so an id like "constructor" is not read off the prototype.
-  return Object.hasOwn(AGENT_INPUT_MARKERS, agentId) ? AGENT_INPUT_MARKERS[agentId] : undefined;
+function markersFor(vendor: string): AgentInputMarkers | undefined {
+  // Own keys only, so a value like "constructor" is not read off the prototype.
+  return Object.hasOwn(AGENT_INPUT_MARKERS, vendor) ? AGENT_INPUT_MARKERS[vendor] : undefined;
 }
 
 function lastLines(tail: string): string[] {
@@ -90,19 +91,19 @@ function readInputLine(lines: readonly string[], markers: AgentInputMarkers): st
  * What the agent in a pane is doing, read from the pane's output tail:
  *
  *  - `approval-prompt` whenever {@link looksLikePrompt} is true, for any
- *    agent, checked first — a paste's Enter would answer the menu;
- *  - `busy` when a busy marker for `agentId` is in the last
+ *    vendor, checked first — a paste's Enter would answer the menu;
+ *  - `busy` when a busy marker for `vendor` is in the last
  *    {@link BUSY_SCAN_LINES} non-empty lines, or the input line holds a
  *    draft the user is typing;
  *  - `idle-input` when the agent's input line is near the end of the tail
  *    (and, for Claude Code, empty);
- *  - `unknown` for an agent with no markers, or no input line in view.
+ *  - `unknown` for a vendor with no markers, or no input line in view.
  *
  * Only `idle-input` permits a delivery.
  */
-export function readAgentInputState(tail: string, agentId: string): AgentInputState {
+export function readAgentInputState(tail: string, vendor: string): AgentInputState {
   if (looksLikePrompt(stripAnsi(tail))) return "approval-prompt";
-  const markers = markersFor(agentId);
+  const markers = markersFor(vendor);
   if (markers === undefined) return "unknown";
   const lines = lastLines(tail);
   if (lines.some((line) => markers.busy.some((marker) => marker.test(line)))) return "busy";
@@ -115,11 +116,11 @@ export function readAgentInputState(tail: string, agentId: string): AgentInputSt
 /**
  * True iff the agent's input line, near the end of the tail, holds text the
  * user typed. Always false for an agent whose empty box shows a placeholder
- * (Codex) or that has no markers — callers must not read false as "empty"
+ * (Codex) or whose vendor has no markers — callers must not read false as "empty"
  * there; {@link readAgentInputState} is the delivery gate.
  */
-export function inputLineHasDraft(tail: string, agentId: string): boolean {
-  const markers = markersFor(agentId);
+export function inputLineHasDraft(tail: string, vendor: string): boolean {
+  const markers = markersFor(vendor);
   if (markers === undefined || !markers.draftReadable) return false;
   const input = readInputLine(lastLines(tail), markers);
   return input !== undefined && input.length > 0;
