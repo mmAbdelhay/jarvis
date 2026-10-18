@@ -28,6 +28,10 @@ export type ReviewComment = {
   inReplyTo?: string;
 };
 
+export function reviewCommentKey(prKey: PrKey, kind: ReviewComment["kind"], id: string): string {
+  return `${prKey}|${kind}|${id}`;
+}
+
 export type QueuedComment = {
   prKey: PrKey;
   comment: ReviewComment;
@@ -89,10 +93,12 @@ export type ReviewsStore = {
     comments: ReviewComment[],
     state: "queued" | "history",
   ): Promise<void>;
-  /** IDs use the store's composite key: PR key + comment kind + GitHub id. */
+  /** IDs are reviewCommentKey values. */
   markDelivered(ids: readonly string[], paneKey: string, at: number): Promise<void>;
   markOwn(prKey: PrKey, comment: ReviewComment): Promise<void>;
   listQueued(prKey?: PrKey): Promise<QueuedComment[]>;
+  /** Moves a `history` entry back to `queued`; false for any other state or unknown key. */
+  requeue(key: string): Promise<boolean>;
   thread(prKey: PrKey): Promise<QueuedComment[]>;
   manualLinks(): Promise<Map<PrKey, string | null>>;
   setManualLink(prKey: PrKey, paneKey: string | null): Promise<void>;

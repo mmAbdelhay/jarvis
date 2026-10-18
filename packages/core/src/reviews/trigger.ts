@@ -9,5 +9,5 @@ export function shouldTrigger(c: ReviewComment, login: string, cfg: ReviewsConfi
   if (cfg.authors.length > 0 && !cfg.authors.some((name) => name.toLowerCase() === author)) {
     return false;
   }
-  return c.body.toLowerCase().includes(cfg.requireText.toLowerCase());
+  return c.body.toLowerCase().includes(cfg.requireText.trim().toLowerCase());
 }

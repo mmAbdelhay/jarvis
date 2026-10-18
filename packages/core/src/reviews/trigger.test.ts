@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { shouldTrigger } from "./trigger.js";
-import { DEFAULT_REVIEWS_CONFIG, prKey, REVIEW_MARKER } from "./types.js";
+import { DEFAULT_REVIEWS_CONFIG, prKey, REVIEW_MARKER, reviewCommentKey } from "./types.js";
 import type { ReviewComment, ReviewsConfig } from "./types.js";
 
 function comment(overrides: Partial<ReviewComment> = {}): ReviewComment {
@@ -42,6 +42,20 @@ describe("shouldTrigger", () => {
     expect(shouldTrigger(comment(), "owner", config({ requireText: "@jarvis" }))).toBe(false);
   });
 
+  it("trims required text before matching regardless of case", () => {
+    expect(
+      shouldTrigger(
+        comment({ body: "@JARVIS please fix" }),
+        "owner",
+        config({ requireText: " \t@jarvis\n" }),
+      ),
+    ).toBe(true);
+  });
+
+  it("treats whitespace-only required text as no requirement", () => {
+    expect(shouldTrigger(comment(), "owner", config({ requireText: " \t\n" }))).toBe(true);
+  });
+
   it("accepts an allowlisted author with required text regardless of case", () => {
     expect(
       shouldTrigger(
@@ -67,6 +81,15 @@ describe("review types", () => {
   it("formats a PR key", () => {
     expect(prKey("owner/name", 42)).toBe("owner/name#42");
   });
+
+  it.each(["issue", "review-inline", "review-body"] as const)(
+    "formats a review comment key for %s",
+    (kind) => {
+      expect(reviewCommentKey(prKey("owner/name", 42), kind, "123")).toBe(
+        `owner/name#42|${kind}|123`,
+      );
+    },
+  );
 
   it("pins the marker and defaults", () => {
     expect(REVIEW_MARKER).toBe("<!-- jarvis:auto -->");
