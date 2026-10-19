@@ -16,7 +16,8 @@ const fixture = (name: string): string =>
 const FINISHED = "✻ Baked for 15s · done 12:34 AM · 1 shell still running";
 // Its empty input box, as the rendered screen has it (trailing space trimmed).
 const EMPTY_BOX = /^❯$/m;
-const withDraft = (draft: string): string => fixture("claude-idle").replace(EMPTY_BOX, `❯ ${draft}`);
+const withDraft = (draft: string): string =>
+  fixture("claude-idle").replace(EMPTY_BOX, `❯ ${draft}`);
 
 // Re-colours every line and erases it first, the way a TUI redraw arrives
 // in a pane's raw output: the verdict must not depend on the escapes.

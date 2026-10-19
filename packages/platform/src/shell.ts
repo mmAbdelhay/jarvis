@@ -75,6 +75,11 @@ export type ShellManager = {
   shellPids(): ReadonlyMap<number, string>;
   write(tabId: string, data: string): void;
   resize(tabId: string, cols: number, rows: number): void;
+  /** The last size a resize set for this pane, as in `snapshot` — without
+   *  joining the retained log, so it is cheap to read per output chunk
+   *  (pane-screen.ts). Undefined until the first resize, or for an unknown
+   *  pane. */
+  termSize(tabId: string): { cols: number; rows: number } | undefined;
   /** Kills a tab's shell and forgets it — for a closed tab. */
   kill(tabId: string): void;
   /** Kills every shell; called on quit. Each one is a live child process
@@ -290,6 +295,11 @@ export function createShellManager(deps: ShellManagerDeps): ShellManager {
       if (session === undefined || session.exited) return;
       session.termSize = { cols, rows };
       session.process.resize(cols, rows);
+    },
+
+    termSize(tabId) {
+      const size = sessions.get(tabId)?.termSize;
+      return size === undefined ? undefined : { ...size };
     },
 
     kill(tabId) {

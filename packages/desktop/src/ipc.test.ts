@@ -2201,6 +2201,7 @@ describe("terminal handlers", () => {
         shellPids: () => new Map(),
         write: (tabId, data) => written.push({ tabId, data }),
         resize: () => {},
+        termSize: () => undefined,
         kill: (tabId) => killed.push(tabId),
         stopAll: async () => {},
       },

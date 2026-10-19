@@ -112,6 +112,10 @@ export type DeliveryOutcome = { sent: true } | { sent: false; wait: DeliveryWait
 
 export type ReviewServiceDeps = {
   shells: Pick<ShellManager, "panes" | "log" | "write" | "onOutput" | "onShellExit">;
+  /** The pane's rendered screen (pane-screen.ts), read in place of its raw
+   *  log when present: an agent that redraws in place (Claude Code) leaves
+   *  a raw log the idle markers cannot read. */
+  screenText?(paneKey: string): string | undefined;
   terminal: Pick<TerminalHandlers, "paneCwd" | "lastKeystrokeAt">;
   /** The current git branch of a directory, undefined outside a repository. */
   branchOf(cwd: string): Promise<string | undefined>;
@@ -312,7 +316,10 @@ export function createReviewService(deps: ReviewServiceDeps): ReviewService {
       .sort((a, b) => b.startedAt - a.startedAt)[0];
     const vendor =
       found === undefined ? undefined : deps.agents().find((a) => a.id === found.agentId)?.vendor;
-    const tail = lastLinesOf(deps.shells.log(paneKey), REVIEW_TAIL_LINES);
+    const tail = lastLinesOf(
+      deps.screenText?.(paneKey) ?? deps.shells.log(paneKey),
+      REVIEW_TAIL_LINES,
+    );
     const pastedAt = awaitingOutput.get(paneKey);
     // The paste is not on screen yet: the tail still shows the box it was
     // pasted into, empty. Until the pane prints again it is busy.
@@ -772,18 +779,20 @@ export function createReviewService(deps: ReviewServiceDeps): ReviewService {
       return posted;
     },
 
+    // Link and pause are written through the same queue as a pane exit's
+    // forget, so one set on a quickly restarted pane (same key) lands after
+    // the old shell's forget instead of being wiped by it.
     async link(prKey, paneKey) {
       const pr = prs.get(lower(prKey));
-      await deps.store.setManualLink(
-        pr === undefined ? prKey : makePrKey(pr.repo, pr.number),
-        paneKey,
+      await exclusive(() =>
+        deps.store.setManualLink(pr === undefined ? prKey : makePrKey(pr.repo, pr.number), paneKey),
       );
       changed(prKey);
       await requestEvaluation();
     },
 
     async pause(paneKey, paused) {
-      await deps.store.setPaused(paneKey, paused);
+      await exclusive(() => deps.store.setPaused(paneKey, paused));
       changed(null);
       await requestEvaluation();
     },

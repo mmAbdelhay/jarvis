@@ -221,6 +221,7 @@ import { serialize } from "../serialize.js";
 import { writeSettingsFile } from "../settings-io.js";
 import { writeDaemonEnabled } from "../daemon/config-file.js";
 import { errorMessage, MESSAGES, PRIMARY_LANGUAGE } from "../messages.js";
+import { createPaneScreens } from "../pane-screen.js";
 import { createRecorderDeps, Recorder } from "../recorder.js";
 import { capacityReport, startupReport } from "../startup.js";
 import { createTerminalFitOverrides } from "../terminal-fit-overrides.js";
@@ -951,6 +952,9 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     broadcast.send("terminal:data", { paneKey, chunk, offset }),
   );
   shells.onShellExit(({ paneKey, code }) => broadcast.send("terminal:exit", { paneKey, code }));
+  // Every pane's output rendered as its screen, for the Reviews idle reader
+  // (Claude Code's raw redraw stream is not readable as lines).
+  const paneScreens = createPaneScreens(shells);
 
   // The history file, and the parser that matches it.
   //
@@ -1277,6 +1281,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     });
   const reviews = createReviewService({
     shells,
+    screenText: (paneKey) => paneScreens.screenText(paneKey),
     terminal,
     branchOf: async (cwd) => {
       const outcome = await git.changes(cwd);
@@ -1937,6 +1942,8 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     safely("session importer", () => sessionImporter.stop());
     // The review poller's timer and the delivery timers.
     safely("reviews", () => reviews.dispose());
+    // One headless terminal per pane that printed.
+    safely("pane screens", () => paneScreens.dispose());
     // A recording started but never stopped holds ffmpeg — and the
     // microphone — open indefinitely.
     safely("recorder", () => recorder.abort());

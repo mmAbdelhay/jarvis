@@ -167,6 +167,7 @@ function harness(
   const store = opts.store ?? memoryStore();
   const writes: { paneKey: string; data: string }[] = [];
   const logs = new Map<string, string>([[PANE, IDLE_TAIL]]);
+  const screens = new Map<string, string>();
   const panes = opts.panes ?? [{ paneKey: PANE, exited: false }];
   const outputListeners: ((o: ShellOutput) => void)[] = [];
   const exitListeners: ((e: { paneKey: string; code: number }) => void)[] = [];
@@ -206,6 +207,7 @@ function harness(
         return () => {};
       },
     },
+    screenText: (key) => screens.get(key),
     terminal: {
       paneCwd: (key) => cwds.get(key) ?? "/p/app",
       lastKeystrokeAt: (key) => keystrokes.get(key),
@@ -250,6 +252,7 @@ function harness(
     store,
     writes,
     logs,
+    screens,
     panes,
     keystrokes,
     notifies,
@@ -831,5 +834,45 @@ describe("review service final-review fixes", () => {
     expect(h.notifies.filter((n) => n.kind === "review-queued")).toEqual([
       { kind: "review-queued", pr: PR_KEY },
     ]);
+  });
+});
+
+describe("review service e2e fixes", () => {
+  const OTHER = "tab-2";
+
+  // Claude Code redraws in place; its raw log is unreadable, so the pane's
+  // rendered screen is what the idle reader sees whenever there is one.
+  it("reads a pane's rendered screen over its raw log, the log when there is none", async () => {
+    const h = harness();
+    h.logs.set(PANE, BUSY_TAIL);
+    expect((await h.service.paneStateOf(PANE)).input).toBe("busy");
+    h.screens.set(PANE, IDLE_TAIL);
+    expect((await h.service.paneStateOf(PANE)).input).toBe("idle-input");
+    h.screens.set(PANE, `${IDLE_TAIL.replace("> ", "> half a dra")}`);
+    expect((await h.service.paneStateOf(PANE)).draft).toBe(true);
+  });
+
+  // A pane's key comes back when its shell restarts (shell.ts start): a
+  // link set on the new shell must not be wiped by the old one's exit,
+  // queued behind a running evaluation.
+  it("keeps a link set on a quickly restarted pane after the old shell's queued forget", async () => {
+    const h = harness({
+      panes: [
+        { paneKey: PANE, exited: false },
+        { paneKey: OTHER, exited: false },
+      ],
+    });
+    await h.service.whenIdle();
+    const release = h.holdScans();
+    h.output(PANE, "x");
+    h.exit(OTHER);
+    for (const pane of h.panes) if (pane.paneKey === OTHER) pane.exited = false;
+    const linked = h.service.link(PR_KEY, OTHER);
+    const paused = h.service.pause(OTHER, true);
+    release();
+    await Promise.all([linked, paused]);
+    await h.service.whenIdle();
+    expect((await h.store.manualLinks()).get(PR_KEY)).toBe(OTHER);
+    expect(await h.store.paused()).toEqual(new Set([OTHER]));
   });
 });
