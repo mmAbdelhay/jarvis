@@ -2382,6 +2382,8 @@ export const MESSAGES = {
     language === "ar" ? "تم الرد" : "replied",
   reviewsCommentHistory: (language: "ar" | "en"): string =>
     language === "ar" ? "سابق · لم يُرسل" : "earlier · not sent",
+  reviewsCommentSkippedMarker: (language: "ar" | "en"): string =>
+    language === "ar" ? "تم التخطي · علامة Jarvis" : "skipped · Jarvis marker",
   reviewsYou: (language: "ar" | "en"): string => (language === "ar" ? "أنت" : "you"),
   reviewsKindIssue: (language: "ar" | "en"): string =>
     language === "ar" ? "تعليق على الطلب" : "PR comment",

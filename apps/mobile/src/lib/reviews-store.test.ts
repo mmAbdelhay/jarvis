@@ -221,6 +221,33 @@ describe("reviewThreadEntries", () => {
   });
 });
 
+describe("reviewThreadEntries — Jarvis marker", () => {
+  // A colleague's comment carrying Jarvis's marker is never queued (core
+  // trigger.ts): it is skipped, not "earlier, not sent".
+  it("marks a history comment carrying the Jarvis marker as skipped, others not", () => {
+    const thread = parseReviewThread({
+      pr,
+      link: { kind: "none" },
+      comments: [
+        {
+          ...comment,
+          state: "history",
+          comment: { ...comment.comment, id: "m1", body: "Done. <!-- jarvis:auto -->" },
+        },
+        {
+          ...comment,
+          state: "history",
+          comment: { ...comment.comment, id: "h2", body: "plain", createdAt: 700 },
+        },
+      ],
+    })!;
+    expect(reviewThreadEntries(thread).map((e) => [e.comment.id, e.skipped])).toEqual([
+      ["m1", true],
+      ["h2", false],
+    ]);
+  });
+});
+
 describe("createReviewsStore", () => {
   it("loads the list", async () => {
     const client = fakeClient([ok([item])]);

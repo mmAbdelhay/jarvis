@@ -346,7 +346,14 @@ export type ReviewThreadEntry = ReviewThreadComment & {
   replies: ReviewThreadComment[];
   /** One of the replies is yours (sent from the phone or the session). */
   replied: boolean;
+  /** Never queued because it carries Jarvis's own marker (a colleague's
+   *  comment quoting it): shown as skipped, not as "earlier". */
+  skipped: boolean;
 };
+
+/** core's REVIEW_MARKER (reviews/types.ts) — the mobile app does not import
+ *  @jarvis/core values. */
+export const JARVIS_MARKER = "<!-- jarvis:auto -->";
 
 /** Top-level comments in order, each with its replies nested under it. */
 export function reviewThreadEntries(thread: ReviewThread): ReviewThreadEntry[] {
@@ -357,7 +364,12 @@ export function reviewThreadEntries(thread: ReviewThread): ReviewThreadEntry[] {
   for (const item of sorted) {
     const parent = item.comment.inReplyTo;
     if (parent !== undefined && ids.has(parent)) continue;
-    const entry = { ...item, replies: [], replied: false };
+    const entry = {
+      ...item,
+      replies: [],
+      replied: false,
+      skipped: item.state === "history" && item.comment.body.includes(JARVIS_MARKER),
+    };
     entries.push(entry);
     byId.set(item.comment.id, entry);
   }

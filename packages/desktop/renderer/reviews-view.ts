@@ -4,6 +4,10 @@ import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 import type { ReviewListItem, ReviewStatus, ReviewThread } from "../src/review-service.js";
 import { detectLanguage, formatAgo } from "./format.js";
 
+/** core's REVIEW_MARKER (reviews/types.ts), which the renderer cannot import
+ *  as a value; reviews-view.test.ts pins the two equal. */
+export const JARVIS_MARKER = "<!-- jarvis:auto -->";
+
 // The Reviews page (Task 11): every PR the poller knows on the left, the
 // selected one's comments on the right, with its link to a Terminal pane
 // and the actions that paste into it. Comment bodies, diff hunks, titles
@@ -601,6 +605,9 @@ export function initReviews(deps: ReviewsViewDeps): ReviewsView {
           replied ? `${text} · ${MESSAGES.reviewsCommentReplied(L)}` : text,
         ),
       );
+    } else if (state === "history" && comment.body.includes(JARVIS_MARKER)) {
+      // Never queued (core trigger.ts): Jarvis's own marker, so no Send.
+      head.append(el("span", "mono reviews-muted", MESSAGES.reviewsCommentSkippedMarker(L)));
     } else if (state === "history") {
       head.append(el("span", "mono reviews-muted", MESSAGES.reviewsCommentHistory(L)));
       head.append(

@@ -8,10 +8,12 @@
 import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { LinkResult, PullRequest, QueuedComment, ReviewComment } from "@jarvis/core";
+import { REVIEW_MARKER } from "@jarvis/core";
 import type { ReviewListItem, ReviewStatus, ReviewThread } from "../src/review-service.js";
 import { MESSAGES } from "../src/messages.js";
 import {
   initReviews,
+  JARVIS_MARKER,
   listTerminalPanes,
   REVIEW_REPLY_MAX,
   REVIEW_WAIT_LABEL_KEYS,
@@ -350,6 +352,30 @@ describe("Reviews page — thread", () => {
     await flush();
 
     expect(api.reviewsRequeue).toHaveBeenCalledWith(KEY, "h1");
+  });
+
+  it("shows a comment carrying the Jarvis marker as skipped, with no Send action", async () => {
+    const api = fakeApi({
+      thread: {
+        pr: PR,
+        link: LINKED,
+        waitReason: null,
+        comments: [queued("history", { id: "m1", body: `Done. ${REVIEW_MARKER}` })],
+      },
+    });
+    const { view } = await start(api);
+    await view.open(KEY);
+    await flush();
+
+    const thread = document.getElementById("reviews-thread");
+    const buttons = [...(thread?.querySelectorAll("button") ?? [])].map((b) => b.textContent);
+    expect(buttons).not.toContain(MESSAGES.reviewsSendToSession("en"));
+    expect(thread?.textContent).toContain(MESSAGES.reviewsCommentSkippedMarker("en"));
+    expect(thread?.textContent).not.toContain(MESSAGES.reviewsCommentHistory("en"));
+  });
+
+  it("matches core's marker", () => {
+    expect(JARVIS_MARKER).toBe(REVIEW_MARKER);
   });
 
   it("asks which pane to use for an ambiguous link", async () => {

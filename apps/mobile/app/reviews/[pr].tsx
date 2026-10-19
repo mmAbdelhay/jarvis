@@ -272,7 +272,9 @@ function CommentCard(props: {
   const { comment } = entry;
   const chip = entry.replied
     ? { key: "reviews.state.replied" as MessageKey, tone: "success" as ChipTone }
-    : STATE_CHIP[entry.state];
+    : entry.skipped
+      ? { key: "reviews.state.skippedMarker" as MessageKey, tone: "muted" as ChipTone }
+      : STATE_CHIP[entry.state];
   const where =
     comment.path === undefined
       ? undefined

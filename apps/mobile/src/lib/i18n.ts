@@ -1559,6 +1559,7 @@ export const STRINGS = {
   "reviews.state.delivered": { en: "delivered", ar: "سُلّم" },
   "reviews.state.own": { en: "you", ar: "أنت" },
   "reviews.state.history": { en: "earlier", ar: "سابق" },
+  "reviews.state.skippedMarker": { en: "skipped · Jarvis marker", ar: "تم التخطي · علامة Jarvis" },
   "reviews.state.replied": { en: "replied", ar: "تم الرد" },
   "reviews.now": { en: "now", ar: "الآن" },
   "reviews.deliverNow": { en: "Deliver now", ar: "سلّم الآن" },
