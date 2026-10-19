@@ -23,6 +23,7 @@ import {
   readFileSync,
   realpathSync,
   renameSync,
+  watch as watchFs,
   writeFileSync,
 } from "node:fs";
 import {
@@ -72,6 +73,7 @@ import { disableRemoteOnDisk } from "../remote-idle.js";
 import { obtainCertificate, type TailscaleCertDeps } from "../tailscale-cert.js";
 import { createNotifier } from "../notify.js";
 import { createReviewService } from "../review-service.js";
+import { createSessionTabNamer } from "../session-tab-name.js";
 import { createDockerFollowers } from "../docker-followers.js";
 import { createSetupHandlers } from "../ipc.js";
 import {
@@ -106,6 +108,7 @@ import {
   type DbGateManager,
   createFaviconStore,
   createFsImportDeps,
+  readFileTail,
   createGitProvider,
   createGitRemoteOps,
   createSqliteUsageStore,
@@ -1313,6 +1316,48 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     },
   });
 
+  // Task 16: a Terminal tab follows the name of the Claude session in it
+  // (Claude's topic name or a /rename), read from Claude Code's own
+  // sessions/<pid>.json; the pane comes from the same fresh process scan.
+  const importFs = createFsImportDeps();
+  const sessionTabNamer = createSessionTabNamer({
+    shells,
+    tabs: workspace,
+    scanAgents: () =>
+      listAgentProcesses({
+        exec: (command, args) => runCommand(command, args),
+        platform,
+        agents: registry.list(),
+        ownedPids: () => sessions.ownedPids(),
+        jarvisPid: process.pid,
+        terminalShells: () => shells.shellPids(),
+        now: () => Date.now(),
+      }),
+    agents: () => registry.list(),
+    home: homedir(),
+    readFile: (path) => importFs.readHead(path),
+    listTranscripts: (dir) => importFs.listFiles(dir, "claude"),
+    readTail: (path) => readFileTail(path, 256 * 1024),
+    watch: (dir, onChange) => {
+      const watcher = watchFs(dir, () => onChange());
+      // A watch that fails later (directory removed) costs live updates only;
+      // the 10 s re-check still runs.
+      watcher.on("error", () => watcher.close());
+      return watcher;
+    },
+    schedule: (fn, ms) => {
+      const timer = setTimeout(fn, ms);
+      timer.unref();
+      return () => clearTimeout(timer);
+    },
+    interval: (fn, ms) => {
+      const timer = setInterval(fn, ms);
+      timer.unref();
+      return () => clearInterval(timer);
+    },
+  });
+  sessionTabNamer.start();
+
   // Sessions the process scan (process-scan.ts) found running outside
   // Jarvis, keyed by "ext-<pid>" — rebuilt wholesale on every
   // refreshSessions() call, never written to sessionStore (session-
@@ -1942,6 +1987,8 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     safely("session importer", () => sessionImporter.stop());
     // The review poller's timer and the delivery timers.
     safely("reviews", () => reviews.dispose());
+    // The sessions-directory watches and the tab-name re-check timer.
+    safely("session tab names", () => sessionTabNamer.stop());
     // One headless terminal per pane that printed.
     safely("pane screens", () => paneScreens.dispose());
     // A recording started but never stopped holds ffmpeg — and the
