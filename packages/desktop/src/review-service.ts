@@ -310,9 +310,12 @@ export function createReviewService(deps: ReviewServiceDeps): ReviewService {
     const [processes, paused] = await Promise.all([deps.scanAgents(), deps.store.paused()]);
     const now = deps.now();
     // The newest agent in the pane is the one at its prompt (an agent
-    // started from inside another's shell tool is its child).
+    // started from inside another's shell tool is its child). Only one in
+    // the terminal's foreground process group counts: a job sent to the
+    // background (`claude &`, bg) is not where a paste lands — the shell or
+    // another job is — so it reads as no agent at all.
     const found = processes
-      .filter((p) => p.terminalPaneKey === paneKey)
+      .filter((p) => p.terminalPaneKey === paneKey && p.foreground === true)
       .sort((a, b) => b.startedAt - a.startedAt)[0];
     const vendor =
       found === undefined ? undefined : deps.agents().find((a) => a.id === found.agentId)?.vendor;

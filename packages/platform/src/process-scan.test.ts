@@ -34,6 +34,33 @@ describe("parsePsOutput", () => {
   it("ignores a line that is not pid/ppid/etime/command", () => {
     expect(parsePsOutput("garbage\n")).toEqual([]);
   });
+
+  it("parses pgid, tpgid and stat when ps gives them (tpgid -1 off a tty)", () => {
+    const text = [
+      "96359   600 96359 96359 S+     00:05 claude --resume abc",
+      "  950   500   950    -1 Ss     00:09 claude -p hello",
+    ].join("\n");
+    expect(parsePsOutput(text)).toEqual([
+      {
+        pid: 96359,
+        ppid: 600,
+        pgid: 96359,
+        tpgid: 96359,
+        stat: "S+",
+        etime: "00:05",
+        command: "claude --resume abc",
+      },
+      {
+        pid: 950,
+        ppid: 500,
+        pgid: 950,
+        tpgid: -1,
+        stat: "Ss",
+        etime: "00:09",
+        command: "claude -p hello",
+      },
+    ]);
+  });
 });
 
 describe("commandBasename", () => {
@@ -394,6 +421,50 @@ describe("listAgentProcesses", () => {
 
     it("reports nothing from Jarvis's own tree when no shell pids are known", async () => {
       expect(await scan({ terminalShells: undefined })).toEqual([]);
+    });
+  });
+
+  // ctrl-Z stops a job (stat T); `claude &` or bg leaves it running outside
+  // the terminal's foreground process group (pgid !== tpgid). Neither is at
+  // the prompt the user sees, so neither may be pasted into.
+  describe("job control", () => {
+    const psOut = [
+      "  500     1   500     0 Ss  10:00:00 /Applications/Jarvis.app/Contents/MacOS/Jarvis",
+      "  600   500   600  9100 Ss     05:00 /bin/zsh -l",
+      " 9000   600  9000  9100 T      00:05 claude",
+      " 9050   600  9050  9100 S      00:06 claude",
+      " 9100   600  9100  9100 S+     00:07 claude",
+    ].join("\n");
+
+    async function scan() {
+      return listAgentProcesses(
+        deps({
+          jarvisPid: 500,
+          terminalShells: () => new Map([[600, "tab-1"]]),
+          exec: async (command) =>
+            command === "ps" ? { code: 0, stdout: psOut } : { code: 0, stdout: "" },
+        }),
+      );
+    }
+
+    it("asks ps for pgid, tpgid and stat", async () => {
+      let psArgs: string[] = [];
+      await listAgentProcesses(
+        deps({
+          exec: async (command, args) => {
+            if (command === "ps") psArgs = args;
+            return { code: 0, stdout: "" };
+          },
+        }),
+      );
+      expect(psArgs.join(" ")).toMatch(/pgid=.*tpgid=.*stat=/);
+    });
+
+    it("skips a stopped agent and marks a background one not foreground", async () => {
+      expect((await scan()).map((r) => [r.pid, r.foreground])).toEqual([
+        [9050, false],
+        [9100, true],
+      ]);
     });
   });
 

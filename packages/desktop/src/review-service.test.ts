@@ -78,6 +78,7 @@ function agentIn(paneKey: string, agentId = "claude-mm"): ExternalAgentProcess {
     cwd: "/p/app",
     startedAt: 0,
     terminalPaneKey: paneKey,
+    foreground: true,
   };
 }
 
@@ -874,5 +875,23 @@ describe("review service e2e fixes", () => {
     await h.service.whenIdle();
     expect((await h.store.manualLinks()).get(PR_KEY)).toBe(OTHER);
     expect(await h.store.paused()).toEqual(new Set([OTHER]));
+  });
+
+  // A job sent to the background (`claude &`, ctrl-Z then bg) is not at the
+  // prompt on screen — the shell is. Plans:send reads agentPresent from
+  // this same paneStateOf, so it refuses with no-agent too.
+  it("treats a background agent, or one with no foreground flag, as no agent and never pastes", async () => {
+    for (const foreground of [false, undefined]) {
+      const h = harness();
+      const { foreground: _drop, ...bare } = agentIn(PANE);
+      h.setAgents([foreground === undefined ? bare : { ...bare, foreground }]);
+      const state = await h.service.paneStateOf(PANE);
+      expect(state.agentPresent).toBe(false);
+      expect(state.hasAgent).toBe(false);
+      await withQueued(h);
+      await h.advance(60_000);
+      expect(await h.service.deliverNow(PR_KEY)).toEqual({ sent: false, wait: "no-agent" });
+      expect(h.writes).toHaveLength(0);
+    }
   });
 });

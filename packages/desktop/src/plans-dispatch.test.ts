@@ -691,6 +691,28 @@ describe("plans:send", () => {
     expect(markSent).toHaveBeenCalledTimes(expected.ok ? 1 : 0);
   });
 
+  // What review-service paneStateOf reports for a pane whose only agent is
+  // a background or stopped job (process-scan foreground/stat): no agent.
+  // Plans must refuse it even forced — the paste would land in the shell.
+  it("refuses a pane whose agent is only a background job, forced or not", async () => {
+    for (const force of [false, true]) {
+      const { deps, write, markSent } = sendDeps({
+        state: {
+          agentPresent: false,
+          hasAgent: false,
+          idleSupported: false,
+          unsupported: false,
+          input: "idle-input",
+        },
+      });
+      expect(
+        await call(createDispatchTable(deps), "plans:send", "pane-1", "/plans/x.md", ["c1"], force),
+      ).toEqual({ ok: false, reason: "no-agent" });
+      expect(write).not.toHaveBeenCalled();
+      expect(markSent).not.toHaveBeenCalled();
+    }
+  });
+
   it("registers a successful paste before marking sent, but not a failed write", async () => {
     const { deps, write, markSent } = sendDeps();
     const notePaste = vi.fn();
