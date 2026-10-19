@@ -1,4 +1,4 @@
-import type { AgentConfig } from "@jarvis/core";
+import type { AgentConfig, ProviderVendor } from "@jarvis/core";
 
 /**
  * Finds coding-agent processes running on this machine that Jarvis did not
@@ -84,6 +84,14 @@ const SERVICE_SUBCOMMANDS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
  *  one (an account wrapper like `claude-acme` is still Claude Code), else
  *  its command's own name. */
 const CLI_BY_VENDOR: Readonly<Record<string, string>> = { anthropic: "claude", openai: "codex" };
+
+/** The binary each vendor's CLI runs as, for matching a wrapper agent's
+ *  process (see listAgentProcesses). */
+const VENDOR_BY_BINARY: Readonly<Record<string, ProviderVendor>> = {
+  claude: "anthropic",
+  codex: "openai",
+  copilot: "github",
+};
 
 /**
  * Whether a command line is `agent` running as a service, not a session —
@@ -288,6 +296,18 @@ export async function listAgentProcesses(deps: ProcessScanDeps): Promise<Externa
     agentByCommand.set(commandBasename(agent.command), agent);
   }
 
+  // A wrapper agent (`claude-mm`: an sh script that `exec`s claude) shows
+  // in ps as the binary it ran, never as itself. Inside a Jarvis pane such
+  // a binary stands for the agent of its vendor — the default one, else the
+  // first. Never outside that tree: an unrelated `claude` elsewhere on the
+  // machine is not the user's wrapper agent.
+  const agentByBinary = new Map<string, AgentConfig>();
+  for (const [binary, vendor] of Object.entries(VENDOR_BY_BINARY)) {
+    const ofVendor = deps.agents.filter((agent) => agent.vendor === vendor);
+    const chosen = ofVendor.find((agent) => agent.default === true) ?? ofVendor[0];
+    if (chosen !== undefined) agentByBinary.set(binary, chosen);
+  }
+
   const now = deps.now();
   const candidates: {
     row: PsRow;
@@ -297,7 +317,10 @@ export async function listAgentProcesses(deps: ProcessScanDeps): Promise<Externa
   }[] = [];
   for (const row of rows) {
     if (owned.has(row.pid)) continue;
-    const agent = agentByCommand.get(commandBasename(row.command));
+    const basename = commandBasename(row.command);
+    const agent =
+      agentByCommand.get(basename) ??
+      (ownTree.has(row.pid) ? agentByBinary.get(basename) : undefined);
     if (agent === undefined) continue;
     if (isAgentServiceCommand(agent, row.command)) continue;
     const agentId = agent.id;
