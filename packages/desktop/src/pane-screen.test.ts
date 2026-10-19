@@ -1,3 +1,4 @@
+import { readAgentInputState } from "@jarvis/core";
 import type { ShellExit, ShellOutput } from "@jarvis/platform";
 import { describe, expect, it } from "vitest";
 import { createPaneScreens } from "./pane-screen.js";
@@ -106,5 +107,91 @@ describe("createPaneScreens", () => {
     screens.dispose();
     expect(fake.listenerCount()).toBe(0);
     expect(screens.screenText("tab-1")).toBeUndefined();
+  });
+
+  // A headless-terminal failure must cost that pane its screen (the reader
+  // falls back to the raw log), never reach the shell's onData loop.
+  describe("when the headless terminal throws", () => {
+    type Fake = { cols: number; rows: number; write(): void; resize(): void; dispose(): void };
+    function failing(where: "create" | "write" | "resize") {
+      let made = 0;
+      return {
+        made: () => made,
+        createTerminal: (options: { cols: number; rows: number }): Fake => {
+          made++;
+          if (where === "create") throw new Error("create failed");
+          return {
+            cols: options.cols,
+            rows: options.rows,
+            write: () => {
+              if (where === "write") throw new Error("write failed");
+            },
+            resize: () => {
+              if (where === "resize") throw new Error("resize failed");
+            },
+            dispose: () => {},
+          };
+        },
+      };
+    }
+
+    for (const where of ["create", "write"] as const) {
+      it(`drops the pane's screen when ${where} throws`, () => {
+        const fake = fakeShells();
+        const factory = failing(where);
+        const screens = createPaneScreens(fake.shells, {
+          createTerminal: factory.createTerminal as never,
+        });
+        expect(() => fake.emit("tab-1", "x")).not.toThrow();
+        expect(screens.screenText("tab-1")).toBeUndefined();
+      });
+    }
+
+    it("drops the pane's screen when resize throws", () => {
+      const fake = fakeShells();
+      const factory = failing("resize");
+      const screens = createPaneScreens(fake.shells, {
+        createTerminal: factory.createTerminal as never,
+      });
+      fake.emit("tab-1", "x");
+      fake.sizes.set("tab-1", { cols: 100, rows: 30 });
+      expect(() => fake.emit("tab-1", "y")).not.toThrow();
+      expect(screens.screenText("tab-1")).toBeUndefined();
+    });
+  });
+
+  // Claude Code draws its empty box's placeholder dim (SGR 2) — the bytes
+  // below are the real ones from a captured pane. Typed text is never dim.
+  describe("placeholder text in the input box", () => {
+    const RULE = "─".repeat(60);
+    const box = (input: string) => `${RULE}\r\n${input}\x1b[22m\r\n${RULE}\r\n  ? for shortcuts`;
+
+    it("drops dim text after the input glyph, so the box reads empty", async () => {
+      const fake = fakeShells();
+      const screens = createPaneScreens(fake.shells);
+      fake.emit("tab-1", box('❯\u00a0\x1b[2mTry "write a test for <filepath>"'));
+      await screens.whenWritten();
+      const screen = screens.screenText("tab-1") ?? "";
+      expect(screen.split("\n")[1]).toBe("❯");
+      expect(readAgentInputState(screen, "anthropic")).toBe("idle-input");
+    });
+
+    it("keeps the same words typed normally, as a draft", async () => {
+      const fake = fakeShells();
+      const screens = createPaneScreens(fake.shells);
+      fake.emit("tab-1", box('❯\u00a0Try "write a test for <filepath>"'));
+      await screens.whenWritten();
+      const screen = screens.screenText("tab-1") ?? "";
+      expect(screen.split("\n")[1]).toBe('❯\u00a0Try "write a test for <filepath>"');
+      expect(readAgentInputState(screen, "anthropic")).toBe("busy");
+    });
+
+    it("keeps dim text on a line that does not start with the input glyph", async () => {
+      const fake = fakeShells();
+      const screens = createPaneScreens(fake.shells);
+      fake.emit("tab-1", "\x1b[2m(3s · esc to interrupt)\x1b[22m");
+      await screens.whenWritten();
+      expect(screens.screenText("tab-1")).toBe("(3s · esc to interrupt)");
+    });
   });
 });

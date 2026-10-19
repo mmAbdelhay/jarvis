@@ -22,6 +22,44 @@ const DEFAULT_ROWS = 24;
  *  400-line busy scan (MAX_SCAN_LINES) ever looks at. */
 const SCROLLBACK_LINES = 500;
 
+type BufferLine = NonNullable<ReturnType<HeadlessTerminal["buffer"]["active"]["getLine"]>>;
+
+/** The prompt glyphs an agent's input line starts with (Claude Code). */
+const INPUT_GLYPHS = new Set(["❯", ">"]);
+
+/**
+ * One row as text, trailing whitespace trimmed — except that on a row whose
+ * first visible character is an input glyph, everything after the glyph is
+ * dropped when all of it is drawn dim: that is the empty box's placeholder
+ * (Claude Code's `Try "…"`), never typed text, which is drawn plain.
+ */
+function rowText(line: BufferLine): string {
+  const text = line.translateToString(true).trimEnd();
+  const start = text.length - text.trimStart().length;
+  if (!INPUT_GLYPHS.has(text.charAt(start))) return text;
+  // Cells, not string indices: a wide or combined character can span more
+  // than one of either. Walk to the glyph's cell, then check every visible
+  // cell after it.
+  let glyphX = -1;
+  let anyAfter = false;
+  for (let x = 0; x < line.length; x++) {
+    const cell = line.getCell(x);
+    if (cell === undefined) break;
+    const chars = cell.getChars();
+    if (glyphX < 0) {
+      if (chars.trim() !== "" && chars !== "\u00a0") {
+        if (!INPUT_GLYPHS.has(chars)) return text;
+        glyphX = x;
+      }
+      continue;
+    }
+    if (chars.trim() === "" || chars === "\u00a0") continue;
+    if (cell.isDim() === 0) return text;
+    anyAfter = true;
+  }
+  return anyAfter ? text.slice(0, start + 1) : text;
+}
+
 export type PaneScreens = {
   /** The pane's rendered buffer — scrollback, then the visible screen — one
    *  line per row with trailing whitespace trimmed, joined by "\n"; trailing
@@ -34,10 +72,29 @@ export type PaneScreens = {
   dispose(): void;
 };
 
+type TerminalOptions = {
+  cols: number;
+  rows: number;
+  scrollback: number;
+  allowProposedApi: boolean;
+};
+
+export type PaneScreensOptions = {
+  /** Makes a pane's headless terminal; tests inject one that throws. */
+  createTerminal?: (options: TerminalOptions) => HeadlessTerminal;
+};
+
 export function createPaneScreens(
   shells: Pick<ShellManager, "onOutput" | "onShellExit" | "termSize">,
+  options: PaneScreensOptions = {},
 ): PaneScreens {
+  const createTerminal =
+    options.createTerminal ?? ((terminalOptions: TerminalOptions) => new Terminal(terminalOptions));
   const screens = new Map<string, HeadlessTerminal>();
+  // Panes whose terminal threw: no screen (the reader uses the raw log)
+  // until the shell exits — a screen rebuilt mid-stream would miss what
+  // was drawn before it and could show a box without the spinner above.
+  const failed = new Set<string>();
   // Each live screen's newest write: xterm parses writes in order, so its
   // callback means every earlier chunk is parsed too. A dropped screen's
   // entry goes with it, so a write a disposed terminal never finishes
@@ -50,7 +107,7 @@ export function createPaneScreens(
     const rows = size?.rows ?? DEFAULT_ROWS;
     let screen = screens.get(paneKey);
     if (screen === undefined) {
-      screen = new Terminal({ cols, rows, scrollback: SCROLLBACK_LINES, allowProposedApi: true });
+      screen = createTerminal({ cols, rows, scrollback: SCROLLBACK_LINES, allowProposedApi: true });
       screens.set(paneKey, screen);
     } else if (screen.cols !== cols || screen.rows !== rows) {
       screen.resize(cols, rows);
@@ -58,18 +115,43 @@ export function createPaneScreens(
     return screen;
   }
 
+  // Runs inside ShellManager's onData loop: nothing may throw out of it.
   const offOutput = shells.onOutput(({ paneKey, chunk }) => {
-    const screen = screenFor(paneKey);
-    lastWrite.set(paneKey, new Promise<void>((done) => screen.write(chunk, done)));
+    if (failed.has(paneKey)) return;
+    try {
+      const screen = screenFor(paneKey);
+      // write is called here, not inside a Promise executor, so a throw
+      // reaches the catch below instead of becoming an unhandled rejection.
+      let done = (): void => {};
+      const written = new Promise<void>((resolve) => {
+        done = resolve;
+      });
+      screen.write(chunk, () => done());
+      lastWrite.set(paneKey, written);
+    } catch (error) {
+      console.error(
+        `pane-screen: ${paneKey}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      drop(paneKey);
+      failed.add(paneKey);
+    }
   });
 
   function drop(paneKey: string): void {
-    screens.get(paneKey)?.dispose();
+    const screen = screens.get(paneKey);
     screens.delete(paneKey);
     lastWrite.delete(paneKey);
+    try {
+      screen?.dispose();
+    } catch {
+      // Already broken; it is forgotten either way.
+    }
   }
 
-  const offExit = shells.onShellExit(({ paneKey }) => drop(paneKey));
+  const offExit = shells.onShellExit(({ paneKey }) => {
+    drop(paneKey);
+    failed.delete(paneKey);
+  });
 
   return {
     screenText(paneKey) {
@@ -78,7 +160,8 @@ export function createPaneScreens(
       const buffer = screen.buffer.active;
       const lines: string[] = [];
       for (let i = 0; i < buffer.length; i++) {
-        lines.push((buffer.getLine(i)?.translateToString(true) ?? "").trimEnd());
+        const line = buffer.getLine(i);
+        lines.push(line === undefined ? "" : rowText(line));
       }
       while (lines.length > 0 && lines.at(-1) === "") lines.pop();
       return lines.join("\n");
