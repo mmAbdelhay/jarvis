@@ -1,24 +1,39 @@
-# synthetic — built from Claude Code's UI (input box between rules, empty "> " prompt, status line below); launching claude makes network calls.
-> run the unit tests for the session package
+# rendered — Claude Code v2.1.302, captured from a real pane and rendered through @xterm/headless at 213x38; personal paths/accounts replaced.
 
-⏺ I'll run the session package tests.
+ ▐▛███▛█   Claude Code v2.1.302
+▝▜██████▀  Opus 5.5 · Claude Plan
+ ▝▝   ▝▝   /Users/dev/projects/scratch-repo
 
-⏺ Bash(pnpm vitest run packages/core/src/session)
-  ⎿   ✓ packages/core/src/session/awaiting-input.test.ts (14 tests) 6ms
-      ✓ packages/core/src/session/label.test.ts (9 tests) 4ms
-      ✓ packages/core/src/session/manager.test.ts (31 tests) 41ms
 
-      Test Files  3 passed (3)
-           Tests  54 passed (54)
-        Start at  14:02:11
-        Duration  1.12s
+❯ Use the Bash tool to run exactly: sleep 40 && echo slept. Then reply only with the word done.
 
-⏺ All 54 tests in the session package pass across the three test files. No
-  failures or skipped tests.
+  Ran 1 shell command
 
-✻ Worked for 18s
+⏺ The command is running in the background. I'll reply when it finishes.
 
-────────────────────────────────────────────────────────────────────────────────
-> 
-────────────────────────────────────────────────────────────────────────────────
-  ? for shortcuts
+✻ Baked for 15s · done 12:34 AM · 1 shell still running
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  claude-acme  dev@example.com
+  [dev@host:/Users/dev/projects/scratch-repo]  [Opus 5.5  ctx:6% (57k/1000k)]
+  Session ███████░ 93% resets 04:40   │   Week ██░░░░░░ 26% resets Wed 23:00
+  ⏵⏵ auto mode on · 1 shell

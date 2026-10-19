@@ -5,7 +5,10 @@
 // Enter answers an approval menu — so every doubt resolves to anything but
 // "idle-input". A false "busy" only delays a delivery.
 //
-// The tail is a raw terminal stream with redraws in it: every spinner frame
+// The tail is best the pane's rendered screen (pane-screen.ts): Claude Code
+// redraws with cursor-positioning escapes, and its raw stream stripped of
+// them glues words and lines into nonsense. Read raw, the tail is a
+// terminal stream with redraws in it: every spinner frame
 // a turn drew is still in it once stripped. So "busy" is not "a spinner in
 // the last N lines" — a todo list can push a live spinner far up — but "a
 // busy marker after the last completed-turn marker". A spinner residue with
@@ -23,7 +26,7 @@ export const MAX_SCAN_LINES = 400;
  * bottom rule and a status line or two; an input line further up than this
  * is history, not the box the agent is waiting at.
  */
-export const INPUT_LINE_WINDOW = 6;
+export const INPUT_LINE_WINDOW = 8;
 
 // A highlighted numbered menu row ("› 1. Yes, proceed (y)", "❯ 1. Yes"),
 // any vendor. It starts with the same glyph as some composers, so it is
@@ -42,6 +45,8 @@ type AgentInputMarkers = {
    * Exact matches only: anything else on the line is the user's draft.
    */
   placeholders: readonly string[];
+  /** Whole-text patterns for a placeholder with a varying part. */
+  placeholderPatterns?: readonly RegExp[];
 };
 
 // One entry per agent vendor (`AgentConfig.vendor`), not per agent id: ids
@@ -49,18 +54,20 @@ type AgentInputMarkers = {
 // them run the same CLI. A vendor with no entry — or an agent with no
 // vendor — is "unknown", never guessed idle.
 export const AGENT_INPUT_MARKERS: Readonly<Record<string, AgentInputMarkers>> = {
-  // anthropic — Claude Code: the input box is "> " between two rules (or
-  // inside "│ … │" on older builds); while a turn runs a spinner line — one
-  // of its glyphs, a gerund, "…", usually "(12s · esc to interrupt)" — sits
-  // above it. A finished turn prints "✻ Worked for 18s" (no "…"); an
-  // interrupted one "⎿  Interrupted · What should Claude do instead?". Its
-  // first-run placeholder (`> Try "…"`) is left out on purpose: reading it
-  // as a draft only delays.
+  // anthropic — Claude Code (checked against v2.1.302's rendered screen):
+  // the input box is "❯ " between two rules ("> ", or inside "│ … │", on
+  // older builds); while a turn runs a spinner line — one of its glyphs, a
+  // gerund, "…", then "(6s · ↓ 235 tokens · thinking)", older builds adding
+  // "esc to interrupt" — sits above it. A finished turn prints "✻ Baked for
+  // 15s · done 12:34 AM" (no "…"); an interrupted one "⎿  Interrupted ·
+  // What should Claude do instead?". An empty box can show a first-run
+  // placeholder, `❯ Try "write a test for <filepath>"`.
   anthropic: {
-    inputLine: /^│?\s*>(?:\s+(.*?))?\s*│?$/,
+    inputLine: /^│?\s*[>❯](?:\s+(.*?))?\s*│?$/,
     busy: [/esc to interrupt/i, /^[·✢✳✶✻✽*]\s+\S.*…/],
     finished: [/^[·✢✳✶✻✽*]\s+[A-Za-z]+ for \d/, /^⎿\s+Interrupted\b/],
     placeholders: [],
+    placeholderPatterns: [/^Try ".+"$/],
   },
   // openai — Codex CLI: the composer is "› " (or "▌" on older builds) and
   // shows one of a fixed set of placeholders when empty; a running turn
@@ -118,7 +125,10 @@ function readInputLine(
     const match = markers.inputLine.exec(line);
     if (match === null) continue;
     const text = (match[1] ?? "").trim();
-    return { kind: "input", draft: text.length > 0 && !markers.placeholders.includes(text) };
+    const placeholder =
+      markers.placeholders.includes(text) ||
+      (markers.placeholderPatterns ?? []).some((pattern) => pattern.test(text));
+    return { kind: "input", draft: text.length > 0 && !placeholder };
   }
   return undefined;
 }

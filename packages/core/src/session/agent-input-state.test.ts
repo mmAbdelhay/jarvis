@@ -2,12 +2,21 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { inputLineHasDraft, readAgentInputState } from "./agent-input-state.js";
 
-// Drops the "# synthetic" provenance line, so it is never part of a tail.
+// Drops the "# synthetic" / "# rendered" provenance line, so it is never
+// part of a tail. The claude-* fixtures are real Claude Code screens: raw
+// pane output captured in an end-to-end run, rendered through
+// @xterm/headless the way pane-screen.ts renders a live pane.
 const fixture = (name: string): string =>
   readFileSync(new URL(`./__fixtures__/agent-input/${name}.txt`, import.meta.url), "utf8").replace(
-    /^# synthetic.*\n/,
+    /^# (?:synthetic|rendered).*\n/,
     "",
   );
+
+// The idle fixture's finished-turn line, which tests below swap out.
+const FINISHED = "✻ Baked for 15s · done 12:34 AM · 1 shell still running";
+// Its empty input box, as the rendered screen has it (trailing space trimmed).
+const EMPTY_BOX = /^❯$/m;
+const withDraft = (draft: string): string => fixture("claude-idle").replace(EMPTY_BOX, `❯ ${draft}`);
 
 // Re-colours every line and erases it first, the way a TUI redraw arrives
 // in a pane's raw output: the verdict must not depend on the escapes.
@@ -19,6 +28,7 @@ const wrapInAnsi = (tail: string): string =>
 
 const CASES = [
   { name: "claude-idle", vendor: "anthropic", state: "idle-input" },
+  { name: "claude-idle-placeholder", vendor: "anthropic", state: "idle-input" },
   { name: "claude-busy", vendor: "anthropic", state: "busy" },
   { name: "claude-approval", vendor: "anthropic", state: "approval-prompt" },
   { name: "codex-idle", vendor: "openai", state: "idle-input" },
@@ -38,10 +48,26 @@ describe("readAgentInputState", () => {
   }
 
   it("never reads a half-typed draft as idle-input", () => {
-    expect(readAgentInputState(fixture("claude-draft"), "anthropic")).not.toBe("idle-input");
-    expect(readAgentInputState(wrapInAnsi(fixture("claude-draft")), "anthropic")).not.toBe(
+    expect(readAgentInputState(withDraft("fix the fla"), "anthropic")).not.toBe("idle-input");
+    expect(readAgentInputState(wrapInAnsi(withDraft("fix the fla")), "anthropic")).not.toBe(
       "idle-input",
     );
+  });
+
+  it("never reads Claude's folder-trust dialog as idle-input", () => {
+    expect(readAgentInputState(fixture("claude-trust"), "anthropic")).not.toBe("idle-input");
+  });
+
+  it("still reads the older '>' input glyph", () => {
+    const tail = fixture("claude-idle").replace(EMPTY_BOX, ">");
+    expect(readAgentInputState(tail, "anthropic")).toBe("idle-input");
+  });
+
+  it("reads Claude's spinner line from the real mid-turn screen as busy, box empty", () => {
+    const busy = fixture("claude-busy");
+    expect(busy).toMatch(EMPTY_BOX);
+    expect(busy).toContain("✶ Moseying… (6s");
+    expect(busy).not.toContain("esc to interrupt");
   });
 
   it("gives unknown for a vendor it has no markers for", () => {
@@ -70,15 +96,12 @@ describe("readAgentInputState", () => {
   // bite-proof: the idle fixture's own box with the agent's busy line put
   // back in must stop being idle — the empty "> " alone is not enough.
   it("reads an empty box under an esc-to-interrupt line as busy", () => {
-    const tail = fixture("claude-idle").replace(
-      "✻ Worked for 18s",
-      "✻ Thinking… (3s · esc to interrupt)",
-    );
+    const tail = fixture("claude-idle").replace(FINISHED, "✻ Thinking… (3s · esc to interrupt)");
     expect(readAgentInputState(tail, "anthropic")).toBe("busy");
   });
 
   it("reads a Claude spinner line without esc-to-interrupt as busy", () => {
-    const tail = fixture("claude-idle").replace("✻ Worked for 18s", "✢ Thinking…");
+    const tail = fixture("claude-idle").replace(FINISHED, "✢ Thinking…");
     expect(readAgentInputState(tail, "anthropic")).toBe("busy");
   });
 
@@ -116,16 +139,16 @@ describe("readAgentInputState — long turns, drafts and menus", () => {
 
   it("reads an old spinner as finished once a completed-turn line follows it", () => {
     const tail = fixture("claude-idle").replace(
-      "✻ Worked for 18s",
-      "✶ Percolating… (12s · esc to interrupt)\n✻ Worked for 18s",
+      FINISHED,
+      `✶ Percolating… (12s · esc to interrupt)\n${FINISHED}`,
     );
     expect(readAgentInputState(tail, "anthropic")).toBe("idle-input");
   });
 
   it("reads a spinner after the completed-turn line as busy", () => {
     const tail = fixture("claude-idle").replace(
-      "✻ Worked for 18s",
-      "✻ Worked for 18s\n\n> next\n\n✶ Percolating… (1s · esc to interrupt)",
+      FINISHED,
+      `${FINISHED}\n\n❯ next\n\n✶ Percolating… (1s · thinking)`,
     );
     expect(readAgentInputState(tail, "anthropic")).toBe("busy");
   });
@@ -162,15 +185,19 @@ describe("readAgentInputState — long turns, drafts and menus", () => {
 });
 
 describe("inputLineHasDraft", () => {
-  it("is true for the Claude draft fixture", () => {
-    expect(inputLineHasDraft(fixture("claude-draft"), "anthropic")).toBe(true);
+  it("is true for a Claude draft", () => {
+    expect(inputLineHasDraft(withDraft("fix the fla"), "anthropic")).toBe(true);
   });
 
-  it("is true for the Claude draft fixture wrapped in ANSI colour codes", () => {
-    expect(inputLineHasDraft(wrapInAnsi(fixture("claude-draft")), "anthropic")).toBe(true);
+  it("is true for a Claude draft wrapped in ANSI colour codes", () => {
+    expect(inputLineHasDraft(wrapInAnsi(withDraft("fix the fla")), "anthropic")).toBe(true);
   });
 
   it("is false for the empty Claude input box", () => {
     expect(inputLineHasDraft(fixture("claude-idle"), "anthropic")).toBe(false);
+  });
+
+  it("is false for Claude's first-run placeholder", () => {
+    expect(inputLineHasDraft(fixture("claude-idle-placeholder"), "anthropic")).toBe(false);
   });
 });

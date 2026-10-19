@@ -1,14 +1,39 @@
-# synthetic — built from Claude Code's UI (spinner line with "esc to interrupt" above the input box while a turn runs); launching claude makes network calls.
-> run the unit tests for the session package
+# rendered — Claude Code v2.1.302, captured from a real pane and rendered through @xterm/headless at 213x38; personal paths/accounts replaced.
 
-⏺ I'll run the session package tests.
+ ▐▛███▛█   Claude Code v2.1.302
+▝▜██████▀  Opus 5.5 · Claude Plan
+ ▝▝   ▝▝   /Users/dev/projects/scratch-repo
 
-⏺ Bash(pnpm vitest run packages/core/src/session)
-  ⎿  Running…
 
-✶ Percolating… (12s · ↑ 1.4k tokens · esc to interrupt)
+❯ Use the Bash tool to run exactly: sleep 40 && echo slept. Then reply only with the word done.
 
-────────────────────────────────────────────────────────────────────────────────
-> 
-────────────────────────────────────────────────────────────────────────────────
-  ⏵⏵ accept edits on (shift+tab to cycle)
+  Waiting 40 seconds then printing slept
+  ⎿  $ sleep 40 && echo slept
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+✶ Moseying… (6s · ↓ 235 tokens · thought for 1s)
+                                                                                                          You've used 93% of your session limit · resets 4:40am (Africa/Cairo) · /upgrade to keep using Claude Code
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  claude-acme  dev@example.com
+  [dev@host:/Users/dev/projects/scratch-repo]  [Opus 5.5  ctx:6% (56k/1000k)]
+  Session ███████░ 93% resets 04:40   │   Week ██░░░░░░ 26% resets Wed 23:00
+  ⏵⏵ auto mode on (shift+tab to cycle)
