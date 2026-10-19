@@ -47,7 +47,23 @@ type AgentInputMarkers = {
   placeholders: readonly string[];
   /** Whole-text patterns for a placeholder with a varying part. */
   placeholderPatterns?: readonly RegExp[];
+  /**
+   * The input line counts only between two horizontal rules, with no shell
+   * prompt below the bottom one — so a bare shell prompt with the same
+   * glyph (starship, pure: "❯"), or the agent's leftover frame above the
+   * shell's prompt once it exited or was stopped, is never its box.
+   */
+  boxed?: boolean;
 };
+
+/** A horizontal rule line: the box's top or bottom border. */
+const RULE_LINE = /^[╭╰]?─{8,}[╮╯]?$/;
+/** A line ending the way a shell prompt does: "$", "#", "❯" or ">" at the
+ *  end ("user@box:~/app$", "~/app ❯"), or "%" after a space ("user@mac app
+ *  %"). Claude's own status lines end in "7%", ")" or "]" — a "%" there
+ *  follows a digit, never a space. Missing a prompt here is backed by the
+ *  process scan's foreground check; a false match only delays. */
+const SHELL_PROMPT_END = /(?:[$#❯>]|(?:^|\s)%)$/;
 
 // One entry per agent vendor (`AgentConfig.vendor`), not per agent id: ids
 // are the user's config keys ("claude-mm", "claude-work") and any number of
@@ -68,6 +84,7 @@ export const AGENT_INPUT_MARKERS: Readonly<Record<string, AgentInputMarkers>> = 
     finished: [/^[·✢✳✶✻✽*]\s+[A-Za-z]+ for \d/, /^⎿\s+Interrupted\b/],
     placeholders: [],
     placeholderPatterns: [/^Try ".+"$/],
+    boxed: true,
   },
   // openai — Codex CLI: the composer is "› " (or "▌" on older builds) and
   // shows one of a fixed set of placeholders when empty; a running turn
@@ -110,7 +127,8 @@ type InputLine = { kind: "menu" } | { kind: "input"; draft: boolean };
 /**
  * The agent's input line within the last {@link INPUT_LINE_WINDOW} lines,
  * walking up from the end: a highlighted menu row met first is a `menu`;
- * the first input line is the box (earlier ones are user turns echoed in
+ * for a boxed vendor, a first input line outside a box (see `boxed`) is
+ * none at all; the first input line is the box (earlier ones are user turns echoed in
  * the transcript), a draft unless empty or a known placeholder. Undefined
  * when neither is in view.
  */
@@ -118,12 +136,15 @@ function readInputLine(
   lines: readonly string[],
   markers: AgentInputMarkers,
 ): InputLine | undefined {
-  const window = lines.slice(-INPUT_LINE_WINDOW);
-  for (let i = window.length - 1; i >= 0; i--) {
-    const line = window[i] ?? "";
+  const first = Math.max(0, lines.length - INPUT_LINE_WINDOW);
+  for (let i = lines.length - 1; i >= first; i--) {
+    const line = lines[i] ?? "";
     if (MENU_ROW.test(line)) return { kind: "menu" };
     const match = markers.inputLine.exec(line);
     if (match === null) continue;
+    // The lowest prompt-like line decides: one outside a box is a shell
+    // prompt, and the agent's frame above it is a leftover.
+    if (markers.boxed === true && !insideBox(lines, i)) return undefined;
     const text = (match[1] ?? "").trim();
     const placeholder =
       markers.placeholders.includes(text) ||
@@ -131,6 +152,12 @@ function readInputLine(
     return { kind: "input", draft: text.length > 0 && !placeholder };
   }
   return undefined;
+}
+
+/** Line `i` sits between two rules, with no shell prompt below the box. */
+function insideBox(lines: readonly string[], i: number): boolean {
+  if (!RULE_LINE.test(lines[i - 1] ?? "") || !RULE_LINE.test(lines[i + 1] ?? "")) return false;
+  return !lines.slice(i + 2).some((line) => SHELL_PROMPT_END.test(line));
 }
 
 /** True iff a busy marker sits after the last completed-turn line. */

@@ -185,6 +185,33 @@ describe("readAgentInputState — long turns, drafts and menus", () => {
   });
 });
 
+describe("readAgentInputState — a shell prompt is never Claude's box", () => {
+  // starship / pure draw a bare "❯" prompt: no rules around it.
+  it("reads a starship ❯ prompt alone at the bottom as not idle", () => {
+    const tail = ["~/projects/app on  main", "❯ "].join("\n");
+    expect(readAgentInputState(tail, "anthropic")).not.toBe("idle-input");
+    expect(readAgentInputState(`${tail}\n`, "anthropic")).not.toBe("idle-input");
+  });
+
+  it("reads a ❯ with only one rule beside it as not idle", () => {
+    const tail = ["⏺ done", "─".repeat(80), "❯ "].join("\n");
+    expect(readAgentInputState(tail, "anthropic")).not.toBe("idle-input");
+  });
+
+  // Claude exited (or was stopped) and left its last frame on screen; the
+  // shell's prompt sits below it.
+  for (const prompt of ["user@mac app % ", "user@box:~/app$ ", "❯ ", "~/app ❯ "]) {
+    it(`reads Claude's leftover frame under a shell prompt ${JSON.stringify(prompt)} as not idle`, () => {
+      const tail = `${fixture("claude-idle")}${prompt}`;
+      expect(readAgentInputState(tail, "anthropic")).not.toBe("idle-input");
+    });
+  }
+
+  it("still reads the real status lines under the box as idle", () => {
+    expect(readAgentInputState(fixture("claude-idle"), "anthropic")).toBe("idle-input");
+  });
+});
+
 describe("inputLineHasDraft", () => {
   it("is true for a Claude draft", () => {
     expect(inputLineHasDraft(withDraft("fix the fla"), "anthropic")).toBe(true);
