@@ -45,8 +45,6 @@ type AgentInputMarkers = {
    * Exact matches only: anything else on the line is the user's draft.
    */
   placeholders: readonly string[];
-  /** Whole-text patterns for a placeholder with a varying part. */
-  placeholderPatterns?: readonly RegExp[];
   /**
    * The input line counts only between two horizontal rules, with no shell
    * prompt below the bottom one — so a bare shell prompt with the same
@@ -77,13 +75,15 @@ export const AGENT_INPUT_MARKERS: Readonly<Record<string, AgentInputMarkers>> = 
   // "esc to interrupt" — sits above it. A finished turn prints "✻ Baked for
   // 15s · done 12:34 AM" (no "…"); an interrupted one "⎿  Interrupted ·
   // What should Claude do instead?". An empty box can show a first-run
-  // placeholder, `❯ Try "write a test for <filepath>"`.
+  // placeholder, `❯ Try "write a test for <filepath>"`, drawn dim:
+  // pane-screen.ts drops dim text after the glyph, so it arrives here as an
+  // empty box; as plain text (a raw-log read) it is taken as a draft —
+  // only a delay, never a paste into someone's typing.
   anthropic: {
     inputLine: /^│?\s*[>❯](?:\s+(.*?))?\s*│?$/,
     busy: [/esc to interrupt/i, /^[·✢✳✶✻✽*]\s+\S.*…/],
     finished: [/^[·✢✳✶✻✽*]\s+[A-Za-z]+ for \d/, /^⎿\s+Interrupted\b/],
     placeholders: [],
-    placeholderPatterns: [/^Try ".+"$/],
     boxed: true,
   },
   // openai — Codex CLI: the composer is "› " (or "▌" on older builds) and
@@ -146,10 +146,7 @@ function readInputLine(
     // prompt, and the agent's frame above it is a leftover.
     if (markers.boxed === true && !insideBox(lines, i)) return undefined;
     const text = (match[1] ?? "").trim();
-    const placeholder =
-      markers.placeholders.includes(text) ||
-      (markers.placeholderPatterns ?? []).some((pattern) => pattern.test(text));
-    return { kind: "input", draft: text.length > 0 && !placeholder };
+    return { kind: "input", draft: text.length > 0 && !markers.placeholders.includes(text) };
   }
   return undefined;
 }

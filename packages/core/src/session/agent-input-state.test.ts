@@ -29,7 +29,9 @@ const wrapInAnsi = (tail: string): string =>
 
 const CASES = [
   { name: "claude-idle", vendor: "anthropic", state: "idle-input" },
-  { name: "claude-idle-placeholder", vendor: "anthropic", state: "idle-input" },
+  // Its placeholder as plain text: pane-screen.ts drops the dim placeholder
+  // before the reader sees it, so plain `Try "…"` here is typed — a draft.
+  { name: "claude-idle-placeholder", vendor: "anthropic", state: "busy" },
   { name: "claude-busy", vendor: "anthropic", state: "busy" },
   { name: "claude-approval", vendor: "anthropic", state: "approval-prompt" },
   { name: "codex-idle", vendor: "openai", state: "idle-input" },
@@ -225,7 +227,7 @@ describe("inputLineHasDraft", () => {
     expect(inputLineHasDraft(fixture("claude-idle"), "anthropic")).toBe(false);
   });
 
-  it("is false for Claude's first-run placeholder", () => {
-    expect(inputLineHasDraft(fixture("claude-idle-placeholder"), "anthropic")).toBe(false);
+  it("is true for placeholder words that are not styled as a placeholder", () => {
+    expect(inputLineHasDraft(fixture("claude-idle-placeholder"), "anthropic")).toBe(true);
   });
 });
