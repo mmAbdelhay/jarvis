@@ -1338,6 +1338,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     readFile: (path) => importFs.readHead(path),
     listTranscripts: (dir) => importFs.listFiles(dir, "claude"),
     readTail: (path) => readFileTail(path, 256 * 1024),
+    now: () => Date.now(),
     watch: (dir, onChange) => {
       const watcher = watchFs(dir, () => onChange());
       // A watch that fails later (directory removed) costs live updates only;

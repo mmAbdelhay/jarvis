@@ -16,6 +16,8 @@ const AGENTS: AgentConfig[] = [
 ];
 const SESSIONS = join("/h/.claude-main", "sessions");
 const PROJECTS = join("/h/.claude-main", "projects");
+/** When the namer was created; processes default to starting after it. */
+const NOW = 1_000_000;
 
 function tab(id: string, customTitle?: string): WorkspaceTab {
   return {
@@ -60,6 +62,7 @@ function world() {
   const outputListeners = new Set<(o: ShellOutput) => void>();
   const exitListeners = new Set<(e: ShellExit) => void>();
   let scans = 0;
+  let listings = 0;
 
   const deps: SessionTabNameDeps = {
     shells: {
@@ -91,7 +94,11 @@ function world() {
       if (text === undefined) throw new Error("ENOENT");
       return text;
     },
-    listTranscripts: async () => transcripts,
+    listTranscripts: async () => {
+      listings++;
+      return transcripts;
+    },
+    now: () => NOW,
     readTail: async (path) => {
       const text = files.get(path);
       if (text === undefined) throw new Error("ENOENT");
@@ -123,7 +130,7 @@ function world() {
     agentId: "claude",
     command: "claude",
     cwd: "/w",
-    startedAt: 0,
+    startedAt: NOW + 1_000,
     terminalPaneKey: paneKey,
     foreground,
   });
@@ -140,6 +147,7 @@ function world() {
     outputListeners,
     exitListeners,
     scans: () => scans,
+    listings: () => listings,
     setProcesses: (next: ExternalAgentProcess[]) => {
       processes = next;
     },
@@ -360,5 +368,50 @@ describe("session tab namer", () => {
     await namer.whenIdle();
     expect(w.renames).toEqual([["t1", "still named"]]);
     namer.stop();
+  });
+
+  it("keeps a hand-set tab name for a session already running when Jarvis started", async () => {
+    const w = world();
+    w.state.tabs = [tab("t1", "mine"), tab("t2")];
+    w.setProcesses([
+      { ...w.claudeIn("t1", 101), startedAt: NOW - 60_000 },
+      { ...w.claudeIn("t2", 102), startedAt: NOW - 60_000 },
+    ]);
+    w.files.set(join(SESSIONS, "101.json"), pidFile(101, "s1", "old topic"));
+    w.files.set(join(SESSIONS, "102.json"), pidFile(102, "s2", "unnamed tab"));
+    const namer = createSessionTabNamer(w.deps);
+
+    await namer.check();
+    await namer.check();
+    // The tab with no name of its own still takes the session's.
+    expect(w.renames).toEqual([["t2", "unnamed tab"]]);
+    expect(w.state.tabs[0]?.customTitle).toBe("mine");
+
+    w.files.set(join(SESSIONS, "101.json"), pidFile(101, "s1", "new topic"));
+    await namer.check();
+    expect(w.renames).toEqual([
+      ["t2", "unnamed tab"],
+      ["t1", "new topic"],
+    ]);
+  });
+
+  it("forgets a transcript path once its session is in no live pane", async () => {
+    const w = world();
+    w.setProcesses([w.claudeIn("t1", 101)]);
+    w.files.set(join(SESSIONS, "101.json"), pidFile(101, "s1"));
+    const transcript = join(PROJECTS, "-w", "s1.jsonl");
+    w.transcripts.push({ path: transcript, mtime: 1 });
+    w.files.set(transcript, `${JSON.stringify({ type: "custom-title", customTitle: "t" })}\n`);
+    const namer = createSessionTabNamer(w.deps);
+
+    await namer.check();
+    await namer.check();
+    expect(w.listings()).toBe(1); // cached while the session is live
+
+    w.setProcesses([]);
+    await namer.check();
+    w.setProcesses([w.claudeIn("t1", 101)]);
+    await namer.check();
+    expect(w.listings()).toBe(2); // pruned, so looked up again
   });
 });

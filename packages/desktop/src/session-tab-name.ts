@@ -39,6 +39,8 @@ export type SessionTabNameDeps = {
   watch(dir: string, onChange: () => void): { close(): void };
   /** One-shot timer; returns its cancel. */
   schedule(fn: () => void, ms: number): () => void;
+  /** Epoch ms; read once, when the namer is created. */
+  now(): number;
   /** Repeating timer; returns its cancel. */
   interval(fn: () => void, ms: number): () => void;
 };
@@ -65,6 +67,11 @@ function tabOf(state: WorkspaceState, paneKey: string): string | undefined {
 export function createSessionTabNamer(deps: SessionTabNameDeps): SessionTabNamer {
   /** Per pane: the session and name last applied to its tab. */
   const applied = new Map<string, { sessionId: string; name: string }>();
+  /** A process started before this is a session that was already running
+   *  when Jarvis (re)started: a name the user gave its tab is kept. */
+  const createdAt = deps.now();
+  /** Sessions read during the current check, for pruning transcriptPaths. */
+  const seenSessions = new Set<string>();
   /** Session id → its transcript path, once found (fallback only). */
   const transcriptPaths = new Map<string, string>();
   const watchers = new Map<string, { close(): void }>();
@@ -122,6 +129,7 @@ export function createSessionTabNamer(deps: SessionTabNameDeps): SessionTabNamer
       process.pid,
     );
     if (record === null) return;
+    seenSessions.add(record.sessionId);
     const name = await nameFor(paths, record);
     if (name === undefined || stopped) return;
 
@@ -131,9 +139,12 @@ export function createSessionTabNamer(deps: SessionTabNameDeps): SessionTabNamer
     const tabId = tabOf(state, paneKey);
     if (tabId === undefined) return;
     applied.set(paneKey, { sessionId: record.sessionId, name });
-    if (state.tabs.find((tab) => tab.id === tabId)?.customTitle !== name) {
-      deps.tabs.rename(tabId, name);
-    }
+    const customTitle = state.tabs.find((tab) => tab.id === tabId)?.customTitle;
+    // First sighting of a session that predates this run, in a tab the user
+    // named: recorded as applied without renaming, so the hand-set name
+    // survives a restart. Its next name change still applies.
+    if (last === undefined && process.startedAt < createdAt && customTitle !== undefined) return;
+    if (customTitle !== name) deps.tabs.rename(tabId, name);
   }
 
   async function run(): Promise<void> {
@@ -146,7 +157,10 @@ export function createSessionTabNamer(deps: SessionTabNameDeps): SessionTabNamer
     );
     // Forget panes the shell manager no longer knows, so the map cannot grow.
     for (const paneKey of applied.keys()) if (!live.has(paneKey)) applied.delete(paneKey);
-    if (live.size === 0) return;
+    if (live.size === 0) {
+      transcriptPaths.clear();
+      return;
+    }
 
     let processes: readonly ExternalAgentProcess[];
     try {
@@ -154,6 +168,7 @@ export function createSessionTabNamer(deps: SessionTabNameDeps): SessionTabNamer
     } catch {
       return;
     }
+    seenSessions.clear();
     for (const process of processes) {
       if (stopped) return;
       const paneKey = process.terminalPaneKey;
@@ -163,6 +178,10 @@ export function createSessionTabNamer(deps: SessionTabNameDeps): SessionTabNamer
       } catch {
         // A pid file mid-write, a transcript gone: this pane waits for the next check.
       }
+    }
+    // Pruned with `applied`: a session in no live pane needs no cached path.
+    for (const sessionId of transcriptPaths.keys()) {
+      if (!seenSessions.has(sessionId)) transcriptPaths.delete(sessionId);
     }
   }
 
