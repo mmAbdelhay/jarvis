@@ -527,6 +527,25 @@ describe("Reviews page — thread", () => {
     expect(api.reviewsOpenOnGithub).toHaveBeenCalledWith(KEY);
     expect(text("reviews-notice")).toBe(MESSAGES.reviewsSent("en"));
   });
+  it("says a session summary that cannot go out now is queued, not lost", async () => {
+    const api = fakeApi({ thread: { pr: PR, link: LINKED, waitReason: null, comments: [] } });
+    api.reviewsPostSummary.mockResolvedValue({ sent: false, wait: "busy" });
+    const { view } = await start(api);
+    await view.open(KEY);
+    await flush();
+    [...document.querySelectorAll<HTMLButtonElement>("#reviews-thread button")]
+      .find((b) => b.textContent === MESSAGES.reviewsPostSummary("en"))
+      ?.click();
+    await flush();
+
+    expect(text("reviews-notice")).toBe("Queued — will send when the agent is idle");
+    expect(MESSAGES.reviewsInstructionQueued("en")).toBe(
+      "Queued — will send when the agent is idle",
+    );
+    expect(MESSAGES.reviewsInstructionQueued("ar")).not.toBe(
+      MESSAGES.reviewsInstructionQueued("en"),
+    );
+  });
 });
 
 describe("listTerminalPanes", () => {

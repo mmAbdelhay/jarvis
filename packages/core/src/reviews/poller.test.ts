@@ -65,6 +65,7 @@ function setup(repos = ["acme/repo", "ACME/REPO"]) {
     setManualLink: async () => {},
     paused: async () => new Set(),
     setPaused: async () => {},
+    forgetPanes: async () => {},
     requeue: async () => false,
   };
   const gh: ReviewsGh = {
@@ -290,5 +291,33 @@ describe("review poller", () => {
     await t.poller.pollNow();
     await t.poller.pollNow();
     expect(t.events.at(-1)).toEqual({ kind: "prs", prs: [pr] });
+  });
+  it("never lets a cursor's since become non-finite", async () => {
+    const t = setup();
+    await t.poller.pollNow();
+    vi.mocked(t.gh.listComments).mockResolvedValue({
+      kind: "ok",
+      comments: [comment("nan", Number.NaN), comment("2", 110)],
+    });
+    await t.poller.pollNow();
+    for (const cursor of t.cursors.values()) expect(Number.isFinite(cursor.since)).toBe(true);
+    expect(t.cursors.get("Acme/Repo#1")?.since).toBe(110);
+    vi.mocked(t.gh.listComments).mockResolvedValue({
+      kind: "ok",
+      comments: [comment("nan2", Number.NaN)],
+    });
+    await t.poller.pollNow();
+    for (const cursor of t.cursors.values()) expect(Number.isFinite(cursor.since)).toBe(true);
+    expect(t.cursors.get("Acme/Repo#1")?.since).toBe(110);
+  });
+  it("recovers from a persisted non-finite since", async () => {
+    const t = setup();
+    await t.poller.pollNow();
+    t.cursors.set("Acme/Repo#1", { since: Number.NaN });
+    t.cursors.set("repo:acme/repo", { since: Number.NaN });
+    vi.mocked(t.gh.listComments).mockResolvedValue({ kind: "ok", comments: [comment("2", 110)] });
+    await t.poller.pollNow();
+    expect(vi.mocked(t.gh.listComments).mock.calls.at(-1)?.[1].since).not.toBeNaN();
+    for (const cursor of t.cursors.values()) expect(Number.isFinite(cursor.since)).toBe(true);
   });
 });

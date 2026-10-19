@@ -2367,6 +2367,11 @@ export const MESSAGES = {
     language === "ar" ? "أُرسل إلى الجلسة." : "Sent to the session.",
   reviewsNotSent: (reason: string, language: "ar" | "en"): string =>
     language === "ar" ? `لم يُرسل: ${reason}` : `Not sent: ${reason}`,
+  /** A review request or session summary held by the idle gate: it stays queued. */
+  reviewsInstructionQueued: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "في الانتظار — سيُرسل عندما يتوقف الوكيل"
+      : "Queued — will send when the agent is idle",
   reviewsRequeued: (language: "ar" | "en"): string =>
     language === "ar" ? "أُضيف إلى انتظار الجلسة." : "Queued for the session.",
   reviewsCommentQueued: (time: string, language: "ar" | "en"): string =>

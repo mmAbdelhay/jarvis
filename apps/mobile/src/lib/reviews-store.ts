@@ -374,8 +374,14 @@ export function reviewThreadEntries(thread: ReviewThread): ReviewThreadEntry[] {
 
 // ---- store -----------------------------------------------------------------
 
-export type ReviewsErrorCode = "loadFailed" | "notFound" | "replyFailed" | "deliverFailed";
-export type ReviewsError = { code: ReviewsErrorCode; detail?: string };
+export type ReviewsErrorCode =
+  | "loadFailed"
+  | "notFound"
+  | "replyFailed"
+  | "deliverFailed"
+  | "deliverWaiting";
+/** `deliverWaiting` carries why the laptop held the paste (shown with the wait labels). */
+export type ReviewsError = { code: ReviewsErrorCode; detail?: string; wait?: ReviewWaitReason };
 
 export type ReviewsState = {
   items?: ReviewListItem[];
@@ -407,6 +413,12 @@ function refusal(value: unknown): string | undefined {
   const raw = record(value);
   if (raw === undefined || raw.ok !== false) return undefined;
   return str(raw.reason) ? raw.reason : "refused";
+}
+
+/** The wait of a delivery outcome `{sent: false, wait}`; undefined otherwise. */
+function heldBack(value: unknown): ReviewWaitReason | undefined {
+  const raw = record(value);
+  return raw !== undefined && raw.sent === false ? (parseWait(raw.wait) ?? "nothing") : undefined;
 }
 
 export function createReviewsStore(deps: ReviewsStoreDeps): ReviewsStore {
@@ -468,6 +480,12 @@ export function createReviewsStore(deps: ReviewsStoreDeps): ReviewsStore {
     }
     const result = await deps.client.call(channel, args);
     const refused = result.ok ? refusal(result.value) : undefined;
+    const wait = result.ok ? heldBack(result.value) : undefined;
+    if (wait !== undefined) {
+      state.error = { code: "deliverWaiting", wait };
+      emit();
+      return false;
+    }
     if (!result.ok || refused !== undefined) {
       state.error = result.ok ? { code, detail: refused } : rpcError(result, code);
       emit();

@@ -180,6 +180,27 @@ describe("createReviewStore", () => {
     expect(await reopened.wasNotified("requested:acme/app#8")).toBe(false);
   });
 
+  it("forgets panes: drops their manual links and pauses, keeps explicit unlinks", async () => {
+    const file = await tempFile();
+    const store = createReviewStore(file);
+    await store.setManualLink(PR, "tab-1");
+    await store.setManualLink("acme/app#8", "tab-2");
+    await store.setManualLink("acme/app#9", null);
+    await store.setPaused("tab-1", true);
+    await store.setPaused("tab-2", true);
+
+    await store.forgetPanes((paneKey) => paneKey === "tab-1");
+
+    const reopened = createReviewStore(file);
+    expect(await reopened.manualLinks()).toEqual(
+      new Map<string, string | null>([
+        ["acme/app#8", "tab-2"],
+        ["acme/app#9", null],
+      ]),
+    );
+    expect(await reopened.paused()).toEqual(new Set(["tab-2"]));
+  });
+
   it("writes a versioned file", async () => {
     const file = await tempFile();
     await createReviewStore(file).markSeeded("acme/app", 1);

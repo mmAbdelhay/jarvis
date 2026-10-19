@@ -47,6 +47,8 @@ export const REVIEW_TAIL_LINES = 400;
 export const REVIEW_PASTE_HOLD_MS = 60_000;
 /** How long a pane directory's branch is reused before git is asked again. */
 const BRANCH_TTL_MS = 10_000;
+/** How long a directory with no repository is remembered before gh is asked again. */
+const REPO_MISS_TTL_MS = 60_000;
 
 type GhStatus = Awaited<ReturnType<ReviewsGh["status"]>>;
 
@@ -206,7 +208,10 @@ export function createReviewService(deps: ReviewServiceDeps): ReviewService {
   const pastedIds = new Set<string>();
   const seenPanes = new Set<string>();
   const quietTimers = new Map<string, () => void>();
-  const repoCache = new Map<string, Promise<string | undefined>>();
+  /** `missAt` is set once the lookup found no repository (or failed). */
+  const repoCache = new Map<string, { value: Promise<string | undefined>; missAt?: number }>();
+  /** Repositories that failed in the current poller tick (repo-error precedes prs). */
+  const tickErrors = new Set<string>();
   const branchCache = new Map<string, { at: number; value: Promise<string | undefined> }>();
   /** First time each queued comment was seen waiting on no-link/no-agent/unsupported. */
   const waitingSince = new Map<string, number>();
@@ -252,12 +257,23 @@ export function createReviewService(deps: ReviewServiceDeps): ReviewService {
   }
 
   function repoOf(cwd: string): Promise<string | undefined> {
-    let hit = repoCache.get(cwd);
-    if (hit === undefined) {
-      hit = deps.gh.repoOf(cwd).catch(() => undefined);
-      repoCache.set(cwd, hit);
+    const hit = repoCache.get(cwd);
+    if (
+      hit !== undefined &&
+      (hit.missAt === undefined || deps.now() - hit.missAt < REPO_MISS_TTL_MS)
+    ) {
+      return hit.value;
     }
-    return hit;
+    const entry: { value: Promise<string | undefined>; missAt?: number } = {
+      value: deps.gh.repoOf(cwd).catch(() => undefined),
+    };
+    // A miss is only reused briefly: gh may be logged in, or the remote added, later.
+    entry.value = entry.value.then((repo) => {
+      if (repo === undefined) entry.missAt = deps.now();
+      return repo;
+    });
+    repoCache.set(cwd, entry);
+    return entry.value;
   }
 
   function branchOf(cwd: string): Promise<string | undefined> {
@@ -429,7 +445,12 @@ export function createReviewService(deps: ReviewServiceDeps): ReviewService {
     wait: DeliveryWait,
   ): Promise<void> {
     const ids = queued.map((q) => reviewCommentKey(q.prKey, q.comment.kind, q.comment.id));
-    if (wait !== "no-link" && wait !== "no-agent" && wait !== "unsupported") {
+    if (
+      wait !== "no-link" &&
+      wait !== "no-agent" &&
+      wait !== "unsupported" &&
+      wait !== "ambiguous"
+    ) {
       for (const id of ids) waitingSince.delete(id);
       return;
     }
@@ -457,6 +478,8 @@ export function createReviewService(deps: ReviewServiceDeps): ReviewService {
   async function evaluate(forceKey?: string): Promise<DeliveryOutcome | undefined> {
     let forced: DeliveryOutcome | undefined;
     const cfg = deps.config();
+    // Listen off: nothing is pasted, whatever is queued (read live each pass).
+    if (!cfg.enabled) return forceKey === undefined ? undefined : { sent: false, wait: "paused" };
     const queuedAll = await deps.store.listQueued();
     const byPr = new Map<string, QueuedComment[]>();
     for (const q of queuedAll) {
@@ -522,14 +545,34 @@ export function createReviewService(deps: ReviewServiceDeps): ReviewService {
     if (pane.repo !== undefined) knownRepos.add(pane.repo);
   }
 
+  /** Looks up every configured project directory's repository (live config). */
+  function discoverProjects(): Promise<unknown> {
+    return Promise.allSettled(
+      deps.projectDirs().map((dir) =>
+        repoOf(dir).then((repo) => {
+          if (repo !== undefined) knownRepos.add(repo);
+        }),
+      ),
+    );
+  }
+
   /** Repositories to poll: configured ones, plus those of project dirs and open panes. */
   function pollRepos(): string[] {
+    // Picks up projects added in Settings; a new one is polled from the next tick.
+    void discoverProjects();
+    return currentRepos();
+  }
+
+  /** The repositories the poller read on its latest tick. */
+  let lastPolled = new Set<string>();
+  function currentRepos(): string[] {
     const cfg = deps.config();
     const out = new Map<string, string>();
     for (const [repo, on] of Object.entries(cfg.repos)) if (on) out.set(lower(repo), repo);
     for (const repo of knownRepos) if (!out.has(lower(repo))) out.set(lower(repo), repo);
     return [...out.values()];
   }
+  const missedByPoll = (): boolean => currentRepos().some((r) => !lastPolled.has(lower(r)));
 
   function onPollerEvent(event: ReviewPollerEvent): void {
     if (disposed) return;
@@ -541,15 +584,23 @@ export function createReviewService(deps: ReviewServiceDeps): ReviewService {
         return;
       case "repo-error":
         repoErrors.set(event.repo, event.message);
+        tickErrors.add(lower(event.repo));
         changed(null);
         return;
-      case "prs":
-        repoErrors.clear();
+      case "prs": {
+        // Only repos that listed this tick lose their error; a failed repo
+        // keeps its last known PRs (and so its links and queue).
+        for (const repo of repoErrors.keys()) {
+          if (!tickErrors.has(lower(repo))) repoErrors.delete(repo);
+        }
+        const kept = [...prs.values()].filter((pr) => tickErrors.has(lower(pr.repo)));
+        tickErrors.clear();
         prs.clear();
-        for (const pr of event.prs) prs.set(lower(makePrKey(pr.repo, pr.number)), pr);
+        for (const pr of [...kept, ...event.prs]) prs.set(lower(makePrKey(pr.repo, pr.number)), pr);
         changed(null);
         void requestEvaluation();
         return;
+      }
       case "comments":
         if (cfg.notify.comment) notify({ kind: "review-comment", pr: event.prKey });
         changed(event.prKey);
@@ -571,7 +622,11 @@ export function createReviewService(deps: ReviewServiceDeps): ReviewService {
     gh: deps.gh,
     store: deps.store,
     config: deps.config,
-    repos: pollRepos,
+    repos: () => {
+      const repos = pollRepos();
+      lastPolled = new Set(repos.map(lower));
+      return repos;
+    },
     schedule: deps.schedule,
     now: deps.now,
     onEvent: onPollerEvent,
@@ -601,17 +656,37 @@ export function createReviewService(deps: ReviewServiceDeps): ReviewService {
     awaitingOutput.delete(paneKey);
     quietTimers.get(paneKey)?.();
     quietTimers.delete(paneKey);
+    // Pane keys are reused (tab-N restarts each launch): a link or pause
+    // to a pane that is gone must not follow its key to a new pane.
+    void exclusive(async () => {
+      await deps.store.forgetPanes((key) => key === paneKey);
+      changed(null);
+    });
     void requestEvaluation();
   });
 
-  // Project repositories are learned up front so the first poll has them.
-  for (const dir of deps.projectDirs()) {
-    void repoOf(dir).then((repo) => {
-      if (repo !== undefined) knownRepos.add(repo);
-    });
-  }
+  // Links and pauses saved for panes that are not live now (a previous
+  // launch's tab-N) are dropped before the first evaluation reads them.
+  void exclusive(async () => {
+    const live = new Set(
+      deps.shells
+        .panes()
+        .filter((p) => !p.exited)
+        .map((p) => p.paneKey),
+    );
+    await deps.store.forgetPanes((key) => !live.has(key));
+  });
   poller.start();
   armSafety();
+  // Project repositories are learned up front; the first results should
+  // not wait a whole interval for them.
+  // A tick already in flight may have read the repo list before discovery
+  // finished: then one more poll follows it.
+  void discoverProjects().then(async () => {
+    if (disposed) return;
+    await poller.pollNow().catch(() => {});
+    if (!disposed && missedByPoll()) await poller.pollNow().catch(() => {});
+  });
 
   function prOrThrow(prKey: PrKey): PullRequest {
     const pr = prs.get(lower(prKey));
@@ -622,6 +697,11 @@ export function createReviewService(deps: ReviewServiceDeps): ReviewService {
   async function queueInstruction(item: PendingInstruction): Promise<DeliveryOutcome> {
     return exclusive(async () => {
       const key = lower(item.prKey);
+      // Listen off: kept for when it is back on, never pasted now.
+      if (!deps.config().enabled) {
+        pending.set(key, item);
+        return { sent: false, wait: "paused" } as const;
+      }
       const pr = prs.get(key);
       const link =
         pr === undefined
@@ -642,7 +722,7 @@ export function createReviewService(deps: ReviewServiceDeps): ReviewService {
   return {
     status: async () => ({
       paused: [...(await deps.store.paused())],
-      repos: pollRepos(),
+      repos: currentRepos(),
       gh: ghStatus,
       enabled: deps.config().enabled,
       repoErrors: Object.fromEntries(repoErrors),

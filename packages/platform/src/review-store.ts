@@ -299,6 +299,24 @@ export function createReviewStore(filePath: string, now: () => number = Date.now
       });
     },
 
+    forgetPanes(isGone) {
+      return modify((data) => {
+        let changed = false;
+        for (const [prKey, paneKey] of Object.entries(data.manualLinks)) {
+          if (paneKey !== null && isGone(paneKey)) {
+            delete data.manualLinks[prKey];
+            changed = true;
+          }
+        }
+        const paused = data.paused.filter((paneKey) => !isGone(paneKey));
+        if (paused.length !== data.paused.length) {
+          data.paused = paused;
+          changed = true;
+        }
+        return changed;
+      });
+    },
+
     wasNotified(key) {
       return read((data) => data.notified.includes(key));
     },

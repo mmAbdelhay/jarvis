@@ -150,6 +150,11 @@ export default function ReviewThreadRoute() {
                 ))}
               </>
             )}
+            {state.error?.code === "deliverWaiting" && state.error.wait !== undefined && (
+              <Text style={styles.error}>
+                {t(language, WAIT_KEY[state.error.wait], { branch: thread?.pr.headRef ?? "" })}
+              </Text>
+            )}
             {actionError !== undefined && (
               <Text style={styles.error}>
                 {t(

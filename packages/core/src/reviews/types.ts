@@ -104,6 +104,9 @@ export type ReviewsStore = {
   setManualLink(prKey: PrKey, paneKey: string | null): Promise<void>;
   paused(): Promise<Set<string>>;
   setPaused(paneKey: string, paused: boolean): Promise<void>;
+  /** Drops every manual link to a pane `isGone` matches (back to no manual
+   *  entry — explicit null unlinks stay) and removes those panes from paused. */
+  forgetPanes(isGone: (paneKey: string) => boolean): Promise<void>;
   wasNotified(key: string): Promise<boolean>;
   markNotified(key: string): Promise<void>;
 };

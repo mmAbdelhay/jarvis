@@ -53,6 +53,18 @@ function comment(value: GhComment, kind: ReviewComment["kind"]): ReviewComment {
   };
 }
 
+/** A pagination URL gh may fetch: https://api.github.com or a relative repos/ path. */
+function safeNext(url: string | undefined): string | undefined {
+  if (url === undefined) return undefined;
+  if (url.startsWith("repos/")) return url;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" && parsed.host === "api.github.com" ? url : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function checked(result: Awaited<ReturnType<GhRunner>>): string {
   if (result.code !== 0) throw new Error(result.stderr || `gh exited with code ${result.code}`);
   return result.stdout;
@@ -209,9 +221,10 @@ export function createGhReviews({
             const ratio = Number(remaining) / Number(limit);
             remainingRatio = Math.min(remainingRatio ?? 1, ratio);
           }
-          const next: string | undefined =
+          const next: string | undefined = safeNext(
             headers.get("link")?.match(/<([^>]+)>;\s*rel="next"/)?.[1] ??
-            (status === 304 ? saved?.next : undefined);
+              (status === 304 ? saved?.next : undefined),
+          );
           validators[endpoint] = {
             etag: headers.get("etag") ?? (status === 304 ? etag : undefined),
             next,
@@ -222,6 +235,8 @@ export function createGhReviews({
             for (const value of JSON.parse(response.body) as GhComment[]) {
               if (kind === "review-body" && !value.body?.trim()) continue;
               const mapped = comment(value, kind);
+              // A pending review has no submitted_at: no time, no place in the cursor.
+              if (!Number.isFinite(mapped.createdAt)) continue;
               if (
                 kind === "review-body" &&
                 cursor.since !== undefined &&

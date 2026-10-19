@@ -19,6 +19,11 @@ type Options = {
   onEvent: (event: ReviewEvent) => void;
 };
 
+/** A stored cursor whose time is not a finite number is treated as absent. */
+function usable<T extends { since: number }>(cursor: T | undefined): T | undefined {
+  return cursor !== undefined && Number.isFinite(cursor.since) ? cursor : undefined;
+}
+
 export function createReviewPoller({ gh, store, config, repos, schedule, now, onEvent }: Options) {
   const retryAt = new Map<string, number>();
   const lastPrs = new Map<string, PullRequest[]>();
@@ -54,7 +59,7 @@ export function createReviewPoller({ gh, store, config, repos, schedule, now, on
         const firstRun = await store.isFirstRun(normalized);
         // Reserved repo key: PrKey is a string; no store interface extension needed.
         const repoKey = `repo:${normalized}`;
-        const repoCursor = await store.cursor(repoKey);
+        const repoCursor = usable(await store.cursor(repoKey));
         let repoSince = repoCursor?.since ?? 0;
         const listed = await gh.listPrs(repo, status.login);
         lastPrs.set(normalized, listed);
@@ -67,7 +72,7 @@ export function createReviewPoller({ gh, store, config, repos, schedule, now, on
             onEvent({ kind: "review-requested", pr });
           }
           if (pr.role !== "mine") continue;
-          const cursor = await store.cursor(key);
+          const cursor = usable(await store.cursor(key));
           const previousSince = cursor?.since ?? repoCursor?.since;
           const result = await gh.listComments(pr, {
             ...cursor,
@@ -92,11 +97,13 @@ export function createReviewPoller({ gh, store, config, repos, schedule, now, on
           let added = 0;
           let since = previousSince ?? 0;
           for (const comment of result.comments) {
-            since = Math.max(since, comment.createdAt);
+            const timed = Number.isFinite(comment.createdAt);
+            if (timed) since = Math.max(since, comment.createdAt);
             const id = reviewCommentKey(key, comment.kind, comment.id);
             // Upsert refreshes edited text while preserving the stored state.
             if (
               existing.has(id) ||
+              !timed ||
               previousSince === undefined ||
               comment.createdAt <= previousSince
             ) {

@@ -427,11 +427,16 @@ export function initReviews(deps: ReviewsViewDeps): ReviewsView {
     setText(node, text);
   }
 
-  /** Runs a delivery action and says whether it went out, or why not. */
-  async function deliver(run: () => Promise<{ sent: true } | { sent: false; wait: DeliveryWait }>) {
+  /** Runs a delivery action and says whether it went out, or why not. An
+   *  instruction (`queues`) that cannot go out now stays queued and pastes later. */
+  async function deliver(
+    run: () => Promise<{ sent: true } | { sent: false; wait: DeliveryWait }>,
+    queues = false,
+  ) {
     try {
       const outcome = await run();
       if (outcome.sent) showNotice(MESSAGES.reviewsSent(L), false);
+      else if (queues) showNotice(MESSAGES.reviewsInstructionQueued(L), false);
       else showNotice(MESSAGES.reviewsNotSent(MESSAGES.reviewsWait(outcome.wait, L), L), true);
     } catch {
       showNotice(MESSAGES.reviewsActionFailed(L), true);
@@ -744,13 +749,13 @@ export function initReviews(deps: ReviewsViewDeps): ReviewsView {
       const paneKey = current.link.paneKey;
       head.append(
         button(MESSAGES.reviewsAskReview(L), "reviews-btn", () => {
-          void deliver(() => api.reviewsSendReview(prKey, paneKey));
+          void deliver(() => api.reviewsSendReview(prKey, paneKey), true);
         }),
       );
     }
     head.append(
       button(MESSAGES.reviewsPostSummary(L), "reviews-btn", () => {
-        void deliver(() => api.reviewsPostSummary(prKey));
+        void deliver(() => api.reviewsPostSummary(prKey), true);
       }),
       button(MESSAGES.reviewsOpenGithub(L), "reviews-btn", () => {
         void api.reviewsOpenOnGithub(prKey).catch(() => undefined);

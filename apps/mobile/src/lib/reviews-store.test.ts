@@ -317,6 +317,24 @@ describe("createReviewsStore", () => {
     expect(store.state.error).toEqual({ code: "deliverFailed", detail: "no-agent" });
   });
 
+  it("reports a delivery that has to wait, with its reason", async () => {
+    const thread = { pr, link: { kind: "none" }, comments: [comment] };
+    const client = fakeClient([ok(thread), ok({ sent: false, wait: "busy" })]);
+    const store = createReviewsStore({ client: client as never });
+    await store.openThread("owner/jarvis#18");
+    expect(await store.deliverNow()).toBe(false);
+    expect(store.state.error).toEqual({ code: "deliverWaiting", wait: "busy" });
+  });
+
+  it("treats a sent delivery as success", async () => {
+    const thread = { pr, link: { kind: "none" }, comments: [comment] };
+    const client = fakeClient([ok(thread), ok({ sent: true }), ok(thread)]);
+    const store = createReviewsStore({ client: client as never });
+    await store.openThread("owner/jarvis#18");
+    expect(await store.deliverNow()).toBe(true);
+    expect(store.state.error).toBeUndefined();
+  });
+
   it("subscribes to reviews:changed and reloads the list and matching thread", async () => {
     const thread = { pr, link: { kind: "none" }, comments: [comment] };
     const client = fakeClient([ok(thread)]);

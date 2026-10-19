@@ -141,6 +141,10 @@ function memoryStore(): ReviewsStore & {
       if (on) paused.add(paneKey);
       else paused.delete(paneKey);
     },
+    async forgetPanes(isGone) {
+      for (const [k, v] of manual) if (v !== null && isGone(v)) manual.delete(k);
+      for (const k of paused) if (isGone(k)) paused.delete(k);
+    },
     wasNotified: async (key) => notified.has(key),
     async markNotified(key) {
       notified.add(key);
@@ -150,14 +154,25 @@ function memoryStore(): ReviewsStore & {
 
 type Harness = ReturnType<typeof harness>;
 
-function harness(opts: { store?: ReturnType<typeof memoryStore>; start?: number } = {}) {
+function harness(
+  opts: {
+    store?: ReturnType<typeof memoryStore>;
+    start?: number;
+    panes?: { paneKey: string; exited: boolean }[];
+    repoOf?: ReviewsGh["repoOf"];
+  } = {},
+) {
   let now = opts.start ?? 1_000_000;
   const timers: { at: number; fn: () => void; live: boolean }[] = [];
   const store = opts.store ?? memoryStore();
   const writes: { paneKey: string; data: string }[] = [];
   const logs = new Map<string, string>([[PANE, IDLE_TAIL]]);
-  const panes = [{ paneKey: PANE, exited: false }];
+  const panes = opts.panes ?? [{ paneKey: PANE, exited: false }];
   const outputListeners: ((o: ShellOutput) => void)[] = [];
+  const exitListeners: ((e: { paneKey: string; code: number }) => void)[] = [];
+  const cwds = new Map<string, string>();
+  const projectDirs: string[] = ["/p/app"];
+  let pollNows = 0;
   const keystrokes = new Map<string, number>();
   let agents: ExternalAgentProcess[] = [agentIn(PANE)];
   let scans = 0;
@@ -168,7 +183,7 @@ function harness(opts: { store?: ReturnType<typeof memoryStore>; start?: number 
 
   const gh: ReviewsGh = {
     status: async () => ({ kind: "ok", login: "me" }),
-    repoOf: async () => "acme/app",
+    repoOf: opts.repoOf ?? (async () => "acme/app"),
     listPrs: async () => [],
     listComments: async () => ({ kind: "unchanged" }),
     postComment: async (_pr, body) => comment("own-1", now, body),
@@ -186,10 +201,13 @@ function harness(opts: { store?: ReturnType<typeof memoryStore>; start?: number 
         outputListeners.push(listener);
         return () => {};
       },
-      onShellExit: () => () => {},
+      onShellExit: (listener) => {
+        exitListeners.push(listener);
+        return () => {};
+      },
     },
     terminal: {
-      paneCwd: () => "/p/app",
+      paneCwd: (key) => cwds.get(key) ?? "/p/app",
       lastKeystrokeAt: (key) => keystrokes.get(key),
     },
     branchOf: async () => "feat/x",
@@ -202,10 +220,17 @@ function harness(opts: { store?: ReturnType<typeof memoryStore>; start?: number 
     },
     agents: () => AGENTS,
     config: () => config,
-    projectDirs: () => ["/p/app"],
+    projectDirs: () => projectDirs,
     createPoller: (options) => {
       pollerOptions = options;
-      return { start: () => {}, stop: () => {}, pollNow: async () => {} };
+      return {
+        start: () => {},
+        stop: () => {},
+        pollNow: async () => {
+          pollNows++;
+          options.repos();
+        },
+      };
     },
     now: () => now,
     schedule: (fn, ms) => {
@@ -229,6 +254,20 @@ function harness(opts: { store?: ReturnType<typeof memoryStore>; start?: number 
     keystrokes,
     notifies,
     config,
+    gh,
+    cwds,
+    projectDirs,
+    get pollNows() {
+      return pollNows;
+    },
+    /** The repositories the poller would poll right now. */
+    pollRepos(): string[] {
+      return pollerOptions?.repos() ?? [];
+    },
+    exit(paneKey: string) {
+      for (const pane of panes) if (pane.paneKey === paneKey) pane.exited = true;
+      for (const l of exitListeners) l({ paneKey, code: 0 });
+    },
     get scans() {
       return scans;
     },
@@ -390,6 +429,7 @@ describe("review service delivery", () => {
 
   it("reports paused pane keys and every watched repository without requiring a PR", async () => {
     const h = harness();
+    await h.service.whenIdle();
     h.config.repos["me/empty"] = true;
     await h.store.setPaused("other:p1", true);
     expect(await h.service.status()).toMatchObject({
@@ -638,5 +678,158 @@ describe("review service fix round 1", () => {
     release();
     await outcome;
     expect(h.writes).toHaveLength(0);
+  });
+});
+
+/** Lets pending promise chains (repo lookups) settle. */
+const flush = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
+describe("review service final-review fixes", () => {
+  const OTHER = "tab-2";
+
+  it("prunes a saved manual link and pause to a pane that is not live at start", async () => {
+    const store = memoryStore();
+    await store.setManualLink(PR_KEY, OTHER);
+    await store.setPaused(OTHER, true);
+    const h = harness({ store });
+    await h.service.whenIdle();
+    expect(await store.manualLinks()).toEqual(new Map());
+    expect(await store.paused()).toEqual(new Set());
+
+    // A new, unrelated tab-2 opens in another repository with an idle agent.
+    h.panes.push({ paneKey: OTHER, exited: false });
+    h.cwds.set(OTHER, "/p/other");
+    h.gh.repoOf = async (cwd) => (cwd === "/p/other" ? "acme/other" : "acme/app");
+    h.logs.set(OTHER, IDLE_TAIL);
+    h.setAgents([agentIn(PANE), agentIn(OTHER)]);
+    await withQueued(h);
+    await h.advance(10_000);
+    expect(h.writes.map((w) => w.paneKey)).not.toContain(OTHER);
+  });
+
+  it("keeps explicit unlinks and links to live panes at start", async () => {
+    const store = memoryStore();
+    await store.setManualLink(PR_KEY, null);
+    await store.setManualLink("Acme/App#19", PANE);
+    const h = harness({ store });
+    await h.service.whenIdle();
+    expect(await store.manualLinks()).toEqual(
+      new Map<PrKey, string | null>([
+        [PR_KEY, null],
+        ["Acme/App#19", PANE],
+      ]),
+    );
+  });
+
+  it("clears a pane's manual links and pause when it exits", async () => {
+    const h = harness({
+      panes: [
+        { paneKey: PANE, exited: false },
+        { paneKey: OTHER, exited: false },
+      ],
+    });
+    await h.service.link(PR_KEY, OTHER);
+    await h.service.link("Acme/App#19", null);
+    await h.service.pause(OTHER, true);
+    h.exit(OTHER);
+    await h.service.whenIdle();
+    expect(await h.store.manualLinks()).toEqual(
+      new Map<PrKey, string | null>([["Acme/App#19", null]]),
+    );
+    expect(await h.store.paused()).toEqual(new Set());
+  });
+
+  it("keeps a repo's error and last PRs when it fails, clears the error once it lists", async () => {
+    const h = harness();
+    const OTHER_PR: PullRequest = { ...PR, repo: "Acme/Other", number: 3 };
+    h.emit({ kind: "prs", prs: [PR, OTHER_PR] });
+    await h.service.whenIdle();
+    // One tick: Acme/Other fails, so its PRs are missing from the list.
+    h.emit({ kind: "repo-error", repo: "Acme/Other", message: "boom" });
+    h.emit({ kind: "prs", prs: [PR] });
+    await h.service.whenIdle();
+    expect((await h.service.status()).repoErrors).toEqual({ "Acme/Other": "boom" });
+    expect((await h.service.list()).map((i) => i.pr.number).sort((a, b) => a - b)).toEqual([3, 18]);
+    // Next tick lists it again.
+    h.emit({ kind: "prs", prs: [PR, OTHER_PR] });
+    await h.service.whenIdle();
+    expect((await h.service.status()).repoErrors).toEqual({});
+    // A tick where it lists successfully with no PRs drops them.
+    h.emit({ kind: "prs", prs: [PR] });
+    expect((await h.service.list()).map((i) => i.pr.number)).toEqual([18]);
+  });
+
+  it("pastes nothing, and sends no instruction, while Listen is off", async () => {
+    const h = harness();
+    h.config.enabled = false;
+    await withQueued(h);
+    await h.advance(10_000);
+    expect(await h.service.sendReview(PR_KEY, PANE)).toEqual({ sent: false, wait: "paused" });
+    expect(await h.service.deliverNow(PR_KEY)).toEqual({ sent: false, wait: "paused" });
+    await h.advance(10_000);
+    expect(h.writes).toHaveLength(0);
+    h.config.enabled = true;
+    await h.advance(10_000);
+    expect(h.writes.length).toBeGreaterThan(0);
+  });
+
+  it("does not cache a failed repo lookup for more than 60 s", async () => {
+    let calls = 0;
+    let answer: string | undefined;
+    const h = harness({
+      repoOf: async () => {
+        calls++;
+        return answer;
+      },
+    });
+    await h.service.whenIdle();
+    await flush();
+    expect(h.pollRepos()).not.toContain("acme/app");
+    await flush();
+    const first = calls;
+    answer = "acme/app";
+    await h.advance(30_000);
+    h.pollRepos();
+    await flush();
+    expect(calls).toBe(first);
+    await h.advance(31_000);
+    h.pollRepos();
+    await flush();
+    expect(calls).toBeGreaterThan(first);
+    expect(h.pollRepos()).toContain("acme/app");
+  });
+
+  it("polls once when project discovery finishes", async () => {
+    const h = harness();
+    await h.service.whenIdle();
+    await flush();
+    expect(h.pollNows).toBe(1);
+  });
+
+  it("picks up a project added to the live config on the next poll", async () => {
+    const h = harness({
+      repoOf: async (cwd) => (cwd === "/p/new" ? "acme/new" : "acme/app"),
+    });
+    await h.service.whenIdle();
+    h.projectDirs.push("/p/new");
+    h.pollRepos();
+    await flush();
+    expect(h.pollRepos()).toContain("acme/new");
+  });
+
+  it("notifies review-queued after 120 s when the link is ambiguous", async () => {
+    const h = harness({
+      panes: [
+        { paneKey: PANE, exited: false },
+        { paneKey: OTHER, exited: false },
+      ],
+    });
+    h.logs.set(OTHER, IDLE_TAIL);
+    await withQueued(h);
+    expect((await h.service.list())[0]?.link.kind).toBe("ambiguous");
+    await h.advance(130_000);
+    expect(h.notifies.filter((n) => n.kind === "review-queued")).toEqual([
+      { kind: "review-queued", pr: PR_KEY },
+    ]);
   });
 });

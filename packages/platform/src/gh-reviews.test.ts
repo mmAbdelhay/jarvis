@@ -257,6 +257,55 @@ describe("createGhReviews", () => {
     expect(result.kind === "ok" && result.comments.map((c) => c.id)).toEqual(["123", "124"]);
   });
 
+  it.each([
+    "https://evil.example.com/repos/owner/project/issues/42/comments?page=2",
+    "http://api.github.com/repos/owner/project/issues/42/comments?page=2",
+    "https://api.github.com.evil.example/repos/owner/project/issues/42/comments?page=2",
+    "user/repos?page=2",
+  ])("stops paging at a next link %j that is not api.github.com or repos/", async (next) => {
+    const gh = vi.fn<GhRunner>(async (args) =>
+      args[2]?.includes("/issues/") && !args[2]?.includes("page=2")
+        ? response(200, [raw], `Link: <${next}>; rel="next"`)
+        : response(200),
+    );
+    const result = await client(gh).listComments(pr, {});
+    expect(result.kind === "ok" && result.comments.map((c) => c.id)).toEqual(["123"]);
+    expect(gh.mock.calls.some(([args]) => args[2]?.includes("page=2"))).toBe(false);
+  });
+
+  it("follows a relative repos/ next link", async () => {
+    const gh = vi.fn<GhRunner>(async (args) =>
+      args[2]?.includes("page=2")
+        ? response(200, [{ ...raw, id: 124 }])
+        : args[2]?.includes("/issues/")
+          ? response(
+              200,
+              [raw],
+              'Link: <repos/owner/project/issues/42/comments?page=2>; rel="next"',
+            )
+          : response(200),
+    );
+    const result = await client(gh).listComments(pr, {});
+    expect(result.kind === "ok" && result.comments.map((c) => c.id)).toEqual(["123", "124"]);
+  });
+
+  it("skips comments without a finite timestamp, such as a pending review", async () => {
+    const pending = { ...raw, id: 200, body: "draft thoughts", submitted_at: undefined };
+    const noCreated = { ...raw, id: 201, created_at: undefined };
+    const gh = vi.fn<GhRunner>(async (args) =>
+      response(200, args[2]?.includes("/reviews") ? [pending, raw] : [noCreated, raw]),
+    );
+    const result = await client(gh).listComments(pr, {});
+    expect(result.kind).toBe("ok");
+    if (result.kind !== "ok") return;
+    expect(result.comments.map((c) => `${c.kind}:${c.id}`)).toEqual([
+      "issue:123",
+      "review-inline:123",
+      "review-body:123",
+    ]);
+    expect(result.comments.every((c) => Number.isFinite(c.createdAt))).toBe(true);
+  });
+
   it("keeps post and reply bodies exclusively in stdin JSON", async () => {
     const stdinGh = vi.fn(async () => ({ code: 0, stdout: JSON.stringify(raw), stderr: "" }));
     const api = createGhReviews({ gh: async () => response(200), stdinGh });
