@@ -39,6 +39,7 @@ import {
 } from "./prayer.js";
 import { initRemoteStatus } from "./remote-status.js";
 import { initKeepAwake } from "./keep-awake.js";
+import { initBattery, topbarDate } from "./topbar-status.js";
 import {
   detectLanguage,
   formatAgo,
@@ -536,6 +537,7 @@ function wireNav(): void {
   // Keep awake (Task 18): the topbar button. Absent markup is a no-op, and
   // a failed first read only waits for the first awake:changed push.
   void initKeepAwake(window.jarvis).catch(() => undefined);
+  void initBattery(navigator as Parameters<typeof initBattery>[0]).catch(() => undefined);
 
   window.jarvis.onWorkspace((state) => renderWorkspace(state));
   // No catch here would be an unhandled rejection in the renderer on any
@@ -1407,6 +1409,8 @@ function startClock(): void {
       minute: "2-digit",
       hour12: false,
     });
+    const dateEl = document.getElementById("clock-date");
+    if (dateEl !== null) dateEl.textContent = topbarDate(now);
     clock.title = now.toLocaleDateString("en-GB", {
       day: "2-digit",
       month: "short",

@@ -248,6 +248,11 @@ export const MESSAGES = {
       ? "Keep awake: off — click to turn on"
       : `Keep awake: ${status.active ? "on" : "waiting for an agent"} — click to turn off`;
   },
+  // The topbar's battery chip (topbar-status.ts).
+  batteryLabel: (percent: number, charging: boolean, language: "ar" | "en"): string =>
+    language === "ar"
+      ? `البطارية ${percent}%${charging ? " — قيد الشحن" : ""}`
+      : `Battery ${percent}%${charging ? " — charging" : ""}`,
   reviewsSettingsTitle: (language: "ar" | "en"): string =>
     language === "ar" ? "المراجعات" : "REVIEWS",
   reviewsSettingsGhLabel: (language: "ar" | "en"): string =>
