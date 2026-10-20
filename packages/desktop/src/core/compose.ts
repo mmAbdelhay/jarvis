@@ -74,6 +74,7 @@ import { obtainCertificate, type TailscaleCertDeps } from "../tailscale-cert.js"
 import { createNotifier } from "../notify.js";
 import { createReviewService } from "../review-service.js";
 import { createSessionTabNamer } from "../session-tab-name.js";
+import { createChildTracker } from "../child-tracker.js";
 import { createDockerFollowers } from "../docker-followers.js";
 import { createSetupHandlers } from "../ipc.js";
 import {
@@ -1249,6 +1250,10 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
   // Reviews (Task 9): PR review comments pasted into the agent session
   // already running in a linked Terminal pane, only when it is idle. `gh`
   // runs with the login-shell PATH (agentEnv) and never prompts.
+  // Every gh child is tracked: shutdown kills and awaits them, because on
+  // Windows a `gh repo view` still running in a project directory holds
+  // that directory open after the core has stopped.
+  const ghChildren = createChildTracker();
   const runGh = (
     args: string[],
     cwd: string,
@@ -1260,6 +1265,10 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
         env: { ...agentEnv, GH_PROMPT_DISABLED: "1" },
         stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
       });
+      if (!ghChildren.track(child)) {
+        reject(new Error("gh: core is shutting down"));
+        return;
+      }
       let stdout = "";
       let stderr = "";
       const timer = setTimeout(() => {
@@ -1922,6 +1931,10 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
   };
   let uploadsStopped: Promise<void> = Promise.resolve();
   let shellsStopped: Promise<void> = Promise.resolve();
+  // The tab namer's in-flight check and the Reviews gh children, awaited
+  // (bounded) by shutdown() like the shells.
+  let tabNamesStopped: Promise<void> = Promise.resolve();
+  let ghStopped: Promise<void> = Promise.resolve();
   const releaseChildren = (): void => {
     if (released) return;
     released = true;
@@ -1988,8 +2001,14 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     safely("session importer", () => sessionImporter.stop());
     // The review poller's timer and the delivery timers.
     safely("reviews", () => reviews.dispose());
+    // Its gh children: after dispose, so nothing spawns another.
+    safely("gh", () => {
+      ghStopped = ghChildren.stopAll();
+    });
     // The sessions-directory watches and the tab-name re-check timer.
-    safely("session tab names", () => sessionTabNamer.stop());
+    safely("session tab names", () => {
+      tabNamesStopped = sessionTabNamer.stop();
+    });
     // One headless terminal per pane that printed.
     safely("pane screens", () => paneScreens.dispose());
     // A recording started but never stopped holds ffmpeg — and the
@@ -2570,12 +2589,13 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
       await stopRemote();
       releaseChildren();
       await uploadsStopped;
-      // Bounded: a shell that ignores its kill must not hold the daemon's
-      // exit. Until they exit, their cwds stay open (on Windows, locked).
+      // Bounded: a shell (or gh child) that ignores its kill must not hold
+      // the daemon's exit. Until they exit, their cwds stay open (on
+      // Windows, locked); the tab namer's in-flight check is awaited too.
       await new Promise<void>((resolve) => {
         const timer = setTimeout(resolve, SHELL_EXIT_WAIT_MS);
         timer.unref();
-        void shellsStopped.then(() => {
+        void Promise.all([shellsStopped, tabNamesStopped, ghStopped]).then(() => {
           clearTimeout(timer);
           resolve();
         });

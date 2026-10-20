@@ -232,40 +232,48 @@ describe("createReviewStore", () => {
     expect(await readFile(`${file}.bad-43`, "utf8")).toBe(original);
   });
 
-  it("throws and leaves a corrupt file in place when it cannot be moved aside", async () => {
-    const file = await tempFile();
-    const dir = dirname(file);
-    await writeFile(file, "garbage", "utf8");
-    await chmod(dir, 0o555);
-    try {
-      const store = createReviewStore(file, () => 45);
+  // chmod has no effect on Windows (no POSIX permission bits), so these two
+  // cannot provoke the failure there.
+  it.skipIf(process.platform === "win32")(
+    "throws and leaves a corrupt file in place when it cannot be moved aside",
+    async () => {
+      const file = await tempFile();
+      const dir = dirname(file);
+      await writeFile(file, "garbage", "utf8");
+      await chmod(dir, 0o555);
+      try {
+        const store = createReviewStore(file, () => 45);
 
-      await expect(store.markNotified("n1")).rejects.toThrow();
-      await expect(store.listQueued()).rejects.toThrow();
-    } finally {
-      await chmod(dir, 0o755);
-    }
-    expect(await readFile(file, "utf8")).toBe("garbage");
-    expect(await readdir(dir)).toEqual([basename(file)]);
-  });
+        await expect(store.markNotified("n1")).rejects.toThrow();
+        await expect(store.listQueued()).rejects.toThrow();
+      } finally {
+        await chmod(dir, 0o755);
+      }
+      expect(await readFile(file, "utf8")).toBe("garbage");
+      expect(await readdir(dir)).toEqual([basename(file)]);
+    },
+  );
 
-  it("rethrows a read error other than ENOENT without moving the file", async () => {
-    const file = await tempFile();
-    const original = JSON.stringify({ v: 1 });
-    await writeFile(file, original, "utf8");
-    await chmod(file, 0o000);
-    try {
-      const store = createReviewStore(file, () => 46);
+  it.skipIf(process.platform === "win32")(
+    "rethrows a read error other than ENOENT without moving the file",
+    async () => {
+      const file = await tempFile();
+      const original = JSON.stringify({ v: 1 });
+      await writeFile(file, original, "utf8");
+      await chmod(file, 0o000);
+      try {
+        const store = createReviewStore(file, () => 46);
 
-      await expect(store.markNotified("n1")).rejects.toMatchObject({
-        code: "EACCES",
-      });
-    } finally {
-      await chmod(file, 0o644);
-    }
-    expect(await readdir(dirname(file))).toEqual([basename(file)]);
-    expect(await readFile(file, "utf8")).toBe(original);
-  });
+        await expect(store.markNotified("n1")).rejects.toMatchObject({
+          code: "EACCES",
+        });
+      } finally {
+        await chmod(file, 0o644);
+      }
+      expect(await readdir(dirname(file))).toEqual([basename(file)]);
+      expect(await readFile(file, "utf8")).toBe(original);
+    },
+  );
 
   it("works normally after recovering from a corrupt file", async () => {
     const file = await tempFile();

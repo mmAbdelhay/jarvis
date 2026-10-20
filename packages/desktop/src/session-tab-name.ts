@@ -52,8 +52,9 @@ export type SessionTabNamer = {
   check(): Promise<void>;
   /** Resolves once no check is running or queued. */
   whenIdle(): Promise<void>;
-  /** Closes every watcher, timer and subscription. */
-  stop(): void;
+  /** Closes every watcher, timer and subscription, then resolves once a
+   *  check in flight has finished — nothing is opened after that. Final. */
+  stop(): Promise<void>;
 };
 
 /** The workspace tab a pane belongs to: its own id, or `<tabId>:<n>` for a
@@ -225,7 +226,7 @@ export function createSessionTabNamer(deps: SessionTabNameDeps): SessionTabNamer
     async whenIdle() {
       while (queued !== undefined || running !== undefined) await (queued ?? running);
     },
-    stop() {
+    async stop() {
       stopped = true;
       cancelDebounce?.();
       cancelDebounce = undefined;
@@ -243,6 +244,13 @@ export function createSessionTabNamer(deps: SessionTabNameDeps): SessionTabNamer
       applied.clear();
       transcriptPaths.clear();
       seenPanes.clear();
+      // A check already running sees `stopped` before any watch/rename/timer.
+      while (queued !== undefined || running !== undefined) {
+        await (queued ?? running)?.catch(() => undefined);
+      }
+      // Belt and braces: anything a racing check slipped in is closed too.
+      for (const watcher of watchers.values()) watcher.close();
+      watchers.clear();
     },
   };
 }

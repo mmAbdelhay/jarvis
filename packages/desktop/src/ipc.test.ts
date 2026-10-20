@@ -1,7 +1,7 @@
 import { readFileSync, realpathSync } from "node:fs";
 import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -2232,7 +2232,8 @@ describe("terminal handlers", () => {
 
   it("paneCwd follows the last valid OSC 7 report", () => {
     const log = "\u001b]7;file:///p/acme/a\u0007$ cd b\r\n\u001b]7;file:///p/acme/b\u0007$ ";
-    expect(reviewSeams(log).paneCwd("tab-7")).toBe("/p/acme/b");
+    // A resolved native path: a drive-letter, backslash path on Windows.
+    expect(reviewSeams(log).paneCwd("tab-7")).toBe(resolve("/p/acme/b"));
   });
 
   it("paneCwd is unknown when the last OSC 7 report leaves the pane's project", () => {

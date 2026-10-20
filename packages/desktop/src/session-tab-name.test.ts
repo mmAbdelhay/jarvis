@@ -334,7 +334,7 @@ describe("session tab namer", () => {
     await namer.whenIdle();
     expect(w.scans()).toBe(before + 4);
 
-    namer.stop();
+    await namer.stop();
   });
 
   it("closes its watchers, timers and listeners on stop", async () => {
@@ -345,7 +345,7 @@ describe("session tab namer", () => {
     await namer.whenIdle();
     w.watchers.get(SESSIONS)?.onChange();
 
-    namer.stop();
+    await namer.stop();
 
     expect(w.watchers.get(SESSIONS)?.closed).toBe(true);
     expect(w.timers.size).toBe(0);
@@ -367,7 +367,7 @@ describe("session tab namer", () => {
     namer.start();
     await namer.whenIdle();
     expect(w.renames).toEqual([["t1", "still named"]]);
-    namer.stop();
+    await namer.stop();
   });
 
   it("keeps a hand-set tab name for a session already running when Jarvis started", async () => {
@@ -413,5 +413,27 @@ describe("session tab namer", () => {
     w.setProcesses([w.claudeIn("t1", 101)]);
     await namer.check();
     expect(w.listings()).toBe(2); // pruned, so looked up again
+  });
+
+  it("creates no watcher or timer after stop, even with a check in flight", async () => {
+    const w = world();
+    w.files.set(join(SESSIONS, "101.json"), pidFile(101, "s1", "late"));
+    let release: (rows: ExternalAgentProcess[]) => void = () => {};
+    w.deps.scanAgents = () =>
+      new Promise((resolve) => {
+        release = resolve;
+      });
+    const namer = createSessionTabNamer(w.deps);
+    namer.start();
+
+    const stopped = namer.stop();
+    release([w.claudeIn("t1", 101)]);
+    await stopped;
+
+    expect(w.watchers.size).toBe(0);
+    expect(w.timers.size).toBe(0);
+    expect(w.renames).toEqual([]);
+    for (const listener of w.exitListeners) listener({ paneKey: "t1", code: 0 });
+    expect(w.timers.size).toBe(0);
   });
 });
