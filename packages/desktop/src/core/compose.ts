@@ -2595,7 +2595,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
       await new Promise<void>((resolve) => {
         const timer = setTimeout(resolve, SHELL_EXIT_WAIT_MS);
         timer.unref();
-        void Promise.all([shellsStopped, tabNamesStopped, ghStopped]).then(() => {
+        void Promise.allSettled([shellsStopped, tabNamesStopped, ghStopped]).then(() => {
           clearTimeout(timer);
           resolve();
         });

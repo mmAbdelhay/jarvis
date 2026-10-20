@@ -249,7 +249,13 @@ export function createSessionTabNamer(deps: SessionTabNameDeps): SessionTabNamer
         await (queued ?? running)?.catch(() => undefined);
       }
       // Belt and braces: anything a racing check slipped in is closed too.
-      for (const watcher of watchers.values()) watcher.close();
+      for (const watcher of watchers.values()) {
+        try {
+          watcher.close();
+        } catch {
+          // Already closed.
+        }
+      }
       watchers.clear();
     },
   };
