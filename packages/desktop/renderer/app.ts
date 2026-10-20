@@ -1401,6 +1401,8 @@ function startClock(): void {
   const timeEl = document.getElementById("clock-time");
   const clock = timeEl?.closest<HTMLElement>(".clock");
   if (timeEl === null || clock === null || clock === undefined) return;
+  // Looked up once, like timeEl: the tick must not touch `document` itself.
+  const dateEl = document.getElementById("clock-date");
 
   const tick = (): void => {
     const now = new Date();
@@ -1409,7 +1411,6 @@ function startClock(): void {
       minute: "2-digit",
       hour12: false,
     });
-    const dateEl = document.getElementById("clock-date");
     if (dateEl !== null) dateEl.textContent = topbarDate(now);
     clock.title = now.toLocaleDateString("en-GB", {
       day: "2-digit",
