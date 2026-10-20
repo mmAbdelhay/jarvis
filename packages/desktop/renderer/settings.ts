@@ -248,7 +248,12 @@ function followAwakeStatus(status: AwakeStatus): void {
   if (!changed) return;
   draft.awake = next;
   savedBaseline.awake = nextBaseline;
-  renderAwake();
+  // Only the two controls that changed: a rebuild would lose an
+  // idle-seconds edit still being typed.
+  const mode = document.getElementById("settings-awake-mode");
+  if (mode instanceof HTMLSelectElement) mode.value = next.mode;
+  const simulate = document.getElementById("settings-awake-simulate");
+  if (simulate instanceof HTMLInputElement) simulate.checked = next.simulateInput;
 }
 
 function renderAwakeStatus(): void {

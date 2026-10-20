@@ -3455,6 +3455,46 @@ describe("keep awake section", () => {
     expect(config.awake).toEqual({ mode: "on", simulateInput: false, idleSeconds: 300 });
   });
 
+  it("a pushed mode change keeps an idle-seconds edit still being typed", async () => {
+    withAwakeDom();
+    document.body.insertAdjacentHTML("beforeend", `<button id="awake-button"></button>`);
+    let push: ((status: unknown) => void) | undefined;
+    const off = {
+      mode: "off",
+      active: false,
+      reason: "off",
+      simulateInput: false,
+      inputState: "idle",
+    } as const;
+    await initKeepAwake({
+      awakeStatus: async () => off,
+      setAwake: async () => off,
+      onAwakeChanged: (cb) => {
+        push = cb as (status: unknown) => void;
+      },
+    });
+    await openSettings();
+    const idle = document.querySelector<HTMLInputElement>("#settings-awake-idle")!;
+    idle.value = "777"; // typed, not yet committed
+    push?.({ ...off, mode: "on", active: true, reason: "on", simulateInput: true });
+    expect(document.querySelector("#settings-awake-idle")).toBe(idle);
+    expect(idle.value).toBe("777");
+    expect(document.querySelector<HTMLSelectElement>("#settings-awake-mode")!.value).toBe("on");
+    expect(document.querySelector<HTMLInputElement>("#settings-awake-simulate")!.checked).toBe(
+      true,
+    );
+  });
+
+  it("the simulate switch clears the save status, like every other field", async () => {
+    withAwakeDom();
+    await openSettings();
+    document.getElementById("settings-status")!.textContent = "Saved.";
+    const simulate = document.querySelector<HTMLInputElement>("#settings-awake-simulate")!;
+    simulate.checked = true;
+    change(simulate);
+    expect(document.getElementById("settings-status")?.textContent).toBe("");
+  });
+
   it("disables the fallback off macOS and says so", async () => {
     withAwakeDom("win32");
     await openSettings();

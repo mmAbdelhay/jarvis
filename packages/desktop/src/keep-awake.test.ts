@@ -176,6 +176,25 @@ describe("keep awake: the system stay-awake", () => {
     expect(h.awake.status().active).toBe(false);
   });
 
+  it("on → agents with an agent running keeps the blocker, with no no-agent flicker", async () => {
+    const h = harness({ config: { mode: "on" } });
+    h.setPanes([{ paneKey: "t1", exited: false }]);
+    h.setRows([{ terminalPaneKey: "t1", foreground: true }]);
+    h.awake.start();
+    await h.awake.whenIdle();
+    expect(h.blocker).toEqual([true]);
+    // compose.ts's writeConfig refreshes the controller inside the save.
+    const save = h.deps.saveConfig as ReturnType<typeof vi.fn>;
+    save.mockImplementation(async (patch: Partial<AwakeConfig>) => {
+      h.setConfig(patch);
+      h.awake.refresh();
+    });
+    const status = await h.awake.set({ mode: "agents" });
+    expect(status.reason).toBe("agent-running");
+    expect(h.blocker).toEqual([true]);
+    expect(h.changes.map((c) => c.reason)).toEqual(["agent-running"]);
+  });
+
   it("applies a mode change live and saves it", async () => {
     const h = harness();
     h.awake.start();

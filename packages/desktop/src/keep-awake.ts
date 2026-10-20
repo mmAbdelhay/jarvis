@@ -89,6 +89,11 @@ export function createKeepAwake(deps: KeepAwakeDeps): KeepAwake {
   const darwin = deps.platform === "darwin";
   let disposed = false;
   let agentRunning = false;
+  // Whether agentRunning answers for agents mode yet: false until the first
+  // scan in agents mode, so switching into it (on → agents) holds the
+  // blocker as it is rather than dropping it for a "no-agent" that only
+  // means "not looked yet".
+  let agentsScanned = false;
   let blockerOn = false;
   let lastSent: string | undefined;
   // The fallback: whether the last press worked, whether one failed (sticky
@@ -197,6 +202,7 @@ export function createKeepAwake(deps: KeepAwakeDeps): KeepAwake {
       pressFailed = false;
       pressedOk = false;
     }
+    if (config.mode === "agents" && !agentsScanned) return; // check() applies.
     const current = status();
     if (current.active !== blockerOn) {
       blockerOn = current.active;
@@ -219,6 +225,7 @@ export function createKeepAwake(deps: KeepAwakeDeps): KeepAwake {
   async function scanOnce(): Promise<void> {
     if (deps.config().mode !== "agents") {
       agentRunning = false;
+      agentsScanned = false;
       return;
     }
     const live = new Set(
@@ -229,14 +236,17 @@ export function createKeepAwake(deps: KeepAwakeDeps): KeepAwake {
     );
     if (live.size === 0) {
       agentRunning = false;
+      agentsScanned = true;
       return;
     }
     let rows: readonly ExternalAgentProcess[];
     try {
       rows = await deps.scanAgents();
     } catch {
+      agentsScanned = true;
       return; // The last answer stands until a scan succeeds.
     }
+    agentsScanned = true;
     agentRunning = rows.some(
       (row) =>
         row.foreground === true &&
@@ -373,7 +383,9 @@ export const PRESS_SHIFT_COMMAND = {
   args: ["-e", 'tell application "System Events" to key code 56'],
 } as const;
 
-/** The macOS idle-clock read, for the core (no electron there). */
+/** The macOS idle-clock read, for the core (no electron there). `-d 4` is
+ *  load-bearing: it keeps the output to IOHIDSystem's own entry, whose
+ *  HIDIdleTime is the first one parseHidIdleSeconds matches. */
 export const IDLE_TIME_COMMAND = {
   file: "ioreg",
   args: ["-c", "IOHIDSystem", "-d", "4", "-r", "-k", "HIDIdleTime"],
