@@ -112,6 +112,7 @@ const fullDraft: JarvisConfig = {
     batchSeconds: 10,
     notify: { comment: true, queued: false, requested: true },
   },
+  awake: { mode: "agents", simulateInput: true, idleSeconds: 300 },
 };
 
 /**
@@ -148,6 +149,7 @@ const FILE_KEYS: Record<keyof JarvisConfig, readonly string[] | null> = {
   remote: ["remote"],
   daemon: ["daemon"],
   reviews: ["reviews"],
+  awake: ["awake"],
   // Computed by parseConfig from the config directory, never a source of
   // truth. See toRawConfig's own note.
   sessionsDbPath: null,
@@ -187,6 +189,15 @@ describe("toRawConfig covers every section", () => {
     expect(reparsed.prayer).toEqual(fullDraft.prayer);
     expect(reparsed.daemon).toEqual(fullDraft.daemon);
     expect(reparsed.reviews).toEqual(fullDraft.reviews);
+    expect(reparsed.awake).toEqual(fullDraft.awake);
+  });
+
+  it("omits awake from the file at its defaults", () => {
+    const raw = toRawConfig({
+      ...draft,
+      awake: { mode: "off", simulateInput: false, idleSeconds: 240 },
+    });
+    expect(raw).not.toHaveProperty("awake");
   });
 
   it("omits reviews from the file at its defaults", () => {

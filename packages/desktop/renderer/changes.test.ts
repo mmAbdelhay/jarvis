@@ -12,6 +12,14 @@ import type { GitViewResult, RendererApi } from "../src/ipc.js";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 import { detectLanguage, formatAgo } from "./format.js";
 
+const AWAKE_STATUS = {
+  mode: "off" as const,
+  active: false,
+  reason: "off" as const,
+  simulateInput: false,
+  inputState: "idle" as const,
+};
+
 // Full RendererApi stub: every member defaults to a vi.fn() so a test that
 // only cares about one or two bridge calls never has to enumerate the rest,
 // while `openChangesWith` below can still override gitDiff/gitSetStaged/
@@ -273,6 +281,9 @@ function stubJarvis(overrides: Partial<RendererApi>): RendererApi {
     reviewsRequeue: vi.fn(async () => false),
     reviewsOpenOnGithub: vi.fn(async () => {}),
     onReviewsChanged: vi.fn(),
+    awakeStatus: vi.fn(async () => AWAKE_STATUS),
+    setAwake: vi.fn(async () => AWAKE_STATUS),
+    onAwakeChanged: vi.fn(),
     backgroundStatus: vi.fn(async () => ({
       enabled: false,
       inApp: true,

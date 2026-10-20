@@ -73,6 +73,13 @@ import { disableRemoteOnDisk } from "../remote-idle.js";
 import { obtainCertificate, type TailscaleCertDeps } from "../tailscale-cert.js";
 import { createNotifier } from "../notify.js";
 import { createReviewService } from "../review-service.js";
+import {
+  createKeepAwake,
+  IDLE_TIME_COMMAND,
+  parseHidIdleSeconds,
+  PRESS_SHIFT_COMMAND,
+  type KeepAwake,
+} from "../keep-awake.js";
 import { createSessionTabNamer } from "../session-tab-name.js";
 import { createChildTracker } from "../child-tracker.js";
 import { createDockerFollowers } from "../docker-followers.js";
@@ -209,6 +216,7 @@ import {
   createFileReader,
 } from "../completion-source.js";
 import {
+  DEFAULT_AWAKE,
   DEFAULT_CONFIG_PATH,
   DEFAULT_TERMINAL,
   mergeConfigInPlace,
@@ -1553,6 +1561,9 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
   // time it is always assigned — never referenced synchronously before
   // that.
   let remoteAccess: RemoteAccess;
+  // Keep awake: built below, once the shells and the broadcaster exist; a
+  // successful save re-applies it (Settings may have changed `awake:`).
+  let keepAwake: KeepAwake | undefined;
 
   // I2: a second, dedicated queue for the re-read-and-apply-to-the-bridge
   // that follows a successful save. Kept separate from the write queue
@@ -1625,6 +1636,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
           next as unknown as Record<string, unknown>,
         );
         registry.replace(next.registry);
+        keepAwake?.refresh();
         const nextAgents = registry.list();
         if (!providerAgentListsEqual(previousAgents, nextAgents)) {
           providers.replaceAgents(nextAgents);
@@ -1751,6 +1763,69 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
   // are cleared by reviews.dispose() at shutdown.
   reviews.onChanged((prKey) => broadcast.send("reviews:changed", prKey));
   reviews.onNotify((event) => notifier.review(event));
+
+  // Keep awake (Task 18): the core decides when the machine must stay
+  // awake; the attached app holds the OS stay-awake (host.setStayAwake).
+  // The fallback's idle clock and its Shift press are macOS commands run
+  // with execFile semantics and a timeout — there is no electron here, so
+  // no powerMonitor.
+  const AWAKE_COMMAND_LIMITS = { timeoutMs: 5_000, maxOutputBytes: 256 * 1024 };
+  keepAwake = createKeepAwake({
+    config: () => config.awake ?? DEFAULT_AWAKE,
+    saveConfig: async (patch) => {
+      const result = await writeConfig((current) => ({
+        ...current,
+        awake: { ...(current.awake ?? DEFAULT_AWAKE), ...patch },
+      }));
+      if (!result.ok) throw new Error(`awake: save failed: ${result.detail}`);
+    },
+    setBlocker: (on) => host.setStayAwake(on),
+    platform,
+    shells,
+    scanAgents: () =>
+      listAgentProcesses({
+        exec: (command, args) => runCommand(command, args),
+        platform,
+        agents: registry.list(),
+        ownedPids: () => sessions.ownedPids(),
+        jarvisPid: process.pid,
+        terminalShells: () => shells.shellPids(),
+        now: () => Date.now(),
+      }),
+    idleSeconds: async () => {
+      const result = await runCommandWithLimits(
+        IDLE_TIME_COMMAND.file,
+        [...IDLE_TIME_COMMAND.args],
+        AWAKE_COMMAND_LIMITS,
+      );
+      const seconds = result.code === 0 ? parseHidIdleSeconds(result.stdout) : undefined;
+      if (seconds === undefined) throw new Error("awake: no idle time from ioreg");
+      return seconds;
+    },
+    pressShift: async () => {
+      const result = await runCommandWithLimits(
+        PRESS_SHIFT_COMMAND.file,
+        [...PRESS_SHIFT_COMMAND.args],
+        AWAKE_COMMAND_LIMITS,
+      );
+      if (result.timedOut || result.code !== 0) {
+        throw new Error(`osascript exited ${result.code}: ${result.stderr.trim().slice(0, 200)}`);
+      }
+    },
+    schedule: (fn, ms) => {
+      const timer = setTimeout(fn, ms);
+      timer.unref();
+      return () => clearTimeout(timer);
+    },
+    interval: (fn, ms) => {
+      const timer = setInterval(fn, ms);
+      timer.unref();
+      return () => clearInterval(timer);
+    },
+  });
+  const awake = keepAwake;
+  awake.onChanged((status) => broadcast.send("awake:changed", status));
+  awake.start();
 
   const settings = createSettingsHandlers({
     readConfig: () => loadConfig(DEFAULT_CONFIG_PATH),
@@ -2001,6 +2076,8 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     safely("session importer", () => sessionImporter.stop());
     // The review poller's timer and the delivery timers.
     safely("reviews", () => reviews.dispose());
+    // Releases the stay-awake and the fallback's timers.
+    safely("keep awake", () => awake.dispose());
     // Its gh children: after dispose, so nothing spawns another.
     safely("gh", () => {
       ghStopped = ghChildren.stopAll();
@@ -2315,6 +2392,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     // Phase 1: remote:openWebClient's system browser (dispatch.ts).
     openExternal: (url) => host.openExternal(url),
     reviews,
+    awake,
     plans: {
       files: planFiles,
       comments: planComments,

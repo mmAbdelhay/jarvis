@@ -20,6 +20,14 @@ import { MESSAGES } from "./messages.js";
 import { CHANNEL_POLICY, isRemoteAllowed } from "./remote-policy.js";
 
 /** Every dep a vi.fn; a test overrides only what it asserts on. */
+const AWAKE_OFF = {
+  mode: "off" as const,
+  active: false,
+  reason: "off" as const,
+  simulateInput: false,
+  inputState: "idle" as const,
+};
+
 export function fakeDeps(overrides: Partial<DispatchDeps> = {}): DispatchDeps {
   return {
     setup: {
@@ -265,6 +273,10 @@ export function fakeDeps(overrides: Partial<DispatchDeps> = {}): DispatchDeps {
       sendReview: vi.fn(async () => ({ sent: true as const })),
       postSummary: vi.fn(async () => ({ sent: true as const })),
       pollNow: vi.fn(async () => undefined),
+    },
+    awake: {
+      status: vi.fn(() => AWAKE_OFF),
+      set: vi.fn(async () => AWAKE_OFF),
     },
     ...overrides,
   } as DispatchDeps;

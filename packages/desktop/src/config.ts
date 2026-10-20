@@ -26,6 +26,7 @@ import type {
 } from "@jarvis/platform";
 import { DB_GATE_ENGINES, isChatDriver } from "@jarvis/platform";
 import { PERSONAL_PROJECT } from "./personal.js";
+import { isAwakeMode } from "./keep-awake.js";
 
 export function providerAgentListsEqual(
   left: readonly AgentConfig[],
@@ -263,6 +264,10 @@ export type JarvisConfig = {
    *  set by parseConfig; optional only because Settings drafts from an
    *  older renderer reach toRawConfig without it. */
   reviews?: ReviewsConfig;
+  /** The `awake:` section (keep the screen on and the machine running —
+   *  keep-awake.ts). Always set by parseConfig; optional for the reason
+   *  `reviews` is. */
+  awake?: AwakeConfig;
   // Beside jarvis.yaml itself, not user-configurable — see the note on
   // defaultSessionsDbPath().
   sessionsDbPath: string;
@@ -425,6 +430,7 @@ export function parseConfig(raw: unknown): JarvisConfig {
     remote,
     daemon,
     reviews: parseReviews(root["reviews"]),
+    awake: parseAwake(root["awake"]),
     sessionsDbPath: defaultSessionsDbPath(),
   };
 }
@@ -986,6 +992,50 @@ export function parseReviews(raw: unknown): ReviewsConfig {
     ),
     notify,
   };
+}
+
+/** When Jarvis holds the OS stay-awake: never, always while it runs, or
+ *  only while a Terminal pane has an agent in its foreground. */
+export type AwakeMode = "off" | "on" | "agents";
+
+export type AwakeConfig = {
+  mode: AwakeMode;
+  /** The opt-in fallback: press Shift after `idleSeconds` of no input,
+   *  while the stay-awake is wanted (macOS only). */
+  simulateInput: boolean;
+  /** The fallback's idle threshold, AWAKE_IDLE_MIN..AWAKE_IDLE_MAX. */
+  idleSeconds: number;
+};
+
+export const AWAKE_IDLE_MIN = 60;
+export const AWAKE_IDLE_MAX = 3600;
+export const DEFAULT_AWAKE: AwakeConfig = { mode: "off", simulateInput: false, idleSeconds: 240 };
+
+/** A threshold rounded and pulled into range — never refused for being
+ *  out of it, only for not being a number. */
+export function clampAwakeIdle(value: number): number {
+  return Math.min(AWAKE_IDLE_MAX, Math.max(AWAKE_IDLE_MIN, Math.round(value)));
+}
+
+/** The `awake:` section. Absent or null is DEFAULT_AWAKE; each key is
+ *  optional. A fresh object every time. */
+export function parseAwake(raw: unknown): AwakeConfig {
+  if (raw === undefined || raw === null) return { ...DEFAULT_AWAKE };
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error("Config `awake` must be an object");
+  }
+  const section = raw as Record<string, unknown>;
+  const mode = section["mode"] ?? DEFAULT_AWAKE.mode;
+  if (!isAwakeMode(mode)) throw new Error("Config `awake.mode` must be off, on or agents");
+  const simulateInput = section["simulateInput"] ?? DEFAULT_AWAKE.simulateInput;
+  if (typeof simulateInput !== "boolean") {
+    throw new Error("Config `awake.simulateInput` must be true or false");
+  }
+  const idle = section["idleSeconds"] ?? DEFAULT_AWAKE.idleSeconds;
+  if (typeof idle !== "number" || !Number.isFinite(idle)) {
+    throw new Error("Config `awake.idleSeconds` must be a number");
+  }
+  return { mode, simulateInput, idleSeconds: clampAwakeIdle(idle) };
 }
 
 /** In the style of parseRemotePush: absent or null is the default, anything

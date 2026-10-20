@@ -11,6 +11,7 @@ import {
   dialog,
   globalShortcut,
   ipcMain,
+  powerSaveBlocker,
   screen,
   session,
   shell as electronShell,
@@ -37,6 +38,7 @@ import {
 import { nodeDaemonModeDeps } from "./daemon/mode-node.js";
 import { answerDbGateChallenge } from "./dbgate-login.js";
 import { ELECTRON_BOUND_CHANNELS, registerDesktopOnly } from "./desktop-only.js";
+import { createPowerBlocker } from "./keep-awake.js";
 import {
   countRunning,
   createUpdater,
@@ -99,6 +101,11 @@ if (launchingDaemon) {
 
 /** The app's window, once there is one: a second instance brings it forward. */
 let focusAppWindow: () => void = () => {};
+
+// Keep awake (keep-awake.ts): at most one OS stay-awake, for this app's
+// whole life — the core asks for it through DesktopHost.setStayAwake.
+const stayAwake = createPowerBlocker(powerSaveBlocker);
+app.on("will-quit", () => stayAwake.set(false));
 
 /** One app per user data directory (single-instance.ts, review I1). */
 const onlyInstance = !launchingDaemon && claimSingleInstance(app, () => focusAppWindow());
@@ -307,6 +314,8 @@ function createDesktopHost(client: CoreClient) {
       app.relaunch();
       app.exit(0);
     },
+    // Keep awake: the core decides when; this app holds the one blocker.
+    setStayAwake: (on) => stayAwake.set(on),
   });
 
   // The window is going: stop reaching into it, then drop its pages here,
@@ -320,6 +329,8 @@ function createDesktopHost(client: CoreClient) {
     stopPushes();
     detach();
     views.destroy();
+    // Nothing of this window holds the machine awake past it.
+    stayAwake.set(false);
   });
 
   /** A push about this window alone — its DevTools, its tab chips — which

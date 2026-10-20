@@ -44,6 +44,7 @@ describe("the channel table", () => {
 
   it("covers every push channel the renderer can listen to", () => {
     expect(Object.values(PUSH_CHANNELS).sort()).toEqual([
+      "awake:changed",
       "docker:log",
       "git:counts",
       "metrics:update",

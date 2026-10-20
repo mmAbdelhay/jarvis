@@ -7,6 +7,7 @@ import { parse } from "yaml";
 import { afterEach, describe, expect, it } from "vitest";
 import { homedir } from "node:os";
 import {
+  DEFAULT_AWAKE,
   DEFAULT_BROWSER,
   DEFAULT_DAEMON,
   DEFAULT_PERFORMANCE,
@@ -21,6 +22,7 @@ import {
   mergeConfigInPlace,
   providerAgentListsEqual,
   parseConfig,
+  parseAwake,
   parseDaemon,
   parseReviews,
 } from "./config.js";
@@ -1687,5 +1689,51 @@ describe("reviews", () => {
     [{ notify: { comment: 1 } }, "Config `reviews.notify.comment` must be true or false"],
   ])("refuses %j", (reviews, message) => {
     expect(() => parseConfig({ ...base, reviews })).toThrow(message);
+  });
+});
+
+// Keep awake (Task 18): off by default; idleSeconds clamped, never refused
+// for being out of range; a wrong type is refused like every other section.
+describe("awake", () => {
+  const base = { agents: { claude: { command: "claude" } }, brain: { cwd: "/tmp/brain" } };
+
+  it("parses a missing, null or empty section to the defaults", () => {
+    expect(DEFAULT_AWAKE).toEqual({ mode: "off", simulateInput: false, idleSeconds: 240 });
+    expect(parseConfig(base).awake).toEqual(DEFAULT_AWAKE);
+    expect(parseConfig({ ...base, awake: null }).awake).toEqual(DEFAULT_AWAKE);
+    expect(parseConfig({ ...base, awake: {} }).awake).toEqual(DEFAULT_AWAKE);
+  });
+
+  it("returns a fresh object, never the shared default", () => {
+    expect(parseAwake(undefined)).not.toBe(DEFAULT_AWAKE);
+  });
+
+  it("reads every key", () => {
+    expect(parseAwake({ mode: "agents", simulateInput: true, idleSeconds: 300 })).toEqual({
+      mode: "agents",
+      simulateInput: true,
+      idleSeconds: 300,
+    });
+    expect(parseAwake({ mode: "on" })).toEqual({ ...DEFAULT_AWAKE, mode: "on" });
+  });
+
+  it.each([
+    [10, 60],
+    [59.4, 60],
+    [99_999, 3600],
+    [120.6, 121],
+  ])("clamps idleSeconds %d to %d", (idleSeconds, expected) => {
+    expect(parseAwake({ idleSeconds }).idleSeconds).toBe(expected);
+  });
+
+  it.each([
+    ["yes", "Config `awake` must be an object"],
+    [[], "Config `awake` must be an object"],
+    [{ mode: "always" }, "Config `awake.mode` must be off, on or agents"],
+    [{ simulateInput: "yes" }, "Config `awake.simulateInput` must be true or false"],
+    [{ idleSeconds: "240" }, "Config `awake.idleSeconds` must be a number"],
+    [{ idleSeconds: Number.NaN }, "Config `awake.idleSeconds` must be a number"],
+  ])("refuses %j", (awake, message) => {
+    expect(() => parseConfig({ ...base, awake })).toThrow(message);
   });
 });

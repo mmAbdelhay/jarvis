@@ -219,6 +219,19 @@ describe("reviews:* policy", () => {
   });
 });
 
+describe("awake:* policy", () => {
+  it("lets a phone read the keep-awake status", () => {
+    expect(isRemoteAllowed("awake:status")).toBe(true);
+    expect(REMOTE_EFFECT["awake:status"]).toBe("read");
+  });
+
+  it("lets a phone flip it, audited as a mutation", () => {
+    expect(isRemoteAllowed("awake:set")).toBe(true);
+    expect(REMOTE_EFFECT["awake:set"]).toBe("mutate");
+    expect(auditPolicyFor("awake:set", () => false)).toBe("always");
+  });
+});
+
 describe("auditPolicyFor", () => {
   const noBlobs = () => false;
   const isVoiceUpload = (channel: string) => channel === "remote:uploadAudio";

@@ -25,6 +25,7 @@ import type { BindKind, DesktopNoticeKind, RemoteErrorCode, RemoteProblem } from
 import type { AuthChannel, PushKind } from "@jarvis/wire";
 import type { RemoteWebState } from "./remote-web.js";
 import type { RunningCounts, UpdateError } from "./updater.js";
+import type { AwakeStatus } from "./keep-awake.js";
 
 export const PRIMARY_LANGUAGE = "en";
 
@@ -170,6 +171,83 @@ export const MESSAGES = {
   },
   reviewsDockChipUnlink: (language: "ar" | "en"): string =>
     language === "ar" ? "إلغاء الربط" : "Unlink",
+  // Keep awake (Task 18): Settings' section and the topbar button.
+  awakeSettingsTitle: (language: "ar" | "en"): string =>
+    language === "ar" ? "إبقاء الجهاز مستيقظًا" : "KEEP AWAKE",
+  awakeSettingsMode: (language: "ar" | "en"): string =>
+    language === "ar" ? "إبقاء الشاشة والجهاز يعملان" : "keep the screen and machine on",
+  awakeModeName: (mode: AwakeStatus["mode"], language: "ar" | "en"): string => {
+    const ar = language === "ar";
+    switch (mode) {
+      case "off":
+        return ar ? "متوقف" : "Off";
+      case "on":
+        return ar ? "دائمًا" : "Always";
+      case "agents":
+        return ar ? "أثناء عمل وكيل" : "While an agent is running";
+    }
+  },
+  awakeSettingsSimulate: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "محاكاة النشاط أيضًا إن انطفأت الشاشة رغم ذلك (يضغط Shift عندما تكون خاملًا؛ macOS، يحتاج إذن تسهيلات الاستخدام)"
+      : "Also simulate activity if the screen still turns off (presses Shift when you're idle; macOS, needs Accessibility)",
+  awakeSettingsMacOnly: (language: "ar" | "en"): string =>
+    language === "ar" ? "على macOS فقط" : "macOS only",
+  awakeSettingsIdle: (language: "ar" | "en"): string =>
+    language === "ar" ? "ثواني الخمول قبل الضغط" : "idle seconds before the press",
+  awakeSettingsIdleNote: (language: "ar" | "en"): string =>
+    language === "ar" ? "من 60 إلى 3600. يُطبَّق عند الحفظ." : "60 to 3600. Applied on Save.",
+  awakeSettingsStatus: (status: AwakeStatus, language: "ar" | "en"): string => {
+    const ar = language === "ar";
+    let line: string;
+    switch (status.reason) {
+      case "off":
+        line = ar
+          ? "متوقف: قد تنام الشاشة والجهاز كالمعتاد."
+          : "Off: the screen and machine sleep as usual.";
+        break;
+      case "on":
+        line = ar
+          ? "يعمل: الشاشة والجهاز يبقيان مستيقظين."
+          : "On: the screen and machine stay awake.";
+        break;
+      case "agent-running":
+        line = ar
+          ? "يعمل: وكيل يعمل في طرفية، فيبقى الجهاز مستيقظًا."
+          : "On: an agent is running in a terminal, so the machine stays awake.";
+        break;
+      case "no-agent":
+        line = ar
+          ? "في الانتظار: لا يوجد وكيل يعمل في أي طرفية."
+          : "Waiting: no agent is running in any terminal.";
+        break;
+    }
+    if (!status.simulateInput) return line;
+    switch (status.inputState) {
+      case "needs-permission":
+        return ar
+          ? `${line} محاكاة النشاط متوقفة: امنح Jarvis إذن تسهيلات الاستخدام (إعدادات النظام ← الخصوصية والأمان ← تسهيلات الاستخدام) ثم أعد تفعيلها.`
+          : `${line} Simulated activity stopped: give Jarvis the Accessibility permission (System Settings → Privacy & Security → Accessibility), then turn it on again.`;
+      case "ok":
+        return ar ? `${line} محاكاة النشاط تعمل.` : `${line} Simulated activity is working.`;
+      case "unsupported":
+        return ar
+          ? `${line} محاكاة النشاط على macOS فقط.`
+          : `${line} Simulated activity is macOS only.`;
+      case "idle":
+        return line;
+    }
+  },
+  awakeButtonLabel: (status: AwakeStatus, language: "ar" | "en"): string => {
+    if (language === "ar") {
+      return status.mode === "off"
+        ? "إبقاء الجهاز مستيقظًا: متوقف — انقر للتشغيل"
+        : `إبقاء الجهاز مستيقظًا: ${status.active ? "يعمل" : "في الانتظار"} — انقر للإيقاف`;
+    }
+    return status.mode === "off"
+      ? "Keep awake: off — click to turn on"
+      : `Keep awake: ${status.active ? "on" : "waiting for an agent"} — click to turn off`;
+  },
   reviewsSettingsTitle: (language: "ar" | "en"): string =>
     language === "ar" ? "المراجعات" : "REVIEWS",
   reviewsSettingsGhLabel: (language: "ar" | "en"): string =>

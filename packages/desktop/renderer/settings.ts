@@ -9,7 +9,9 @@ import type {
   DockerEntry,
   EditorRoot,
 } from "@jarvis/platform";
-import type { JarvisConfig } from "../src/config.js";
+import type { AwakeConfig, JarvisConfig } from "../src/config.js";
+import type { AwakeStatus } from "../src/keep-awake.js";
+import { latestAwakeStatus, onAwakeStatusChange } from "./keep-awake.js";
 import type { ReviewStatus } from "../src/review-service.js";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 import { PERSONAL_PROJECT } from "../src/personal.js";
@@ -116,6 +118,14 @@ function wireSettingsNav(): void {
 export function initSettings(): void {
   wireStaticFields();
   wireSettingsNav();
+  // Keep awake: the topbar button or a phone may change the mode while
+  // Settings is open. A field the user has not touched follows it, so a
+  // later Save does not put the old value back; the status line redraws.
+  stopAwakeListener?.();
+  stopAwakeListener = onAwakeStatusChange((status) => {
+    followAwakeStatus(status);
+    renderAwakeStatus();
+  });
   // Reopens the prerequisites screen. It shows itself on a first run and
   // when something required is missing; this is how a user reaches it the
   // rest of the time — after installing a tool, or to see what a tab wants.
@@ -187,12 +197,142 @@ function renderSettings(): void {
   renderWhisper();
   renderRemote();
   renderReviews();
+  renderAwake();
 }
 
 function renderBrowser(): void {
   if (draft === undefined) return;
   ($("settings-allow-popups") as HTMLInputElement).checked = draft.browser.allowPopups;
   ($("settings-browser-homepage") as HTMLInputElement).value = draft.browser.homePage ?? "";
+}
+
+// ---------------------------------------------------------- Keep awake
+//
+// Keep awake (Task 18): mode, the simulated-input fallback and its idle
+// threshold, committed into the draft on "change" like every section and
+// written by Save. The status line is the core's own awake:status, kept
+// current by renderer/keep-awake.ts.
+
+const AWAKE_DEFAULTS: AwakeConfig = { mode: "off", simulateInput: false, idleSeconds: 240 };
+const AWAKE_MODE_ORDER: readonly AwakeConfig["mode"][] = ["off", "on", "agents"];
+let stopAwakeListener: (() => void) | undefined;
+
+function awakeDraft(): AwakeConfig | undefined {
+  if (draft === undefined) return undefined;
+  draft.awake ??= { ...AWAKE_DEFAULTS };
+  return draft.awake;
+}
+
+/** A pushed mode/fallback replaces an untouched draft field (and its
+ *  baseline), never one the user has changed and not saved yet. */
+function followAwakeStatus(status: AwakeStatus): void {
+  if (draft === undefined || savedBaseline === undefined) return;
+  const current = draft.awake ?? AWAKE_DEFAULTS;
+  const baseline = savedBaseline.awake ?? AWAKE_DEFAULTS;
+  const next = { ...current };
+  const nextBaseline = { ...baseline };
+  let changed = false;
+  if (current.mode === baseline.mode && current.mode !== status.mode) {
+    next.mode = status.mode;
+    nextBaseline.mode = status.mode;
+    changed = true;
+  }
+  if (
+    current.simulateInput === baseline.simulateInput &&
+    current.simulateInput !== status.simulateInput
+  ) {
+    next.simulateInput = status.simulateInput;
+    nextBaseline.simulateInput = status.simulateInput;
+    changed = true;
+  }
+  if (!changed) return;
+  draft.awake = next;
+  savedBaseline.awake = nextBaseline;
+  renderAwake();
+}
+
+function renderAwakeStatus(): void {
+  const line = document.getElementById("settings-awake-status");
+  if (line === null) return;
+  const status = latestAwakeStatus();
+  line.textContent =
+    status === undefined ? "" : MESSAGES.awakeSettingsStatus(status, PRIMARY_LANGUAGE);
+  line.classList.toggle(
+    "settings-awake-status--warn",
+    status?.simulateInput === true && status.inputState === "needs-permission",
+  );
+}
+
+function renderAwake(): void {
+  const host = document.getElementById("settings-awake");
+  if (host === null || draft === undefined) return;
+  const language = PRIMARY_LANGUAGE;
+  const title = document.getElementById("settings-awake-title");
+  if (title !== null) title.textContent = MESSAGES.awakeSettingsTitle(language);
+  const cfg = draft.awake ?? AWAKE_DEFAULTS;
+  const mac = window.jarvis.platform === "darwin";
+
+  const mode = document.createElement("select");
+  mode.id = "settings-awake-mode";
+  for (const value of AWAKE_MODE_ORDER) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = MESSAGES.awakeModeName(value, language);
+    mode.append(option);
+  }
+  mode.value = cfg.mode;
+  mode.addEventListener("change", () => {
+    const section = awakeDraft();
+    const value = AWAKE_MODE_ORDER.find((m) => m === mode.value);
+    if (section === undefined || value === undefined) return;
+    section.mode = value;
+    clearSaveStatus();
+  });
+
+  const simulate = reviewsSwitch(
+    "settings-awake-simulate",
+    cfg.simulateInput,
+    MESSAGES.awakeSettingsSimulate(language),
+    (on) => {
+      const section = awakeDraft();
+      if (section !== undefined) section.simulateInput = on;
+    },
+  );
+  const simulateInput = simulate.querySelector("input");
+  if (simulateInput !== null) simulateInput.disabled = !mac;
+
+  const idle = document.createElement("input");
+  idle.type = "number";
+  idle.id = "settings-awake-idle";
+  idle.min = "60";
+  idle.max = "3600";
+  idle.step = "1";
+  idle.value = String(cfg.idleSeconds);
+  idle.addEventListener("change", () => {
+    const section = awakeDraft();
+    if (section === undefined) return;
+    const typed = Number(idle.value);
+    const seconds = Number.isFinite(typed)
+      ? Math.min(3600, Math.max(60, Math.round(typed)))
+      : section.idleSeconds;
+    section.idleSeconds = seconds;
+    idle.value = String(seconds);
+    clearSaveStatus();
+  });
+
+  const status = document.createElement("div");
+  status.id = "settings-awake-status";
+  status.className = "settings-awake-status";
+
+  host.replaceChildren(
+    reviewsField(MESSAGES.awakeSettingsMode(language), mode, mode.id),
+    reviewsField(MESSAGES.awakeSettingsSimulate(language), simulate),
+    ...(mac ? [] : [reviewsNote(MESSAGES.awakeSettingsMacOnly(language))]),
+    reviewsField(MESSAGES.awakeSettingsIdle(language), idle, idle.id),
+    reviewsNote(MESSAGES.awakeSettingsIdleNote(language)),
+    status,
+  );
+  renderAwakeStatus();
 }
 
 // ------------------------------------------------------------- Reviews

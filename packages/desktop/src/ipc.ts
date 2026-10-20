@@ -89,6 +89,7 @@ import { MAX_PINNED } from "@jarvis/platform";
 import { resolveDirectory } from "./completion-source.js";
 import type { CompletionSource } from "./completion-source.js";
 import type { JarvisConfig, TerminalConfig } from "./config.js";
+import type { AwakePatch, AwakeStatus } from "./keep-awake.js";
 import type { ChangeResult, DaemonStatus } from "./daemon/mode.js";
 import { MESSAGES } from "./messages.js";
 import type { SnippetLanguage } from "@jarvis/platform";
@@ -1163,6 +1164,13 @@ export type RendererApi = {
   /** A PR's review state changed (`null`: possibly any PR's). Re-read with
    *  reviewsList/reviewsThread on receipt. */
   onReviewsChanged(cb: (prKey: string | null) => void): void;
+  /** Keep awake (Task 18): whether Jarvis holds the screen and machine
+   *  awake now, and why. */
+  awakeStatus(): Promise<AwakeStatus>;
+  /** Saves and applies a new mode and/or the simulated-input fallback. */
+  setAwake(patch: AwakePatch): Promise<AwakeStatus>;
+  /** The keep-awake status changed; the payload is the new one. */
+  onAwakeChanged(cb: (status: AwakeStatus) => void): void;
 };
 
 export type WiringDeps = {

@@ -84,6 +84,11 @@
     <div class="clock mono">
       <span id="clock-time" dir="ltr">--:--</span>
     </div>
+    <!-- Keep awake (Task 18, keep-awake.ts): lit while Jarvis holds the
+         screen and machine awake; a click turns it off, or back on. -->
+    <button id="awake-button" class="icon-btn awake-btn" type="button" aria-label="Keep awake" aria-pressed="false">
+      <svg aria-hidden="true" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M17 8h1a4 4 0 1 1 0 8h-1"></path><path d="M3 8h14v9a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4Z"></path><line x1="6" y1="2" x2="6" y2="4"></line><line x1="10" y1="2" x2="10" y2="4"></line><line x1="14" y1="2" x2="14" y2="4"></line></svg>
+    </button>
     <button id="history-button" class="icon-btn" type="button" aria-label="Session history">
       <svg aria-hidden="true" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#9fb7c4" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5M12 7v5l4 2"></path></svg>
     </button>
@@ -666,6 +671,7 @@
         <a class="settings-nav-link" href="#settings-section-docker">Docker</a>
         <a class="settings-nav-link" href="#settings-section-chat">Chat</a>
         <a id="settings-nav-reviews" class="settings-nav-link" href="#settings-section-reviews">Reviews</a>
+        <a id="settings-nav-awake" class="settings-nav-link" href="#settings-section-awake">Keep awake</a>
         <a class="settings-nav-link" href="#settings-section-brain">Brain</a>
         <a class="settings-nav-link" href="#settings-section-voice">Voice</a>
         <a id="settings-nav-header" class="settings-nav-link" href="#settings-section-header">Header</a>
@@ -807,6 +813,12 @@
       <section class="settings-section" id="settings-section-reviews">
         <div id="settings-reviews-title" class="lbl"></div>
         <div id="settings-reviews" class="settings-reviews"></div>
+      </section>
+
+      <!-- Keep awake (Task 18): built by settings.ts (renderAwake), bilingual. -->
+      <section class="settings-section" id="settings-section-awake">
+        <div id="settings-awake-title" class="lbl"></div>
+        <div id="settings-awake" class="settings-awake"></div>
       </section>
 
       <section class="settings-section" id="settings-section-brain">

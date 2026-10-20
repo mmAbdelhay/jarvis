@@ -710,6 +710,12 @@
     animation: dash-spin 0.8s linear infinite;
   }
 
+  /* Keep awake (Task 18): muted while off, amber while waiting for an
+     agent, green while it holds the screen and machine awake. */
+  .awake-btn { color: var(--text-muted); }
+  .awake-btn.icon-btn--armed { color: var(--warn); }
+  .awake-btn.icon-btn--on { color: var(--good); border-color: var(--good); }
+
   /* Providers panel: the approved artboard (design/Main.dc.html) has three
      panels and none is this one. It is a third panel in the LEFT column
      rather than a History-style overlay because the user's question — "which
@@ -2320,6 +2326,8 @@
   .settings-reviews-repos { display: flex; flex-direction: column; gap: var(--s2); }
   .settings-reviews-repo { display: flex; align-items: center; gap: 10px; font-size: 13px; }
   .settings-reviews-repo input { accent-color: var(--accent); }
+  .settings-awake-status { font-size: 13px; color: var(--text-secondary); }
+  .settings-awake-status--warn { color: var(--warn); }
   /* end Reviews dock ------------------------------------------------------ */
 
   /* One terminal as the user sees it: frozen blocks stacked above a live

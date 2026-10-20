@@ -50,6 +50,7 @@ import {
 } from "@jarvis/remote";
 import type { InvokeChannel } from "./channels.js";
 import type { ReviewService } from "./review-service.js";
+import { isAwakeMode, type KeepAwake } from "./keep-awake.js";
 import type { IpLocateResult } from "./ip-locate.js";
 import type { TabHost } from "./core/tab-host.js";
 import type { UsageHistory } from "./usage-history.js";
@@ -424,7 +425,34 @@ export type DispatchDeps = {
     | "postSummary"
     | "pollNow"
   >;
+  // Keep awake (Task 18): keep-awake.ts's createKeepAwake, built once in
+  // compose.ts — narrowed to the two calls its channels make.
+  awake: Pick<KeepAwake, "status" | "set">;
 };
+
+/** awake:set's argument: an object with `mode` and/or `simulateInput` and
+ *  nothing else. Anything else — idleSeconds included, which only Settings'
+ *  own save writes — is refused, never stripped. */
+function awakePatch(value: unknown): { mode?: "off" | "on" | "agents"; simulateInput?: boolean } {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("awake:set: invalid patch");
+  }
+  const record = value as Record<string, unknown>;
+  const keys = Object.keys(record);
+  if (keys.length === 0 || keys.some((key) => key !== "mode" && key !== "simulateInput")) {
+    throw new Error("awake:set: invalid patch");
+  }
+  const patch: { mode?: "off" | "on" | "agents"; simulateInput?: boolean } = {};
+  if ("mode" in record) {
+    if (!isAwakeMode(record["mode"])) throw new Error("awake:set: invalid patch");
+    patch.mode = record["mode"];
+  }
+  if ("simulateInput" in record) {
+    if (typeof record["simulateInput"] !== "boolean") throw new Error("awake:set: invalid patch");
+    patch.simulateInput = record["simulateInput"];
+  }
+  return patch;
+}
 
 /** A terminal/session pty resize dimension: a plain positive integer, no
  *  larger than a real terminal could ever be. Rejects NaN, Infinity, a
@@ -1725,5 +1753,8 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
       }
       await deps.openExternal(url);
     },
+
+    "awake:status": () => deps.awake.status(),
+    "awake:set": async ([patchArg]) => deps.awake.set(awakePatch(patchArg)),
   } satisfies Record<TableChannel, Handler>;
 }

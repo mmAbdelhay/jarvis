@@ -1497,6 +1497,27 @@ export const STRINGS = {
     en: "Log out of Jarvis in this browser? You'll need your password to unlock it again.",
     ar: "تسجيل الخروج من Jarvis في هذا المتصفح؟ ستحتاج إلى كلمة المرور لفتح القفل مجددًا.",
   },
+  "awake.title": { en: "Keep laptop awake", ar: "إبقاء الحاسوب مستيقظًا" },
+  "awake.hintOff": {
+    en: "Off: the laptop sleeps as usual.",
+    ar: "متوقف: ينام الحاسوب كالمعتاد.",
+  },
+  "awake.hintOn": {
+    en: "On: the screen and machine stay awake.",
+    ar: "يعمل: تبقى الشاشة والجهاز مستيقظين.",
+  },
+  "awake.hintAgent": {
+    en: "On while an agent runs: one is running now.",
+    ar: "يعمل أثناء عمل وكيل: يوجد وكيل يعمل الآن.",
+  },
+  "awake.hintNoAgent": {
+    en: "On while an agent runs: none is running now.",
+    ar: "يعمل أثناء عمل وكيل: لا يوجد وكيل يعمل الآن.",
+  },
+  "awake.hintPermission": {
+    en: "Simulated activity needs the Accessibility permission on the laptop.",
+    ar: "محاكاة النشاط تحتاج إذن تسهيلات الاستخدام على الحاسوب.",
+  },
   "reviews.title": { en: "Reviews", ar: "المراجعات" },
   "reviews.section": { en: "REVIEWS", ar: "المراجعات" },
   "reviews.all": { en: "All reviews", ar: "كل المراجعات" },

@@ -5,6 +5,7 @@ import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 import { PERSONAL_PROJECT } from "../src/personal.js";
 import type { BindChoice, RemoteStatus } from "@jarvis/remote";
 import { initSettings, openSettings, savePrayerSettings } from "./settings.js";
+import { initKeepAwake } from "./keep-awake.js";
 import { encodeQr, qrToCanvas } from "./vendor/qr.js";
 
 // The real encoder is unit-tested on its own (vendor/qr.test.ts); here we
@@ -3360,5 +3361,108 @@ describe("reviews section", () => {
       "tab-9",
       "gh auth login",
     ]);
+  });
+});
+
+describe("keep awake section", () => {
+  function withAwakeDom(platform = "darwin"): Recorded[] {
+    const { calls } = harness();
+    document.body.insertAdjacentHTML(
+      "beforeend",
+      `<div id="settings-awake-title"></div><div id="settings-awake"></div>`,
+    );
+    const jarvis = (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
+    jarvis["platform"] = platform;
+    initSettings();
+    return calls;
+  }
+
+  async function saved(calls: Recorded[]): Promise<JarvisConfig> {
+    document.getElementById("settings-save")?.click();
+    await Promise.resolve();
+    return savedConfig(calls.find((entry) => entry.call === "saveSettings"));
+  }
+
+  it("draws the mode, the fallback switch and the idle seconds from the draft", async () => {
+    withAwakeDom();
+    await openSettings();
+    expect(document.getElementById("settings-awake-title")?.textContent).toBe(
+      MESSAGES.awakeSettingsTitle(PRIMARY_LANGUAGE),
+    );
+    const mode = document.querySelector<HTMLSelectElement>("#settings-awake-mode")!;
+    expect(mode.value).toBe("off");
+    expect([...mode.options].map((o) => o.textContent)).toEqual([
+      MESSAGES.awakeModeName("off", PRIMARY_LANGUAGE),
+      MESSAGES.awakeModeName("on", PRIMARY_LANGUAGE),
+      MESSAGES.awakeModeName("agents", PRIMARY_LANGUAGE),
+    ]);
+    expect(document.querySelector<HTMLInputElement>("#settings-awake-simulate")!.checked).toBe(
+      false,
+    );
+    expect(document.querySelector<HTMLInputElement>("#settings-awake-idle")!.value).toBe("240");
+  });
+
+  it("saves the mode, the fallback and a clamped idle threshold", async () => {
+    const calls = withAwakeDom();
+    await openSettings();
+    const mode = document.querySelector<HTMLSelectElement>("#settings-awake-mode")!;
+    mode.value = "agents";
+    change(mode);
+    const simulate = document.querySelector<HTMLInputElement>("#settings-awake-simulate")!;
+    simulate.checked = true;
+    change(simulate);
+    const idle = document.querySelector<HTMLInputElement>("#settings-awake-idle")!;
+    idle.value = "5";
+    change(idle);
+    expect(idle.value).toBe("60");
+
+    const config = await saved(calls);
+    expect(config.awake).toEqual({ mode: "agents", simulateInput: true, idleSeconds: 60 });
+  });
+
+  it("follows a mode flipped elsewhere into an untouched field, so Save keeps it", async () => {
+    const calls = withAwakeDom();
+    document.body.insertAdjacentHTML("beforeend", `<button id="awake-button"></button>`);
+    let push: ((status: unknown) => void) | undefined;
+    const off = {
+      mode: "off",
+      active: false,
+      reason: "off",
+      simulateInput: false,
+      inputState: "idle",
+    } as const;
+    await initKeepAwake({
+      awakeStatus: async () => off,
+      setAwake: async () => off,
+      onAwakeChanged: (cb) => {
+        push = cb as (status: unknown) => void;
+      },
+    });
+    await openSettings();
+    const idle = document.querySelector<HTMLInputElement>("#settings-awake-idle")!;
+    idle.value = "300";
+    change(idle);
+    push?.({ ...off, mode: "on", active: true, reason: "on" });
+    expect(document.querySelector<HTMLSelectElement>("#settings-awake-mode")!.value).toBe("on");
+    expect(document.getElementById("settings-awake-status")?.textContent).toBe(
+      MESSAGES.awakeSettingsStatus(
+        { ...off, mode: "on", active: true, reason: "on" },
+        PRIMARY_LANGUAGE,
+      ),
+    );
+
+    const config = await saved(calls);
+    expect(config.awake).toEqual({ mode: "on", simulateInput: false, idleSeconds: 300 });
+  });
+
+  it("disables the fallback off macOS and says so", async () => {
+    withAwakeDom("win32");
+    await openSettings();
+    expect(document.querySelector<HTMLInputElement>("#settings-awake-simulate")!.disabled).toBe(
+      true,
+    );
+    expect(document.getElementById("settings-awake")?.textContent).toContain(
+      MESSAGES.awakeSettingsMacOnly(PRIMARY_LANGUAGE),
+    );
   });
 });

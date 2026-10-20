@@ -127,6 +127,9 @@ export const REMOTE_PUSH_POLICY: {
   // (mobile) subscribes to the bare channel and decides from the payload
   // whether its open thread needs a re-read.
   "reviews:changed": { kind: "reliable" },
+  // Keep awake (Task 18): unkeyed; the payload is the whole status, so a
+  // phone's toggle redraws from the push alone.
+  "awake:changed": { kind: "reliable" },
   // Keyed, unlike the six reliable channels above: a phone that only cares
   // about one pane subscribes to that pane's exit, not every pane's.
   "terminal:exit": { kind: "reliable", keyOf: (payload) => stringField(payload, "paneKey") },

@@ -38,6 +38,7 @@ import {
   setPrayerSnapshot,
 } from "./prayer.js";
 import { initRemoteStatus } from "./remote-status.js";
+import { initKeepAwake } from "./keep-awake.js";
 import {
   detectLanguage,
   formatAgo,
@@ -532,6 +533,9 @@ function wireNav(): void {
   } catch {
     // The topbar indicator's own markup is absent in this harness.
   }
+  // Keep awake (Task 18): the topbar button. Absent markup is a no-op, and
+  // a failed first read only waits for the first awake:changed push.
+  void initKeepAwake(window.jarvis).catch(() => undefined);
 
   window.jarvis.onWorkspace((state) => renderWorkspace(state));
   // No catch here would be an unhandled rejection in the renderer on any

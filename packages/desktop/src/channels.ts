@@ -1,6 +1,7 @@
 import type { RemoteStatus } from "@jarvis/remote";
 import type { DevToolsDock } from "./browser-host.js";
 import type { IpcChannels, RendererApi } from "./ipc.js";
+import type { AwakeStatus } from "./keep-awake.js";
 import type { UpdateState } from "./updater.js";
 
 /**
@@ -54,6 +55,9 @@ export type PushChannels = IpcChannels & {
   // payload is a key, never comment text; the renderer and a paired phone
   // re-read with reviewsList/reviewsThread on receipt.
   "reviews:changed": string | null;
+  // Keep awake (Task 18): the whole status, after it changes — small, and
+  // nothing in it is private; the renderer and a paired phone redraw from it.
+  "awake:changed": AwakeStatus;
   // The updater's state (updater.ts), after every change. Local to this
   // window: a phone has no business installing the laptop's app.
   "update:state": UpdateState;
@@ -301,6 +305,10 @@ export const INVOKE_CHANNELS = {
   reviewsRequeue: "reviews:requeue",
   // Desktop-only: opens the PR in the laptop's own browser.
   reviewsOpenOnGithub: "reviews:openOnGithub",
+  // Keep awake (Task 18, keep-awake.ts): both remote-legal — a phone may
+  // read it and flip it; idleSeconds changes only through Settings' save.
+  awakeStatus: "awake:status",
+  setAwake: "awake:set",
   // The updater (updater.ts). Electron-bound and desktop-only: they act on
   // this app's own install and quit it.
   updateCheck: "update:check",
@@ -336,6 +344,7 @@ export const PUSH_CHANNELS = {
   onTabRename: "workspace:tabRename",
   onPlansChanged: "plans:changed",
   onReviewsChanged: "reviews:changed",
+  onAwakeChanged: "awake:changed",
   onTabPlans: "workspace:tabPlans",
   onUpdateState: "update:state",
 } as const satisfies Record<PushKey, string>;
