@@ -1,6 +1,7 @@
 import type { RendererApi } from "../src/ipc.js";
 import type { AwakeStatus } from "../src/keep-awake.js";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
+import { attachHoverTip } from "./hover-tip.js";
 
 // Keep awake (Task 18), the renderer's side: one cached AwakeStatus, read
 // once at startup and kept current by awake:changed, drawn on the topbar
@@ -36,7 +37,8 @@ export function onAwakeStatusChange(listener: (status: AwakeStatus) => void): ()
 function render(button: HTMLElement, status: AwakeStatus): void {
   const label = MESSAGES.awakeButtonLabel(status, PRIMARY_LANGUAGE);
   button.setAttribute("aria-label", label);
-  button.title = label;
+  // hover-tip.ts draws this; no `title` too, or two tooltips would show.
+  button.dataset.tip = label;
   button.setAttribute("aria-pressed", String(status.mode !== "off"));
   button.classList.toggle("icon-btn--on", status.active);
   button.classList.toggle("icon-btn--armed", status.mode !== "off" && !status.active);
@@ -59,6 +61,7 @@ function apply(button: HTMLElement, status: AwakeStatus): void {
 export async function initKeepAwake(api: AwakeApi): Promise<void> {
   const button = document.getElementById("awake-button");
   if (button === null) return;
+  attachHoverTip(button);
   api.onAwakeChanged((status) => apply(button, status));
   button.addEventListener("click", () => {
     const mode = awakeToggleTarget(latest?.mode ?? "off", lastOn);

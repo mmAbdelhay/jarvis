@@ -45,7 +45,7 @@ async function loadApp(
   vi.resetModules();
   FakeTerminal.last = undefined;
   document.body.innerHTML = `
-    <div class="clock"><span id="clock-time"></span></div>
+    <div class="clock"><span id="clock-date"></span><span id="clock-time"></span></div>
     <input id="composer" />
     <button id="composer-send"></button>
     <span id="voice-state">placeholder</span>
@@ -1071,11 +1071,11 @@ describe("the header clock", () => {
 
   afterEach(() => vi.useRealTimers());
 
-  it("renders HH:MM only and moves the full date to the clock title", async () => {
+  it("renders the time with AM/PM, the short date beside it, and the full date in the title", async () => {
     await loadApp();
-    expect(document.getElementById("clock-time")?.textContent).toBe("18:12");
+    expect(document.getElementById("clock-time")?.textContent).toMatch(/^6:12\sPM$/);
+    expect(document.getElementById("clock-date")?.textContent).toMatch(/^Sat 19 Sep/);
     expect(document.querySelector<HTMLElement>(".clock")?.title).toContain("19 Sept 2026");
-    expect(document.getElementById("clock-date")).toBeNull();
   });
 });
 

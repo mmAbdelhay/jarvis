@@ -712,7 +712,7 @@
 
   /* Keep awake (Task 18): muted while off, amber while waiting for an
      agent, green while it holds the screen and machine awake. */
-  .awake-btn { color: var(--text-muted); }
+  .awake-btn { color: var(--text-muted); margin-inline-start: 14px; }
   .awake-btn.icon-btn--armed { color: var(--warn); }
   .awake-btn.icon-btn--on { color: var(--good); border-color: var(--good); }
 
@@ -4680,6 +4680,20 @@
 #header-prayer[data-prayer-state="now"] .prayer-label { color: var(--good); stroke: var(--good); }
 .clock { margin-inline-start: 22px; padding-inline-start: 22px; border-inline-start: 1px solid var(--border); font-size: 13px; color: var(--text); }
 .clock-date { color: var(--text-muted); }
+/* hover-tip.ts: fixed on <body>, under the control it describes. */
+.hover-tip {
+  position: fixed;
+  z-index: 10000;
+  padding: 5px 9px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface-alt);
+  color: var(--text);
+  font-size: 11px;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+}
 /* The battery chip sits before the clock's divider; muted while fine,
    coloured once it matters. */
 .battery-chip { display: inline-flex; align-items: center; gap: 6px; margin-inline-start: 22px; font-size: 12px; color: var(--text-muted); }

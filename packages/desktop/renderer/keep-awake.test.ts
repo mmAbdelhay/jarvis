@@ -68,6 +68,13 @@ describe("the topbar keep-awake button", () => {
     );
     expect(latestAwakeStatus()?.mode).toBe("on");
 
+    button.dispatchEvent(new MouseEvent("mouseenter"));
+    expect(document.querySelector(".hover-tip")?.textContent).toBe(
+      button.getAttribute("aria-label"),
+    );
+    button.dispatchEvent(new MouseEvent("mouseleave"));
+    expect(document.querySelector(".hover-tip")).toBeNull();
+
     const seen: AwakeStatus[] = [];
     const stop = onAwakeStatusChange((s) => seen.push(s));
     pushed?.(status());

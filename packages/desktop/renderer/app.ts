@@ -1406,10 +1406,10 @@ function startClock(): void {
 
   const tick = (): void => {
     const now = new Date();
-    timeEl.textContent = now.toLocaleTimeString("en-GB", {
-      hour: "2-digit",
+    timeEl.textContent = now.toLocaleTimeString("en-US", {
+      hour: "numeric",
       minute: "2-digit",
-      hour12: false,
+      hour12: true,
     });
     if (dateEl !== null) dateEl.textContent = topbarDate(now);
     clock.title = now.toLocaleDateString("en-GB", {
