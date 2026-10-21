@@ -8,6 +8,24 @@ version and the downloads. This file is the index.
 
 ## Unreleased
 
+## [0.1.10] — 2026-10-21
+
+- Reviews: Jarvis watches your open PRs through `gh` and pastes each new
+  comment from someone else into the Claude/Codex session already running
+  in the Terminal tab for that PR — only while the agent is idle at its
+  input box. The session fixes, pushes and replies itself; Jarvis never
+  pushes. Desktop Reviews page, Terminal-tab link chip, Settings section,
+  and phone list, thread view and dashboard section.
+- Plan panel: a send while the agent is busy is refused with a reason
+  instead of arriving half-pasted.
+- Terminal tabs follow the Claude session name, including `/rename`.
+- Keep awake: a topbar button and Settings section keep the screen and
+  machine awake — always, or only while an agent runs — with an optional
+  idle Shift press on macOS. Also on the phone.
+- Topbar: battery percentage, today's date, and a 12-hour clock.
+- Remote: a Settings save no longer swaps a `127.0.0.1` bind for the
+  Tailscale address.
+
 ## [0.1.9] — 2026-10-04
 
 - Desktop: Jarvis checks for a new version when it starts and once a day,
