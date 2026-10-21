@@ -25,8 +25,13 @@ export type PlanPanelApi = {
     paneKey: string,
     path: string,
     commentIds: string[],
+    force?: boolean,
   ): Promise<
-    { ok: true; sent: number } | { ok: false; reason: "no-comments" | "forbidden" | "no-pane" }
+    | { ok: true; sent: number }
+    | {
+        ok: false;
+        reason: "no-comments" | "forbidden" | "no-pane" | "busy" | "approval" | "no-agent";
+      }
   >;
 };
 
@@ -301,6 +306,12 @@ function pickConflictTargetId(doc: PlanDoc, state: ConflictState): string | unde
 
 function planSendErrorKey(reason: PlanSendError["reason"]): MessageKey {
   switch (reason) {
+    case "busy":
+      return "planSendErrorBusy";
+    case "approval":
+      return "planSendErrorApproval";
+    case "no-agent":
+      return "planSendErrorNoAgent";
     case "no-comments":
       return "planSendErrorNoComments";
     case "forbidden":
@@ -388,6 +399,7 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
   let loadError: PlanReadError["reason"] | undefined;
   let actionError: string | undefined;
   let sendError: string | undefined;
+  let sendBusy = false;
   let closeActivePopover: (() => void) | undefined;
   let disposed = false;
   let loadId = 0;
@@ -1672,20 +1684,28 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
     send.disabled = queued.length === 0;
     send.addEventListener("click", () => void sendQueued(queued));
     actions.append(later, send);
+    if (sendBusy) {
+      const force = button("plan-panel__secondary", t("planSendAnyway"), "force-send-comments");
+      force.addEventListener("click", () => void sendQueued(queued, true));
+      actions.append(force);
+    }
     tray.append(actions);
     return tray;
   }
 
-  async function sendQueued(queued: AnchoredComment[]): Promise<void> {
+  async function sendQueued(queued: AnchoredComment[], force = false): Promise<void> {
     if (!currentDoc || queued.length === 0) return;
     sendError = undefined;
+    sendBusy = false;
     try {
       const result = await api.plansSend(
         paneKey,
         currentDoc.path,
         queued.map((comment) => comment.id),
+        ...(force ? ([true] as const) : []),
       );
       if (!result.ok) {
+        sendBusy = result.reason === "busy";
         sendError = t(planSendErrorKey(result.reason));
         renderDocument();
         return;
@@ -1868,6 +1888,7 @@ export function createPlanPanel(hooks: PlanPanelHooks): PlanPanel {
       showAllQueued = false;
       draft = undefined;
       sendError = undefined;
+      sendBusy = false;
     }
     renderDocument();
   }

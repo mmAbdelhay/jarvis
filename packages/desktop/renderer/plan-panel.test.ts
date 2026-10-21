@@ -488,6 +488,43 @@ describe("createPlanPanel", () => {
     expect(api.plansSend).toHaveBeenCalledWith("pane-1", doc.path, ["comment-1"]);
   });
 
+  it("offers Send anyway after a busy result and forwards force", async () => {
+    const api = fakeApi({
+      plansComments: vi.fn(async () => [comment()]),
+      plansSend: vi.fn(async () => ({ ok: false as const, reason: "busy" as const })),
+    });
+    const { panel } = setup(api);
+    await panel.open(doc.path);
+    click(panel.element.querySelector('[data-action="send-comments"]'));
+    await flush();
+    expect(panel.element.querySelector(".plan-panel__send-error")?.textContent).toBe(
+      "planSendErrorBusy",
+    );
+    click(panel.element.querySelector('[data-action="force-send-comments"]'));
+    await flush();
+    expect(api.plansSend).toHaveBeenLastCalledWith("pane-1", doc.path, ["comment-1"], true);
+  });
+
+  it.each([
+    ["approval", "planSendErrorApproval"],
+    ["no-agent", "planSendErrorNoAgent"],
+  ] as const)("shows %s without Send anyway, including after busy", async (reason, key) => {
+    const send = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, reason: "busy" })
+      .mockResolvedValue({ ok: false, reason });
+    const { panel } = setup(
+      fakeApi({ plansComments: vi.fn(async () => [comment()]), plansSend: send }),
+    );
+    await panel.open(doc.path);
+    click(panel.element.querySelector('[data-action="send-comments"]'));
+    await flush();
+    click(panel.element.querySelector('[data-action="force-send-comments"]'));
+    await flush();
+    expect(panel.element.querySelector(".plan-panel__send-error")?.textContent).toBe(key);
+    expect(panel.element.querySelector('[data-action="force-send-comments"]')).toBeNull();
+  });
+
   it("disables Send when there are no queued comments", async () => {
     const api = fakeApi({ plansComments: vi.fn(async () => [comment({ sentAt: 3 })]) });
     const { panel } = setup(api);

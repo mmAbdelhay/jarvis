@@ -107,6 +107,7 @@ function recordingHost(): { host: DesktopHost; seen: unknown[][]; state: { focus
         seen.push(["openExternal", url]);
       },
       restart: () => seen.push(["restart"]),
+      setStayAwake: (on) => seen.push(["setStayAwake", on]),
     },
   };
 }
@@ -228,6 +229,24 @@ describe("inProcessCoreClient: pushes", () => {
 });
 
 describe("inProcessCoreClient: host hooks", () => {
+  it("replays a wanted stay-awake to a host that attaches after it was asked for", () => {
+    const { core, link } = fakeCore();
+    const client = inProcessCoreClient(core);
+    link.host.setStayAwake(true);
+    const { host, seen } = recordingHost();
+    client.attachHost(host);
+    expect(seen).toEqual([["setStayAwake", true]]);
+    link.host.setStayAwake(false);
+    expect(seen).toEqual([
+      ["setStayAwake", true],
+      ["setStayAwake", false],
+    ]);
+    // Released: nothing to replay to the next one.
+    const next = recordingHost();
+    client.attachHost(next.host);
+    expect(next.seen).toEqual([]);
+  });
+
   it("reaches the attached host for every call the core makes, and stops at detach", async () => {
     const { core, link } = fakeCore();
     const client = inProcessCoreClient(core);

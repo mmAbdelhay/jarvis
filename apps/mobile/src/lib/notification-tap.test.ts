@@ -73,6 +73,40 @@ describe("planNavigation (rule 8)", () => {
   });
 });
 
+describe("planNavigation: review pushes", () => {
+  test("a review-comment push routes to /reviews/<encoded pr>", () => {
+    const plan = planNavigation({ kind: "review-comment", pr: "owner/name#18" }, new Set());
+    expect(plan).toEqual({ route: "/reviews/owner%2Fname%2318" });
+  });
+
+  test("review-queued and review-requested route the same way", () => {
+    for (const kind of ["review-queued", "review-requested"]) {
+      expect(planNavigation({ kind, pr: "owner/name#18" }, new Set())).toEqual({
+        route: "/reviews/owner%2Fname%2318",
+      });
+    }
+  });
+
+  test("a malformed pr goes to the dashboard [bite-proof: skip the key check]", () => {
+    for (const pr of ["../x#1", "owner/name", "owner/name#18/../../x", 18, null, ""]) {
+      expect(planNavigation({ kind: "review-comment", pr }, new Set())).toEqual({
+        route: undefined,
+        reason: "dashboard",
+      });
+    }
+  });
+});
+
+describe("planNavigation: review pushes without a pr", () => {
+  // The laptop omits `pr` when project names are off — the list, not the
+  // dashboard, is the closest place to what the push was about.
+  test("each review kind with no pr routes to the Reviews list", () => {
+    for (const kind of ["review-comment", "review-queued", "review-requested"]) {
+      expect(planNavigation({ kind }, new Set())).toEqual({ route: "/reviews" });
+    }
+  });
+});
+
 test("NOTIFICATION_NAV_WAIT_MS is 15_000", () => {
   expect(NOTIFICATION_NAV_WAIT_MS).toBe(15_000);
 });

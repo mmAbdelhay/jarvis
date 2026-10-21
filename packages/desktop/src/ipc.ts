@@ -31,7 +31,7 @@ import {
   type Turn,
 } from "@jarvis/core";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
-import type { Brain, WorkspaceState, WorkspaceTab } from "@jarvis/core";
+import type { Brain, ReviewComment, WorkspaceState, WorkspaceTab } from "@jarvis/core";
 import type { BindChoice, OwnerStatus, RemoteStatus, SetOwnerPasswordResult } from "@jarvis/remote";
 import type { PushRegisterResult, PushRegistration, TerminalPaneInfo } from "@jarvis/wire";
 import {
@@ -89,6 +89,7 @@ import { MAX_PINNED } from "@jarvis/platform";
 import { resolveDirectory } from "./completion-source.js";
 import type { CompletionSource } from "./completion-source.js";
 import type { JarvisConfig, TerminalConfig } from "./config.js";
+import type { AwakePatch, AwakeStatus } from "./keep-awake.js";
 import type { ChangeResult, DaemonStatus } from "./daemon/mode.js";
 import { MESSAGES } from "./messages.js";
 import type { SnippetLanguage } from "@jarvis/platform";
@@ -96,6 +97,12 @@ import type { RunningCounts, UpdateState } from "./updater.js";
 import type { UsageHistory } from "./usage-history.js";
 import type { TailscaleCertResult } from "./tailscale-cert.js";
 import type { IpLocateResult } from "./ip-locate.js";
+import type {
+  DeliveryOutcome,
+  ReviewListItem,
+  ReviewStatus,
+  ReviewThread,
+} from "./review-service.js";
 import {
   isCleanScalar,
   prepareRemoteApiRequest,
@@ -761,9 +768,9 @@ export type RendererApi = {
    *  for a project that declares none, and for Personal. */
   chatNames(project: string): Promise<string[]>;
   /** Opens a terminal tab for `project` and starts its shell. The new tab
-   *  arrives through the ordinary workspace:update, so nothing is returned
-   *  but success or a localised failure. */
-  openTerminal(project: string, directory?: string): Promise<GitViewResult<void>>;
+   *  arrives through the ordinary workspace:update; the value is its id
+   *  (Reviews' "Run gh auth login" types into it), or a localised failure. */
+  openTerminal(project: string, directory?: string): Promise<GitViewResult<string>>;
   /** Suggestions for what is typed at `paneKey`'s prompt, best first. Each
    *  one is a whole replacement line. `path` is the pane's own live
    *  directory — the same OSC 7 report `terminalChips` takes — and is used
@@ -1107,8 +1114,13 @@ export type RendererApi = {
     paneKey: string,
     path: string,
     commentIds: string[],
+    force?: boolean,
   ): Promise<
-    { ok: true; sent: number } | { ok: false; reason: "no-comments" | "forbidden" | "no-pane" }
+    | { ok: true; sent: number }
+    | {
+        ok: false;
+        reason: "no-comments" | "forbidden" | "no-pane" | "busy" | "approval" | "no-agent";
+      }
   >;
   /** A plan file main is watching changed on disk. `path` is the file
    *  itself, never its contents — the renderer re-reads with
@@ -1123,6 +1135,42 @@ export type RendererApi = {
    *  (desktop-only.ts's own validator, never trusted from the renderer
    *  alone since the renderer only renders what plansRead handed it). */
   plansOpenLink(url: string): Promise<void>;
+  /** Reviews (Task 10): whether `gh` is usable, the feature is on, and
+   *  which watched repos last failed to poll. */
+  reviewsStatus(): Promise<ReviewStatus>;
+  /** Every PR the poller knows, with its link, counts and wait reason. */
+  reviewsList(): Promise<ReviewListItem[]>;
+  /** One PR's comments; `undefined` for a PR the poller does not know or
+   *  a key that is not `owner/name#number`. */
+  reviewsThread(prKey: string): Promise<ReviewThread | undefined>;
+  /** Posts the user's own reply on GitHub — top level, or under the
+   *  review comment `inReplyTo` names. */
+  reviewsReply(prKey: string, body: string, inReplyTo?: string): Promise<ReviewComment>;
+  /** Links a PR to a live pane, or clears a manual link with `null`. */
+  reviewsLink(prKey: string, paneKey: string | null): Promise<void>;
+  reviewsPause(paneKey: string, paused: boolean): Promise<void>;
+  /** Delivers the PR's queued comments now, past the batching wait — never
+   *  past the agent-idle gate; `wait` says why nothing was sent. */
+  reviewsDeliverNow(prKey: string): Promise<DeliveryOutcome>;
+  /** Asks the agent in `paneKey` to review the PR. */
+  reviewsSendReview(prKey: string, paneKey: string): Promise<DeliveryOutcome>;
+  /** Asks the linked agent to post a summary of its session on the PR. */
+  reviewsPostSummary(prKey: string): Promise<DeliveryOutcome>;
+  reviewsPollNow(): Promise<void>;
+  /** Turns a first-run `history` comment back into a queued one. */
+  reviewsRequeue(prKey: string, commentId: string): Promise<boolean>;
+  /** Desktop-only: the PR in the laptop's own browser. */
+  reviewsOpenOnGithub(prKey: string): Promise<void>;
+  /** A PR's review state changed (`null`: possibly any PR's). Re-read with
+   *  reviewsList/reviewsThread on receipt. */
+  onReviewsChanged(cb: (prKey: string | null) => void): void;
+  /** Keep awake (Task 18): whether Jarvis holds the screen and machine
+   *  awake now, and why. */
+  awakeStatus(): Promise<AwakeStatus>;
+  /** Saves and applies a new mode and/or the simulated-input fallback. */
+  setAwake(patch: AwakePatch): Promise<AwakeStatus>;
+  /** The keep-awake status changed; the payload is the new one. */
+  onAwakeChanged(cb: (status: AwakeStatus) => void): void;
 };
 
 export type WiringDeps = {
@@ -2246,6 +2294,17 @@ export type TerminalHandlers = {
    *  under a project actually open in a terminal — never every configured
    *  project, and never one that used to be open and has since closed. */
   paneStartDirs(): readonly string[];
+  /** Where `paneKey`'s shell is now, for the Reviews PR link: the last OSC 7
+   *  report in the pane's retained output, else its start directory. A
+   *  report is honoured only inside the pane's project (resolveWithin, as
+   *  `chips` does); when the last one is outside it, `undefined` — the
+   *  pane is somewhere this process will not describe, and an older report
+   *  or the start directory would name a repository it has left. A pane in
+   *  no configured project takes any absolute report. */
+  paneCwd(paneKey: string): string | undefined;
+  /** When `paneKey` last received a `terminal:input` write (desktop or
+   *  phone), epoch ms; `undefined` if never in this process. */
+  lastKeystrokeAt(paneKey: string): number | undefined;
 };
 
 /** The chip row above a terminal's prompt — a runtime version, the
@@ -2530,6 +2589,8 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
   // only a tab id, and both directory affinity and path completion are
   // meaningless without the cwd behind it.
   const directories = new Map<string, string>();
+  // Last `terminal:input` per pane key — the Reviews "user is typing" gate.
+  const keystrokes = new Map<string, number>();
 
   /** Where a tab's shells are running. The tab's own key first; failing
    *  that, any pane the tab has split off — closing the first pane of a
@@ -2686,6 +2747,7 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
       // Both arguments cross an untyped IPC boundary; a keystroke stream is
       // no reason to relax that.
       if (!isString(tabId) || !isString(data)) return;
+      keystrokes.set(tabId, Date.now());
       deps.shells.write(tabId, data);
     },
 
@@ -2698,6 +2760,10 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
       if (!isString(tabId)) return;
       directories.delete(tabId);
       deps.shells.kill(tabId);
+      keystrokes.delete(tabId);
+      for (const key of [...keystrokes.keys()]) {
+        if (key.startsWith(`${tabId}:`)) keystrokes.delete(key);
+      }
       // And every shell the tab's splits are running. The colon is what
       // makes this exact rather than a prefix match over tab ids: "tab-7"
       // must never take "tab-70" down with it.
@@ -2722,6 +2788,7 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
       if (!isString(paneKey)) return;
       directories.delete(paneKey);
       deps.shells.kill(paneKey);
+      keystrokes.delete(paneKey);
     },
 
     async suggest(paneKey, input, path, remote) {
@@ -3132,7 +3199,45 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
     paneStartDirs() {
       return [...new Set(directories.values())];
     },
+
+    paneCwd(paneKey) {
+      if (!isString(paneKey)) return undefined;
+      const start = directories.get(paneKey) ?? directoryOf(paneKey.split(":")[0] ?? paneKey);
+      if (start === undefined) return undefined;
+      const reported = lastOsc7(deps.shells.log(paneKey));
+      if (reported === undefined) return start;
+      if (projectFor(start) === undefined) return isAbsolute(reported) ? reported : undefined;
+      return liveCwd(start, reported);
+    },
+
+    lastKeystrokeAt(paneKey) {
+      return isString(paneKey) ? keystrokes.get(paneKey) : undefined;
+    },
   };
+}
+
+const OSC7_START = "\u001b]7;file://";
+
+/** The path of the last complete OSC 7 report (`ESC ] 7 ; file://<path>`
+ *  ended by BEL or ESC \\) in `log` — the form the shell integrations
+ *  print at every prompt — or undefined when there is none. */
+function lastOsc7(log: string): string | undefined {
+  let from = log.length;
+  while (from > 0) {
+    const at = log.lastIndexOf(OSC7_START, from - 1);
+    if (at === -1) return undefined;
+    const rest = log.slice(at + OSC7_START.length, at + OSC7_START.length + 4096);
+    const bel = rest.indexOf("\u0007");
+    const st = rest.indexOf("\u001b\\");
+    const end = bel === -1 ? st : st === -1 ? bel : Math.min(bel, st);
+    if (end !== -1) {
+      const path = rest.slice(0, end);
+      return path === "" ? undefined : path;
+    }
+    // Cut off mid-sequence (the shell is still printing it): the one before.
+    from = at;
+  }
+  return undefined;
 }
 
 export type ApiHandlers = ApiEditHandlers & {

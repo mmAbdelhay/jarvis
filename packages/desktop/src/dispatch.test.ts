@@ -20,6 +20,14 @@ import { MESSAGES } from "./messages.js";
 import { CHANNEL_POLICY, isRemoteAllowed } from "./remote-policy.js";
 
 /** Every dep a vi.fn; a test overrides only what it asserts on. */
+const AWAKE_OFF = {
+  mode: "off" as const,
+  active: false,
+  reason: "off" as const,
+  simulateInput: false,
+  inputState: "idle" as const,
+};
+
 export function fakeDeps(overrides: Partial<DispatchDeps> = {}): DispatchDeps {
   return {
     setup: {
@@ -238,6 +246,38 @@ export function fakeDeps(overrides: Partial<DispatchDeps> = {}): DispatchDeps {
       projectRoots: vi.fn(() => []),
     },
     openExternal: vi.fn(async () => {}),
+    reviews: {
+      notePaste: vi.fn(),
+      paneStateOf: vi.fn(async () => ({
+        hasAgent: true,
+        input: "idle-input" as const,
+        draft: false,
+        quietMs: 3000,
+        sinceKeystrokeMs: 20000,
+        paused: false,
+      })),
+      status: vi.fn(async () => ({
+        gh: null,
+        enabled: true,
+        paused: [],
+        repos: [],
+        repoErrors: {},
+      })),
+      list: vi.fn(async () => []),
+      thread: vi.fn(async () => undefined),
+      reply: vi.fn(async () => ({}) as never),
+      link: vi.fn(async () => undefined),
+      pause: vi.fn(async () => undefined),
+      requeue: vi.fn(async () => false),
+      deliverNow: vi.fn(async () => ({ sent: true as const })),
+      sendReview: vi.fn(async () => ({ sent: true as const })),
+      postSummary: vi.fn(async () => ({ sent: true as const })),
+      pollNow: vi.fn(async () => undefined),
+    },
+    awake: {
+      status: vi.fn(() => AWAKE_OFF),
+      set: vi.fn(async () => AWAKE_OFF),
+    },
     ...overrides,
   } as DispatchDeps;
 }

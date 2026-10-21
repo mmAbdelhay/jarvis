@@ -465,6 +465,24 @@ export default function RootLayout() {
                   }}
                 />
                 <Stack.Screen
+                  name="reviews/index"
+                  options={{
+                    // Phone: ScreenHeader inside the screen. Wide: the shell's
+                    // panel header.
+                    headerShown: false,
+                    animation: wide ? "none" : "default",
+                    title: t(language, "reviews.title"),
+                  }}
+                />
+                <Stack.Screen
+                  name="reviews/[pr]"
+                  options={{
+                    headerShown: false,
+                    animation: wide ? "none" : "default",
+                    title: t(language, "reviews.title"),
+                  }}
+                />
+                <Stack.Screen
                   name="unlock"
                   // No swipe back past the lock: it closes itself once unlocked.
                   options={{ headerShown: false, gestureEnabled: false }}

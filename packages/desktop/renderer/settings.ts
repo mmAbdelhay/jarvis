@@ -1,5 +1,5 @@
 import { openSetup } from "./setup.js";
-import type { AgentConfig, ProviderVendor, RoutingRule } from "@jarvis/core";
+import type { AgentConfig, ProviderVendor, ReviewsConfig, RoutingRule } from "@jarvis/core";
 import type {
   ChatDriver,
   ChatEntry,
@@ -9,11 +9,14 @@ import type {
   DockerEntry,
   EditorRoot,
 } from "@jarvis/platform";
-import type { JarvisConfig } from "../src/config.js";
+import type { AwakeConfig, JarvisConfig } from "../src/config.js";
+import type { AwakeStatus } from "../src/keep-awake.js";
+import { latestAwakeStatus, onAwakeStatusChange } from "./keep-awake.js";
+import type { ReviewStatus } from "../src/review-service.js";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 import { PERSONAL_PROJECT } from "../src/personal.js";
 import type { BindChoice, OwnerStatus, RemoteDeviceStatus, RemoteStatus } from "@jarvis/remote";
-import { isMeshAddress, primaryBindChoices } from "./remote-bind.js";
+import { isMeshAddress, primaryBindChoices, proposedBindAddress } from "./remote-bind.js";
 import { latestRemoteStatus, onRemoteStatusChange, withNameInBdi } from "./remote-status.js";
 import { remoteDeviceClient, remoteWebState, remoteWebUrl } from "../src/remote-web.js";
 import { encodeQr, qrToCanvas } from "./vendor/qr.js";
@@ -115,6 +118,14 @@ function wireSettingsNav(): void {
 export function initSettings(): void {
   wireStaticFields();
   wireSettingsNav();
+  // Keep awake: the topbar button or a phone may change the mode while
+  // Settings is open. A field the user has not touched follows it, so a
+  // later Save does not put the old value back; the status line redraws.
+  stopAwakeListener?.();
+  stopAwakeListener = onAwakeStatusChange((status) => {
+    followAwakeStatus(status);
+    renderAwakeStatus();
+  });
   // Reopens the prerequisites screen. It shows itself on a first run and
   // when something required is missing; this is how a user reaches it the
   // rest of the time — after installing a tool, or to see what a tab wants.
@@ -156,6 +167,7 @@ export async function openSettings(): Promise<void> {
   renderSettings();
 
   void loadVoices();
+  void loadReviewsStatus();
   void loadBindChoices();
   // Then refreshed: remoteStatus() is a pull, distinct from the onRemoteStatus
   // push above — a value paired or revoked from a phone while this window
@@ -184,12 +196,492 @@ function renderSettings(): void {
   renderBrowser();
   renderWhisper();
   renderRemote();
+  renderReviews();
+  renderAwake();
 }
 
 function renderBrowser(): void {
   if (draft === undefined) return;
   ($("settings-allow-popups") as HTMLInputElement).checked = draft.browser.allowPopups;
   ($("settings-browser-homepage") as HTMLInputElement).value = draft.browser.homePage ?? "";
+}
+
+// ---------------------------------------------------------- Keep awake
+//
+// Keep awake (Task 18): mode, the simulated-input fallback and its idle
+// threshold, committed into the draft on "change" like every section and
+// written by Save. The status line is the core's own awake:status, kept
+// current by renderer/keep-awake.ts.
+
+const AWAKE_DEFAULTS: AwakeConfig = { mode: "off", simulateInput: false, idleSeconds: 240 };
+const AWAKE_MODE_ORDER: readonly AwakeConfig["mode"][] = ["off", "on", "agents"];
+let stopAwakeListener: (() => void) | undefined;
+
+function awakeDraft(): AwakeConfig | undefined {
+  if (draft === undefined) return undefined;
+  draft.awake ??= { ...AWAKE_DEFAULTS };
+  return draft.awake;
+}
+
+/** A pushed mode/fallback replaces an untouched draft field (and its
+ *  baseline), never one the user has changed and not saved yet. */
+function followAwakeStatus(status: AwakeStatus): void {
+  if (draft === undefined || savedBaseline === undefined) return;
+  const current = draft.awake ?? AWAKE_DEFAULTS;
+  const baseline = savedBaseline.awake ?? AWAKE_DEFAULTS;
+  const next = { ...current };
+  const nextBaseline = { ...baseline };
+  let changed = false;
+  if (current.mode === baseline.mode && current.mode !== status.mode) {
+    next.mode = status.mode;
+    nextBaseline.mode = status.mode;
+    changed = true;
+  }
+  if (
+    current.simulateInput === baseline.simulateInput &&
+    current.simulateInput !== status.simulateInput
+  ) {
+    next.simulateInput = status.simulateInput;
+    nextBaseline.simulateInput = status.simulateInput;
+    changed = true;
+  }
+  if (!changed) return;
+  draft.awake = next;
+  savedBaseline.awake = nextBaseline;
+  // Only the two controls that changed: a rebuild would lose an
+  // idle-seconds edit still being typed.
+  const mode = document.getElementById("settings-awake-mode");
+  if (mode instanceof HTMLSelectElement) mode.value = next.mode;
+  const simulate = document.getElementById("settings-awake-simulate");
+  if (simulate instanceof HTMLInputElement) simulate.checked = next.simulateInput;
+}
+
+function renderAwakeStatus(): void {
+  const line = document.getElementById("settings-awake-status");
+  if (line === null) return;
+  const status = latestAwakeStatus();
+  line.textContent =
+    status === undefined ? "" : MESSAGES.awakeSettingsStatus(status, PRIMARY_LANGUAGE);
+  line.classList.toggle(
+    "settings-awake-status--warn",
+    status?.simulateInput === true && status.inputState === "needs-permission",
+  );
+}
+
+function renderAwake(): void {
+  const host = document.getElementById("settings-awake");
+  if (host === null || draft === undefined) return;
+  const language = PRIMARY_LANGUAGE;
+  const title = document.getElementById("settings-awake-title");
+  if (title !== null) title.textContent = MESSAGES.awakeSettingsTitle(language);
+  const cfg = draft.awake ?? AWAKE_DEFAULTS;
+  const mac = window.jarvis.platform === "darwin";
+
+  const mode = document.createElement("select");
+  mode.id = "settings-awake-mode";
+  for (const value of AWAKE_MODE_ORDER) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = MESSAGES.awakeModeName(value, language);
+    mode.append(option);
+  }
+  mode.value = cfg.mode;
+  mode.addEventListener("change", () => {
+    const section = awakeDraft();
+    const value = AWAKE_MODE_ORDER.find((m) => m === mode.value);
+    if (section === undefined || value === undefined) return;
+    section.mode = value;
+    clearSaveStatus();
+  });
+
+  const simulate = reviewsSwitch(
+    "settings-awake-simulate",
+    cfg.simulateInput,
+    MESSAGES.awakeSettingsSimulate(language),
+    (on) => {
+      const section = awakeDraft();
+      if (section !== undefined) section.simulateInput = on;
+    },
+  );
+  const simulateInput = simulate.querySelector("input");
+  if (simulateInput !== null) simulateInput.disabled = !mac;
+
+  const idle = document.createElement("input");
+  idle.type = "number";
+  idle.id = "settings-awake-idle";
+  idle.min = "60";
+  idle.max = "3600";
+  idle.step = "1";
+  idle.value = String(cfg.idleSeconds);
+  idle.addEventListener("change", () => {
+    const section = awakeDraft();
+    if (section === undefined) return;
+    const typed = Number(idle.value);
+    const seconds = Number.isFinite(typed)
+      ? Math.min(3600, Math.max(60, Math.round(typed)))
+      : section.idleSeconds;
+    section.idleSeconds = seconds;
+    idle.value = String(seconds);
+    clearSaveStatus();
+  });
+
+  const status = document.createElement("div");
+  status.id = "settings-awake-status";
+  status.className = "settings-awake-status";
+
+  host.replaceChildren(
+    reviewsField(MESSAGES.awakeSettingsMode(language), mode, mode.id),
+    reviewsField(MESSAGES.awakeSettingsSimulate(language), simulate),
+    ...(mac ? [] : [reviewsNote(MESSAGES.awakeSettingsMacOnly(language))]),
+    reviewsField(MESSAGES.awakeSettingsIdle(language), idle, idle.id),
+    reviewsNote(MESSAGES.awakeSettingsIdleNote(language)),
+    status,
+  );
+  renderAwakeStatus();
+}
+
+// ------------------------------------------------------------- Reviews
+//
+// Reviews (Task 12): the whole section is built here, from MESSAGES (it is
+// bilingual), into #settings-reviews. Every field commits into the draft
+// on "change", like every other section; Save writes it. The gh line and
+// the repo list are redrawn on their own when reviews:status answers, so
+// that answer never rebuilds a field mid-edit.
+
+/** DEFAULT_REVIEWS_CONFIG (@jarvis/core), restated: the renderer may only
+ *  type-import a workspace package. A fresh object every call. */
+function defaultReviews(): ReviewsConfig {
+  return {
+    enabled: true,
+    intervalSeconds: 60,
+    repos: {},
+    authors: [],
+    requireText: "",
+    ignoreBots: true,
+    autoLink: true,
+    batchSeconds: 30,
+    notify: { comment: true, queued: true, requested: true },
+  };
+}
+
+/** What reviews:status last said — undefined until it answers. */
+let reviewsStatusCache: ReviewStatus | undefined;
+/** Repositories reviews:list and reviews:status have named. */
+let reviewsSeenRepos: string[] = [];
+
+/** The draft's reviews section, created from the defaults on first edit. */
+function reviewsDraft(): ReviewsConfig | undefined {
+  if (draft === undefined) return undefined;
+  draft.reviews ??= defaultReviews();
+  return draft.reviews;
+}
+
+async function loadReviewsStatus(): Promise<void> {
+  try {
+    reviewsStatusCache = await window.jarvis.reviewsStatus();
+  } catch {
+    reviewsStatusCache = undefined;
+  }
+  let listed: Awaited<ReturnType<typeof window.jarvis.reviewsList>> = [];
+  try {
+    listed = await window.jarvis.reviewsList();
+  } catch {
+    listed = [];
+  }
+  reviewsSeenRepos = [
+    ...(reviewsStatusCache?.repos ?? []),
+    ...listed.map((entry) => entry.pr.repo),
+    ...Object.keys(reviewsStatusCache?.repoErrors ?? {}),
+  ];
+  renderReviewsGh();
+  renderReviewsRepos();
+}
+
+function reviewsField(label: string, control: Node, forId?: string): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "settings-field";
+  const caption = document.createElement(forId === undefined ? "span" : "label");
+  caption.textContent = label;
+  if (caption instanceof HTMLLabelElement && forId !== undefined) caption.htmlFor = forId;
+  row.append(caption, control);
+  return row;
+}
+
+function reviewsNote(text: string, id?: string): HTMLElement {
+  const note = document.createElement("div");
+  note.className = "settings-note";
+  if (id !== undefined) note.id = id;
+  note.textContent = text;
+  return note;
+}
+
+function reviewsSwitch(
+  id: string,
+  checked: boolean,
+  label: string,
+  onChange: (checked: boolean) => void,
+): HTMLElement {
+  const wrap = document.createElement("span");
+  wrap.className = "settings-switch";
+  const input = document.createElement("input");
+  input.type = "checkbox";
+  input.id = id;
+  input.checked = checked;
+  input.setAttribute("aria-label", label);
+  input.addEventListener("change", () => {
+    onChange(input.checked);
+    clearSaveStatus();
+  });
+  const track = document.createElement("span");
+  track.className = "settings-switch-track";
+  track.setAttribute("aria-hidden", "true");
+  wrap.append(input, track);
+  return wrap;
+}
+
+function reviewsText(
+  id: string,
+  value: string,
+  onChange: (value: string, input: HTMLInputElement) => void,
+  placeholder?: string,
+): HTMLInputElement {
+  const input = document.createElement("input");
+  input.type = "text";
+  input.id = id;
+  input.className = "mono";
+  input.autocomplete = "off";
+  input.value = value;
+  if (placeholder !== undefined) input.placeholder = placeholder;
+  input.addEventListener("change", () => {
+    onChange(input.value, input);
+    clearSaveStatus();
+  });
+  return input;
+}
+
+/** "a, @b ,, c" → ["a", "b", "c"]: GitHub logins, comma-separated. */
+export function parseReviewAuthors(text: string): string[] {
+  return text
+    .split(",")
+    .map((part) => part.trim().replace(/^@/, ""))
+    .filter((part) => part !== "");
+}
+
+function renderReviews(): void {
+  const host = document.getElementById("settings-reviews");
+  if (host === null || draft === undefined) return;
+  const language = PRIMARY_LANGUAGE;
+  const title = document.getElementById("settings-reviews-title");
+  if (title !== null) title.textContent = MESSAGES.reviewsSettingsTitle(language);
+  const cfg = draft.reviews ?? defaultReviews();
+
+  // gh: its state, and the two ways out of a bad one.
+  const gh = document.createElement("span");
+  gh.className = "settings-reviews-gh";
+  const ghState = document.createElement("span");
+  ghState.id = "settings-reviews-gh";
+  const login = document.createElement("button");
+  login.type = "button";
+  login.id = "settings-reviews-login";
+  login.className = "settings-add";
+  login.textContent = MESSAGES.reviewsSettingsRunLogin(language);
+  login.addEventListener("click", () => void runGhAuthLogin());
+  const check = document.createElement("button");
+  check.type = "button";
+  check.id = "settings-reviews-check";
+  check.className = "settings-add";
+  check.textContent = MESSAGES.reviewsSettingsCheckAgain(language);
+  check.addEventListener("click", () => {
+    void Promise.resolve()
+      .then(() => window.jarvis.reviewsPollNow())
+      .catch(() => {})
+      .then(() => loadReviewsStatus());
+  });
+  gh.append(ghState, login, check);
+
+  const enabledState = document.createElement("span");
+  enabledState.textContent = MESSAGES.reviewsSettingsOnOff(cfg.enabled, language);
+  const listen = document.createElement("span");
+  listen.className = "settings-reviews-inline";
+  listen.append(
+    reviewsSwitch(
+      "settings-reviews-enabled",
+      cfg.enabled,
+      MESSAGES.reviewsSettingsListen(language),
+      (on) => {
+        const section = reviewsDraft();
+        if (section === undefined) return;
+        section.enabled = on;
+        enabledState.textContent = MESSAGES.reviewsSettingsOnOff(on, language);
+      },
+    ),
+    enabledState,
+  );
+
+  const interval = reviewsText(
+    "settings-reviews-interval",
+    String(cfg.intervalSeconds),
+    (typed, input) => {
+      const section = reviewsDraft();
+      if (section === undefined) return;
+      const seconds = Number(typed.trim());
+      // A half-typed value never lands as NaN; range is Save's validation.
+      if (typed.trim() !== "" && Number.isFinite(seconds)) section.intervalSeconds = seconds;
+      input.value = String(section.intervalSeconds);
+    },
+  );
+  interval.inputMode = "numeric";
+
+  const repos = document.createElement("div");
+  repos.id = "settings-reviews-repos";
+  repos.className = "settings-reviews-repos";
+
+  const authors = reviewsText(
+    "settings-reviews-authors",
+    cfg.authors.join(", "),
+    (typed, input) => {
+      const section = reviewsDraft();
+      if (section === undefined) return;
+      section.authors = parseReviewAuthors(typed);
+      input.value = section.authors.join(", ");
+    },
+  );
+  const require = reviewsText(
+    "settings-reviews-require",
+    cfg.requireText,
+    (typed) => {
+      const section = reviewsDraft();
+      if (section !== undefined) section.requireText = typed.trim();
+    },
+    "@jarvis",
+  );
+  const pushOn = cfg.notify.comment || cfg.notify.queued || cfg.notify.requested;
+
+  host.replaceChildren(
+    reviewsField(MESSAGES.reviewsSettingsGhLabel(language), gh),
+    reviewsNote(MESSAGES.reviewsSettingsGhNote(language)),
+    reviewsNote("", "settings-reviews-login-note"),
+    reviewsField(MESSAGES.reviewsSettingsListen(language), listen),
+    reviewsField(MESSAGES.reviewsSettingsInterval(language), interval, interval.id),
+    reviewsField(MESSAGES.reviewsSettingsRepos(language), repos),
+    reviewsNote(MESSAGES.reviewsSettingsReposNote(language)),
+    reviewsField(MESSAGES.reviewsSettingsAuthors(language), authors, authors.id),
+    reviewsNote(MESSAGES.reviewsSettingsAuthorsNote(language)),
+    reviewsField(MESSAGES.reviewsSettingsRequire(language), require, require.id),
+    reviewsField(
+      MESSAGES.reviewsSettingsIgnoreBots(language),
+      reviewsSwitch(
+        "settings-reviews-ignore-bots",
+        cfg.ignoreBots,
+        MESSAGES.reviewsSettingsIgnoreBots(language),
+        (on) => {
+          const section = reviewsDraft();
+          if (section !== undefined) section.ignoreBots = on;
+        },
+      ),
+    ),
+    reviewsField(
+      MESSAGES.reviewsSettingsAutoLink(language),
+      reviewsSwitch(
+        "settings-reviews-auto-link",
+        cfg.autoLink,
+        MESSAGES.reviewsSettingsAutoLink(language),
+        (on) => {
+          const section = reviewsDraft();
+          if (section !== undefined) section.autoLink = on;
+        },
+      ),
+    ),
+    reviewsNote(MESSAGES.reviewsSettingsDeliveryNote(cfg.batchSeconds, language)),
+    reviewsField(
+      MESSAGES.reviewsSettingsPush(language),
+      reviewsSwitch(
+        "settings-reviews-push",
+        pushOn,
+        MESSAGES.reviewsSettingsPush(language),
+        (on) => {
+          const section = reviewsDraft();
+          if (section !== undefined) section.notify = { comment: on, queued: on, requested: on };
+        },
+      ),
+    ),
+    reviewsNote(MESSAGES.reviewsSettingsPushNote(language)),
+  );
+  renderReviewsGh();
+  renderReviewsRepos();
+}
+
+function renderReviewsGh(): void {
+  const state = document.getElementById("settings-reviews-gh");
+  if (state === null) return;
+  const gh = reviewsStatusCache?.gh ?? null;
+  const kind = gh === null ? "unknown" : gh.kind;
+  const login = gh !== null && gh.kind === "ok" ? gh.login : "";
+  state.textContent = MESSAGES.reviewsSettingsGhState(kind, login, PRIMARY_LANGUAGE);
+  state.className = `settings-reviews-gh-state settings-reviews-gh-state--${kind}`;
+  const button = document.getElementById("settings-reviews-login");
+  if (button !== null) button.hidden = kind === "ok";
+}
+
+function renderReviewsRepos(): void {
+  const host = document.getElementById("settings-reviews-repos");
+  if (host === null || draft === undefined) return;
+  const cfg = draft.reviews ?? defaultReviews();
+  const byLower = new Map<string, string>();
+  for (const repo of [...Object.keys(cfg.repos), ...reviewsSeenRepos]) {
+    if (!byLower.has(repo.toLowerCase())) byLower.set(repo.toLowerCase(), repo);
+  }
+  const repos = [...byLower.values()].sort((a, b) => a.localeCompare(b));
+  host.replaceChildren();
+  if (repos.length === 0) {
+    host.append(reviewsNote(MESSAGES.reviewsSettingsReposEmpty(PRIMARY_LANGUAGE)));
+    return;
+  }
+  for (const repo of repos) {
+    const label = document.createElement("label");
+    label.className = "settings-reviews-repo mono";
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.dataset["repo"] = repo;
+    const key = Object.keys(cfg.repos).find((name) => name.toLowerCase() === repo.toLowerCase());
+    box.checked = key === undefined ? true : cfg.repos[key] !== false;
+    box.addEventListener("change", () => {
+      const section = reviewsDraft();
+      if (section === undefined) return;
+      const existing = Object.keys(section.repos).find(
+        (name) => name.toLowerCase() === repo.toLowerCase(),
+      );
+      section.repos[existing ?? repo] = box.checked;
+      clearSaveStatus();
+    });
+    const name = document.createElement("span");
+    name.textContent = repo;
+    label.append(box, name);
+    host.append(label);
+  }
+}
+
+/** Opens a Terminal tab in the first project with `gh auth login` typed at
+ *  its prompt — not run: no Enter is sent, the user presses it. */
+async function runGhAuthLogin(): Promise<void> {
+  const note = document.getElementById("settings-reviews-login-note");
+  if (note !== null) note.textContent = "";
+  const project = draft === undefined ? undefined : Object.keys(draft.projects)[0];
+  if (project === undefined) {
+    if (note !== null) note.textContent = MESSAGES.reviewsSettingsNoProject(PRIMARY_LANGUAGE);
+    return;
+  }
+  try {
+    const result = await window.jarvis.openTerminal(project);
+    if (!result.ok) {
+      if (note !== null) note.textContent = result.text;
+      return;
+    }
+    await window.jarvis.sendTerminalInput(result.value, "gh auth login");
+    document.getElementById("nav-workspace")?.click();
+  } catch (error: unknown) {
+    console.error(`settings: gh auth login failed: ${String(error)}`);
+  }
 }
 
 function clearSaveStatus(): void {
@@ -1998,21 +2490,18 @@ function clearRemoteCertError(): void {
   error.hidden = true;
 }
 
-/** Round 3: the saved address still being the config default means nobody
- *  has ever picked one, so the picker proposes the best one rather than
- *  making a first-time user hunt for Tailscale/Wi-Fi behind Advanced… —
- *  Tailscale first, Wi-Fi when this machine has no tailnet address. Called
- *  only once per open, right after a fresh bindChoiceList arrives (see
- *  loadBindChoices): re-running it on every render would fight a later,
- *  deliberate pick of "This machine only" back to loopback's own literal
- *  address, since that pick is indistinguishable on disk from "never
- *  touched". Nothing here reaches jarvis.yaml on its own — like every other
- *  field in this file, it only changes what Save would write. */
+/** Round 3: on a first-time setup (remote access off, address still the
+ *  config default) the picker proposes the best address rather than making
+ *  the user hunt for Tailscale/Wi-Fi behind Advanced… — see
+ *  proposedBindAddress for why an enabled loopback bind is left alone.
+ *  Called only once per open, right after a fresh bindChoiceList arrives
+ *  (see loadBindChoices). Nothing here reaches jarvis.yaml on its own — like
+ *  every other field in this file, it only changes what Save would write. */
 function applyDefaultBindSelection(): void {
-  if (draft === undefined || draft.remote.bindAddress !== DEFAULT_BIND_ADDRESS) return;
-  const { tailscale, wifi } = primaryBindChoices(bindChoiceList);
-  const preferred = tailscale ?? wifi;
-  if (preferred !== undefined) draft.remote.bindAddress = preferred.address;
+  if (draft === undefined || savedBaseline === undefined) return;
+  if (draft.remote.bindAddress !== DEFAULT_BIND_ADDRESS) return;
+  const proposed = proposedBindAddress(savedBaseline.remote, DEFAULT_BIND_ADDRESS, bindChoiceList);
+  if (proposed !== undefined) draft.remote.bindAddress = proposed;
 }
 
 function renderBindChoices(): void {

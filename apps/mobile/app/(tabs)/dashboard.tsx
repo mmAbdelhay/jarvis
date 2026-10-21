@@ -12,11 +12,14 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ActiveList } from "@/components/ActiveList";
 import { ActiveTable } from "@/components/ActiveTable";
+import { AwakeToggle } from "@/components/AwakeToggle";
 import { NewSessionSheet } from "@/components/NewSessionSheet";
 import { ProjectToolRow } from "@/components/ProjectToolRow";
+import { ReviewsSection } from "@/components/ReviewsSection";
 import { Icon } from "@/components/Icon";
 import { IconButton } from "@/components/IconButton";
 import { MetricStrip } from "@/components/MetricStrip";
+import { type AwakeStatus, createAwakeStore } from "@/lib/awake-store";
 import { type ChangeCountsView, createChangeCountsStore } from "@/lib/change-counts";
 import type { ConnectionView } from "@/lib/connection-store";
 import { machinePillModel } from "@/lib/connection-pill";
@@ -30,6 +33,7 @@ import type { MessageKey } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
 import { loadProjectChoices } from "@/lib/new-session";
 import { loadPairing } from "@/lib/pairing-record";
+import { createReviewsStore, type ReviewListItem, reviewRoute } from "@/lib/reviews-store";
 import { useConnectionStore, useRpcClient } from "@/lib/rpc-context";
 import { expoSecureStore } from "@/lib/secure-store";
 import { openSession, sessionTarget } from "@/lib/session-nav";
@@ -56,6 +60,12 @@ export default function DashboardScreen() {
   const [home, setHome] = useState<HomeView>(homeStore.get());
   const countsStore = useMemo(() => createChangeCountsStore({ client }), [client]);
   const [counts, setCounts] = useState<ChangeCountsView>(countsStore.get());
+  // REVIEWS above SESSIONS: the laptop's watched PRs, live via reviews:changed.
+  const reviewsStore = useMemo(() => createReviewsStore({ client }), [client]);
+  const [reviews, setReviews] = useState<ReviewListItem[] | undefined>(undefined);
+  // Keep awake: the laptop's stay-awake switch, live via awake:changed.
+  const awakeStore = useMemo(() => createAwakeStore({ client }), [client]);
+  const [awake, setAwake] = useState<{ status?: AwakeStatus; busy: boolean }>({ busy: false });
   const [connection, setConnection] = useState<ConnectionView>(connectionStore.get());
   // The paired computer's display name — read from the same
   // `loadPairing(expoSecureStore)` source `settings.tsx` uses (item 3):
@@ -88,6 +98,12 @@ export default function DashboardScreen() {
       const unsubscribeCounts = countsStore.subscribe(setCounts);
       // The phone's ActiveList and the wide Active table both read the counts.
       countsStore.focus();
+      const unsubscribeReviews = reviewsStore.subscribe(() => setReviews(reviewsStore.state.items));
+      void reviewsStore.load();
+      const syncAwake = () =>
+        setAwake({ status: awakeStore.state.status, busy: awakeStore.state.busy });
+      const unsubscribeAwake = awakeStore.subscribe(syncAwake);
+      void awakeStore.load();
       setConnection(connectionStore.get());
       const unsubscribeConnection = connectionStore.subscribe(setConnection);
       let cancelled = false;
@@ -101,10 +117,12 @@ export default function DashboardScreen() {
         homeStore.blur();
         unsubscribeCounts();
         countsStore.blur();
+        unsubscribeReviews();
+        unsubscribeAwake();
         unsubscribeConnection();
         cancelled = true;
       };
-    }, [store, homeStore, countsStore, connectionStore]),
+    }, [store, homeStore, countsStore, reviewsStore, awakeStore, connectionStore]),
   );
   // The sessions a question could be waiting in: Jarvis's own live ones.
   // A row found by the process scan has no terminal to answer through.
@@ -178,6 +196,23 @@ export default function DashboardScreen() {
     if (outcome === "answered") homeStore.dismiss(sessionId);
     return outcome;
   };
+  const awakeToggle = (
+    <AwakeToggle
+      language={language}
+      status={awake.status}
+      busy={awake.busy}
+      onToggle={() => void awakeStore.toggle()}
+    />
+  );
+  const reviewsSection = (
+    <ReviewsSection
+      language={language}
+      items={reviews}
+      now={now}
+      onOpen={(key) => router.push(reviewRoute(key))}
+      onAll={() => router.push("/reviews")}
+    />
+  );
   return (
     <ScrollView
       style={styles.container}
@@ -244,7 +279,9 @@ export default function DashboardScreen() {
             onOpen={openById}
           />
           <View style={[styles.lower, homeSideBySide(content) && styles.lowerRow]}>
-            <View style={homeSideBySide(content) ? styles.activeCol : undefined}>
+            <View style={[styles.activeStack, homeSideBySide(content) && styles.activeCol]}>
+              {awakeToggle}
+              {reviewsSection}
               <ActiveTable
                 language={language}
                 sessions={view.sessions}
@@ -312,6 +349,8 @@ export default function DashboardScreen() {
               <Text style={styles.quickActionText}>{t(language, "home.newTerminal")}</Text>
             </Pressable>
           </View>
+          {awakeToggle}
+          {reviewsSection}
           <ActiveList
             language={language}
             sessions={view.sessions}
@@ -418,6 +457,7 @@ const styles = StyleSheet.create({
   homeTopWide: { width: "100%", maxWidth: WIDE_PANEL_MAX_WIDTH, alignSelf: "center", gap: 22 },
   lower: { gap: 18 },
   lowerRow: { flexDirection: "row", alignItems: "flex-start" },
+  activeStack: { gap: 18 },
   activeCol: { flex: 3, minWidth: 0 },
   projectsCol: { gap: 8, minWidth: 0 },
   projectsColRow: { flex: 2 },

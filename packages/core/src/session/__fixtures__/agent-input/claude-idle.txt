@@ -1,0 +1,39 @@
+# rendered — Claude Code v2.1.302, captured from a real pane and rendered through @xterm/headless at 213x38; personal paths/accounts replaced.
+
+ ▐▛███▛█   Claude Code v2.1.302
+▝▜██████▀  Opus 5.5 · Claude Plan
+ ▝▝   ▝▝   /Users/dev/projects/scratch-repo
+
+
+❯ Use the Bash tool to run exactly: sleep 40 && echo slept. Then reply only with the word done.
+
+  Ran 1 shell command
+
+⏺ The command is running in the background. I'll reply when it finishes.
+
+✻ Baked for 15s · done 12:34 AM · 1 shell still running
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  claude-acme  dev@example.com
+  [dev@host:/Users/dev/projects/scratch-repo]  [Opus 5.5  ctx:6% (57k/1000k)]
+  Session ███████░ 93% resets 04:40   │   Week ██░░░░░░ 26% resets Wed 23:00
+  ⏵⏵ auto mode on · 1 shell

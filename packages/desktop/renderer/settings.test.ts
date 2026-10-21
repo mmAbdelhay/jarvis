@@ -5,6 +5,7 @@ import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 import { PERSONAL_PROJECT } from "../src/personal.js";
 import type { BindChoice, RemoteStatus } from "@jarvis/remote";
 import { initSettings, openSettings, savePrayerSettings } from "./settings.js";
+import { initKeepAwake } from "./keep-awake.js";
 import { encodeQr, qrToCanvas } from "./vendor/qr.js";
 
 // The real encoder is unit-tested on its own (vendor/qr.test.ts); here we
@@ -1715,6 +1716,13 @@ describe("remote access section", () => {
     expect(loopback?.checked).toBe(true);
   });
 
+  it("keeps a loopback bind once remote access is on, so an unrelated Save never swaps in the Tailscale address", async () => {
+    const calls = await open(withRemote({ enabled: true, bindAddress: "127.0.0.1" }));
+
+    expect(tailscaleRadio().checked).toBe(false);
+    expect((await save(calls)).remote.bindAddress).toBe("127.0.0.1");
+  });
+
   it("commits a typed address on change, never on input, and keeps Other… picked", async () => {
     const calls = await open(withRemote({ bindAddress: "10.1.2.3" }));
 
@@ -3217,5 +3225,284 @@ describe("Settings: owner account (Phase 0)", () => {
     toggle.checked = false;
     change(toggle);
     expect(toggle.disabled).toBe(true);
+  });
+});
+
+describe("reviews section", () => {
+  function withReviewsDom(config: JarvisConfig = sample()): Recorded[] {
+    const { calls } = harness(config);
+    document.body.insertAdjacentHTML(
+      "beforeend",
+      `<div id="settings-reviews-title"></div><div id="settings-reviews"></div>`,
+    );
+    const jarvis = (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
+    jarvis["reviewsStatus"] = () => {
+      calls.push({ call: "reviewsStatus", args: [] });
+      return Promise.resolve({
+        gh: { kind: "logged-out" },
+        enabled: true,
+        repoErrors: { "me/rafiq": "boom" },
+        paused: [],
+        repos: ["me/empty", "me/jarvis", "me/rafiq"],
+      });
+    };
+    jarvis["reviewsList"] = () =>
+      Promise.resolve([
+        {
+          pr: {
+            repo: "me/jarvis",
+            number: 18,
+            title: "x",
+            headRef: "b",
+            author: "me",
+            url: "",
+            isDraft: false,
+            role: "mine",
+          },
+          link: { kind: "none" },
+          queued: 0,
+          delivered: 0,
+          waitReason: null,
+          lastActivity: 0,
+        },
+      ]);
+    jarvis["reviewsPollNow"] = () => {
+      calls.push({ call: "reviewsPollNow", args: [] });
+      return Promise.resolve();
+    };
+    jarvis["openTerminal"] = (...args: unknown[]) => {
+      calls.push({ call: "openTerminal", args });
+      return Promise.resolve({ ok: true, value: "tab-9" });
+    };
+    jarvis["sendTerminalInput"] = (...args: unknown[]) => {
+      calls.push({ call: "sendTerminalInput", args });
+      return Promise.resolve();
+    };
+    initSettings();
+    return calls;
+  }
+
+  async function saved(calls: Recorded[]): Promise<JarvisConfig> {
+    document.getElementById("settings-save")?.click();
+    await Promise.resolve();
+    return savedConfig(calls.find((entry) => entry.call === "saveSettings"));
+  }
+
+  it("saves reviews.authors as an array from a change event", async () => {
+    const calls = withReviewsDom();
+    await openSettings();
+    const authors = document.querySelector<HTMLInputElement>("#settings-reviews-authors");
+    expect(authors).not.toBeNull();
+    authors!.value = " colleague, @other ,, ";
+    change(authors!);
+
+    const config = await saved(calls);
+    expect(config.reviews?.authors).toEqual(["colleague", "other"]);
+  });
+
+  it("commits the interval, required text and toggles on change", async () => {
+    const calls = withReviewsDom();
+    await openSettings();
+    const interval = document.querySelector<HTMLInputElement>("#settings-reviews-interval")!;
+    interval.value = "90";
+    change(interval);
+    const require = document.querySelector<HTMLInputElement>("#settings-reviews-require")!;
+    require.value = "@jarvis";
+    change(require);
+    const bots = document.querySelector<HTMLInputElement>("#settings-reviews-ignore-bots")!;
+    bots.checked = false;
+    change(bots);
+    const push = document.querySelector<HTMLInputElement>("#settings-reviews-push")!;
+    push.checked = false;
+    change(push);
+
+    const config = await saved(calls);
+    expect(config.reviews?.intervalSeconds).toBe(90);
+    expect(config.reviews?.requireText).toBe("@jarvis");
+    expect(config.reviews?.ignoreBots).toBe(false);
+    expect(config.reviews?.notify).toEqual({ comment: false, queued: false, requested: false });
+  });
+
+  it("lists repos it has seen and saves a toggled-off one as false", async () => {
+    const calls = withReviewsDom();
+    await openSettings();
+    await flush();
+    const boxes = [
+      ...document.querySelectorAll<HTMLInputElement>("#settings-reviews input[data-repo]"),
+    ];
+    expect(boxes.map((box) => box.dataset["repo"])).toEqual(["me/empty", "me/jarvis", "me/rafiq"]);
+    boxes[0]!.checked = false;
+    change(boxes[0]!);
+
+    const config = await saved(calls);
+    expect(config.reviews?.repos).toEqual({ "me/empty": false });
+  });
+
+  it("shows the gh state, and Check again polls before re-reading it", async () => {
+    const calls = withReviewsDom();
+    await openSettings();
+    await flush();
+    expect(document.getElementById("settings-reviews-gh")?.textContent).toBe("gh not signed in");
+
+    document.getElementById("settings-reviews-check")?.click();
+    await flush();
+    const order = calls.map((entry) => entry.call).filter((c) => c.startsWith("reviews"));
+    expect(order.slice(-2)).toEqual(["reviewsPollNow", "reviewsStatus"]);
+  });
+
+  it("Run gh auth login opens a Terminal tab with the command typed but not run", async () => {
+    const calls = withReviewsDom();
+    await openSettings();
+    document.getElementById("settings-reviews-login")?.click();
+    await flush();
+
+    expect(calls.find((entry) => entry.call === "openTerminal")?.args).toEqual(["acme"]);
+    expect(calls.find((entry) => entry.call === "sendTerminalInput")?.args).toEqual([
+      "tab-9",
+      "gh auth login",
+    ]);
+  });
+});
+
+describe("keep awake section", () => {
+  function withAwakeDom(platform = "darwin"): Recorded[] {
+    const { calls } = harness();
+    document.body.insertAdjacentHTML(
+      "beforeend",
+      `<div id="settings-awake-title"></div><div id="settings-awake"></div>`,
+    );
+    const jarvis = (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
+    jarvis["platform"] = platform;
+    initSettings();
+    return calls;
+  }
+
+  async function saved(calls: Recorded[]): Promise<JarvisConfig> {
+    document.getElementById("settings-save")?.click();
+    await Promise.resolve();
+    return savedConfig(calls.find((entry) => entry.call === "saveSettings"));
+  }
+
+  it("draws the mode, the fallback switch and the idle seconds from the draft", async () => {
+    withAwakeDom();
+    await openSettings();
+    expect(document.getElementById("settings-awake-title")?.textContent).toBe(
+      MESSAGES.awakeSettingsTitle(PRIMARY_LANGUAGE),
+    );
+    const mode = document.querySelector<HTMLSelectElement>("#settings-awake-mode")!;
+    expect(mode.value).toBe("off");
+    expect([...mode.options].map((o) => o.textContent)).toEqual([
+      MESSAGES.awakeModeName("off", PRIMARY_LANGUAGE),
+      MESSAGES.awakeModeName("on", PRIMARY_LANGUAGE),
+      MESSAGES.awakeModeName("agents", PRIMARY_LANGUAGE),
+    ]);
+    expect(document.querySelector<HTMLInputElement>("#settings-awake-simulate")!.checked).toBe(
+      false,
+    );
+    expect(document.querySelector<HTMLInputElement>("#settings-awake-idle")!.value).toBe("240");
+  });
+
+  it("saves the mode, the fallback and a clamped idle threshold", async () => {
+    const calls = withAwakeDom();
+    await openSettings();
+    const mode = document.querySelector<HTMLSelectElement>("#settings-awake-mode")!;
+    mode.value = "agents";
+    change(mode);
+    const simulate = document.querySelector<HTMLInputElement>("#settings-awake-simulate")!;
+    simulate.checked = true;
+    change(simulate);
+    const idle = document.querySelector<HTMLInputElement>("#settings-awake-idle")!;
+    idle.value = "5";
+    change(idle);
+    expect(idle.value).toBe("60");
+
+    const config = await saved(calls);
+    expect(config.awake).toEqual({ mode: "agents", simulateInput: true, idleSeconds: 60 });
+  });
+
+  it("follows a mode flipped elsewhere into an untouched field, so Save keeps it", async () => {
+    const calls = withAwakeDom();
+    document.body.insertAdjacentHTML("beforeend", `<button id="awake-button"></button>`);
+    let push: ((status: unknown) => void) | undefined;
+    const off = {
+      mode: "off",
+      active: false,
+      reason: "off",
+      simulateInput: false,
+      inputState: "idle",
+    } as const;
+    await initKeepAwake({
+      awakeStatus: async () => off,
+      setAwake: async () => off,
+      onAwakeChanged: (cb) => {
+        push = cb as (status: unknown) => void;
+      },
+    });
+    await openSettings();
+    const idle = document.querySelector<HTMLInputElement>("#settings-awake-idle")!;
+    idle.value = "300";
+    change(idle);
+    push?.({ ...off, mode: "on", active: true, reason: "on" });
+    expect(document.querySelector<HTMLSelectElement>("#settings-awake-mode")!.value).toBe("on");
+    expect(document.getElementById("settings-awake-status")?.textContent).toBe(
+      MESSAGES.awakeSettingsStatus(
+        { ...off, mode: "on", active: true, reason: "on" },
+        PRIMARY_LANGUAGE,
+      ),
+    );
+
+    const config = await saved(calls);
+    expect(config.awake).toEqual({ mode: "on", simulateInput: false, idleSeconds: 300 });
+  });
+
+  it("a pushed mode change keeps an idle-seconds edit still being typed", async () => {
+    withAwakeDom();
+    document.body.insertAdjacentHTML("beforeend", `<button id="awake-button"></button>`);
+    let push: ((status: unknown) => void) | undefined;
+    const off = {
+      mode: "off",
+      active: false,
+      reason: "off",
+      simulateInput: false,
+      inputState: "idle",
+    } as const;
+    await initKeepAwake({
+      awakeStatus: async () => off,
+      setAwake: async () => off,
+      onAwakeChanged: (cb) => {
+        push = cb as (status: unknown) => void;
+      },
+    });
+    await openSettings();
+    const idle = document.querySelector<HTMLInputElement>("#settings-awake-idle")!;
+    idle.value = "777"; // typed, not yet committed
+    push?.({ ...off, mode: "on", active: true, reason: "on", simulateInput: true });
+    expect(document.querySelector("#settings-awake-idle")).toBe(idle);
+    expect(idle.value).toBe("777");
+    expect(document.querySelector<HTMLSelectElement>("#settings-awake-mode")!.value).toBe("on");
+    expect(document.querySelector<HTMLInputElement>("#settings-awake-simulate")!.checked).toBe(
+      true,
+    );
+  });
+
+  it("the simulate switch clears the save status, like every other field", async () => {
+    withAwakeDom();
+    await openSettings();
+    document.getElementById("settings-status")!.textContent = "Saved.";
+    const simulate = document.querySelector<HTMLInputElement>("#settings-awake-simulate")!;
+    simulate.checked = true;
+    change(simulate);
+    expect(document.getElementById("settings-status")?.textContent).toBe("");
+  });
+
+  it("disables the fallback off macOS and says so", async () => {
+    withAwakeDom("win32");
+    await openSettings();
+    expect(document.querySelector<HTMLInputElement>("#settings-awake-simulate")!.disabled).toBe(
+      true,
+    );
+    expect(document.getElementById("settings-awake")?.textContent).toContain(
+      MESSAGES.awakeSettingsMacOnly(PRIMARY_LANGUAGE),
+    );
   });
 });

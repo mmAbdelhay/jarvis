@@ -207,6 +207,15 @@ describe("createShellManager", () => {
     expect(instance.snapshot("tab-1")).toEqual({ text: "", end: 0, cols: 120, rows: 40 });
   });
 
+  it("reports the last resize's size alone, without joining the log", () => {
+    const { instance } = manager();
+    instance.start("tab-1", "/p/a");
+    expect(instance.termSize("tab-1")).toBeUndefined();
+    instance.resize("tab-1", 120, 40);
+    expect(instance.termSize("tab-1")).toEqual({ cols: 120, rows: 40 });
+    expect(instance.termSize("nope")).toBeUndefined();
+  });
+
   it("ignores a write, resize or kill for a tab with no shell", () => {
     const { instance } = manager();
 

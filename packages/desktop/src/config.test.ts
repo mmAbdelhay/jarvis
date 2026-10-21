@@ -7,6 +7,7 @@ import { parse } from "yaml";
 import { afterEach, describe, expect, it } from "vitest";
 import { homedir } from "node:os";
 import {
+  DEFAULT_AWAKE,
   DEFAULT_BROWSER,
   DEFAULT_DAEMON,
   DEFAULT_PERFORMANCE,
@@ -21,8 +22,11 @@ import {
   mergeConfigInPlace,
   providerAgentListsEqual,
   parseConfig,
+  parseAwake,
   parseDaemon,
+  parseReviews,
 } from "./config.js";
+import { DEFAULT_REVIEWS_CONFIG } from "@jarvis/core";
 
 const valid = {
   agents: { "claude-main": { command: "claude-main", model: "opus", default: true } },
@@ -1627,5 +1631,109 @@ describe("daemon", () => {
 
   it("returns a fresh object, never the shared default", () => {
     expect(parseDaemon(undefined)).not.toBe(DEFAULT_DAEMON);
+  });
+});
+
+// Reviews (spec §5 config): every key optional, defaults from core.
+describe("reviews", () => {
+  const base = { agents: { claude: { command: "claude" } }, brain: { cwd: "/tmp/brain" } };
+
+  it("parses a missing, null or empty section to the defaults", () => {
+    expect(parseConfig(base).reviews).toEqual(DEFAULT_REVIEWS_CONFIG);
+    expect(parseConfig({ ...base, reviews: null }).reviews).toEqual(DEFAULT_REVIEWS_CONFIG);
+    expect(parseConfig({ ...base, reviews: {} }).reviews).toEqual(DEFAULT_REVIEWS_CONFIG);
+  });
+
+  it("returns a fresh object, never the shared default", () => {
+    const parsed = parseReviews(undefined);
+    expect(parsed).not.toBe(DEFAULT_REVIEWS_CONFIG);
+    expect(parsed.notify).not.toBe(DEFAULT_REVIEWS_CONFIG.notify);
+    expect(parsed.repos).not.toBe(DEFAULT_REVIEWS_CONFIG.repos);
+  });
+
+  it("reads every key and keeps defaults for the rest", () => {
+    const parsed = parseReviews({
+      intervalSeconds: 15,
+      repos: { "acme/app": true, "acme/old": false },
+      authors: ["alice"],
+      requireText: "@jarvis",
+      notify: { queued: false },
+    });
+    expect(parsed).toEqual({
+      ...DEFAULT_REVIEWS_CONFIG,
+      intervalSeconds: 15,
+      repos: { "acme/app": true, "acme/old": false },
+      authors: ["alice"],
+      requireText: "@jarvis",
+      notify: { comment: true, queued: false, requested: true },
+    });
+  });
+
+  it.each([
+    ["on", "Config `reviews` must be an object"],
+    [{ enabled: "yes" }, "Config `reviews.enabled` must be true or false"],
+    [
+      { intervalSeconds: 14 },
+      "Config `reviews.intervalSeconds` must be a whole number from 15 to 86400",
+    ],
+    [
+      { intervalSeconds: 30.5 },
+      "Config `reviews.intervalSeconds` must be a whole number from 15 to 86400",
+    ],
+    [{ batchSeconds: -1 }, "Config `reviews.batchSeconds` must be a whole number from 0 to 3600"],
+    [{ repos: ["acme/app"] }, "Config `reviews.repos` must be an object"],
+    [{ repos: { "acme/app": "yes" } }, "Config `reviews.repos.acme/app` must be true or false"],
+    [{ repos: { "not a repo": true } }, "Config `reviews.repos` keys must look like owner/name"],
+    [{ authors: "alice" }, "Config `reviews.authors` must be an array of strings"],
+    [{ requireText: 3 }, "Config `reviews.requireText` must be a string"],
+    [{ notify: { comment: 1 } }, "Config `reviews.notify.comment` must be true or false"],
+  ])("refuses %j", (reviews, message) => {
+    expect(() => parseConfig({ ...base, reviews })).toThrow(message);
+  });
+});
+
+// Keep awake (Task 18): off by default; idleSeconds clamped, never refused
+// for being out of range; a wrong type is refused like every other section.
+describe("awake", () => {
+  const base = { agents: { claude: { command: "claude" } }, brain: { cwd: "/tmp/brain" } };
+
+  it("parses a missing, null or empty section to the defaults", () => {
+    expect(DEFAULT_AWAKE).toEqual({ mode: "off", simulateInput: false, idleSeconds: 240 });
+    expect(parseConfig(base).awake).toEqual(DEFAULT_AWAKE);
+    expect(parseConfig({ ...base, awake: null }).awake).toEqual(DEFAULT_AWAKE);
+    expect(parseConfig({ ...base, awake: {} }).awake).toEqual(DEFAULT_AWAKE);
+  });
+
+  it("returns a fresh object, never the shared default", () => {
+    expect(parseAwake(undefined)).not.toBe(DEFAULT_AWAKE);
+  });
+
+  it("reads every key", () => {
+    expect(parseAwake({ mode: "agents", simulateInput: true, idleSeconds: 300 })).toEqual({
+      mode: "agents",
+      simulateInput: true,
+      idleSeconds: 300,
+    });
+    expect(parseAwake({ mode: "on" })).toEqual({ ...DEFAULT_AWAKE, mode: "on" });
+  });
+
+  it.each([
+    [10, 60],
+    [59.4, 60],
+    [99_999, 3600],
+    [120.6, 121],
+  ])("clamps idleSeconds %d to %d", (idleSeconds, expected) => {
+    expect(parseAwake({ idleSeconds }).idleSeconds).toBe(expected);
+  });
+
+  it.each([
+    ["yes", "Config `awake` must be an object"],
+    [[], "Config `awake` must be an object"],
+    [{ mode: "always" }, "Config `awake.mode` must be off, on or agents"],
+    [{ simulateInput: "yes" }, "Config `awake.simulateInput` must be true or false"],
+    [{ idleSeconds: "240" }, "Config `awake.idleSeconds` must be a number"],
+    [{ idleSeconds: Number.NaN }, "Config `awake.idleSeconds` must be a number"],
+  ])("refuses %j", (awake, message) => {
+    expect(() => parseConfig({ ...base, awake })).toThrow(message);
   });
 });

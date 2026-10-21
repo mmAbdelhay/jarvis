@@ -18,6 +18,9 @@ export type PlansState = {
 export type PlanErrorCode =
   | "loadFailed"
   | "sendFailed"
+  | "busy"
+  | "approval"
+  | "noAgent"
   | "saveFailed"
   | "conflict"
   | "tooLarge"
@@ -73,6 +76,9 @@ function rpcError(result: RpcResult, code: PlanErrorCode): PlanError {
 
 function reasonError(reason: string, fallback: PlanErrorCode, detail?: string): PlanError {
   const codes: Record<string, PlanErrorCode> = {
+    busy: "busy",
+    approval: "approval",
+    "no-agent": "noAgent",
     conflict: "conflict",
     "too-large": "tooLarge",
     tooLarge: "tooLarge",

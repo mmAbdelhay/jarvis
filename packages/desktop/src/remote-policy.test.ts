@@ -53,6 +53,8 @@ describe("remote policy", () => {
     "history:edit",
     // Task 8: runs shell.openExternal on the laptop.
     "plans:openLink",
+    // Reviews: opens the laptop's own browser.
+    "reviews:openOnGithub",
   ])("denies %s remotely", (channel) => {
     expect(CHANNEL_POLICY[channel as keyof typeof CHANNEL_POLICY]).toBe("desktop-only");
     expect(isRemoteAllowed(channel)).toBe(false);
@@ -189,6 +191,44 @@ describe("REMOTE_EFFECT", () => {
   it("classifies terminal:open as a mutation, always audited", () => {
     expect(REMOTE_EFFECT["terminal:open"]).toBe("mutate");
     expect(auditPolicyFor("terminal:open", () => false)).toBe("always");
+  });
+});
+
+describe("reviews:* policy", () => {
+  it.each(["reviews:status", "reviews:list", "reviews:thread"])(
+    "allows %s remotely as a read",
+    (channel) => {
+      expect(isRemoteAllowed(channel)).toBe(true);
+      expect(REMOTE_EFFECT[channel as keyof typeof REMOTE_EFFECT]).toBe("read");
+    },
+  );
+
+  it.each([
+    "reviews:reply",
+    "reviews:link",
+    "reviews:pause",
+    "reviews:deliverNow",
+    "reviews:sendReview",
+    "reviews:postSummary",
+    "reviews:pollNow",
+    "reviews:requeue",
+  ])("allows %s remotely and audits it as a mutation", (channel) => {
+    expect(isRemoteAllowed(channel)).toBe(true);
+    expect(REMOTE_EFFECT[channel as keyof typeof REMOTE_EFFECT]).toBe("mutate");
+    expect(auditPolicyFor(channel, () => false)).toBe("always");
+  });
+});
+
+describe("awake:* policy", () => {
+  it("lets a phone read the keep-awake status", () => {
+    expect(isRemoteAllowed("awake:status")).toBe(true);
+    expect(REMOTE_EFFECT["awake:status"]).toBe("read");
+  });
+
+  it("lets a phone flip it, audited as a mutation", () => {
+    expect(isRemoteAllowed("awake:set")).toBe(true);
+    expect(REMOTE_EFFECT["awake:set"]).toBe("mutate");
+    expect(auditPolicyFor("awake:set", () => false)).toBe("always");
   });
 });
 

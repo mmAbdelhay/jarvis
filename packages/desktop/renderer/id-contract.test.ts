@@ -40,6 +40,11 @@ const daemonSettingsSource = readFileSync(
   fileURLToPath(new URL("./daemon-settings.ts", import.meta.url)),
   "utf8",
 );
+// reviews-view.ts's `$()` throws, same contract as app.ts/changes.ts.
+const reviewsViewSource = readFileSync(
+  fileURLToPath(new URL("./reviews-view.ts", import.meta.url)),
+  "utf8",
+);
 const htmlSource = readFileSync(fileURLToPath(new URL("./index.html", import.meta.url)), "utf8");
 
 function idsPassedTo$(source: string): string[] {
@@ -61,6 +66,7 @@ describe("$() id contract", () => {
     ...idsPassedTo$(settingsSource),
     ...idsPassedTo$(remoteStatusSource),
     ...idsPassedTo$(daemonSettingsSource),
+    ...idsPassedTo$(reviewsViewSource),
   ];
 
   it("finds at least one $() call across the renderer modules (sanity check the extraction itself works)", () => {

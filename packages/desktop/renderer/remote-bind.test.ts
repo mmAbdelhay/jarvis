@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { BindChoice } from "@jarvis/remote";
-import { primaryBindChoices } from "./remote-bind.js";
+import { primaryBindChoices, proposedBindAddress } from "./remote-bind.js";
 
 function choice(address: string, iface: string, kind: BindChoice["kind"]): BindChoice {
   return { address, iface, kind };
@@ -77,5 +77,38 @@ describe("primaryBindChoices", () => {
   it("returns every choice in rest when neither primary is available", () => {
     const choices = [choice("127.0.0.1", "lo0", "loopback"), choice("8.8.8.8", "eth0", "other")];
     expect(primaryBindChoices(choices).rest).toEqual(choices);
+  });
+});
+
+describe("proposedBindAddress", () => {
+  const choices = [
+    choice("127.0.0.1", "lo0", "loopback"),
+    choice("192.168.1.5", "en0", "lan"),
+    choice("100.84.17.203", "utun4", "mesh"),
+  ];
+
+  it("proposes the tailscale address on a first-time setup", () => {
+    const saved = { enabled: false, bindAddress: "127.0.0.1" };
+    expect(proposedBindAddress(saved, "127.0.0.1", choices)).toBe("100.84.17.203");
+  });
+
+  it("proposes wifi on a first-time setup when there is no tailscale address", () => {
+    const saved = { enabled: false, bindAddress: "127.0.0.1" };
+    expect(proposedBindAddress(saved, "127.0.0.1", choices.slice(0, 2))).toBe("192.168.1.5");
+  });
+
+  it("keeps loopback once remote access is on", () => {
+    const saved = { enabled: true, bindAddress: "127.0.0.1" };
+    expect(proposedBindAddress(saved, "127.0.0.1", choices)).toBeUndefined();
+  });
+
+  it("keeps any address other than the default", () => {
+    const saved = { enabled: false, bindAddress: "192.168.1.5" };
+    expect(proposedBindAddress(saved, "127.0.0.1", choices)).toBeUndefined();
+  });
+
+  it("proposes nothing when no tailscale or wifi address exists", () => {
+    const saved = { enabled: false, bindAddress: "127.0.0.1" };
+    expect(proposedBindAddress(saved, "127.0.0.1", choices.slice(0, 1))).toBeUndefined();
   });
 });

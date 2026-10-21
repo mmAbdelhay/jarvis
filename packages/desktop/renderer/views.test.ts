@@ -8,11 +8,13 @@ function layout(): void {
   document.body.innerHTML = `
     <button id="nav-dashboard"></button>
     <button id="nav-changes"></button>
+    <button id="nav-reviews"></button>
     <button id="nav-session"></button>
     <button id="nav-workspace"></button>
     <button id="nav-settings"></button>
     <div id="view-dashboard"></div>
     <div id="view-changes" hidden></div>
+    <div id="view-reviews" hidden></div>
     <div id="view-session" hidden></div>
     <div id="view-workspace" hidden></div>
     <div id="view-settings" hidden></div>`;
@@ -69,6 +71,20 @@ describe("showView", () => {
 
     expect(document.getElementById("nav-workspace")?.classList.contains("nav-btn--on")).toBe(true);
     expect(document.getElementById("nav-dashboard")?.classList.contains("nav-btn--on")).toBe(false);
+  });
+
+  it("shows the Reviews page and hides every other route", () => {
+    const calls = stubBridge();
+    showView("workspace");
+
+    showView("reviews");
+
+    expect(document.getElementById("view-reviews")?.hasAttribute("hidden")).toBe(false);
+    expect(document.getElementById("view-changes")?.hasAttribute("hidden")).toBe(true);
+    expect(document.getElementById("view-workspace")?.hasAttribute("hidden")).toBe(true);
+    expect(document.getElementById("nav-reviews")?.classList.contains("nav-btn--on")).toBe(true);
+    expect(currentView()).toBe("reviews");
+    expect(calls.at(-1)).toBe(false);
   });
 
   it("reports the current view", () => {

@@ -710,6 +710,12 @@
     animation: dash-spin 0.8s linear infinite;
   }
 
+  /* Keep awake (Task 18): muted while off, amber while waiting for an
+     agent, green while it holds the screen and machine awake. */
+  .awake-btn { color: var(--text-muted); margin-inline-start: 14px; }
+  .awake-btn.icon-btn--armed { color: var(--warn); }
+  .awake-btn.icon-btn--on { color: var(--good); border-color: var(--good); }
+
   /* Providers panel: the approved artboard (design/Main.dc.html) has three
      panels and none is this one. It is a third panel in the LEFT column
      rather than a History-style overlay because the user's question — "which
@@ -2238,6 +2244,91 @@
     border-left: 1px solid var(--border); }
   .plan-panel-handle:hover { background: var(--border); }
   .plan-panel-handle[hidden] { display: none; }
+
+  /* Reviews dock (Task 12) ------------------------------------------------
+     The Terminal tab's Reviews dock, right of the plan panel, with the same
+     handle discipline; its toggle sits left of the plan toggle; the PR link
+     chip and its menu live in the linked pane's chip row; the PR badge on
+     the tab; and the Settings section's own few rules. Comment state is a
+     left border: delivered good, queued warn, history/own quiet. */
+  .reviews-dock-handle { flex: 0 0 5px; cursor: col-resize; background: var(--ground);
+    border-left: 1px solid var(--border); }
+  .reviews-dock-handle:hover { background: var(--border); }
+  .reviews-dock-handle[hidden] { display: none; }
+  .reviews-dock { position: relative; width: 360px; min-width: 280px; max-width: 60%;
+    height: 100%; box-sizing: border-box; display: flex; flex-direction: column; gap: var(--s3);
+    padding: var(--s3); overflow-y: auto; background: var(--surface); color: var(--text);
+    border-inline-start: 1px solid var(--border); }
+  .reviews-dock[hidden] { display: none; }
+  .reviews-dock__header { display: flex; align-items: center; gap: var(--s2); }
+  .reviews-dock__title { margin: 0; font: 600 12px/1.4 var(--font-ui); letter-spacing: 0.06em;
+    color: var(--text-secondary); }
+  .reviews-dock__spacer { flex: 1 1 0; }
+  .reviews-dock__open { border: 0; padding: 0; background: transparent; color: var(--accent-text);
+    font: 13px/1.4 var(--font-ui); cursor: pointer; }
+  .reviews-dock__open:hover { text-decoration: underline; }
+  .reviews-dock__close { border: 0; padding: 0 var(--s1); background: transparent;
+    color: var(--text-muted); font: 16px/1 var(--font-ui); cursor: pointer; }
+  .reviews-dock__close:hover { color: var(--text); }
+  .reviews-dock__wait { padding: var(--s2) var(--s3); border-radius: 6px; background: var(--warn-quiet);
+    color: var(--warn); font: 12px/1.5 var(--font-ui); }
+  .reviews-dock__list { display: flex; flex-direction: column; gap: var(--s3); }
+  .reviews-dock__comment { display: flex; flex-direction: column; gap: var(--s1);
+    padding-inline-start: var(--s3); border-inline-start: 2px solid var(--border); }
+  .reviews-dock__comment--delivered { border-inline-start-color: var(--good); }
+  .reviews-dock__comment--queued { border-inline-start-color: var(--warn); }
+  .reviews-dock__meta { display: flex; gap: var(--s2); font: 12px/1.4 var(--font-mono); }
+  .reviews-dock__path { color: var(--accent-text); }
+  .reviews-dock__state { color: var(--text-secondary); }
+  .reviews-dock__comment--queued .reviews-dock__state { color: var(--warn); }
+  .reviews-dock__body { margin: 0; font: 13px/1.5 var(--font-ui); color: var(--text-secondary);
+    white-space: pre-wrap; overflow-wrap: anywhere; }
+  .reviews-dock__deliver { align-self: flex-start; height: 26px; padding: 0 var(--s3);
+    border: 1px solid var(--border); border-radius: 6px; background: transparent;
+    color: var(--accent-text); font: 12px/1 var(--font-ui); cursor: pointer; }
+  .reviews-dock__deliver:hover { border-color: var(--accent); }
+  .reviews-dock__empty, .reviews-dock__none { color: var(--text-muted); font: 13px/1.5 var(--font-ui); }
+  .reviews-dock__empty p { margin: 0 0 var(--s2); }
+  .reviews-toggle { position: absolute; inset-block-start: 6px; inset-inline-end: 40px; z-index: 5;
+    height: 24px; min-width: 24px; display: flex; align-items: center; gap: 4px;
+    padding: 0 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel);
+    color: var(--text-muted); font: 11px/1 var(--font-mono); cursor: pointer; opacity: 0.7; }
+  .reviews-toggle:hover { opacity: 1; color: var(--text); border-color: var(--accent); }
+  .reviews-toggle:focus-visible { opacity: 1; outline: 1px solid var(--accent); }
+  .reviews-toggle[aria-pressed="true"] { opacity: 1; color: var(--accent-text); border-color: var(--accent); }
+  .reviews-toggle--linked { opacity: 1; }
+  .reviews-toggle__count { padding: 0 5px; border-radius: 8px; background: var(--warn-quiet);
+    color: var(--warn); font-size: 10px; line-height: 14px; }
+  .reviews-toggle__count[hidden] { display: none; }
+  .reviews-chip-wrap { position: relative; display: inline-flex; }
+  .reviews-chip-wrap[hidden] { display: none; }
+  .reviews-chip { background: transparent; border-color: var(--accent); color: var(--accent-text);
+    font: inherit; cursor: pointer; }
+  .reviews-chip--paused { border-color: var(--border); color: var(--text-muted); }
+  .reviews-chip__menu { position: absolute; inset-block-end: calc(100% + 6px); inset-inline-start: 0;
+    z-index: 20; width: 260px; padding: 4px; display: flex; flex-direction: column;
+    border: 1px solid var(--border); border-radius: 8px; background: var(--surface-raised);
+    font: 13px/1.4 var(--font-ui); }
+  .reviews-chip__menu[hidden] { display: none; }
+  .reviews-chip__how { padding: var(--s2) 10px; font-size: 12px; color: var(--text-secondary); }
+  .reviews-chip__item { min-height: 32px; padding: 0 10px; border: 0; border-radius: 6px;
+    background: transparent; color: var(--text); font: inherit; text-align: start; cursor: pointer;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .reviews-chip__item:hover, .reviews-chip__item:focus-visible { background: var(--selected); }
+  .reviews-chip__item--danger { color: var(--bad); }
+  .workspace-tab-pr { padding: 0 6px; border: 1px solid var(--accent); border-radius: 5px;
+    color: var(--accent-text); font: 10px/1.5 var(--font-mono); white-space: nowrap; }
+  .settings-reviews-gh, .settings-reviews-inline { display: inline-flex; flex-wrap: wrap;
+    align-items: center; gap: var(--s3); }
+  .settings-reviews-gh-state { font-family: var(--font-mono); font-size: 13px; }
+  .settings-reviews-gh-state--ok { color: var(--good); }
+  .settings-reviews-gh-state--logged-out, .settings-reviews-gh-state--no-gh { color: var(--warn); }
+  .settings-reviews-repos { display: flex; flex-direction: column; gap: var(--s2); }
+  .settings-reviews-repo { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+  .settings-reviews-repo input { accent-color: var(--accent); }
+  .settings-awake-status { font-size: 13px; color: var(--text-secondary); }
+  .settings-awake-status--warn { color: var(--warn); }
+  /* end Reviews dock ------------------------------------------------------ */
 
   /* One terminal as the user sees it: frozen blocks stacked above a live
      xterm. data-state is set by terminal-pane.ts and is the only thing that
@@ -4588,6 +4679,30 @@
 #header-prayer[data-prayer-state="now"] .prayer-ring-fill,
 #header-prayer[data-prayer-state="now"] .prayer-label { color: var(--good); stroke: var(--good); }
 .clock { margin-inline-start: 22px; padding-inline-start: 22px; border-inline-start: 1px solid var(--border); font-size: 13px; color: var(--text); }
+.clock-date { color: var(--text-muted); }
+/* hover-tip.ts: fixed on <body>, under the control it describes. */
+.hover-tip {
+  position: fixed;
+  z-index: 10000;
+  padding: 5px 9px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface-alt);
+  color: var(--text);
+  font-size: 11px;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+}
+/* The battery chip sits before the clock's divider; muted while fine,
+   coloured once it matters. */
+.battery-chip { display: inline-flex; align-items: center; gap: 6px; margin-inline-start: 22px; font-size: 12px; color: var(--text-muted); }
+.battery-chip[hidden] { display: none; }
+.battery-chip .battery-bolt { display: none; }
+.battery-chip[data-battery-state="charging"] { color: var(--good); }
+.battery-chip[data-battery-state="charging"] .battery-bolt { display: inline; }
+.battery-chip[data-battery-state="low"] { color: var(--warn); }
+.battery-chip[data-battery-state="critical"] { color: var(--bad); }
 #history-button { margin-inline-start: 12px; width: 32px; height: 32px; border: 0; background: transparent; }
 
 /* The dashboard is one column of four rows now (SYSTEM/core stage/PROVIDERS,
@@ -5322,3 +5437,97 @@
 .api-find-step { padding: 2px 8px; }
 .api-match { background: var(--accent-quiet); color: var(--text); border-radius: 2px; }
 .api-match--current { background: var(--accent); color: var(--ground); }
+
+/* Reviews page (reviews-view.ts, Task 11) — board "Desktop · Reviews".
+   Same [hidden] discipline as every other .main route: no display in the
+   base rule (view-display-css.test.ts). Thread borders: queued amber,
+   delivered green, own blue. */
+.main--reviews { flex-direction: column; padding: 0; gap: 0; overflow: auto; min-height: 0; }
+.main--reviews:not([hidden]) { display: flex; }
+.nav-count { margin-inline-start: 8px; padding: 1px 6px; border-radius: 9px; background: var(--warn-quiet); color: var(--warn); font-size: 11px; font-weight: 500; }
+.nav-count[hidden] { display: none; }
+.reviews-title { padding: var(--s4) 20px; border-bottom: 1px solid var(--hairline); font-size: 17px; font-weight: 700; }
+.reviews-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.reviews-filter { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s3); margin: var(--s4) 20px 0; padding: 14px var(--s3); background: var(--surface-dim); border-radius: 10px; }
+.reviews-input { flex: 0 1 360px; height: 36px; padding: 0 var(--s3); border-radius: 8px; border: 1px solid var(--hairline); background: var(--surface-alt); color: var(--text); font: inherit; font-size: 14px; }
+.reviews-select { height: 36px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-alt); color: var(--text); font: inherit; font-size: 14px; }
+.reviews-spacer { flex: 1 1 0; }
+.reviews-listening { font-size: 12px; color: var(--text-secondary); }
+.reviews-icon-btn { width: 36px; height: 36px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-alt); color: var(--text-secondary); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+.reviews-icon-btn:hover { color: var(--text); }
+.reviews-errors { margin: var(--s2) 20px 0; font-size: 12px; color: var(--bad); }
+.reviews-errors[hidden] { display: none; }
+.reviews-setup { margin: var(--s4) 20px 20px; padding: 20px; border: 1px solid var(--hairline); border-radius: 10px; display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
+.reviews-setup[hidden] { display: none; }
+.reviews-setup-title { display: flex; align-items: center; gap: var(--s2); font-size: 15px; font-weight: 700; }
+.reviews-setup-hint { font-size: 13px; color: var(--accent-text); }
+.reviews-setup-note { font-size: 13px; color: var(--text-secondary); }
+.reviews-board { display: flex; flex-wrap: wrap; flex: 1 1 auto; margin: var(--s4) 20px 20px; border: 1px solid var(--hairline); border-radius: 10px; overflow: hidden; min-height: 0; }
+.reviews-board[hidden] { display: none; }
+.reviews-list { flex: 1 1 420px; max-width: 520px; min-width: 0; border-inline-end: 1px solid var(--hairline); overflow: auto; }
+.reviews-grid { display: grid; grid-template-columns: minmax(0, 1fr) 128px 64px; gap: var(--s3); }
+.reviews-head { padding: var(--s3) 14px; border-bottom: 1px solid var(--hairline); font-size: 12px; font-weight: 600; letter-spacing: .06em; color: var(--text-secondary); }
+.reviews-row { width: 100%; padding: 14px; border: 0; border-bottom: 1px solid var(--hairline-soft); background: transparent; color: inherit; font: inherit; text-align: start; cursor: pointer; }
+.reviews-row:hover { background: var(--surface); }
+.reviews-row--on { background: var(--surface-alt); box-shadow: inset 2px 0 0 var(--accent); }
+.reviews-row-main { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.reviews-row-title { font-size: 14px; color: var(--text); overflow-wrap: anywhere; }
+.reviews-num { color: var(--accent-text); margin-inline-end: 6px; }
+.reviews-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.reviews-repo { padding: 1px 7px; border-radius: 6px; background: var(--selected); font-size: 11px; color: var(--text); }
+.reviews-chip { padding: 0 7px; border-radius: 6px; border: 1px solid var(--text-faint); font-family: var(--font-mono); font-size: 11px; color: var(--text-secondary); }
+.reviews-chip--linked { border-color: var(--accent); color: var(--accent-text); }
+.reviews-chip--ambiguous { border-color: var(--warn); color: var(--warn); }
+.reviews-state { display: flex; align-items: center; gap: 6px; align-self: start; font-size: 12px; }
+.reviews-wait { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
+.reviews-state--queued { color: var(--warn); }
+.reviews-state--waiting { color: var(--bad); }
+.reviews-state--delivered { color: var(--good); }
+.reviews-state--review { color: var(--accent-text); }
+.reviews-state--none { color: var(--text-dim); }
+.reviews-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--text-faint); }
+.reviews-dot--queued { background: var(--warn); }
+.reviews-dot--waiting { background: var(--bad); }
+.reviews-dot--delivered { background: var(--good); }
+.reviews-dot--review { background: var(--accent); }
+.reviews-last { font-size: 12px; color: var(--text-secondary); }
+.reviews-empty { padding: 20px 14px; color: var(--text-muted); font-size: 13px; }
+.reviews-thread { flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; }
+.reviews-thread-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: var(--s3) var(--s4); border-bottom: 1px solid var(--hairline); }
+.reviews-thread-title { font-size: 15px; font-weight: 700; overflow-wrap: anywhere; }
+.reviews-thread-title .reviews-num { font-weight: 500; }
+.reviews-muted { font-size: 12px; color: var(--text-secondary); }
+.reviews-linkbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px var(--s4); border-bottom: 1px solid var(--hairline); background: var(--surface-dim); font-size: 13px; }
+.reviews-linkbar .reviews-chip { padding: 1px 8px; font-size: 12px; }
+.reviews-pickrow { flex: 1 0 100%; display: flex; align-items: center; gap: 10px; }
+.reviews-picker { height: 30px; font-size: 13px; }
+.reviews-btn { height: 32px; padding: 0 var(--s3); border-radius: 8px; border: 1px solid var(--border); background: var(--surface-alt); color: var(--text); font: inherit; font-size: 13px; cursor: pointer; }
+.reviews-btn:hover { border-color: var(--accent-dim); }
+.reviews-btn--small { height: 26px; padding: 0 10px; border-radius: 7px; background: transparent; font-size: 12px; }
+.reviews-btn--accent { color: var(--accent-text); }
+.reviews-btn--primary { height: 40px; padding: 0 var(--s4); border: 0; background: var(--accent); color: var(--terminal-ground); font-size: 14px; font-weight: 600; }
+.reviews-link { border: 0; background: none; padding: 0; color: var(--accent-text); font: inherit; font-size: 13px; cursor: pointer; }
+.reviews-link:hover { color: var(--text); }
+.reviews-notice { padding: var(--s2) var(--s4); font-size: 13px; color: var(--good); border-bottom: 1px solid var(--hairline-soft); }
+.reviews-notice--bad { color: var(--warn); }
+.reviews-notice[hidden] { display: none; }
+.reviews-comments { flex: 1 1 auto; padding: var(--s4); display: flex; flex-direction: column; gap: 14px; overflow: auto; }
+.reviews-comment { padding: 2px 0 2px var(--s3); border-inline-start: 2px solid var(--text-faint); display: flex; flex-direction: column; gap: 6px; }
+.reviews-comment--queued { border-inline-start-color: var(--warn); }
+.reviews-comment--delivered { border-inline-start-color: var(--good); }
+.reviews-comment--own { border-inline-start-color: var(--accent); }
+.reviews-comment--history { border-inline-start-color: var(--text-faint); }
+.reviews-comment--reply { margin-inline-start: var(--s5); }
+.reviews-comment-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: baseline; }
+.reviews-author { font-size: 13px; color: var(--text); }
+.reviews-author--own { color: var(--accent-text); }
+.reviews-where { font-size: 12px; color: var(--text-secondary); }
+.reviews-where--path { color: var(--accent-text); }
+.reviews-hunk { margin: 0; padding: var(--s2) 10px; border-radius: 6px; background: var(--terminal-ground); font-size: 12px; line-height: 1.6; color: var(--text-secondary); white-space: pre-wrap; overflow-wrap: anywhere; }
+.reviews-hunk-add { color: var(--good); }
+.reviews-hunk-del { color: var(--bad); }
+.reviews-body { margin: 0; font-size: 14px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.reviews-composer { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: var(--s3) var(--s4); border-top: 1px solid var(--hairline); }
+.reviews-replying { flex: 1 0 100%; display: flex; gap: 10px; align-items: center; font-size: 12px; color: var(--text-secondary); }
+.reviews-reply-input { flex: 1 1 320px; height: auto; min-height: 40px; max-height: 200px; padding: var(--s2) var(--s3); line-height: 1.45; resize: vertical; }
+/* /Reviews page */

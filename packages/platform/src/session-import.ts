@@ -131,6 +131,87 @@ export function transcriptDirs(
   });
 }
 
+/**
+ * Where one Claude-format agent keeps its per-process session records
+ * (`<configDir>/sessions/<pid>.json`) and its transcripts, resolved the way
+ * transcriptDirs resolves them. Null for any other vendor or an unknown id.
+ */
+export function claudeSessionPaths(
+  agents: readonly AgentConfig[],
+  home: string,
+  agentId: string,
+): { sessionsDir: string; transcriptsDir: string } | null {
+  const entry = transcriptDirs(agents, home).find((candidate) => candidate.agentId === agentId);
+  if (entry === undefined || entry.format !== "claude") return null;
+  return { sessionsDir: join(dirname(entry.dir), "sessions"), transcriptsDir: entry.dir };
+}
+
+/** What Claude Code's `<configDir>/sessions/<pid>.json` says about the
+ *  process: the session it is in and, once it has one, that session's
+ *  current name (Claude's own topic name or one set with `/rename`). */
+export type ClaudePidRecord = { sessionId: string; name?: string };
+
+/**
+ * Parses a pid file. Null when the text is not (yet) whole JSON — Claude
+ * rewrites the file while it runs — or when it names another pid: a file
+ * left by an earlier process that held this pid is someone else's session.
+ */
+export function parseClaudePidRecord(text: string, pid: number): ClaudePidRecord | null {
+  let record: unknown;
+  try {
+    record = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (typeof record !== "object" || record === null) return null;
+  const { pid: recordPid, sessionId, name } = record as Record<string, unknown>;
+  if (recordPid !== pid || typeof sessionId !== "string") return null;
+  return typeof name === "string" && name.trim() !== ""
+    ? { sessionId, name: name.trim() }
+    : { sessionId };
+}
+
+/**
+ * The newest non-empty `/rename` title in a stretch of transcript — its
+ * `{"type":"custom-title","customTitle":…}` records. Lines that do not
+ * parse (a tail read cut mid-record, a record being written) are skipped.
+ */
+export function lastCustomTitle(text: string): string | undefined {
+  let title: string | undefined;
+  for (const line of text.split("\n")) {
+    if (!line.includes('"custom-title"')) continue;
+    try {
+      const record = JSON.parse(line) as { type?: unknown; customTitle?: unknown };
+      if (
+        record.type === "custom-title" &&
+        typeof record.customTitle === "string" &&
+        record.customTitle.trim() !== ""
+      ) {
+        title = record.customTitle.trim();
+      }
+    } catch {
+      // A fragment, not a record.
+    }
+  }
+  return title;
+}
+
+/** At most the last `maxBytes` of `path`, as text — readHead's mirror, for
+ *  records appended late in a transcript (a `/rename`). Rejects when the
+ *  file cannot be read. */
+export async function readFileTail(path: string, maxBytes: number): Promise<string> {
+  const handle = await open(path, "r");
+  try {
+    const { size } = await handle.stat();
+    const start = Math.max(0, size - maxBytes);
+    const buffer = Buffer.alloc(size - start);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, start);
+    return buffer.subarray(0, bytesRead).toString("utf8");
+  } finally {
+    await handle.close();
+  }
+}
+
 /** What one transcript says about its session. Everything else a session
  *  row needs — which agent's directory it was found under, which project
  *  its cwd resolves to — is the importer's to supply. */
@@ -641,18 +722,17 @@ export function createSessionImporter(deps: SessionImporterDeps): SessionImporte
     },
 
     async transcriptForPid(agentId, pid) {
-      const entry = dirs.find((candidate) => candidate.agentId === agentId);
-      if (entry === undefined || entry.format !== "claude") return null;
+      const paths = claudeSessionPaths(deps.agents, deps.home, agentId);
+      if (paths === null) return null;
 
       // Beside the transcripts directory, under the same configDir.
       let sessionId: string;
       try {
-        const record = JSON.parse(
-          await deps.readHead(join(dirname(entry.dir), "sessions", `${pid}.json`)),
-        ) as { pid?: unknown; sessionId?: unknown };
-        // A file left by an earlier process that held this pid names
-        // someone else's session.
-        if (record.pid !== pid || typeof record.sessionId !== "string") return null;
+        const record = parseClaudePidRecord(
+          await deps.readHead(join(paths.sessionsDir, `${pid}.json`)),
+          pid,
+        );
+        if (record === null) return null;
         sessionId = record.sessionId;
       } catch {
         return null;
@@ -660,7 +740,7 @@ export function createSessionImporter(deps: SessionImporterDeps): SessionImporte
 
       let files: TranscriptFile[];
       try {
-        files = await deps.listFiles(entry.dir, entry.format);
+        files = await deps.listFiles(paths.transcriptsDir, "claude");
       } catch {
         return null;
       }

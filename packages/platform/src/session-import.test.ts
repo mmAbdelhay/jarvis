@@ -12,6 +12,9 @@ import {
   createSessionImporter,
   HEAD_BYTES,
   isWithin,
+  claudeSessionPaths,
+  lastCustomTitle,
+  parseClaudePidRecord,
   resolveProject,
   sessionFromTranscript,
   transcriptDirs,
@@ -1106,5 +1109,87 @@ describe("createFsImportDeps", () => {
     const { readHead } = createFsImportDeps();
 
     await expect(readHead("/nonexistent-jarvis-session-import-test/a.jsonl")).rejects.toThrow();
+  });
+});
+
+describe("claudeSessionPaths", () => {
+  const agents: AgentConfig[] = [
+    { id: "claude-x", command: "claude-x", vendor: "anthropic", configDir: "/home/u/.claude-x" },
+    { id: "claude", command: "claude", vendor: "anthropic" },
+    { id: "codex", command: "codex", vendor: "openai" },
+    { id: "copilot", command: "copilot", vendor: "github" },
+  ];
+
+  it("names the sessions and transcripts directories under a Claude agent's configDir", () => {
+    expect(claudeSessionPaths(agents, "/home/u", "claude-x")).toEqual({
+      sessionsDir: join("/home/u/.claude-x", "sessions"),
+      transcriptsDir: join("/home/u/.claude-x", "projects"),
+    });
+    expect(claudeSessionPaths(agents, "/home/u", "claude")?.sessionsDir).toBe(
+      join("/home/u", ".claude", "sessions"),
+    );
+  });
+
+  it("is null for a non-Claude or unknown agent", () => {
+    expect(claudeSessionPaths(agents, "/home/u", "codex")).toBeNull();
+    expect(claudeSessionPaths(agents, "/home/u", "copilot")).toBeNull();
+    expect(claudeSessionPaths(agents, "/home/u", "nope")).toBeNull();
+  });
+});
+
+describe("parseClaudePidRecord", () => {
+  it("reads the session id and its current name", () => {
+    const text = JSON.stringify({
+      pid: 13591,
+      sessionId: "s-1",
+      name: "github-pr-comment-listener",
+      nameSource: "auto",
+    });
+    expect(parseClaudePidRecord(text, 13591)).toEqual({
+      sessionId: "s-1",
+      name: "github-pr-comment-listener",
+    });
+  });
+
+  it("leaves name out when it is missing, empty or not a string", () => {
+    expect(parseClaudePidRecord(JSON.stringify({ pid: 1, sessionId: "s" }), 1)).toEqual({
+      sessionId: "s",
+    });
+    expect(parseClaudePidRecord(JSON.stringify({ pid: 1, sessionId: "s", name: "  " }), 1)).toEqual(
+      { sessionId: "s" },
+    );
+    expect(parseClaudePidRecord(JSON.stringify({ pid: 1, sessionId: "s", name: 4 }), 1)).toEqual({
+      sessionId: "s",
+    });
+  });
+
+  it("is null for another pid, no session id, or text that is not JSON", () => {
+    expect(parseClaudePidRecord(JSON.stringify({ pid: 2, sessionId: "s" }), 1)).toBeNull();
+    expect(parseClaudePidRecord(JSON.stringify({ pid: 1 }), 1)).toBeNull();
+    expect(parseClaudePidRecord('{"pid":1,"sessi', 1)).toBeNull();
+    expect(parseClaudePidRecord("null", 1)).toBeNull();
+  });
+});
+
+describe("lastCustomTitle", () => {
+  it("returns the newest custom-title in the text", () => {
+    const text = [
+      JSON.stringify({ type: "user", message: { content: "hi" } }),
+      JSON.stringify({ type: "custom-title", customTitle: "first", sessionId: "s" }),
+      JSON.stringify({ type: "custom-title", customTitle: "PR 42 review", sessionId: "s" }),
+      "",
+    ].join("\n");
+    expect(lastCustomTitle(text)).toBe("PR 42 review");
+  });
+
+  it("skips a cut-off first line, a bad line and an empty title", () => {
+    const text = [
+      'tle","customTitle":"cut"}',
+      JSON.stringify({ type: "custom-title", customTitle: "kept" }),
+      "{not json",
+      JSON.stringify({ type: "custom-title", customTitle: "" }),
+    ].join("\n");
+    expect(lastCustomTitle(text)).toBe("kept");
+    expect(lastCustomTitle("")).toBeUndefined();
   });
 });

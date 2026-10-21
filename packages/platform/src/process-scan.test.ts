@@ -34,6 +34,33 @@ describe("parsePsOutput", () => {
   it("ignores a line that is not pid/ppid/etime/command", () => {
     expect(parsePsOutput("garbage\n")).toEqual([]);
   });
+
+  it("parses pgid, tpgid and stat when ps gives them (tpgid -1 off a tty)", () => {
+    const text = [
+      "96359   600 96359 96359 S+     00:05 claude --resume abc",
+      "  950   500   950    -1 Ss     00:09 claude -p hello",
+    ].join("\n");
+    expect(parsePsOutput(text)).toEqual([
+      {
+        pid: 96359,
+        ppid: 600,
+        pgid: 96359,
+        tpgid: 96359,
+        stat: "S+",
+        etime: "00:05",
+        command: "claude --resume abc",
+      },
+      {
+        pid: 950,
+        ppid: 500,
+        pgid: 950,
+        tpgid: -1,
+        stat: "Ss",
+        etime: "00:09",
+        command: "claude -p hello",
+      },
+    ]);
+  });
 });
 
 describe("commandBasename", () => {
@@ -394,6 +421,123 @@ describe("listAgentProcesses", () => {
 
     it("reports nothing from Jarvis's own tree when no shell pids are known", async () => {
       expect(await scan({ terminalShells: undefined })).toEqual([]);
+    });
+  });
+
+  // ctrl-Z stops a job (stat T); `claude &` or bg leaves it running outside
+  // the terminal's foreground process group (pgid !== tpgid). Neither is at
+  // the prompt the user sees, so neither may be pasted into.
+  describe("job control", () => {
+    const psOut = [
+      "  500     1   500     0 Ss  10:00:00 /Applications/Jarvis.app/Contents/MacOS/Jarvis",
+      "  600   500   600  9100 Ss     05:00 /bin/zsh -l",
+      " 9000   600  9000  9100 T      00:05 claude",
+      " 9050   600  9050  9100 S      00:06 claude",
+      " 9100   600  9100  9100 S+     00:07 claude",
+    ].join("\n");
+
+    async function scan() {
+      return listAgentProcesses(
+        deps({
+          jarvisPid: 500,
+          terminalShells: () => new Map([[600, "tab-1"]]),
+          exec: async (command) =>
+            command === "ps" ? { code: 0, stdout: psOut } : { code: 0, stdout: "" },
+        }),
+      );
+    }
+
+    it("asks ps for pgid, tpgid and stat", async () => {
+      let psArgs: string[] = [];
+      await listAgentProcesses(
+        deps({
+          exec: async (command, args) => {
+            if (command === "ps") psArgs = args;
+            return { code: 0, stdout: "" };
+          },
+        }),
+      );
+      expect(psArgs.join(" ")).toMatch(/pgid=.*tpgid=.*stat=/);
+    });
+
+    it("skips a stopped agent and marks a background one not foreground", async () => {
+      expect((await scan()).map((r) => [r.pid, r.foreground])).toEqual([
+        [9050, false],
+        [9100, true],
+      ]);
+    });
+  });
+
+  // `claude-mm` is an sh wrapper that `exec`s /opt/homebrew/bin/claude, so
+  // ps shows `claude`, never `claude-mm`.
+  describe("a wrapper agent whose process shows as the binary it execs", () => {
+    const WRAPPERS = [
+      { id: "claude-work", command: "claude-work", vendor: "anthropic" as const },
+      { id: "claude-mm", command: "claude-mm", vendor: "anthropic" as const, default: true },
+      { id: "codex-mm", command: "codex-mm", vendor: "openai" as const },
+      { id: "copilot", command: "gh-copilot-wrap", vendor: "github" as const },
+    ];
+    // jarvis 500 -> 600 (tab-1's shell) -> 96359 (claude)
+    //            -> 700 (tab-2's shell) -> 97000 (codex)
+    //            -> 710 (tab-3's shell) -> 97100 (copilot)
+    //            -> 600 -> 960 (claude mcp serve, a service)
+    // 1 -> 98000 (claude outside Jarvis)
+    const psOut = [
+      "  500     1   10:00:00 /Applications/Jarvis.app/Contents/MacOS/Jarvis",
+      "  600   500   05:00 /bin/zsh -l",
+      "96359   600   00:05 /opt/homebrew/bin/claude",
+      "  700   500   05:00 /bin/zsh -l",
+      "97000   700   00:06 codex --yolo",
+      "  710   500   05:00 /bin/zsh -l",
+      "97100   710   00:07 copilot",
+      "  960   600   00:04 claude mcp serve",
+      "98000     1   00:08 claude",
+    ].join("\n");
+
+    function scan(agents: ProcessScanDeps["agents"]) {
+      return listAgentProcesses(
+        deps({
+          agents,
+          jarvisPid: 500,
+          terminalShells: () =>
+            new Map([
+              [600, "tab-1"],
+              [700, "tab-2"],
+              [710, "tab-3"],
+            ]),
+          exec: async (command) =>
+            command === "ps" ? { code: 0, stdout: psOut } : { code: 0, stdout: "" },
+        }),
+      );
+    }
+
+    it("matches a binary in a Jarvis pane to the default agent of its vendor", async () => {
+      const result = await scan(WRAPPERS);
+      expect(result.map((r) => [r.pid, r.agentId, r.terminalPaneKey])).toEqual([
+        [96359, "claude-mm", "tab-1"],
+        [97000, "codex-mm", "tab-2"],
+        [97100, "copilot", "tab-3"],
+      ]);
+    });
+
+    it("takes the first agent of the vendor when none of them is the default", async () => {
+      const result = await scan(WRAPPERS.map(({ default: _d, ...agent }) => agent));
+      expect(result.find((r) => r.pid === 96359)?.agentId).toBe("claude-work");
+    });
+
+    it("prefers an exact command match over the vendor fallback", async () => {
+      const result = await scan([...WRAPPERS, { id: "plain", command: "claude" }]);
+      expect(result.find((r) => r.pid === 96359)?.agentId).toBe("plain");
+    });
+
+    it("leaves a binary outside Jarvis's tree unmatched", async () => {
+      const result = await scan(WRAPPERS);
+      expect(result.some((r) => r.pid === 98000)).toBe(false);
+    });
+
+    it("matches nothing for a binary whose vendor no agent has", async () => {
+      const result = await scan([{ id: "claude-mm", command: "claude-mm", vendor: "anthropic" }]);
+      expect(result.map((r) => r.pid)).toEqual([96359]);
     });
   });
 });

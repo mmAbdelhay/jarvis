@@ -21,6 +21,11 @@ export type ChipRow = {
    *  branch, no runtime) is left out of the row entirely, never drawn
    *  empty. */
   render(chips: TerminalChips | undefined): void;
+  /** Reviews (Task 12): one element kept at the row's end across every
+   *  render — a chip the row itself knows nothing about (the PR link
+   *  chip). `undefined` removes it, so an otherwise empty row stays
+   *  `:empty` and hidden. */
+  setExtra(node: HTMLElement | undefined): void;
 };
 
 /** `cwd` with `$HOME` collapsed to `~`, by path segment — not by string
@@ -72,26 +77,40 @@ export function createChipRow(host: HTMLElement, home: string): ChipRow {
   const element = document.createElement("div");
   element.className = "terminal-chips";
   host.append(element);
+  let extra: HTMLElement | undefined;
 
   return {
     element,
     render(chips) {
       element.replaceChildren();
-      if (chips === undefined) return;
-      if (chips.runtime !== undefined) element.append(chip(chips.runtime));
-      // Classed, unlike the runtime chip: it is the one chip that has to
-      // give way when the row cannot fit (a deep path in a three-way
-      // split), because the branch and the ± counts carry what the shell's
-      // own prompt does not. See `.terminal-chip--path` in styles.css.
-      element.append(chip(formatCwd(chips.cwd, home), "terminal-chip--path"));
-      if (chips.branch !== undefined) {
-        // A detached HEAD's "branch" is a short SHA, not a name — wrapped
-        // in parentheses so it never reads as an ordinary branch.
-        const label = chips.detached ? `(${chips.branch})` : chips.branch;
-        element.append(chip(label, "terminal-chip--branch"));
-        const total = chips.insertions + chips.deletions;
-        element.append(chip(`± ${total}`, total > 0 ? "terminal-chip--dirty" : undefined));
+      try {
+        draw(chips);
+      } finally {
+        if (extra !== undefined) element.append(extra);
       }
     },
+    setExtra(node) {
+      if (extra !== undefined && extra !== node) extra.remove();
+      extra = node;
+      if (node !== undefined) element.append(node);
+    },
   };
+
+  function draw(chips: TerminalChips | undefined): void {
+    if (chips === undefined) return;
+    if (chips.runtime !== undefined) element.append(chip(chips.runtime));
+    // Classed, unlike the runtime chip: it is the one chip that has to
+    // give way when the row cannot fit (a deep path in a three-way
+    // split), because the branch and the ± counts carry what the shell's
+    // own prompt does not. See `.terminal-chip--path` in styles.css.
+    element.append(chip(formatCwd(chips.cwd, home), "terminal-chip--path"));
+    if (chips.branch !== undefined) {
+      // A detached HEAD's "branch" is a short SHA, not a name — wrapped
+      // in parentheses so it never reads as an ordinary branch.
+      const label = chips.detached ? `(${chips.branch})` : chips.branch;
+      element.append(chip(label, "terminal-chip--branch"));
+      const total = chips.insertions + chips.deletions;
+      element.append(chip(`± ${total}`, total > 0 ? "terminal-chip--dirty" : undefined));
+    }
+  }
 }

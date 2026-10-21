@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+import { t } from "./i18n";
+import { planErrorText } from "../plan/plan-error";
 import { createPlansStore } from "./plans-store";
 import type { RpcResult } from "./rpc-client";
 
@@ -337,4 +339,23 @@ describe("createPlansStore", () => {
     expect(store.state.doc?.path).toBe("/other.md");
     expect(client.call).toHaveBeenCalledTimes(3);
   });
+});
+
+it.each([
+  ["busy", "busy"],
+  ["approval", "approval"],
+  ["no-agent", "noAgent"],
+] as const)("maps plan send reason %s to localized error %s", async (reason, code) => {
+  const client = fakeClient([ok({ ok: true, value: doc }), ok([]), ok({ ok: false, reason })]);
+  const store = createPlansStore({ client: client as never, paneKey: "pane-1" });
+  await store.open(doc.path);
+  await expect(store.send(["c1"])).resolves.toEqual({ ok: false, error: { code } });
+  expect(store.state.error).toEqual({ code });
+  for (const language of ["ar", "en"] as const) {
+    const key = `plans.error.${code}` as const;
+    expect(planErrorText(language, code)).toBe(t(language, key));
+    expect(t(language, key)).not.toBe(key);
+    expect(t(language, key)).not.toBe(t(language === "ar" ? "en" : "ar", key));
+  }
+  expect(client.call).toHaveBeenCalledTimes(3);
 });

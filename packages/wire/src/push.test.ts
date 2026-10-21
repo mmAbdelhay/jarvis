@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   EXPO_PUSH_TOKEN_PATTERN,
   isExpoPushToken,
+  isPrKey,
   isPushKind,
+  MAX_PR_KEY_CHARS,
   MAX_PUSH_PROJECT_CHARS,
   parsePushData,
   parsePushRegisterResult,
@@ -156,6 +158,41 @@ function validRegistration(overrides: Record<string, unknown> = {}): Record<stri
     ...overrides,
   };
 }
+
+describe("review push data (pr)", () => {
+  it("lists the three review kinds", () => {
+    expect(PUSH_KINDS).toEqual(
+      expect.arrayContaining(["review-comment", "review-queued", "review-requested"]),
+    );
+  });
+
+  it("round-trips a review kind with a valid pr", () => {
+    const value = { kind: "review-comment", pr: "acme/web.app#18" };
+    expect(parsePushData(value)).toEqual(value);
+  });
+
+  it.each([
+    "acme/web",
+    "acme#18",
+    "acme/web#",
+    "acme/web#18x",
+    "a b/web#18",
+    "acme/web/x#18",
+    "acme/web#-1",
+    7,
+    null,
+    `${"a".repeat(MAX_PR_KEY_CHARS)}/b#1`,
+  ])("rejects a malformed pr %j", (pr) => {
+    expect(parsePushData({ kind: "review-comment", pr })).toBeUndefined();
+  });
+
+  it("isPrKey accepts exactly the 140-character bound and refuses one more", () => {
+    const at = `${"a".repeat(MAX_PR_KEY_CHARS - 4)}/b#1`;
+    expect(at.length).toBe(MAX_PR_KEY_CHARS);
+    expect(isPrKey(at)).toBe(true);
+    expect(isPrKey(`a${at}`)).toBe(false);
+  });
+});
 
 describe("parsePushRegistration", () => {
   it("round-trips a valid registration", () => {
