@@ -12,10 +12,13 @@ describe("batteryState", () => {
   it("is charging whenever plugged in, whatever the level", () => {
     expect(batteryState(0.05, true)).toBe("charging");
   });
-  it("is critical at 10% and below, low at 20% and below, ok above", () => {
+  it("steps critical ≤10%, low ≤20%, mid ≤50%, good above", () => {
     expect(batteryState(0.1, false)).toBe("critical");
     expect(batteryState(0.2, false)).toBe("low");
-    expect(batteryState(0.21, false)).toBe("ok");
+    expect(batteryState(0.11, false)).toBe("low");
+    expect(batteryState(0.21, false)).toBe("mid");
+    expect(batteryState(0.5, false)).toBe("mid");
+    expect(batteryState(0.51, false)).toBe("good");
   });
 });
 
@@ -36,7 +39,11 @@ describe("the topbar battery chip", () => {
     chip.hidden = true;
     const text = document.createElement("span");
     text.id = "battery-text";
-    chip.append(text);
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    const fill = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    fill.setAttribute("class", "battery-fill");
+    svg.append(fill);
+    chip.append(svg, text);
     document.body.append(chip);
   });
 
@@ -46,7 +53,8 @@ describe("the topbar battery chip", () => {
     await initBattery({ getBattery: async () => new FakeBattery(0.876, false) });
     expect(chip().hidden).toBe(false);
     expect(document.getElementById("battery-text")?.textContent).toBe("88%");
-    expect(chip().dataset.batteryState).toBe("ok");
+    expect(chip().dataset.batteryState).toBe("good");
+    expect(chip().querySelector(".battery-fill")?.getAttribute("width")).toBe("14.9");
     expect(chip().title).toContain("88%");
   });
 
@@ -57,6 +65,7 @@ describe("the topbar battery chip", () => {
     battery.dispatchEvent(new Event("levelchange"));
     expect(document.getElementById("battery-text")?.textContent).toBe("8%");
     expect(chip().dataset.batteryState).toBe("critical");
+    expect(chip().querySelector(".battery-fill")?.getAttribute("width")).toBe("1.4");
     battery.charging = true;
     battery.dispatchEvent(new Event("chargingchange"));
     expect(chip().dataset.batteryState).toBe("charging");

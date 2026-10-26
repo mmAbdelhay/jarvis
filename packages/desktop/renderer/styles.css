@@ -4696,14 +4696,19 @@
   pointer-events: none;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
 }
-/* The battery chip sits before the clock's divider; muted while fine,
-   coloured once it matters. */
+/* The battery chip sits before the clock's divider. Its glyph fills to the
+   charge and steps green → amber → red as it drains (topbar-status.ts
+   batteryState). */
 .battery-chip { display: inline-flex; align-items: center; gap: 6px; margin-inline-start: 22px; font-size: 12px; color: var(--text-muted); }
 .battery-chip[hidden] { display: none; }
 .battery-chip .battery-bolt { display: none; }
 .battery-chip[data-battery-state="charging"] { color: var(--good); }
 .battery-chip[data-battery-state="charging"] .battery-bolt { display: inline; }
-.battery-chip[data-battery-state="low"] { color: var(--warn); }
+/* The bolt is drawn in the same colour, so dim the fill behind it. */
+.battery-chip[data-battery-state="charging"] .battery-fill { opacity: 0.35; }
+.battery-chip[data-battery-state="good"] { color: var(--good); }
+.battery-chip[data-battery-state="mid"] { color: var(--warn); }
+.battery-chip[data-battery-state="low"] { color: var(--warn); font-weight: 600; }
 .battery-chip[data-battery-state="critical"] { color: var(--bad); }
 #history-button { margin-inline-start: 12px; width: 32px; height: 32px; border: 0; background: transparent; }
 
