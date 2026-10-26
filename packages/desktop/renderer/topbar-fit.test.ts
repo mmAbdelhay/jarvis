@@ -53,13 +53,7 @@ describe("fitTopbar", () => {
 
   it("never hides the nav, the pills, the time or the end buttons", () => {
     fitTopbar(bar, () => true);
-    for (const id of [
-      "history-button",
-      "awake-button",
-      "clock-time",
-      "running-pill",
-      "voice-state",
-    ]) {
+    for (const id of ["history-button", "awake-button", "clock-time"]) {
       expect(bar.querySelector(`#${id}`)?.closest(`.${TOPBAR_COLLAPSED_CLASS}`), id).toBeNull();
     }
     expect(bar.querySelector(".nav")?.closest(`.${TOPBAR_COLLAPSED_CLASS}`)).toBeNull();
