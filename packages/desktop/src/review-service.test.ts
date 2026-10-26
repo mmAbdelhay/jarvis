@@ -565,6 +565,13 @@ describe("review service notifications", () => {
 });
 
 describe("review service actions", () => {
+  it("trackRepo adds a repository to the poll set", () => {
+    const h = harness();
+    expect(h.pollRepos()).not.toContain("acme/other");
+    h.service.trackRepo("acme/other");
+    expect(h.pollRepos()).toContain("acme/other");
+  });
+
   it("sendReview pastes the review instruction through the idle gate", async () => {
     const h = harness();
     h.emit({ kind: "prs", prs: [PR] });

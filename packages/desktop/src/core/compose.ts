@@ -81,6 +81,7 @@ import {
   type KeepAwake,
 } from "../keep-awake.js";
 import { createSessionTabNamer } from "../session-tab-name.js";
+import { createPrTabNamer } from "../pr-tab-namer.js";
 import { createChildTracker } from "../child-tracker.js";
 import { createDockerFollowers } from "../docker-followers.js";
 import { createSetupHandlers } from "../ipc.js";
@@ -1333,6 +1334,25 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     },
   });
 
+  // A PR an agent opens in a Terminal pane (its URL in the pane's output)
+  // names the tab "PR #N · title" and links the pane in Reviews. Ahead of
+  // the session namer below, which leaves such a tab alone.
+  const prTabNamer = createPrTabNamer({
+    shells,
+    tabs: workspace,
+    reviews,
+    prTitle: async (repo, number) => {
+      const out = await runGh(
+        ["pr", "view", String(number), "--repo", repo, "--json", "title", "--jq", ".title"],
+        homedir(),
+      );
+      const title = out.stdout.trim();
+      return out.code === 0 && title !== "" ? title : undefined;
+    },
+    reviewsEnabled: () => (config.reviews ?? DEFAULT_REVIEWS_CONFIG).enabled,
+  });
+  prTabNamer.start();
+
   // Task 16: a Terminal tab follows the name of the Claude session in it
   // (Claude's topic name or a /rename), read from Claude Code's own
   // sessions/<pid>.json; the pane comes from the same fresh process scan.
@@ -1373,6 +1393,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
       timer.unref();
       return () => clearInterval(timer);
     },
+    isPrNamed: (paneKey) => prTabNamer.isPrNamed(paneKey),
   });
   sessionTabNamer.start();
 
@@ -2078,6 +2099,8 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     safely("reviews", () => reviews.dispose());
     // Releases the stay-awake and the fallback's timers.
     safely("keep awake", () => awake.dispose());
+    // Before the gh children stop: it asks gh for a PR's title.
+    safely("pr tab names", () => prTabNamer.stop());
     // Its gh children: after dispose, so nothing spawns another.
     safely("gh", () => {
       ghStopped = ghChildren.stopAll();

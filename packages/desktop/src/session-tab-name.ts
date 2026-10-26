@@ -43,6 +43,9 @@ export type SessionTabNameDeps = {
   now(): number;
   /** Repeating timer; returns its cancel. */
   interval(fn: () => void, ms: number): () => void;
+  /** A pane whose tab is named after a PR it opened (pr-tab-namer.ts):
+   *  that name outranks the session's own. */
+  isPrNamed?(paneKey: string): boolean;
 };
 
 export type SessionTabNamer = {
@@ -59,7 +62,7 @@ export type SessionTabNamer = {
 
 /** The workspace tab a pane belongs to: its own id, or `<tabId>:<n>` for a
  *  split — the same rule as the `terminal:panes` handler (dispatch.ts). */
-function tabOf(state: WorkspaceState, paneKey: string): string | undefined {
+export function tabOf(state: WorkspaceState, paneKey: string): string | undefined {
   return state.tabs.find(
     (tab) => tab.kind === "terminal" && (tab.id === paneKey || paneKey.startsWith(`${tab.id}:`)),
   )?.id;
@@ -136,6 +139,7 @@ export function createSessionTabNamer(deps: SessionTabNameDeps): SessionTabNamer
 
     const last = applied.get(paneKey);
     if (last?.sessionId === record.sessionId && last.name === name) return;
+    if (deps.isPrNamed?.(paneKey) === true) return;
     const state = deps.tabs.state();
     const tabId = tabOf(state, paneKey);
     if (tabId === undefined) return;
