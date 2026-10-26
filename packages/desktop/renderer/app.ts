@@ -40,6 +40,7 @@ import {
 import { initRemoteStatus } from "./remote-status.js";
 import { initKeepAwake } from "./keep-awake.js";
 import { initBattery, topbarDate } from "./topbar-status.js";
+import { initTopbarFit } from "./topbar-fit.js";
 import {
   detectLanguage,
   formatAgo,
@@ -538,6 +539,7 @@ function wireNav(): void {
   // a failed first read only waits for the first awake:changed push.
   void initKeepAwake(window.jarvis).catch(() => undefined);
   void initBattery(navigator as Parameters<typeof initBattery>[0]).catch(() => undefined);
+  initTopbarFit(document.querySelector<HTMLElement>(".topbar"));
 
   window.jarvis.onWorkspace((state) => renderWorkspace(state));
   // No catch here would be an unhandled rejection in the renderer on any

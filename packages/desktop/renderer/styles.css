@@ -382,18 +382,10 @@
     color: var(--text-muted);
   }
 
-  /* board 0's collapse: the prayer group is the first to go (it is the one
-     piece of information that is not, in the end, about the app), and the
-     remote pill's host:port follows it — the wifi glyph alone still answers
-     "is the bridge listening" at any width. */
-  @container topbar (max-width: 1099px) {
-    .prayer-chip { display: none; }
-  }
-
-  @container topbar (max-width: 899px) {
-    #remote-pill-text { display: none; }
-    #topbar-metrics { display: none; }
-  }
+  /* The narrow-window collapse is measured, not guessed: topbar-fit.ts
+     hides pieces in TOPBAR_COLLAPSE_ORDER until the bar fits, so the
+     history button at the end is never clipped. */
+  .topbar .topbar-collapsed { display: none !important; }
 
   /* No `display` here: an author rule on `.main` itself would out-cascade
      the UA stylesheet's `[hidden] { display: none }` regardless of
@@ -712,7 +704,7 @@
 
   /* Keep awake (Task 18): muted while off, amber while waiting for an
      agent, green while it holds the screen and machine awake. */
-  .awake-btn { color: var(--text-muted); margin-inline-start: 14px; }
+  .awake-btn { color: var(--text-muted); margin-inline-start: 10px; }
   .awake-btn.icon-btn--armed { color: var(--warn); }
   .awake-btn.icon-btn--on { color: var(--good); border-color: var(--good); }
 
@@ -4593,11 +4585,11 @@
   border-color: var(--hairline-soft);
   white-space: nowrap;
 }
-.brand { margin-inline-end: 22px; font-size: 14px; font-weight: 700; letter-spacing: .24em; }
+.brand { margin-inline-end: 16px; font-size: 14px; font-weight: 700; letter-spacing: .24em; }
 .nav { align-self: stretch; gap: 2px; }
 .nav-btn {
   align-self: stretch;
-  padding-inline: 12px;
+  padding-inline: 10px;
   border: 0;
   border-block-end: 2px solid transparent;
   border-radius: 0;
@@ -4607,14 +4599,14 @@
 }
 .nav-btn:hover { background: transparent; color: var(--text); }
 .nav-btn--on { background: transparent; color: var(--text); border-block-end-color: var(--accent); }
-.status-group { margin-inline-start: auto; display: flex; align-items: center; gap: 14px; color: var(--text-secondary); font-size: 12px; }
+.status-group { margin-inline-start: auto; padding-inline-start: 16px; display: flex; align-items: center; gap: 12px; color: var(--text-secondary); font-size: 12px; }
 .pill { display: flex; align-items: center; gap: 7px; min-height: 0; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--text-secondary); font: 12px var(--font-ui); }
 .pill:hover { border: 0; background: transparent; }
 .pill-dot { width: 7px; height: 7px; }
 /* The ambient readout users asked back after board 0 removed it. Same
    values as the Dashboard's SYSTEM card, glanceable from every route;
-   collapses below 900px (the @container rule above) so the topbar never
-   wraps, leaving the danger dot as the only signal at that width. */
+   topbar-fit.ts drops it on a narrow window so the topbar never clips,
+   leaving the danger dot as the only signal at that width. */
 .topbar-metrics { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-muted); }
 .topbar-metrics .unit { color: var(--text-muted); font-size: 10px; }
 .topbar-metrics .sep { color: var(--border-strong); }
@@ -4650,8 +4642,8 @@
    removed there, the same reason .workspace-tab's colour band is restored
    in this section rather than in its own base rule. */
 .prayer-chip {
-  margin-inline-start: 22px;
-  padding-inline-start: 22px;
+  margin-inline-start: 14px;
+  padding-inline-start: 14px;
   padding-inline-end: 0;
   padding-block: 0;
   border-inline-start: 1px solid var(--border);
@@ -4680,7 +4672,7 @@
 #header-prayer[data-prayer-state="danger"] .prayer-label { color: var(--bad); stroke: var(--bad); }
 #header-prayer[data-prayer-state="now"] .prayer-ring-fill,
 #header-prayer[data-prayer-state="now"] .prayer-label { color: var(--good); stroke: var(--good); }
-.clock { margin-inline-start: 22px; padding-inline-start: 22px; border-inline-start: 1px solid var(--border); font-size: 13px; color: var(--text); }
+.clock { margin-inline-start: 14px; padding-inline-start: 14px; border-inline-start: 1px solid var(--border); font-size: 13px; color: var(--text); }
 .clock-date { color: var(--text-muted); }
 /* hover-tip.ts: fixed on <body>, under the control it describes. */
 .hover-tip {
@@ -4699,7 +4691,7 @@
 /* The battery chip sits before the clock's divider. Its glyph fills to the
    charge and steps green → amber → red as it drains (topbar-status.ts
    batteryState). */
-.battery-chip { display: inline-flex; align-items: center; gap: 6px; margin-inline-start: 22px; font-size: 12px; color: var(--text-muted); }
+.battery-chip { display: inline-flex; align-items: center; gap: 6px; margin-inline-start: 14px; font-size: 12px; color: var(--text-muted); }
 .battery-chip[hidden] { display: none; }
 .battery-chip .battery-bolt { display: none; }
 .battery-chip[data-battery-state="charging"] { color: var(--good); }
@@ -4710,7 +4702,7 @@
 .battery-chip[data-battery-state="mid"] { color: var(--warn); }
 .battery-chip[data-battery-state="low"] { color: var(--warn); font-weight: 600; }
 .battery-chip[data-battery-state="critical"] { color: var(--bad); }
-#history-button { margin-inline-start: 12px; width: 32px; height: 32px; border: 0; background: transparent; }
+#history-button { margin-inline-start: 4px; width: 32px; height: 32px; border: 0; background: transparent; }
 
 /* The dashboard is one column of four rows now (SYSTEM/core stage/PROVIDERS,
    the projects grid, SESSIONS/CONVERSATION) rather than three side
