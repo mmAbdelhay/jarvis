@@ -557,6 +557,15 @@ function wireNav(): void {
     .catch(() => undefined);
 }
 
+/** The header metric readout's 3-tier colour: green below 85%, amber from
+ *  85% up to (not including) 95%, red at 95% and up — same thresholds as
+ *  the SYSTEM card's warn/crit split and the danger dot below. */
+export function metricTone(percent: number): "good" | "warn" | "bad" {
+  if (percent >= 95) return "bad";
+  if (percent >= 85) return "warn";
+  return "good";
+}
+
 function renderMetrics(metrics: SystemMetrics): void {
   $("cpu-value").textContent = `${metrics.cpuPercent}%`;
   $("cpu-bar").style.width = `${metrics.cpuPercent}%`;
@@ -571,7 +580,6 @@ function renderMetrics(metrics: SystemMetrics): void {
   $("mem-detail").textContent =
     `${formatBytes(metrics.memoryUsedBytes)} / ${formatBytes(metrics.memoryTotalBytes)}`;
   $("mem-bar").style.width = `${memPercent}%`;
-  const memCrit = memPercent >= 95;
 
   // A disk at 98% used to be stated in exactly the same colour as a disk at
   // 12%, which makes the number decorative: nobody reads a strip of
@@ -598,15 +606,18 @@ function renderMetrics(metrics: SystemMetrics): void {
   $("net-up").textContent = `↑${metrics.networkUpMbps.toFixed(1)}`;
 
   // The compact topbar readout users asked back after board 0 removed it —
-  // same values as the Dashboard's SYSTEM card above, just glanceable from
-  // every route. `metric--danger` names the same >=95% threshold as the
-  // danger dot below, per number rather than one dot for the whole machine.
+  // same values as the Dashboard's SYSTEM card above, coloured per number by
+  // metricTone() (85/95, same thresholds as the danger dot below) rather
+  // than one dot for the whole machine.
+  const cpuTone = metricTone(metrics.cpuPercent);
   $("header-cpu").textContent = `${metrics.cpuPercent}%`;
-  $("header-cpu").classList.toggle("metric--danger", cpuCrit);
+  $("header-cpu").className = `metric--${cpuTone}`;
+  const memTone = metricTone(memPercent);
   $("header-mem").textContent = `${memPercent}%`;
-  $("header-mem").classList.toggle("metric--danger", memCrit);
+  $("header-mem").className = `metric--${memTone}`;
+  const diskTone = metricTone(diskPercent);
   $("header-disk").textContent = `${diskPercent}%`;
-  $("header-disk").classList.toggle("metric--danger", diskCrit);
+  $("header-disk").className = `metric--${diskTone}`;
   $("header-net").textContent =
     `↓${metrics.networkDownMbps.toFixed(1)} ↑${metrics.networkUpMbps.toFixed(1)} Mbps`;
 

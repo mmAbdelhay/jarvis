@@ -4618,7 +4618,9 @@
 .topbar-metrics { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-muted); }
 .topbar-metrics .unit { color: var(--text-muted); font-size: 10px; }
 .topbar-metrics .sep { color: var(--border-strong); }
-.topbar-metrics .metric--danger { color: var(--bad); }
+.topbar-metrics .metric--good { color: var(--good); }
+.topbar-metrics .metric--warn { color: var(--warn); }
+.topbar-metrics .metric--bad { color: var(--bad); }
 /* board 0's danger dot: on only when renderMetrics() (app.ts) finds CPU or
    disk at/above 95%, named in its own tooltip. Sits before "Online" so a
    machine in real trouble is the first thing the strip says. */

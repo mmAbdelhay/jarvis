@@ -1052,14 +1052,32 @@ describe("the Dashboard SYSTEM card and the topbar's danger dot", () => {
     expect(document.getElementById("header-net")?.textContent).toBe("↓0.3 ↑1.2 Mbps");
   });
 
-  it("marks only the header metric that is at or above 95% with the danger class", async () => {
+  it("colours each header metric by its own tier: good, warn, bad", async () => {
     const { onMetrics } = await loadApp();
 
-    onMetrics?.(metrics({ cpuPercent: 96 }));
+    onMetrics?.(
+      metrics({
+        cpuPercent: 40,
+        memoryUsedBytes: 90,
+        memoryTotalBytes: 100,
+        diskUsedBytes: 97,
+        diskTotalBytes: 100,
+      }),
+    );
 
-    expect(document.getElementById("header-cpu")?.className).toContain("metric--danger");
-    expect(document.getElementById("header-mem")?.className).not.toContain("metric--danger");
-    expect(document.getElementById("header-disk")?.className).not.toContain("metric--danger");
+    expect(document.getElementById("header-cpu")?.className).toBe("metric--good");
+    expect(document.getElementById("header-mem")?.className).toBe("metric--warn");
+    expect(document.getElementById("header-disk")?.className).toBe("metric--bad");
+  });
+
+  it("exposes metricTone's 85/95 boundaries", async () => {
+    await loadApp();
+    const { metricTone } = await import("./app.js");
+
+    expect(metricTone(84)).toBe("good");
+    expect(metricTone(85)).toBe("warn");
+    expect(metricTone(94)).toBe("warn");
+    expect(metricTone(95)).toBe("bad");
   });
 });
 
