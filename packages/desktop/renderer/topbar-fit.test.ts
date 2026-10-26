@@ -68,6 +68,6 @@ describe("fitTopbar", () => {
 
 describe("the collapsed class", () => {
   it("hides whatever it is on", () => {
-    expect(css).toMatch(/\.topbar \.topbar-collapsed \{ display: none !important; \}/);
+    expect(css).toMatch(/\.topbar \.topbar-collapsed \{ display: none; \}/);
   });
 });

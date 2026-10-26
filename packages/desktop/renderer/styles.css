@@ -385,7 +385,7 @@
   /* The narrow-window collapse is measured, not guessed: topbar-fit.ts
      hides pieces in TOPBAR_COLLAPSE_ORDER until the bar fits, so the
      history button at the end is never clipped. */
-  .topbar .topbar-collapsed { display: none !important; }
+  .topbar .topbar-collapsed { display: none; }
 
   /* No `display` here: an author rule on `.main` itself would out-cascade
      the UA stylesheet's `[hidden] { display: none }` regardless of
