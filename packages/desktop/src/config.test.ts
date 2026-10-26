@@ -1256,6 +1256,19 @@ describe("terminal blocks and notifications", () => {
 
     expect(() => parseConfig(raw)).toThrow(/terminal\.notifyAfterSeconds/);
   });
+
+  it("defaults the font size to twelve and takes one in range", () => {
+    expect(parseConfig(base).terminal.fontSize).toBe(12);
+    const raw = { ...base, terminal: { fontSize: 16 } };
+    expect(parseConfig(raw).terminal.fontSize).toBe(16);
+  });
+
+  it("rejects a font size outside 8 to 32, or one that is not a number", () => {
+    for (const fontSize of [7, 33, "big", Number.NaN]) {
+      const raw = { ...base, terminal: { fontSize } };
+      expect(() => parseConfig(raw)).toThrow(/terminal\.fontSize/);
+    }
+  });
 });
 
 // Regression for the bug where saving Settings twice threw "Cannot read

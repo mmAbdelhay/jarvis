@@ -8,6 +8,10 @@ version and the downloads. This file is the index.
 
 ## Unreleased
 
+- Terminal: a font size setting (Settings → Terminal, or `terminal.fontSize`)
+  that applies to every open terminal on save, and ⌘+ / ⌘- / ⌘0
+  (Ctrl+Shift+= / - / 0 on Linux) to zoom for the session.
+
 ## [0.1.10] — 2026-10-21
 
 - Reviews: Jarvis watches your open PRs through `gh` and pastes each new

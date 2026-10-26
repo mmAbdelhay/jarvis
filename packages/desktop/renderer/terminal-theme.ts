@@ -32,11 +32,20 @@ export const TERMINAL_THEME = {
   brightWhite: "#ffffff",
 };
 
+/** `fontSize` here is only the size a terminal starts at before
+ *  `terminal.fontSize` has arrived — terminal-font.ts owns the size that is
+ *  actually drawn. */
 export const TERMINAL_FONT = {
   fontFamily: '"JetBrains Mono", ui-monospace, monospace',
   fontSize: 12,
   lineHeight: 1.35,
 };
+
+/** The range `terminal.fontSize` accepts, and the bounds the zoom keys clamp
+ *  to. The same pair as src/config.ts's, which the renderer cannot import a
+ *  value from (it pulls in node:fs); terminal-font.test.ts holds them equal. */
+export const TERMINAL_FONT_SIZE_MIN = 8;
+export const TERMINAL_FONT_SIZE_MAX = 32;
 
 /**
  * How much scrollback a terminal keeps when jarvis.yaml says nothing.

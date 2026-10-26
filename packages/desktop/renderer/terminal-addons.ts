@@ -1,5 +1,6 @@
-import { hostPlatform, matchChord } from "./keys.js";
+import { hostPlatform, matchChord, type ChordAction } from "./keys.js";
 import type { BlockNav } from "./block-nav.js";
+import { resetTerminalFontZoom, zoomTerminalFont } from "./terminal-font.js";
 import type { Palette, PaletteAction } from "./terminal-palette.js";
 import { ClipboardAddon } from "./vendor/addon-clipboard.mjs";
 import { LigaturesAddon } from "./vendor/addon-ligatures.mjs";
@@ -157,6 +158,32 @@ export function handlePaletteKey(
   }
 
   return true;
+}
+
+/** Applies a font zoom chord, or reports that `action` is not one. */
+function applyFontChord(action: ChordAction | undefined): boolean {
+  if (action === "fontBigger") zoomTerminalFont(1);
+  else if (action === "fontSmaller") zoomTerminalFont(-1);
+  else if (action === "fontReset") resetTerminalFontZoom();
+  else return false;
+  return true;
+}
+
+/**
+ * The font zoom chords — ⌘+/⌘-/⌘0 on macOS, Ctrl+Shift+=/-/0 elsewhere —
+ * for a keystroke xterm's own handler never sees: one aimed at the command
+ * editor's field. Every terminal changes at once (terminal-font.ts), so it
+ * does not matter which pane the key landed in.
+ *
+ * Returns false when the key was claimed, the same contract as
+ * `handlePaletteKey`.
+ */
+export function handleFontKey(
+  event: KeyboardEvent,
+  platform: NodeJS.Platform = hostPlatform(),
+): boolean {
+  if (!applyFontChord(matchChord(event, platform))) return true;
+  return claim(event);
 }
 
 /** ESC then CR. xterm encodes Shift+Enter as a bare CR, byte-identical to
@@ -412,6 +439,10 @@ function attachKeys(
       terminal.clear();
       return claim(event);
     }
+
+    // Font zoom. Never a byte a program could want on either platform —
+    // see keys.ts for why Linux takes Shift here.
+    if (applyFontChord(action)) return claim(event);
 
     return true;
   });

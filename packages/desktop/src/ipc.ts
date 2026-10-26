@@ -839,6 +839,9 @@ export type RendererApi = {
      *  because it is a memory setting, not a terminal-behaviour one — but it
      *  rides this payload because this is the one the panes already read. */
     scrollback: number;
+    /** `terminal.fontSize`. The one field here that applies without a
+     *  restart — see renderer/terminal-font.ts. */
+    fontSize: number;
   }>;
   /** Every saved workflow the ⌘P palette's "Run workflow…" can offer for
    *  `project` — see TerminalHandlers.workflows above. */
@@ -2249,6 +2252,7 @@ export type TerminalHandlers = {
     notifyAfterSeconds: number;
     home: string;
     scrollback: number;
+    fontSize: number;
   };
   /** Every saved workflow the palette can offer for `project` — the
    *  always-read `~/.config/jarvis/workflows/` plus that project's
@@ -3038,6 +3042,7 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
       notifyAfterSeconds: deps.terminal.notifyAfterSeconds,
       home: homedir(),
       scrollback: deps.terminalScrollback,
+      fontSize: deps.terminal.fontSize,
     }),
 
     async workflows(project) {

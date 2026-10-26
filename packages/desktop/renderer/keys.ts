@@ -33,6 +33,9 @@ export type ChordAction =
   | "closePane"
   | "focusPrev"
   | "focusNext"
+  | "fontBigger"
+  | "fontSmaller"
+  | "fontReset"
   | "sendRequest"
   | "saveRequest";
 
@@ -49,16 +52,33 @@ export type LabelledChord = ChordAction | "voiceStart" | "voiceStop";
  * table without an ordering rule between them: neither matches the other's
  * event, so the table can be read in any order.
  */
-type Chord = {
-  /** `event.key`, compared case-insensitively — Shift changes its case. */
-  key: string;
+type Chord = (
+  | {
+      /** `event.key`, compared case-insensitively — Shift changes its case. */
+      key: string;
+      code?: never;
+    }
+  | {
+      /** `event.code`, the physical key, for a chord whose Shift changes
+       *  which character `event.key` reports: Ctrl+Shift+= arrives as "+"
+       *  on a US layout and as something else on others. */
+      code: string;
+      key?: never;
+    }
+) & {
   meta?: boolean;
   ctrl?: boolean;
   alt?: boolean;
   shift?: boolean;
 };
 
-type Binding = { darwin: Chord; linux: Chord; label: { darwin: string; linux: string } };
+/** A side may list more than one chord when the platform's convention has
+ *  two spellings of the same thing — ⌘= and ⌘+ are both "bigger" on a Mac. */
+type Binding = {
+  darwin: Chord | readonly Chord[];
+  linux: Chord | readonly Chord[];
+  label: { darwin: string; linux: string };
+};
 
 const BINDINGS: Record<LabelledChord, Binding> = {
   palette: {
@@ -143,6 +163,28 @@ const BINDINGS: Record<LabelledChord, Binding> = {
     linux: { key: "ArrowRight", alt: true },
     label: { darwin: "⌥⌘→", linux: "Alt+→" },
   },
+  // Terminal font zoom, for the session — terminal-font.ts owns the size.
+  // Matched by physical key, so ⌘= and ⌘⇧= (which a Mac menu spells ⌘+)
+  // both grow it. On Linux bare Ctrl+- is ^_, readline's undo, so these
+  // take Shift like every other app chord there.
+  fontBigger: {
+    darwin: [
+      { code: "Equal", meta: true },
+      { code: "Equal", meta: true, shift: true },
+    ],
+    linux: { code: "Equal", ctrl: true, shift: true },
+    label: { darwin: "⌘+", linux: "Ctrl+Shift+=" },
+  },
+  fontSmaller: {
+    darwin: { code: "Minus", meta: true },
+    linux: { code: "Minus", ctrl: true, shift: true },
+    label: { darwin: "⌘-", linux: "Ctrl+Shift+-" },
+  },
+  fontReset: {
+    darwin: { code: "Digit0", meta: true },
+    linux: { code: "Digit0", ctrl: true, shift: true },
+    label: { darwin: "⌘0", linux: "Ctrl+Shift+0" },
+  },
   // The API tab's request editor, not the terminal. Ctrl+Enter and Ctrl+S are
   // safe there precisely because no shell is listening: a text field is.
   sendRequest: {
@@ -178,8 +220,12 @@ function side(platform: NodeJS.Platform): "darwin" | "linux" {
 }
 
 function matches(event: KeyboardEvent, chord: Chord): boolean {
+  const sameKey =
+    chord.code !== undefined
+      ? event.code === chord.code
+      : event.key.toLowerCase() === chord.key.toLowerCase();
   return (
-    event.key.toLowerCase() === chord.key.toLowerCase() &&
+    sameKey &&
     event.metaKey === (chord.meta ?? false) &&
     event.ctrlKey === (chord.ctrl ?? false) &&
     event.altKey === (chord.alt ?? false) &&
@@ -202,7 +248,8 @@ export function matchChord(
   const which = side(platform);
   for (const [action, binding] of Object.entries(BINDINGS)) {
     if (action === "voiceStart" || action === "voiceStop") continue;
-    if (matches(event, binding[which])) return action as ChordAction;
+    const chords = ([] as readonly Chord[]).concat(binding[which]);
+    if (chords.some((chord) => matches(event, chord))) return action as ChordAction;
   }
   return undefined;
 }

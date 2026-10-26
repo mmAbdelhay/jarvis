@@ -1504,7 +1504,7 @@
     /* It is a flex child of .terminal-pane: the prompt row, under a block
        list that scrolls. Never stretched, never squeezed. */
     flex: 0 0 auto;
-    font: 12px/1.35 var(--font-mono); }
+    font: var(--terminal-font-size, 12px)/1.35 var(--font-mono); }
   .terminal-input-prompt { flex: 0 0 auto; white-space: pre; color: var(--text-muted); }
   .terminal-input-field { position: relative; flex: 1 1 auto; min-width: 0; }
   /* Chromium's UA stylesheet gives <textarea> non-zero default padding (and
@@ -2438,7 +2438,10 @@
   .block-more-menu[hidden] { display: none; }
   .block-more-item { color: var(--text); cursor: pointer; padding: 2px 6px; }
   .block-more-item[aria-disabled="true"] { color: var(--text-muted); cursor: default; }
-  .block-output { font: 12px/1.35 var(--font-mono); white-space: pre; }
+  /* The live terminal's size, set on :root by terminal-font.ts — a block
+     drawn smaller or larger than the xterm it was frozen from would change
+     size the moment its command finished. */
+  .block-output { font: var(--terminal-font-size, 12px)/1.35 var(--font-mono); white-space: pre; }
   .block-line { min-height: 1.35em; }
   .block-elided { color: var(--text-muted); font-style: italic; }
   /* "Explain this failure"'s answer, inside the block it explains — a
