@@ -180,7 +180,7 @@ describe("session tab namer", () => {
     w.setProcesses([w.claudeIn("t1", 101)]);
     w.files.set(join(SESSIONS, "101.json"), pidFile(101, "s1", "fix-login"));
 
-    await createSessionTabNamer({ ...w.deps, isPrNamed: (key) => key === "t1" }).check();
+    await createSessionTabNamer({ ...w.deps, isPrNamedTab: (id) => id === "t1" }).check();
 
     expect(w.renames).toEqual([]);
   });

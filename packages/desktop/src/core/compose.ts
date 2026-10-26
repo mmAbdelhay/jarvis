@@ -1300,6 +1300,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
       });
       if (input !== undefined) child.stdin?.end(input);
     });
+  const reviewStore = createReviewStore(join(homedir(), ".config/jarvis/reviews.json"));
   const reviews = createReviewService({
     shells,
     screenText: (paneKey) => paneScreens.screenText(paneKey),
@@ -1309,7 +1310,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
       return outcome.ok ? outcome.value.branch : undefined;
     },
     gh: createGhReviews({ gh: (args, cwd) => runGh(args, cwd), stdinGh: runGh }),
-    store: createReviewStore(join(homedir(), ".config/jarvis/reviews.json")),
+    store: reviewStore,
     // A fresh scan every time — never refreshSessions()'s cached result,
     // which only refreshes when a window asks (spec §4.3 rule 2).
     scanAgents: () =>
@@ -1341,15 +1342,39 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     shells,
     tabs: workspace,
     reviews,
-    prTitle: async (repo, number) => {
+    prInfo: async (repo, number) => {
       const out = await runGh(
-        ["pr", "view", String(number), "--repo", repo, "--json", "title", "--jq", ".title"],
+        ["pr", "view", String(number), "--repo", repo, "--json", "title,state,createdAt,url"],
         homedir(),
       );
-      const title = out.stdout.trim();
-      return out.code === 0 && title !== "" ? title : undefined;
+      if (out.code !== 0) return undefined;
+      const pr = JSON.parse(out.stdout) as {
+        title?: string;
+        state?: string;
+        createdAt?: string;
+        url?: string;
+      };
+      // GitHub's own casing for the repository, from its canonical URL.
+      const canonical = /github\.com\/([^/]+\/[^/]+)\/pull\//.exec(pr.url ?? "")?.[1];
+      const createdAt = Date.parse(pr.createdAt ?? "");
+      if (Number.isNaN(createdAt)) return undefined;
+      return {
+        repo: canonical ?? repo,
+        number,
+        title: pr.title ?? "",
+        state: pr.state ?? "",
+        createdAt,
+      };
     },
-    reviewsEnabled: () => (config.reviews ?? DEFAULT_REVIEWS_CONFIG).enabled,
+    hasManualLink: async (key) => {
+      const wanted = key.toLowerCase();
+      for (const linked of (await reviewStore.manualLinks()).keys()) {
+        if (linked.toLowerCase() === wanted) return true;
+      }
+      return false;
+    },
+    reviewsConfig: () => config.reviews ?? DEFAULT_REVIEWS_CONFIG,
+    now: () => Date.now(),
   });
   prTabNamer.start();
 
@@ -1393,7 +1418,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
       timer.unref();
       return () => clearInterval(timer);
     },
-    isPrNamed: (paneKey) => prTabNamer.isPrNamed(paneKey),
+    isPrNamedTab: (tabId) => prTabNamer.isPrNamedTab(tabId),
   });
   sessionTabNamer.start();
 
@@ -2088,6 +2113,9 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     safely("dbgate", () => dbgate.stopAll());
     // And each open Cluster tab is a live headlamp-server child process.
     safely("headlamp-server", () => headlamp.stopAll());
+    // Before the shells' last output and the Reviews service go: it renames
+    // tabs and links panes from that output.
+    safely("pr tab names", () => prTabNamer.stop());
     // And each open Terminal tab is a live shell.
     // shutdown() awaits their exits: a live shell holds its cwd.
     safely("shells", () => {
@@ -2099,8 +2127,6 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     safely("reviews", () => reviews.dispose());
     // Releases the stay-awake and the fallback's timers.
     safely("keep awake", () => awake.dispose());
-    // Before the gh children stop: it asks gh for a PR's title.
-    safely("pr tab names", () => prTabNamer.stop());
     // Its gh children: after dispose, so nothing spawns another.
     safely("gh", () => {
       ghStopped = ghChildren.stopAll();

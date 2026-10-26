@@ -33,6 +33,11 @@ const WRAP_CHAR = /[ \t\r\n│┃|]/;
 const OSC8 = /\x1b\]8;[^;\x07\x1b]*;([^\x07\x1b]*)(?:\x07|\x1b\\)/g;
 // biome-ignore lint/suspicious/noControlCharactersInRegex: escape sequences are what these patterns strip.
 const OSC = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
+// A cursor move (CUP, CUU…CHA, VPA) puts what follows somewhere else on
+// screen: read it as a line break, so the next cell drawn neither glues onto
+// a URL's number nor stays apart from the second half of a wrapped URL.
+// biome-ignore lint/suspicious/noControlCharactersInRegex: escape sequences are what these patterns strip.
+const CSI_MOVE = /\x1b\[[0-?]*[ -/]*[A-HdfJ]/g;
 // biome-ignore lint/suspicious/noControlCharactersInRegex: escape sequences are what these patterns strip.
 const CSI = /\x1b\[[0-?]*[ -/]*[@-~]/g;
 // biome-ignore lint/suspicious/noControlCharactersInRegex: escape sequences are what these patterns strip.
@@ -42,12 +47,15 @@ function plainText(raw: string): string {
   return raw
     .replace(OSC8, (_match, uri: string) => (uri === "" ? " " : ` ${uri} `))
     .replace(OSC, "")
+    .replace(CSI_MOVE, "\n")
     .replace(CSI, "")
     .replace(ESC2, "");
 }
 
 /** The URL starting at `from`, rejoined across a wrapped line break; or
- *  undefined when the text ends before the URL does. */
+ *  undefined when the text ends before the URL does, or when a break falls
+ *  where the number might go on (digits after it): a truncated number is a
+ *  confident wrong PR, which is worse than none. */
 function readUrl(text: string, from: number): string | undefined {
   let url = "";
   let i = from;
@@ -64,6 +72,7 @@ function readUrl(text: string, from: number): string | undefined {
     while (j < text.length && WRAP_CHAR.test(text[j] as string)) j += 1;
     const hasBreak = text.slice(i, j).includes("\n");
     const inNumber = /\/pull\/\d/.test(url);
+    if (hasBreak && inNumber && /\d$/.test(url) && /\d/.test(text[j] ?? "")) return undefined;
     if (hasBreak && !inNumber && j < text.length && URL_CHAR.test(text[j] as string)) {
       i = j;
       continue;

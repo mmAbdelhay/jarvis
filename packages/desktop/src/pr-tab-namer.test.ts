@@ -5,6 +5,7 @@ import {
   PR_TAB_TITLE_MAX,
   createPrTabNamer,
   prTabTitle,
+  type PrInfo,
   type PrTabNamerDeps,
 } from "./pr-tab-namer.js";
 
@@ -27,13 +28,32 @@ function tab(id: string): WorkspaceTab {
   };
 }
 
-function world(opts: { title?: (repo: string, n: number) => Promise<string | undefined> } = {}) {
+const NOW = 10_000_000;
+
+function info(n: number, over: Partial<PrInfo> = {}): PrInfo {
+  return {
+    repo: "Acme/App",
+    number: n,
+    title: "Fix the header",
+    state: "OPEN",
+    createdAt: NOW - 60_000,
+    ...over,
+  };
+}
+
+function world(
+  opts: {
+    prInfo?: (repo: string, n: number) => Promise<PrInfo | undefined>;
+    manual?: string[];
+  } = {},
+) {
   const state: WorkspaceState = { tabs: [tab("t1"), tab("t2")], activeTabId: "t1" };
   const renames: [string, string][] = [];
   const links: [string, string | null][] = [];
   const tracked: string[] = [];
-  let polls = 0;
-  let enabled = true;
+  const order: string[] = [];
+  let lookups = 0;
+  const cfg = { enabled: true, autoLink: true };
   const outputs = new Set<(o: ShellOutput) => void>();
   const exits = new Set<(e: ShellExit) => void>();
   const deps: PrTabNamerDeps = {
@@ -55,17 +75,25 @@ function world(opts: { title?: (repo: string, n: number) => Promise<string | und
     },
     reviews: {
       link: async (key, pane) => {
+        order.push("link");
         links.push([key, pane]);
       },
       trackRepo: (repo) => {
+        order.push("track");
         tracked.push(repo);
       },
       pollNow: async () => {
-        polls++;
+        order.push("poll");
       },
     },
-    prTitle: opts.title ?? (async () => "Fix the header"),
-    reviewsEnabled: () => enabled,
+    prInfo: async (repo, n) => {
+      lookups++;
+      return opts.prInfo === undefined ? info(n) : opts.prInfo(repo, n);
+    },
+    hasManualLink: async (key) =>
+      (opts.manual ?? []).some((k) => k.toLowerCase() === key.toLowerCase()),
+    reviewsConfig: () => cfg,
+    now: () => NOW,
   };
   const namer = createPrTabNamer(deps);
   namer.start();
@@ -74,10 +102,9 @@ function world(opts: { title?: (repo: string, n: number) => Promise<string | und
     renames,
     links,
     tracked,
-    polls: () => polls,
-    disable: () => {
-      enabled = false;
-    },
+    order,
+    cfg,
+    lookups: () => lookups,
     print: (paneKey: string, chunk: string) => {
       for (const l of outputs) l({ paneKey, chunk, offset: 0 });
     },
@@ -104,16 +131,16 @@ describe("prTabTitle", () => {
 });
 
 describe("PR tab namer", () => {
-  it("renames the pane's tab and links the pane in Reviews", async () => {
+  it("renames the tab and links the pane, polling first so the key is canonical", async () => {
     const w = world();
     w.print("t1", `Created ${URL_42}\r\n`);
     await w.namer.whenIdle();
     expect(w.renames).toEqual([["t1", "PR #42 · Fix the header"]]);
-    expect(w.links).toEqual([["acme/app#42", "t1"]]);
-    expect(w.tracked).toEqual(["acme/app"]);
-    expect(w.polls()).toBe(1);
-    expect(w.namer.isPrNamed("t1")).toBe(true);
-    expect(w.namer.isPrNamed("t2")).toBe(false);
+    expect(w.links).toEqual([["Acme/App#42", "t1"]]);
+    expect(w.tracked).toEqual(["Acme/App"]);
+    expect(w.order).toEqual(["track", "poll", "link"]);
+    expect(w.namer.isPrNamedTab("t1")).toBe(true);
+    expect(w.namer.isPrNamedTab("t2")).toBe(false);
   });
 
   it("maps a split pane to its tab", async () => {
@@ -121,31 +148,49 @@ describe("PR tab namer", () => {
     w.print("t2:3", `${URL_42}\n`);
     await w.namer.whenIdle();
     expect(w.renames).toEqual([["t2", "PR #42 · Fix the header"]]);
+    expect(w.namer.isPrNamedTab("t2")).toBe(true);
   });
 
   it("acts once for the same URL printed again", async () => {
     const w = world();
     w.print("t1", `${URL_42}\n`);
+    await w.namer.whenIdle();
     w.print("t1", `${URL_42}\n`);
     await w.namer.whenIdle();
     expect(w.renames).toHaveLength(1);
     expect(w.links).toHaveLength(1);
   });
 
-  it("uses the bare number when the title cannot be read", async () => {
+  it("ignores an old PR — one listed or mentioned, not opened here", async () => {
+    const w = world({ prInfo: async (_r, n) => info(n, { createdAt: NOW - 2 * 60 * 60_000 }) });
+    w.print("t1", `${URL_42}\n`);
+    await w.namer.whenIdle();
+    expect(w.renames).toEqual([]);
+    expect(w.links).toEqual([]);
+    expect(w.namer.isPrNamedTab("t1")).toBe(false);
+  });
+
+  it("ignores a closed or merged PR", async () => {
+    const w = world({ prInfo: async (_r, n) => info(n, { state: "MERGED" }) });
+    w.print("t1", `${URL_42}\n`);
+    await w.namer.whenIdle();
+    expect(w.renames).toEqual([]);
+  });
+
+  it("does nothing when gh cannot say", async () => {
     const w = world({
-      title: async () => {
+      prInfo: async () => {
         throw new Error("gh: not found");
       },
     });
     w.print("t1", `${URL_42}\n`);
     await w.namer.whenIdle();
-    expect(w.renames).toEqual([["t1", "PR #42"]]);
+    expect(w.renames).toEqual([]);
+    expect(w.tracked).toEqual([]);
   });
 
-  it("still renames, without linking, while Reviews is off", async () => {
-    const w = world();
-    w.disable();
+  it("never writes over a manual link or unlink", async () => {
+    const w = world({ manual: ["acme/app#42"] });
     w.print("t1", `${URL_42}\n`);
     await w.namer.whenIdle();
     expect(w.renames).toHaveLength(1);
@@ -153,22 +198,43 @@ describe("PR tab namer", () => {
     expect(w.tracked).toEqual([]);
   });
 
-  it("lets a newer PR win over one whose title is still loading", async () => {
+  it("renames without linking while Reviews or its auto-link is off", async () => {
+    const off = world();
+    off.cfg.enabled = false;
+    off.print("t1", `${URL_42}\n`);
+    await off.namer.whenIdle();
+    expect(off.renames).toHaveLength(1);
+    expect(off.links).toEqual([]);
+
+    const manualOnly = world();
+    manualOnly.cfg.autoLink = false;
+    manualOnly.print("t1", `${URL_42}\n`);
+    await manualOnly.namer.whenIdle();
+    expect(manualOnly.links).toEqual([]);
+    expect(manualOnly.tracked).toEqual([]);
+  });
+
+  it("asks gh once per pane at a time, the newest waiting PR winning", async () => {
     let release: () => void = () => {};
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
     const w = world({
-      title: async (_repo, n) => {
+      prInfo: async (_repo, n) => {
         if (n === 42) await gate;
-        return `title ${n}`;
+        return info(n, { title: `title ${n}` });
       },
     });
     w.print("t1", `${URL_42}\n`);
     w.print("t1", "https://github.com/acme/app/pull/43\n");
+    w.print("t1", "https://github.com/acme/app/pull/44\n");
     release();
     await w.namer.whenIdle();
-    expect(w.renames).toEqual([["t1", "PR #43 · title 43"]]);
+    expect(w.lookups()).toBe(2);
+    expect(w.renames).toEqual([
+      ["t1", "PR #42 · title 42"],
+      ["t1", "PR #44 · title 44"],
+    ]);
   });
 
   it("forgets a pane whose shell exited", async () => {
@@ -176,7 +242,7 @@ describe("PR tab namer", () => {
     w.print("t1", `${URL_42}\n`);
     await w.namer.whenIdle();
     w.exit("t1");
-    expect(w.namer.isPrNamed("t1")).toBe(false);
+    expect(w.namer.isPrNamedTab("t1")).toBe(false);
     w.print("t1", `${URL_42}\n`);
     await w.namer.whenIdle();
     expect(w.renames).toHaveLength(2);

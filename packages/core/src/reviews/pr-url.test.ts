@@ -40,6 +40,32 @@ describe("createPrUrlScanner", () => {
     expect(scan.push("p", wrapped)).toEqual({ repo: "acme/widgets", number: 42 });
   });
 
+  it("never reads a cell drawn after a cursor move as more of the number", () => {
+    const scan = createPrUrlScanner();
+    // Digits after the move could be a wrapped number or the next cell:
+    // no PR beats #53.
+    expect(
+      scan.push("p", "https://github.com/acme/widgets/pull/5\x1b[12;40H3 files "),
+    ).toBeUndefined();
+    expect(scan.push("p", "https://github.com/acme/widgets/pull/6\x1b[12;40HDone ")).toEqual({
+      repo: "acme/widgets",
+      number: 6,
+    });
+  });
+
+  it("rejoins a URL wrapped with a cursor move instead of a newline", () => {
+    const scan = createPrUrlScanner();
+    expect(scan.push("p", "https://github.com/acme/wid\x1b[2;1Hgets/pull/42 ")).toEqual({
+      repo: "acme/widgets",
+      number: 42,
+    });
+  });
+
+  it("drops a URL whose number a wrap may have cut", () => {
+    const scan = createPrUrlScanner();
+    expect(scan.push("p", "https://github.com/acme/widgets/pull/12\r\n│ 34 │\r\n")).toBeUndefined();
+  });
+
   it("drops sentence punctuation after the URL", () => {
     const scan = createPrUrlScanner();
     expect(scan.push("p", `Opened ${URL_42}.\nNext line`)).toEqual({
