@@ -995,8 +995,9 @@ function ensurePane(
   planHandle.hidden = true;
 
   // The panel's visible switch (the tab menu and the palette are the
-  // other two): floated in the panes' own top corner, so it costs the
-  // terminal no width and stays left of the panel once that is open.
+  // other two): in a slim band above the panes (styles.css), so it costs
+  // the terminal no width, stays left of the panel once that is open, and
+  // never sits on a block's own buttons.
   const planToggle = document.createElement("button");
   planToggle.type = "button";
   planToggle.className = "plan-toggle";
