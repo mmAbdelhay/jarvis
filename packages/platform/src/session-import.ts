@@ -869,8 +869,12 @@ function toolTarget(fields: Record<string, unknown>): string | undefined {
   if (typeof path === "string" && path !== "") return basename(path);
   const command = fields["command"];
   if (typeof command === "string" && command !== "") {
-    const first = command.split("\n")[0] ?? "";
-    return first.length > TARGET_CHARS ? `${first.slice(0, TARGET_CHARS)}…` : first;
+    // A command can open on a blank line, or end its lines Windows-style;
+    // the first line with something on it is the one that says what ran.
+    const first = command.split(/\r?\n/).find((row) => row.trim() !== "");
+    if (first !== undefined) {
+      return first.length > TARGET_CHARS ? `${first.slice(0, TARGET_CHARS)}…` : first;
+    }
   }
   for (const key of ["pattern", "url"]) {
     const value = fields[key];
@@ -885,6 +889,9 @@ function lineCount(value: unknown): number {
   const lines = value.split("\n").length;
   return value.endsWith("\n") ? lines - 1 : lines;
 }
+
+/** The model the CLI records on an API-error turn it wrote itself. */
+const SYNTHETIC_MODEL = "<synthetic>";
 
 /**
  * The conversation in a Claude transcript, with each tool call shaped by
@@ -918,7 +925,15 @@ function readTurns<T>(
     const message = fields["message"];
     if (typeof message !== "object" || message === null) continue;
     const body = message as Record<string, unknown>;
-    if (role === "assistant" && typeof body["model"] === "string") model = body["model"];
+    // An API error is written as an assistant record whose model is
+    // "<synthetic>": not a model, so it must not replace the real one.
+    if (
+      role === "assistant" &&
+      typeof body["model"] === "string" &&
+      body["model"] !== SYNTHETIC_MODEL
+    ) {
+      model = body["model"];
+    }
     const turn = transcriptTurn(body["content"], toTool);
     if (turn === undefined) continue;
     if (turn.text === "" && turn.tools.length === 0) continue;

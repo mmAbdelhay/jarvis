@@ -392,6 +392,27 @@ describe("parseChatTranscript", () => {
     ]);
   });
 
+  it("targets a command by its first non-blank line, whatever the line ending", () => {
+    const out = parseChatTranscript(
+      [
+        toolTurn("Bash", { command: "\ncd x && ls" }),
+        toolTurn("Bash", { command: "a\r\nb" }),
+        toolTurn("Bash", { command: "  \n\n", pattern: "fallback" }),
+      ].join("\n"),
+    );
+    expect(out.turns[0]?.tools).toEqual([
+      { name: "Bash", target: "cd x && ls" },
+      { name: "Bash", target: "a" },
+      { name: "Bash", target: "fallback" },
+    ]);
+  });
+
+  it("keeps an exactly-80-character command whole, with no …", () => {
+    const exact = "y".repeat(80);
+    const out = parseChatTranscript(toolTurn("Bash", { command: exact }));
+    expect(out.turns[0]?.tools).toEqual([{ name: "Bash", target: exact }]);
+  });
+
   it("falls back to a pattern, then a url, and names a tool with neither", () => {
     const out = parseChatTranscript(
       [
@@ -436,6 +457,21 @@ describe("parseChatTranscript", () => {
       ].join("\n"),
     );
     expect(out.model).toBe("claude-b");
+  });
+
+  // An API error is recorded as an assistant turn whose model is
+  // "<synthetic>" — not a model anyone chose, so it must not replace one.
+  it("ignores the <synthetic> model of an API-error record", () => {
+    const out = parseChatTranscript(
+      [
+        line({ type: "assistant", message: { model: "claude-a", content: "first" } }),
+        line({
+          type: "assistant",
+          message: { model: "<synthetic>", content: [{ type: "text", text: "API Error" }] },
+        }),
+      ].join("\n"),
+    );
+    expect(out.model).toBe("claude-a");
   });
 
   it("returns no model when no assistant has spoken", () => {
