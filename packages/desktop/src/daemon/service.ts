@@ -41,6 +41,10 @@ export interface ServiceManager {
 export interface CreateServiceManagerOptions {
   platform: ServicePlatform;
   home: string;
+  /** The OS account's home (os.userInfo().homedir, which ignores $HOME).
+   *  The service names are per account, so an instance with any other home
+   *  installs and drives a service of its own (service-name.ts). */
+  accountHome: string;
   uid: number;
   execPath: string;
   daemonScript: string;
@@ -184,7 +188,7 @@ export function createServiceManager(options: CreateServiceManagerOptions): Serv
     async isStale() {
       const result = await options.run(...service.commands.status);
       if (result.code !== 0) return false;
-      return windowsRecordedExecPath(result.stdout) !== options.execPath;
+      return windowsRecordedExecPath(result.stdout, service.valueName) !== options.execPath;
     },
   };
 }

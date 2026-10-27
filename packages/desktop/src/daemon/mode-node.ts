@@ -39,6 +39,9 @@ const LOG_TAIL_BYTES = 16 * 1024;
 export type NodeModeOptions = {
   platform: NodeJS.Platform;
   home: string;
+  /** The OS account's home (os.userInfo().homedir): when `home` is another
+   *  (a dev or test instance), the service gets names of its own. */
+  accountHome: string;
   uid: number;
   /** The binary the service runs the daemon with (process.execPath). */
   execPath: string;
@@ -153,6 +156,7 @@ export function nodeDaemonModeDeps(options: NodeModeOptions): NodeModeDeps {
   const service = createServiceManager({
     platform: servicePlatform(platform),
     home: options.home,
+    accountHome: options.accountHome,
     uid: options.uid,
     execPath: options.execPath,
     daemonScript: options.daemonScript,
