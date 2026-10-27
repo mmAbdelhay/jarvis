@@ -88,6 +88,13 @@ const config: ExpoConfig = {
     ],
     "expo-camera",
     [
+      "expo-image-picker",
+      {
+        photosPermission: "Jarvis attaches the photos you pick to your message to Claude.",
+        cameraPermission: "Jarvis attaches the photo you take to your message to Claude.",
+      },
+    ],
+    [
       "expo-audio",
       {
         // Unlike NSCameraUsageDescription above, this string is not set
