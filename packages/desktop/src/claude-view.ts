@@ -31,6 +31,8 @@ export type ClaudeViewDeps = {
   log(token: string): void;
   /** Tells the notifier which transcript to watch for this pane. */
   follow(paneKey: string, transcript: TranscriptLocation): void;
+  /** Undoes a follow, for a pane that exited while it was being set up. */
+  forget(paneKey: string): void;
 };
 
 const NONE: ClaudeView = { kind: "none" };
@@ -89,6 +91,17 @@ export function createClaudeViewHandlers(deps: ClaudeViewDeps): {
       } catch {
         none("follow"); // Costs live pushes for the transcript, not the view.
       }
+      // The shell can exit while the scan or lookup awaits. Its exit has
+      // already forgotten the pane, so this follow re-added a dead one —
+      // and with it a watch nothing would ever close.
+      try {
+        if (!live(paneKey)) {
+          deps.forget(paneKey);
+          return NONE;
+        }
+      } catch {
+        return none("panes");
+      }
 
       let chat: ReturnType<typeof parseChatTranscript> = { turns: [] };
       if (session.transcriptPath !== undefined) {
@@ -128,13 +141,22 @@ export function createClaudeViewHandlers(deps: ClaudeViewDeps): {
     // and label; both must match the screen now, and the keys typed are the
     // ones read now, never any the phone holds.
     answer(paneKey, index, label) {
-      if (!live(paneKey)) return { ok: false, reason: "gone" };
-      const prompt = readClaudeScreen(deps.screenText(paneKey) ?? "").prompt;
-      if (prompt === undefined) return { ok: false, reason: "gone" };
-      const option = Number.isInteger(index) ? prompt.options[index as number] : undefined;
-      if (option === undefined || option.label !== label) return { ok: false, reason: "changed" };
-      deps.write(paneKey, option.keys);
-      return { ok: true };
+      try {
+        if (!live(paneKey)) return { ok: false, reason: "gone" };
+        const prompt = readClaudeScreen(deps.screenText(paneKey) ?? "").prompt;
+        if (prompt === undefined) return { ok: false, reason: "gone" };
+        const option = Number.isInteger(index) ? prompt.options[index as number] : undefined;
+        if (option === undefined || option.label !== label) {
+          return { ok: false, reason: "changed" };
+        }
+        deps.write(paneKey, option.keys);
+        return { ok: true };
+      } catch {
+        // A pane that died under the write (or a screen that could not be
+        // read) is gone to the phone; the error's text stays here.
+        none("answer");
+        return { ok: false, reason: "gone" };
+      }
     },
   };
 }
@@ -145,8 +167,9 @@ export type ClaudeViewNotifierDeps = {
   /** Subscribes to every pane's shell exit; returns the unsubscribe. */
   onExit(cb: (paneKey: string) => void): () => void;
   /** Watches a directory; `file` is the changed entry's name, or null when
-   *  the platform does not say. May throw (directory missing). */
-  watch(dir: string, cb: (file: string | null) => void): { close(): void };
+   *  the platform does not say. May throw (directory missing). `onError`
+   *  runs when the watch dies later (directory removed). */
+  watch(dir: string, cb: (file: string | null) => void, onError: () => void): { close(): void };
   schedule(fn: () => void, ms: number): () => void;
   emit(paneKey: string): void;
   log(token: string): void;
@@ -161,10 +184,12 @@ export type ClaudeViewNotifierDeps = {
  *
  * Transcript watches are per directory, shared by every pane whose session
  * lives there, and only for panes the view handler has followed; a pane's
- * entry goes when its shell exits.
+ * entry goes when its shell exits, or on `forget`. A watch that errors is
+ * dropped, so the next follow watches that directory again.
  */
 export function createClaudeViewNotifier(deps: ClaudeViewNotifierDeps): {
   follow(paneKey: string, transcript: TranscriptLocation): void;
+  forget(paneKey: string): void;
   stop(): void;
 } {
   const pending = new Map<string, () => void>();
@@ -222,20 +247,32 @@ export function createClaudeViewNotifier(deps: ClaudeViewNotifierDeps): {
       if (watchers.has(transcript.dir)) return;
       try {
         const dir = transcript.dir;
-        watchers.set(
+        let watcher: { close(): void } | undefined;
+        let failed = false;
+        watcher = deps.watch(
           dir,
-          deps.watch(dir, (file) => {
+          (file) => {
             for (const [key, location] of followed) {
               if (location.dir === dir && (file === null || file === location.file)) bump(key);
             }
-          }),
+          },
+          () => {
+            // Only this watch's own entry: a late error from one already
+            // replaced must not drop its successor.
+            failed = true;
+            if (watcher !== undefined && watchers.get(dir) === watcher) watchers.delete(dir);
+            watcher?.close();
+            log("watch-error");
+          },
         );
+        if (!failed) watchers.set(dir, watcher);
       } catch {
         // Not there yet (Claude creates it on its first write); the next
         // view call follows again. Output pushes still flow meanwhile.
         log("watch");
       }
     },
+    forget,
     stop() {
       stopped = true;
       stopOutput();

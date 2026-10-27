@@ -65,6 +65,7 @@ function fakeDeps(overrides: Partial<ClaudeViewDeps> = {}): ClaudeViewDeps {
     write: vi.fn(),
     log: vi.fn(),
     follow: vi.fn(),
+    forget: vi.fn(),
     ...overrides,
   };
 }
@@ -175,7 +176,53 @@ describe("createClaudeViewHandlers.view", () => {
   });
 });
 
+describe("createClaudeViewHandlers.view, pane exiting mid-call", () => {
+  // The shell exits while the scan or lookup awaits: its exit already ran
+  // the notifier's forget, so this follow would re-add a dead pane.
+  it("forgets a pane that died before follow, and is none", async () => {
+    const panes = vi
+      .fn(() => [{ paneKey: "t1", exited: false }])
+      .mockReturnValueOnce([{ paneKey: "t1", exited: false }])
+      .mockReturnValue([{ paneKey: "t1", exited: true }]);
+    const deps = fakeDeps({ panes });
+    expect(await createClaudeViewHandlers(deps).view("t1")).toEqual({ kind: "none" });
+    expect(deps.follow).toHaveBeenCalledWith("t1", expect.anything());
+    expect(deps.forget).toHaveBeenCalledWith("t1");
+  });
+
+  it("does not forget a pane that is still live", async () => {
+    const deps = fakeDeps();
+    expect((await createClaudeViewHandlers(deps).view("t1")).kind).toBe("claude");
+    expect(deps.forget).not.toHaveBeenCalled();
+  });
+});
+
 describe("createClaudeViewHandlers.answer", () => {
+  it("is gone, logging a category token, when reading or writing the pane throws", () => {
+    const writes = fakeDeps({
+      screenText: vi.fn(() => PROMPT_SCREEN),
+      write: vi.fn(() => {
+        throw new Error("EPIPE /secret/path");
+      }),
+    });
+    expect(createClaudeViewHandlers(writes).answer("t1", 0, "Yes")).toEqual({
+      ok: false,
+      reason: "gone",
+    });
+    expect(writes.log).toHaveBeenCalledWith("claude-view: answer");
+    expect(JSON.stringify(vi.mocked(writes.log).mock.calls)).not.toContain("secret");
+
+    const panes = fakeDeps({
+      panes: vi.fn(() => {
+        throw new Error("panes");
+      }),
+    });
+    expect(createClaudeViewHandlers(panes).answer("t1", 0, "Yes")).toEqual({
+      ok: false,
+      reason: "gone",
+    });
+  });
+
   it("is changed when the label at that index differs, and writes nothing", () => {
     const deps = fakeDeps({ screenText: vi.fn(() => PROMPT_SCREEN) });
     const { answer } = createClaudeViewHandlers(deps);
@@ -224,7 +271,10 @@ describe("createClaudeViewNotifier", () => {
     let output: ((paneKey: string) => void) | undefined;
     let exit: ((paneKey: string) => void) | undefined;
     const timers: { fn: () => void; ms: number; cancelled: boolean }[] = [];
-    const watchers = new Map<string, { cb: (file: string | null) => void; closed: boolean }>();
+    const watchers = new Map<
+      string,
+      { cb: (file: string | null) => void; onError: () => void; closed: boolean }
+    >();
     const emit = vi.fn();
     const deps = {
       onOutput: vi.fn((cb: (paneKey: string) => void) => {
@@ -239,8 +289,8 @@ describe("createClaudeViewNotifier", () => {
           exit = undefined;
         };
       }),
-      watch: vi.fn((dir: string, cb: (file: string | null) => void) => {
-        const watcher = { cb, closed: false };
+      watch: vi.fn((dir: string, cb: (file: string | null) => void, onError: () => void) => {
+        const watcher = { cb, onError, closed: false };
         watchers.set(dir, watcher);
         return {
           close: () => {
@@ -333,5 +383,38 @@ describe("createClaudeViewNotifier", () => {
     expect(h.deps.log).toHaveBeenCalledWith("claude-view: watch");
     h.notifier.follow("t1", { dir: "/p", file: "a.jsonl" });
     expect(h.deps.watch).toHaveBeenCalledTimes(2);
+  });
+
+  // fs.watch emits "error" when its directory goes (a project deleted and
+  // recreated): that watch is dead, and the next view must watch again.
+  it("drops a watch that errored, so the next follow watches again", () => {
+    const h = harness();
+    h.notifier.follow("t1", { dir: "/p", file: "a.jsonl" });
+    h.watchers.get("/p")?.onError();
+    expect(h.watchers.get("/p")?.closed).toBe(true);
+    expect(h.deps.log).toHaveBeenCalledWith("claude-view: watch-error");
+    h.notifier.follow("t1", { dir: "/p", file: "a.jsonl" });
+    expect(h.deps.watch).toHaveBeenCalledTimes(2);
+    h.watchers.get("/p")?.cb("a.jsonl");
+    h.flush();
+    expect(h.deps.emit).toHaveBeenCalledWith("t1");
+  });
+
+  it("an old watch's late error does not drop its replacement", () => {
+    const h = harness();
+    h.notifier.follow("t1", { dir: "/p", file: "a.jsonl" });
+    const first = h.watchers.get("/p");
+    first?.onError();
+    h.notifier.follow("t1", { dir: "/p", file: "a.jsonl" });
+    first?.onError();
+    h.notifier.follow("t1", { dir: "/p", file: "a.jsonl" });
+    expect(h.deps.watch).toHaveBeenCalledTimes(2);
+  });
+
+  it("forget drops a pane's follow and closes its unused watch", () => {
+    const h = harness();
+    h.notifier.follow("t1", { dir: "/p", file: "a.jsonl" });
+    h.notifier.forget("t1");
+    expect(h.watchers.get("/p")?.closed).toBe(true);
   });
 });

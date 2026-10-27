@@ -1,5 +1,6 @@
 import { join } from "node:path";
-import { isFileId, type AttachUploadResult } from "@jarvis/wire";
+import type { ExternalAgentProcess } from "@jarvis/platform";
+import { isFileId, type AttachUploadResult, type TerminalPaneInfo } from "@jarvis/wire";
 import type { UploadStore } from "./file-upload.js";
 import { MESSAGES } from "./messages.js";
 
@@ -42,6 +43,48 @@ export function attachFileName(
   return `${day}-${time}-${hex6}.${extension}`;
 }
 
+type PaneAttachCwdDeps = {
+  panes(): readonly TerminalPaneInfo[];
+  /** A fresh process scan. */
+  scanAgents(): Promise<readonly ExternalAgentProcess[]>;
+  agents(): readonly { id: string; vendor?: string }[];
+  paneStartDir(paneKey: string): string | undefined;
+};
+
+/**
+ * Where an attachment for a pane goes: the Claude process's own cwd in that
+ * pane, else the directory the pane's tab was opened in — and nowhere at
+ * all for a pane that is gone or exited, whose start directory is only a
+ * memory of a shell that no longer runs.
+ */
+export function createPaneAttachCwd(
+  deps: PaneAttachCwdDeps,
+): (paneKey: string) => Promise<string | undefined> {
+  return async (paneKey) => {
+    try {
+      if (!deps.panes().some((pane) => pane.paneKey === paneKey && !pane.exited)) {
+        return undefined;
+      }
+    } catch {
+      return undefined;
+    }
+    try {
+      const agents = deps.agents();
+      const claude = (await deps.scanAgents()).find(
+        (candidate) =>
+          candidate.terminalPaneKey === paneKey &&
+          candidate.foreground !== false &&
+          candidate.cwd !== null &&
+          agents.find((agent) => agent.id === candidate.agentId)?.vendor === "anthropic",
+      );
+      if (claude?.cwd) return claude.cwd;
+    } catch {
+      // No scan: the pane's own directory is still a safe answer.
+    }
+    return deps.paneStartDir(paneKey);
+  };
+}
+
 type PaneAttachDeps = {
   uploads: Pick<UploadStore, "resolve" | "release">;
   /** Claude process cwd, falling back to the tab's project directory. */
@@ -55,7 +98,11 @@ type PaneAttachDeps = {
     ): Promise<unknown>;
     realpath(path: string): Promise<string>;
     lstat(path: string): Promise<{ isSymbolicLink(): boolean }>;
+    chmod(path: string, mode: number): Promise<unknown>;
+    rm(path: string, options: { force: true }): Promise<unknown>;
   };
+  /** The app's language, for the generic errors the phone shows. */
+  language: "ar" | "en";
   now(): number;
   /** Byte count: randomHex(3) returns six lowercase hex characters. */
   randomHex(n: number): string;
@@ -65,13 +112,26 @@ type PaneAttachDeps = {
 export function createPaneAttach(deps: PaneAttachDeps): {
   attach(deviceId: string, paneKey: unknown, fileId: unknown): Promise<AttachUploadResult>;
 } {
-  function failure(token: string, error = MESSAGES.fileUploadFailed("en")): AttachUploadResult {
+  function failure(
+    token: string,
+    error = MESSAGES.fileUploadFailed(deps.language),
+  ): AttachUploadResult {
     try {
       deps.log(`pane-attach: ${token}`);
     } catch {
       // Diagnostics cannot break attachment or reveal dependency errors.
     }
     return { ok: false, error };
+  }
+
+  /** What sits at `path`, without following a symlink there. */
+  async function entryKind(path: string): Promise<"missing" | "symlink" | "present"> {
+    try {
+      return (await deps.fs.lstat(path)).isSymbolicLink() ? "symlink" : "present";
+    } catch (error) {
+      if (errorCode(error) === "ENOENT") return "missing";
+      throw error;
+    }
   }
 
   return {
@@ -81,10 +141,22 @@ export function createPaneAttach(deps: PaneAttachDeps): {
       }
       try {
         const upload = await deps.uploads.resolve(deviceId, fileId);
-        if (upload === undefined) return failure("notfound", MESSAGES.fileUploadNotFound("en"));
+        if (upload === undefined)
+          return failure("notfound", MESSAGES.fileUploadNotFound(deps.language));
         const cwd = await deps.cwdFor(paneKey);
         if (cwd === undefined || cwd.length === 0) return failure("cwd");
-        const directory = join(cwd, ".jarvis", "uploads");
+        const parent = join(cwd, ".jarvis");
+        const directory = join(parent, "uploads");
+        // mkdir -p follows a symlink it finds on the way, so one at .jarvis
+        // would have it create directories wherever that points. Refuse
+        // before creating anything.
+        const parentKind = await entryKind(parent);
+        if (
+          parentKind === "symlink" ||
+          (parentKind === "present" && (await entryKind(directory)) === "symlink")
+        ) {
+          return failure("directory");
+        }
         await deps.fs.mkdir(directory, { recursive: true, mode: 0o700 });
         const [cwdReal, directoryReal, stat] = await Promise.all([
           deps.fs.realpath(cwd),
@@ -96,28 +168,33 @@ export function createPaneAttach(deps: PaneAttachDeps): {
         if (stat.isSymbolicLink() || directoryReal !== join(cwdReal, ".jarvis", "uploads")) {
           return failure("directory");
         }
+        // mkdir's mode is masked by the umask and never touches a directory
+        // that already existed: set it outright, now that it is known ours.
+        await deps.fs.chmod(directory, 0o700);
         try {
           await deps.fs.writeFile(join(directory, ".gitignore"), "*\n", {
             flag: "wx",
             mode: 0o600,
           });
         } catch (error) {
-          if (
-            !(
-              typeof error === "object" &&
-              error !== null &&
-              "code" in error &&
-              error.code === "EEXIST"
-            )
-          )
-            throw error;
+          if (errorCode(error) !== "EEXIST") throw error;
         }
         const hex = deps.randomHex(3);
         if (!/^[a-f0-9]{6}$/.test(hex)) return failure("random");
         const name = attachFileName(deps.now(), hex, upload.contentType, upload.name);
         // Exclusive creation refuses existing files and symlinks. Keep the
         // staged copy on every failed write so the phone can retry.
-        await deps.fs.writeFile(join(directory, name), upload.bytes, { flag: "wx", mode: 0o600 });
+        const path = join(directory, name);
+        try {
+          await deps.fs.writeFile(path, upload.bytes, { flag: "wx", mode: 0o600 });
+        } catch (error) {
+          // A write that failed part-way leaves a truncated file behind;
+          // EEXIST means the file was never ours to remove.
+          if (errorCode(error) !== "EEXIST") {
+            await deps.fs.rm(path, { force: true }).catch(() => undefined);
+          }
+          throw error;
+        }
         await deps.uploads.release(deviceId, fileId);
         return { ok: true, path: `.jarvis/uploads/${name}` };
       } catch {
@@ -125,4 +202,8 @@ export function createPaneAttach(deps: PaneAttachDeps): {
       }
     },
   };
+}
+
+function errorCode(error: unknown): unknown {
+  return typeof error === "object" && error !== null && "code" in error ? error.code : undefined;
 }

@@ -239,7 +239,7 @@ import { writeDaemonEnabled } from "../daemon/config-file.js";
 import { errorMessage, MESSAGES, PRIMARY_LANGUAGE } from "../messages.js";
 import { createPaneScreens } from "../pane-screen.js";
 import { createPaneClaudeLookup } from "../pane-claude-session.js";
-import { createPaneAttach } from "../pane-attach.js";
+import { createPaneAttach, createPaneAttachCwd } from "../pane-attach.js";
 import { createClaudeViewHandlers, createClaudeViewNotifier } from "../claude-view.js";
 import { createRecorderDeps, Recorder } from "../recorder.js";
 import { capacityReport, startupReport } from "../startup.js";
@@ -2388,11 +2388,11 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
   const claudeViewNotifier = createClaudeViewNotifier({
     onOutput: (cb) => shells.onOutput(({ paneKey }) => cb(paneKey)),
     onExit: (cb) => shells.onShellExit(({ paneKey }) => cb(paneKey)),
-    watch: (dir, cb) => {
+    watch: (dir, cb, onError) => {
       const watcher = watchFs(dir, (_event, file) => cb(typeof file === "string" ? file : null));
-      // A watch that fails later (directory removed) costs transcript
-      // pushes only; output pushes still flow.
-      watcher.on("error", () => watcher.close());
+      // A watch that fails later (directory removed) is closed and dropped
+      // by the notifier; the next view call watches again.
+      watcher.on("error", () => onError());
       return watcher;
     },
     schedule: (fn, ms) => {
@@ -2417,28 +2417,18 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     write: (paneKey, data) => shells.write(paneKey, data),
     log: (token) => console.warn(token),
     follow: (paneKey, transcript) => claudeViewNotifier.follow(paneKey, transcript),
+    forget: (paneKey) => claudeViewNotifier.forget(paneKey),
   });
   const paneAttach = createPaneAttach({
     uploads: uploadStore,
-    // The Claude process's own cwd in that pane, else the directory the
-    // pane's tab was opened in.
-    cwdFor: async (paneKey) => {
-      try {
-        const agents = registry.list();
-        const claude = (await scanPaneAgents()).find(
-          (candidate) =>
-            candidate.terminalPaneKey === paneKey &&
-            candidate.foreground !== false &&
-            candidate.cwd !== null &&
-            agents.find((agent) => agent.id === candidate.agentId)?.vendor === "anthropic",
-        );
-        if (claude?.cwd) return claude.cwd;
-      } catch {
-        // No scan: the pane's own directory is still a safe answer.
-      }
-      return terminal.paneStartDir(paneKey);
-    },
-    fs: { mkdir, writeFile, realpath, lstat },
+    cwdFor: createPaneAttachCwd({
+      panes: () => shells.panes(),
+      scanAgents: scanPaneAgents,
+      agents: () => registry.list(),
+      paneStartDir: (paneKey) => terminal.paneStartDir(paneKey),
+    }),
+    fs: { mkdir, writeFile, realpath, lstat, chmod, rm },
+    language: PRIMARY_LANGUAGE,
     now: Date.now,
     randomHex: (n) => randomBytes(n).toString("hex"),
     log: (token) => console.warn(token),
