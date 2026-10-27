@@ -43,6 +43,8 @@ export function createClaudeViewStore(deps: {
   }
 
   function refresh(): Promise<void> {
+    // A closed store fetches nothing and changes no state.
+    if (!opened) return Promise.resolve();
     if (inFlight) {
       queued = true;
       return inFlight;
@@ -59,17 +61,19 @@ export function createClaudeViewStore(deps: {
           if (result.ok) {
             const view = parseClaudeView(result.value);
             const tab = view.kind === "none" ? "term" : seenClaude ? state.tab : "chat";
-            if (view.kind === "claude") seenClaude = true;
+            // Claude gone: a later Claude in this pane opens on Chat again.
+            seenClaude = view.kind === "claude";
             setState({ view, tab });
           } else deps.log("claude-view: refresh failed");
         } catch {
           deps.log("claude-view: refresh failed");
         }
       } while (queued && current === generation);
-    };
-    const promise = run().finally(() => {
+      // Cleared as the loop exits, not in a `.finally`: a refresh() landing
+      // in the microtasks between would join this finished run and be lost.
       if (inFlight === promise) inFlight = undefined;
-    });
+    };
+    const promise: Promise<void> = run();
     inFlight = promise;
     return promise;
   }
@@ -105,7 +109,11 @@ export function createClaudeViewStore(deps: {
       off = undefined;
       deps.client.unsubscribe(target);
     },
+    // One answer at a time: a second answer() while one is pending rejects
+    // unsent ("claude-view: answer pending"), and `answering` stays true
+    // until the first settles. After close() no answer changes state.
     async answer(index, label) {
+      if (state.answering) throw new Error("claude-view: answer pending");
       setState({ answering: true });
       try {
         const result = await deps.client.call(CLAUDE_ANSWER_CHANNEL, [deps.paneKey, index, label], {
@@ -120,7 +128,8 @@ export function createClaudeViewStore(deps: {
         }
         throw new Error("claude-view: invalid answer reply");
       } finally {
-        setState({ answering: false });
+        if (opened) setState({ answering: false });
+        else state = { ...state, answering: false };
       }
     },
   };

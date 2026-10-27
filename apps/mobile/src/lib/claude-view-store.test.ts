@@ -23,6 +23,8 @@ function setup() {
     call,
     off,
     push: (payload: unknown) => push(payload),
+    /** Settles the oldest call without waiting for its continuation. */
+    settle: (value: unknown) => pending.shift()?.({ ok: true, value }),
     reply: async (value: unknown) => {
       const resolve = pending.shift();
       if (!resolve) throw new Error("no pending call");
@@ -97,5 +99,67 @@ describe("Claude view store", () => {
     await e.reply(claude);
     expect(await answering).toEqual({ ok: false, reason: "changed" });
     expect(e.store.get().answering).toBe(false);
+  });
+
+  it("close while an answer is pending → no state update, no RPC", async () => {
+    const e = setup();
+    e.store.open();
+    await e.reply(claude);
+    const listener = vi.fn();
+    e.store.subscribe(listener);
+    const answering = e.store.answer(0, "Yes");
+    listener.mockClear();
+    e.store.close();
+    const calls = e.call.mock.calls.length;
+    await e.reply({ ok: false, reason: "changed" });
+    expect(await answering).toEqual({ ok: false, reason: "changed" });
+    expect(e.call).toHaveBeenCalledTimes(calls);
+    expect(listener).not.toHaveBeenCalled();
+    await e.store.refresh();
+    expect(e.call).toHaveBeenCalledTimes(calls);
+  });
+
+  it("refresh() from a microtask right after a run finishes still calls", async () => {
+    const e = setup();
+    e.store.open();
+    expect(e.call).toHaveBeenCalledTimes(1);
+    e.settle(claude);
+    // Runs right after the run's continuation leaves its loop, before a
+    // `.finally` on the run would have cleared `inFlight`.
+    queueMicrotask(() => void e.store.refresh());
+    for (let i = 0; i < 6; i++) await Promise.resolve();
+    expect(e.call).toHaveBeenCalledTimes(2);
+    e.store.close();
+  });
+
+  it("Claude restarting in the same pane defaults the tab back to chat", async () => {
+    const e = setup();
+    e.store.open();
+    await e.reply(claude);
+    e.store.setTab("term");
+    let next = e.store.refresh();
+    await e.reply({ kind: "none" });
+    await next;
+    expect(e.store.get().tab).toBe("term");
+    next = e.store.refresh();
+    await e.reply(claude);
+    await next;
+    expect(e.store.get().tab).toBe("chat");
+    e.store.close();
+  });
+
+  it("a second answer while one is pending is rejected unsent; answering stays true", async () => {
+    const e = setup();
+    e.store.open();
+    await e.reply(claude);
+    const first = e.store.answer(0, "Yes");
+    const calls = e.call.mock.calls.length;
+    await expect(e.store.answer(1, "No")).rejects.toThrow("claude-view: answer pending");
+    expect(e.call).toHaveBeenCalledTimes(calls);
+    expect(e.store.get().answering).toBe(true);
+    await e.reply({ ok: true });
+    expect(await first).toEqual({ ok: true });
+    expect(e.store.get().answering).toBe(false);
+    e.store.close();
   });
 });
