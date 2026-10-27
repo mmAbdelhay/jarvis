@@ -72,7 +72,11 @@ describe("attach uploader", () => {
       paneKey: "pane",
       errorText: (kind) => kind,
     });
-    const tray = createAttachTray<AttachPick>({ ...uploader, maxFiles: 4 });
+    const tray = createAttachTray<AttachPick>({
+      ...uploader,
+      failedText: () => "failed",
+      maxFiles: 4,
+    });
     tray.add(PHOTO("a.jpg"));
     tray.add(PHOTO("b.jpg"));
     await flush();
@@ -110,7 +114,7 @@ describe("attach uploader", () => {
       paneKey: "pane",
       errorText: (kind) => `text:${kind}`,
     });
-    const result = await uploader.upload({ ...PHOTO("big.jpg"), bytes: MAX_FILE_BYTES + 1 });
+    const result = await uploader.send({ ...PHOTO("big.jpg"), bytes: MAX_FILE_BYTES + 1 });
     expect(result).toEqual({ error: "text:overLimit" });
     expect(files.readBase64).not.toHaveBeenCalled();
     expect(client.upload).not.toHaveBeenCalled();
@@ -137,8 +141,8 @@ describe("attach uploader", () => {
       paneKey: "pane",
       errorText: (kind) => kind,
     });
-    void uploader.upload(PHOTO("a.jpg"));
-    const queued = uploader.upload(PHOTO("b.jpg"));
+    void uploader.send(PHOTO("a.jpg"));
+    const queued = uploader.send(PHOTO("b.jpg"));
     await flush();
     uploader.dispose();
     await expect(queued).resolves.toEqual({ error: "cancelled" });
@@ -160,7 +164,11 @@ describe("attach uploader", () => {
       paneKey: "pane",
       errorText: (kind) => kind,
     });
-    const tray = createAttachTray<AttachPick>({ ...uploader, maxFiles: 4 });
+    const tray = createAttachTray<AttachPick>({
+      ...uploader,
+      failedText: () => "failed",
+      maxFiles: 4,
+    });
     tray.add(PHOTO("a.jpg"));
     tray.add(PHOTO("b.jpg"));
     await flush();

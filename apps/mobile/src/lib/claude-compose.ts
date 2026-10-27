@@ -24,12 +24,14 @@ export type AttachTray = {
 export function createAttachTray<Pick extends { name: string }>(deps: {
   /** `onProgress` takes the sent fraction, 0..1, for the chip's bar;
    *  `onCancel` registers what stops this upload when its chip goes. */
-  upload(
+  send(
     pick: Pick,
     onProgress?: (fraction: number) => void,
     onCancel?: (cancel: () => void) => void,
   ): Promise<{ fileId: string } | { error: string }>;
   attach(fileId: string): Promise<AttachUploadResult>;
+  /** The chip's text when a send throws, in the screen's language. */
+  failedText(): string;
   maxFiles: number;
 }): Omit<AttachTray, "add"> & { add(pick: Pick): void } {
   let entries: TrayItem[] = [];
@@ -51,7 +53,7 @@ export function createAttachTray<Pick extends { name: string }>(deps: {
   async function upload(id: string, pick: Pick): Promise<void> {
     const active = () => entries.some((item) => item.id === id);
     try {
-      const result = await deps.upload(
+      const result = await deps.send(
         pick,
         (fraction) => {
           if (active()) update(id, { progress: Math.max(0, Math.min(1, fraction)) });
@@ -75,12 +77,9 @@ export function createAttachTray<Pick extends { name: string }>(deps: {
           ? { state: "done", path: attached.path }
           : { state: "error", error: attached.error },
       );
-    } catch (error) {
-      if (active())
-        update(id, {
-          state: "error",
-          error: error instanceof Error ? error.message : "Upload failed",
-        });
+    } catch {
+      // The error's own text is English and internal; the chip shows ours.
+      if (active()) update(id, { state: "error", error: deps.failedText() });
     }
   }
   return {

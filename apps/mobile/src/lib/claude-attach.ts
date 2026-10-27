@@ -21,7 +21,9 @@ export type AttachPick = { uri: string; name: string; contentType: string; bytes
 export type AttachErrorKind = Exclude<FileUploadResult["kind"], "ok" | "refused"> | "attach";
 
 export type AttachUploader = {
-  upload(
+  /** Named `send`, not `upload`: only voice-controller.ts calls
+   *  RpcClient.upload from a screen (voice-screen.test.ts scans for it). */
+  send(
     pick: AttachPick,
     onProgress?: (fraction: number) => void,
     onCancel?: (cancel: () => void) => void,
@@ -96,7 +98,7 @@ export function createAttachUploader(deps: {
   }
 
   return {
-    upload(pick, onProgress, onCancel) {
+    send(pick, onProgress, onCancel) {
       if (disposed) return Promise.resolve({ error: deps.errorText("cancelled") });
       return new Promise((resolve) => {
         const job: Job = { pick, onProgress, resolve };

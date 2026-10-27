@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { composeSubmission, createAttachTray, submit } from "./claude-compose";
+
+const failedText = () => "Upload failed";
 import type { SessionInput, SendResult } from "./session-input";
 
 function deferred<T>() {
@@ -19,7 +21,7 @@ describe("attach tray", () => {
     const b = deferred<{ fileId: string }>();
     const upload = vi.fn((pick: { name: string }) => (pick.name === "a" ? a.promise : b.promise));
     const attach = vi.fn(async (fileId: string) => ({ ok: true as const, path: `/${fileId}` }));
-    const tray = createAttachTray({ upload, attach, maxFiles: 2 });
+    const tray = createAttachTray({ send: upload, attach, failedText, maxFiles: 2 });
     const listener = vi.fn();
     tray.subscribe(listener);
     tray.add({ name: "a" });
@@ -39,7 +41,12 @@ describe("attach tray", () => {
     expect(tray.items()).toEqual([]);
 
     const late = deferred<{ fileId: string }>();
-    const cancelled = createAttachTray({ upload: () => late.promise, attach, maxFiles: 1 });
+    const cancelled = createAttachTray({
+      send: () => late.promise,
+      attach,
+      failedText,
+      maxFiles: 1,
+    });
     cancelled.add({ name: "late" });
     const id = cancelled.items()[0]?.id;
     if (!id) throw new Error("missing item");
@@ -53,21 +60,37 @@ describe("attach tray", () => {
 
   it("reports upload and attach errors", async () => {
     const tray = createAttachTray({
-      upload: async () => ({ error: "upload failed" }),
+      send: async () => ({ error: "upload failed" }),
       attach: vi.fn(),
+      failedText,
       maxFiles: 1,
     });
     tray.add({ name: "a" });
     await flush();
     expect(tray.items()[0]).toMatchObject({ state: "error", error: "upload failed" });
     const other = createAttachTray({
-      upload: async () => ({ fileId: "a" }),
+      send: async () => ({ fileId: "a" }),
       attach: async () => ({ ok: false, error: "attach failed" }),
+      failedText,
       maxFiles: 1,
     });
     other.add({ name: "a" });
     await flush();
     expect(other.items()[0]).toMatchObject({ state: "error", error: "attach failed" });
+  });
+
+  it("a send that throws shows the screen's own failed text, never the error's", async () => {
+    const tray = createAttachTray({
+      send: async () => {
+        throw new Error("socket closed");
+      },
+      attach: vi.fn(),
+      failedText: () => "فشل الرفع",
+      maxFiles: 1,
+    });
+    tray.add({ name: "a" });
+    await flush();
+    expect(tray.items()[0]).toMatchObject({ state: "error", error: "فشل الرفع" });
   });
 });
 

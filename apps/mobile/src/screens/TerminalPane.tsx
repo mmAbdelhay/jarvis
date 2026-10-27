@@ -251,16 +251,17 @@ function TerminalPaneBody({
   const tray = useMemo(
     () =>
       createAttachTray<AttachPick>({
-        upload: (pick, onProgress, onCancel) => {
+        send: (pick, onProgress, onCancel) => {
           const uploader = uploaderRef.current;
           if (uploader === undefined || uploader.isDisposed()) {
             return Promise.resolve({ error: t(languageRef.current, "claude.upload.cancelled") });
           }
-          return uploader.upload(pick, onProgress, onCancel);
+          return uploader.send(pick, onProgress, onCancel);
         },
         attach: (fileId) =>
           uploaderRef.current?.attach(fileId) ??
           Promise.resolve({ ok: false, error: t(languageRef.current, "claude.upload.attach") }),
+        failedText: () => t(languageRef.current, "claude.upload.failed"),
         maxFiles: MAX_ATTACH,
       }),
     [],
@@ -520,11 +521,6 @@ function TerminalPaneBody({
     } catch {
       flashNotice(t(language, "claude.answerFailed"));
     }
-  }
-
-  function openLink(url: string): void {
-    if (!url.startsWith("https://")) return;
-    void Linking.openURL(url).catch(() => {});
   }
 
   async function attachFrom(source: AttachSource): Promise<void> {
@@ -1043,6 +1039,12 @@ const styles = StyleSheet.create({
 });
 
 /** The host's answer to a restore: the pty's size, if it is one. */
+/** Module-level so its identity is stable for the chat's memoised rows. */
+function openLink(url: string): void {
+  if (!url.startsWith("https://")) return;
+  void Linking.openURL(url).catch(() => {});
+}
+
 function parseTerminalSize(value: unknown): TerminalSize | undefined {
   if (typeof value !== "object" || value === null) return undefined;
   const { cols, rows } = value as { cols?: unknown; rows?: unknown };
