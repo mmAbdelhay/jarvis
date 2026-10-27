@@ -15,6 +15,7 @@ import {
   isWithin,
   claudeSessionPaths,
   lastCustomTitle,
+  lastAiTitle,
   parseClaudePidRecord,
   resolveProject,
   sessionFromTranscript,
@@ -1362,5 +1363,21 @@ describe("lastCustomTitle", () => {
     ].join("\n");
     expect(lastCustomTitle(text)).toBe("kept");
     expect(lastCustomTitle("")).toBeUndefined();
+  });
+});
+
+describe("lastAiTitle", () => {
+  it("returns the newest non-empty trimmed ai title, ignoring fragments and other records", () => {
+    const text = [
+      'Title":"fragment"}',
+      JSON.stringify({ type: "ai-title", aiTitle: "first" }),
+      JSON.stringify({ type: "ai-title", aiTitle: " latest " }),
+      JSON.stringify({ type: "ai-title", aiTitle: "  " }),
+      JSON.stringify({ type: "ai-title", aiTitle: 12 }),
+      JSON.stringify({ type: "user", aiTitle: "wrong type" }),
+      '{"type":"ai-title","aiTitle":',
+    ].join("\n");
+    expect(lastAiTitle(text)).toBe("latest");
+    expect(lastAiTitle("")).toBeUndefined();
   });
 });

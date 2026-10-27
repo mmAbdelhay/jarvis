@@ -196,6 +196,27 @@ export function lastCustomTitle(text: string): string | undefined {
   return title;
 }
 
+/** The newest non-empty automatic title; malformed transcript fragments are skipped. */
+export function lastAiTitle(text: string): string | undefined {
+  let title: string | undefined;
+  for (const line of text.split("\n")) {
+    if (!line.includes('"ai-title"')) continue;
+    try {
+      const record = JSON.parse(line) as { type?: unknown; aiTitle?: unknown };
+      if (
+        record.type === "ai-title" &&
+        typeof record.aiTitle === "string" &&
+        record.aiTitle.trim() !== ""
+      ) {
+        title = record.aiTitle.trim();
+      }
+    } catch {
+      // A fragment, not a record.
+    }
+  }
+  return title;
+}
+
 /** At most the last `maxBytes` of `path`, as text — readHead's mirror, for
  *  records appended late in a transcript (a `/rename`). Rejects when the
  *  file cannot be read. */

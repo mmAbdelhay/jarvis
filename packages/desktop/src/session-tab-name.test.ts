@@ -99,6 +99,7 @@ function world() {
       return transcripts;
     },
     now: () => NOW,
+    readHead: async () => "",
     readTail: async (path) => {
       const text = files.get(path);
       if (text === undefined) throw new Error("ENOENT");
@@ -300,6 +301,83 @@ describe("session tab namer", () => {
     await createSessionTabNamer(w.deps).check();
 
     expect(w.renames).toEqual([["t1", "renamed"]]);
+  });
+
+  it.each([
+    [undefined, "", "ai-title", "auto"],
+    ["pid", "", "custom-title", "pid"],
+    [undefined, "", "custom-title", "manual"],
+    [undefined, "head", "custom-title", "manual"],
+    [undefined, "head", "ai-title", "auto"],
+  ])(
+    "resumed session title precedence: pid %s, location %s, type %s",
+    async (pidName, location, type, expected) => {
+      const w = world();
+      w.setProcesses([w.claudeIn("t1", 101)]);
+      w.files.set(join(SESSIONS, "101.json"), pidFile(101, "s1", pidName));
+      const path = join(PROJECTS, "-w", "s1.jsonl");
+      w.transcripts.push({ path, mtime: 1 });
+      const records = [
+        JSON.stringify({ type: "ai-title", aiTitle: "auto" }),
+        ...(type === "custom-title" ? [JSON.stringify({ type, customTitle: "manual" })] : []),
+      ].join("\n");
+      let reads = 0;
+      w.deps.readTail = async () => {
+        reads++;
+        return location === "head" ? "" : records;
+      };
+      w.deps.readHead = async () => {
+        reads++;
+        return records;
+      };
+      await createSessionTabNamer(w.deps).check();
+      expect(w.renames).toEqual([["t1", expected]]);
+      if (pidName !== undefined) expect(reads).toBe(0);
+    },
+  );
+
+  it("caches transcript titles until the 10 second recheck, then discovers changes", async () => {
+    const w = world();
+    w.setProcesses([w.claudeIn("t1", 101)]);
+    w.files.set(join(SESSIONS, "101.json"), pidFile(101, "s1"));
+    w.transcripts.push({ path: join(PROJECTS, "s1.jsonl"), mtime: 1 });
+    let reads = 0;
+    let time = NOW;
+    let title = "first";
+    w.deps.now = () => time;
+    w.deps.readTail = async () => {
+      reads++;
+      return JSON.stringify({ type: "ai-title", aiTitle: title });
+    };
+    const namer = createSessionTabNamer(w.deps);
+    await namer.check();
+    title = "second";
+    await namer.check();
+    expect(reads).toBe(1);
+    time += SESSION_TAB_RECHECK_MS;
+    await namer.check();
+    expect(reads).toBe(2);
+    expect(w.renames).toEqual([
+      ["t1", "first"],
+      ["t1", "second"],
+    ]);
+  });
+
+  it("renames when a different session is resumed directly in an already named pane", async () => {
+    const w = world();
+    w.setProcesses([w.claudeIn("t1", 101)]);
+    w.files.set(join(SESSIONS, "101.json"), pidFile(101, "s1", "first"));
+    const namer = createSessionTabNamer(w.deps);
+    await namer.check();
+    w.files.set(join(SESSIONS, "101.json"), pidFile(101, "s2"));
+    const path = join(PROJECTS, "s2.jsonl");
+    w.transcripts.push({ path, mtime: 1 });
+    w.files.set(path, JSON.stringify({ type: "ai-title", aiTitle: "resumed" }));
+    await namer.check();
+    expect(w.renames).toEqual([
+      ["t1", "first"],
+      ["t1", "resumed"],
+    ]);
   });
 
   it("does not scan while no Terminal pane is live", async () => {

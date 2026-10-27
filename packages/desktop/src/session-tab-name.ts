@@ -8,6 +8,7 @@
 import type { AgentConfig, WorkspaceState } from "@jarvis/core";
 import {
   lastCustomTitle,
+  lastAiTitle,
   type ExternalAgentProcess,
   type ShellManager,
   type TranscriptFile,
@@ -37,11 +38,13 @@ export type SessionTabNameDeps = {
   listTranscripts(dir: string): Promise<TranscriptFile[]>;
   /** The end of a transcript, where a `/rename` record is appended. */
   readTail(path: string): Promise<string>;
+  /** The first 64 KB of a transcript, for titles outside the tail. */
+  readHead(path: string): Promise<string>;
   /** Calls back on any change in `dir`. May throw (no such directory). */
   watch(dir: string, onChange: () => void): { close(): void };
   /** One-shot timer; returns its cancel. */
   schedule(fn: () => void, ms: number): () => void;
-  /** Epoch ms; read once, when the namer is created. */
+  /** Epoch ms, for startup protection and the transcript cache. */
   now(): number;
   /** Repeating timer; returns its cancel. */
   interval(fn: () => void, ms: number): () => void;
@@ -80,6 +83,7 @@ export function createSessionTabNamer(deps: SessionTabNameDeps): SessionTabNamer
   const seenSessions = new Set<string>();
   /** Session id → its transcript path, once found (fallback only). */
   const transcriptPaths = createTranscriptPaths(deps.listTranscripts);
+  const titles = new Map<string, { name: string | undefined; readAt: number }>();
   const watchers = new Map<string, { close(): void }>();
   /** Panes whose output has been seen — a new one means a shell started. */
   const seenPanes = new Set<string>();
@@ -114,7 +118,17 @@ export function createSessionTabNamer(deps: SessionTabNameDeps): SessionTabNamer
     if (record.name !== undefined) return record.name;
     const path = await transcriptPaths.find(paths.transcriptsDir, record.sessionId);
     if (path === undefined) return undefined;
-    return lastCustomTitle(await deps.readTail(path));
+    const cached = titles.get(record.sessionId);
+    const now = deps.now();
+    if (cached !== undefined && now - cached.readAt < SESSION_TAB_RECHECK_MS) return cached.name;
+    const tail = await deps.readTail(path);
+    let name = lastCustomTitle(tail) ?? lastAiTitle(tail);
+    if (name === undefined) {
+      const head = await deps.readHead(path);
+      name = lastCustomTitle(head) ?? lastAiTitle(head);
+    }
+    titles.set(record.sessionId, { name, readAt: now });
+    return name;
   }
 
   async function applyTo(process: ExternalAgentProcess, paneKey: string): Promise<void> {
@@ -154,6 +168,7 @@ export function createSessionTabNamer(deps: SessionTabNameDeps): SessionTabNamer
     for (const paneKey of applied.keys()) if (!live.has(paneKey)) applied.delete(paneKey);
     if (live.size === 0) {
       transcriptPaths.retain(new Set());
+      titles.clear();
       return;
     }
 
@@ -176,6 +191,7 @@ export function createSessionTabNamer(deps: SessionTabNameDeps): SessionTabNamer
     }
     // Pruned with `applied`: a session in no live pane needs no cached path.
     transcriptPaths.retain(seenSessions);
+    for (const id of titles.keys()) if (!seenSessions.has(id)) titles.delete(id);
   }
 
   /** At most one check queued behind the running one. */
@@ -234,6 +250,7 @@ export function createSessionTabNamer(deps: SessionTabNameDeps): SessionTabNamer
       }
       watchers.clear();
       applied.clear();
+      titles.clear();
       transcriptPaths.retain(new Set());
       seenPanes.clear();
       // A check already running sees `stopped` before any watch/rename/timer.
