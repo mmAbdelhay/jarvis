@@ -213,14 +213,22 @@ describe("createClaudeViewHandlers.view, caching", () => {
     expect(deps.scanAgents).toHaveBeenCalledTimes(2);
   });
 
-  it("caches a none result for the TTL too", async () => {
+  it("caches a none result only within one output-throttle window", async () => {
+    let now = 0;
     const deps = fakeDeps({
+      now: vi.fn(() => now),
       lookup: { forProcess: vi.fn(async () => undefined), retain: vi.fn() },
     });
     const { view } = createClaudeViewHandlers(deps);
     await view("t1");
     await view("t1");
     expect(deps.scanAgents).toHaveBeenCalledTimes(1);
+    // The next throttled output push (Claude just started and drew its
+    // screen) must scan again: a none held for the full session TTL left a
+    // phone on Term once Claude's screen went quiet.
+    now = CLAUDE_VIEW_OUTPUT_THROTTLE_MS;
+    await view("t1");
+    expect(deps.scanAgents).toHaveBeenCalledTimes(2);
   });
 
   it("does not cache a session whose transcript is not written yet", async () => {

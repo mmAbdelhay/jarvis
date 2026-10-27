@@ -20,6 +20,11 @@ export const CLAUDE_VIEW_DEBOUNCE_MS = 300;
 export const CLAUDE_VIEW_OUTPUT_THROTTLE_MS = 1000;
 /** How long a pane's process scan + pid record lookup is reused. */
 export const PANE_SESSION_TTL_MS = 5000;
+/** How long a pane with no Claude is taken to have none: under one output
+ *  throttle, so the next push after Claude starts scans again. Held for the
+ *  full session TTL, a none read just before `claude` drew its screen
+ *  outlived the last push, and a phone stayed on Term once Claude was idle. */
+const PANE_NONE_TTL_MS = CLAUDE_VIEW_OUTPUT_THROTTLE_MS - 100;
 
 /** Where a pane's transcript appears: its directory and its file name, so a
  *  directory watch also sees a transcript Claude has not written yet. */
@@ -56,8 +61,8 @@ export function createClaudeViewHandlers(deps: ClaudeViewDeps): {
   /** Drops a pane's cached session (its shell exited). */
   forgetPane(paneKey: string): void;
 } {
-  // Pane → its session (or none), reused for PANE_SESSION_TTL_MS so a push
-  // storm does not run ps + lsof per call.
+  // Pane → its session (or none), reused for PANE_SESSION_TTL_MS (a none
+  // for PANE_NONE_TTL_MS) so a push storm does not run ps + lsof per call.
   const sessions = new Map<string, { session: PaneClaudeSession | undefined; at: number }>();
   // Session → the last parse of its transcript, keyed by size and mtime.
   const parsed = new Map<string, { path: string; size: number; mtimeMs: number; chat: Chat }>();
@@ -93,7 +98,8 @@ export function createClaudeViewHandlers(deps: ClaudeViewDeps): {
 
   async function sessionFor(paneKey: string): Promise<PaneClaudeSession | undefined> {
     const cached = sessions.get(paneKey);
-    if (cached !== undefined && deps.now() - cached.at < PANE_SESSION_TTL_MS) {
+    const ttl = cached?.session === undefined ? PANE_NONE_TTL_MS : PANE_SESSION_TTL_MS;
+    if (cached !== undefined && deps.now() - cached.at < ttl) {
       return cached.session;
     }
     const processes = await deps.scanAgents().catch(() => {
