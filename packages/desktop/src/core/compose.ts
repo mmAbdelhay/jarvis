@@ -2388,7 +2388,11 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     });
   const claudeViewNotifier = createClaudeViewNotifier({
     onOutput: (cb) => shells.onOutput(({ paneKey }) => cb(paneKey)),
-    onExit: (cb) => shells.onShellExit(({ paneKey }) => cb(paneKey)),
+    onExit: (cb) =>
+      shells.onShellExit(({ paneKey }) => {
+        claudeView.forgetPane(paneKey);
+        cb(paneKey);
+      }),
     watch: (dir, cb, onError) => {
       const watcher = watchFs(dir, (_event, file) => cb(typeof file === "string" ? file : null));
       // A watch that fails later (directory removed) is closed and dropped
@@ -2414,6 +2418,12 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
       listTranscripts: (dir) => importFs.listFiles(dir, "claude"),
     }),
     readTail: (path) => readFileTail(path, CHAT_TAIL_BYTES),
+    statFile: async (path) => {
+      const { size, mtimeMs } = await stat(path);
+      return { size, mtimeMs };
+    },
+    now: () => Date.now(),
+    notice: (paneKey) => claudeViewNotifier.notice(paneKey),
     screenText: (paneKey) => paneScreens.screenText(paneKey),
     write: (paneKey, data) => shells.write(paneKey, data),
     log: (token) => console.warn(token),

@@ -2,6 +2,8 @@ import type { ExternalAgentProcess } from "@jarvis/platform";
 import { describe, expect, it, vi } from "vitest";
 import {
   CLAUDE_VIEW_DEBOUNCE_MS,
+  CLAUDE_VIEW_OUTPUT_THROTTLE_MS,
+  PANE_SESSION_TTL_MS,
   createClaudeViewHandlers,
   createClaudeViewNotifier,
   type ClaudeViewDeps,
@@ -52,15 +54,20 @@ const SESSION: PaneClaudeSession = {
   name: "fix build",
   transcriptPath: "/home/.claude/projects/-repo/sess-1.jsonl",
   cwd: "/repo",
-  transcriptsDir: "/home/.claude/projects/-repo",
+  // What claudeSessionPaths() really returns: the projects root, one level
+  // above the project folder that holds the transcript.
+  transcriptsDir: "/home/.claude/projects",
 };
 
 function fakeDeps(overrides: Partial<ClaudeViewDeps> = {}): ClaudeViewDeps {
   return {
     panes: vi.fn(() => [{ paneKey: "t1", exited: false }]),
     scanAgents: vi.fn(async () => [claudeProcess()]),
-    lookup: { forProcess: vi.fn(async () => SESSION) },
+    lookup: { forProcess: vi.fn(async () => SESSION), retain: vi.fn() },
     readTail: vi.fn(async () => TRANSCRIPT),
+    statFile: vi.fn(async () => ({ size: TRANSCRIPT.length, mtimeMs: 1 })),
+    now: vi.fn(() => 0),
+    notice: vi.fn(),
     screenText: vi.fn(() => ""),
     write: vi.fn(),
     log: vi.fn(),
@@ -81,7 +88,9 @@ describe("createClaudeViewHandlers.view", () => {
 
     expect(await createClaudeViewHandlers(fakeDeps()).view(7)).toEqual({ kind: "none" });
 
-    const notClaude = fakeDeps({ lookup: { forProcess: vi.fn(async () => undefined) } });
+    const notClaude = fakeDeps({
+      lookup: { forProcess: vi.fn(async () => undefined), retain: vi.fn() },
+    });
     expect(await createClaudeViewHandlers(notClaude).view("t1")).toEqual({ kind: "none" });
 
     const otherPane = fakeDeps({
@@ -122,7 +131,7 @@ describe("createClaudeViewHandlers.view", () => {
     });
     expect(deps.readTail).toHaveBeenCalledWith(SESSION.transcriptPath);
     expect(deps.follow).toHaveBeenCalledWith("t1", {
-      dir: SESSION.transcriptsDir,
+      dir: "/home/.claude/projects/-repo",
       file: "sess-1.jsonl",
     });
   });
@@ -136,10 +145,14 @@ describe("createClaudeViewHandlers.view", () => {
 
   it("answers with no turns before Claude has written a transcript", async () => {
     const { transcriptPath: _omit, ...unwritten } = SESSION;
-    const deps = fakeDeps({ lookup: { forProcess: vi.fn(async () => unwritten) } });
+    const deps = fakeDeps({
+      lookup: { forProcess: vi.fn(async () => unwritten), retain: vi.fn() },
+    });
     const view = await createClaudeViewHandlers(deps).view("t1");
     expect(view).toMatchObject({ kind: "claude", sessionId: "sess-1", turns: [] });
     expect(deps.readTail).not.toHaveBeenCalled();
+    // No transcript, so no directory to watch yet: the next view follows.
+    expect(deps.follow).not.toHaveBeenCalled();
   });
 
   it("is none on a read error, logging a category token without the path", async () => {
@@ -169,10 +182,130 @@ describe("createClaudeViewHandlers.view", () => {
         forProcess: vi.fn(async () => {
           throw new Error("EACCES /home/.claude/projects");
         }),
+        retain: vi.fn(),
       },
     });
     expect(await createClaudeViewHandlers(lookup).view("t1")).toEqual({ kind: "none" });
     expect(lookup.log).toHaveBeenCalledWith("claude-view: lookup");
+  });
+});
+
+describe("createClaudeViewHandlers.view, caching", () => {
+  it("tells the notifier a remote looks at the pane, Claude or not", async () => {
+    const deps = fakeDeps({
+      lookup: { forProcess: vi.fn(async () => undefined), retain: vi.fn() },
+    });
+    await createClaudeViewHandlers(deps).view("t1");
+    expect(deps.notice).toHaveBeenCalledWith("t1");
+  });
+
+  it("reuses the pane's session for the TTL, then scans again", async () => {
+    let now = 0;
+    const deps = fakeDeps({ now: vi.fn(() => now) });
+    const { view } = createClaudeViewHandlers(deps);
+    await view("t1");
+    now = PANE_SESSION_TTL_MS - 1;
+    expect((await view("t1")).kind).toBe("claude");
+    expect(deps.scanAgents).toHaveBeenCalledTimes(1);
+    expect(deps.lookup.forProcess).toHaveBeenCalledTimes(1);
+    now = PANE_SESSION_TTL_MS;
+    await view("t1");
+    expect(deps.scanAgents).toHaveBeenCalledTimes(2);
+  });
+
+  it("caches a none result for the TTL too", async () => {
+    const deps = fakeDeps({
+      lookup: { forProcess: vi.fn(async () => undefined), retain: vi.fn() },
+    });
+    const { view } = createClaudeViewHandlers(deps);
+    await view("t1");
+    await view("t1");
+    expect(deps.scanAgents).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not cache a session whose transcript is not written yet", async () => {
+    const { transcriptPath: _omit, ...unwritten } = SESSION;
+    const deps = fakeDeps({
+      lookup: { forProcess: vi.fn(async () => unwritten), retain: vi.fn() },
+    });
+    const { view } = createClaudeViewHandlers(deps);
+    await view("t1");
+    await view("t1");
+    expect(deps.scanAgents).toHaveBeenCalledTimes(2);
+  });
+
+  it("forgetPane drops the cached session", async () => {
+    const deps = fakeDeps();
+    const handlers = createClaudeViewHandlers(deps);
+    await handlers.view("t1");
+    handlers.forgetPane("t1");
+    await handlers.view("t1");
+    expect(deps.scanAgents).toHaveBeenCalledTimes(2);
+  });
+
+  it("re-reads the transcript only when its size or mtime changed", async () => {
+    let stat = { size: 10, mtimeMs: 1 };
+    const deps = fakeDeps({ statFile: vi.fn(async () => stat) });
+    const { view } = createClaudeViewHandlers(deps);
+    const first = await view("t1");
+    const second = await view("t1");
+    expect(second).toEqual(first);
+    expect(deps.readTail).toHaveBeenCalledTimes(1);
+    stat = { size: 11, mtimeMs: 1 };
+    await view("t1");
+    expect(deps.readTail).toHaveBeenCalledTimes(2);
+    stat = { size: 11, mtimeMs: 2 };
+    await view("t1");
+    expect(deps.readTail).toHaveBeenCalledTimes(3);
+  });
+
+  it("is none when the transcript cannot be stat'd", async () => {
+    const deps = fakeDeps({
+      statFile: vi.fn(async () => {
+        throw new Error("ENOENT /x");
+      }),
+    });
+    expect(await createClaudeViewHandlers(deps).view("t1")).toEqual({ kind: "none" });
+    expect(deps.log).toHaveBeenCalledWith("claude-view: transcript");
+  });
+
+  it("prunes caches of gone panes and retains only live sessions in the lookup", async () => {
+    let panes = [
+      { paneKey: "t1", exited: false },
+      { paneKey: "t2", exited: false },
+    ];
+    const other: PaneClaudeSession = {
+      ...SESSION,
+      paneKey: "t2",
+      sessionId: "sess-2",
+      transcriptPath: "/home/.claude/projects/-repo/sess-2.jsonl",
+    };
+    const deps = fakeDeps({
+      panes: vi.fn(() => panes),
+      scanAgents: vi.fn(async () => [
+        claudeProcess(),
+        claudeProcess({ pid: 43, terminalPaneKey: "t2" }),
+      ]),
+      lookup: {
+        forProcess: vi.fn(async (process: ExternalAgentProcess) =>
+          process.terminalPaneKey === "t2" ? other : SESSION,
+        ),
+        retain: vi.fn(),
+      },
+    });
+    const { view } = createClaudeViewHandlers(deps);
+    await view("t1");
+    await view("t2");
+    await view("t1"); // Prunes before it looks up, so this call sees both.
+    expect(deps.lookup.retain).toHaveBeenLastCalledWith(new Set(["sess-1", "sess-2"]));
+    panes = [{ paneKey: "t1", exited: false }];
+    await view("t1");
+    expect(deps.lookup.retain).toHaveBeenLastCalledWith(new Set(["sess-1"]));
+    // t2 came back (a new shell under the same key): scanned afresh.
+    panes = [...panes, { paneKey: "t2", exited: false }];
+    const scans = vi.mocked(deps.scanAgents).mock.calls.length;
+    await view("t2");
+    expect(deps.scanAgents).toHaveBeenCalledTimes(scans + 1);
   });
 });
 
@@ -323,14 +456,15 @@ describe("createClaudeViewNotifier", () => {
     };
   }
 
-  it("coalesces three outputs within the window into one emit", () => {
+  it("coalesces three outputs within the window into one emit, at the output throttle", () => {
     const h = harness();
+    h.notifier.notice("t1");
     h.output("t1");
     h.output("t1");
     h.output("t1");
     expect(h.timers).toHaveLength(1);
-    expect(h.timers[0]?.ms).toBe(CLAUDE_VIEW_DEBOUNCE_MS);
-    expect(CLAUDE_VIEW_DEBOUNCE_MS).toBe(300);
+    expect(h.timers[0]?.ms).toBe(CLAUDE_VIEW_OUTPUT_THROTTLE_MS);
+    expect(CLAUDE_VIEW_OUTPUT_THROTTLE_MS).toBe(1000);
     h.flush();
     expect(h.deps.emit).toHaveBeenCalledTimes(1);
     expect(h.deps.emit).toHaveBeenCalledWith("t1");
@@ -339,8 +473,37 @@ describe("createClaudeViewNotifier", () => {
     expect(h.deps.emit).toHaveBeenCalledTimes(2);
   });
 
+  it("ignores output from a pane no remote looks at and no Claude session runs in", () => {
+    const h = harness();
+    h.output("t9");
+    expect(h.timers).toHaveLength(0);
+    h.notifier.follow("t1", { dir: "/p", file: "a.jsonl" });
+    h.output("t1");
+    expect(h.timers).toHaveLength(1);
+    h.notifier.notice("t2");
+    h.exit("t2");
+    h.output("t2");
+    expect(h.timers).toHaveLength(1);
+  });
+
+  it("a transcript change pushes at the short throttle, even with an output push pending", () => {
+    const h = harness();
+    h.notifier.follow("t1", { dir: "/p", file: "a.jsonl" });
+    h.output("t1");
+    h.watchers.get("/p")?.cb("a.jsonl");
+    expect(h.timers.filter((timer) => !timer.cancelled).map((timer) => timer.ms)).toEqual([
+      CLAUDE_VIEW_DEBOUNCE_MS,
+    ]);
+    expect(CLAUDE_VIEW_DEBOUNCE_MS).toBe(300);
+    h.output("t1");
+    h.flush();
+    expect(h.deps.emit).toHaveBeenCalledTimes(1);
+  });
+
   it("emits per pane, independently", () => {
     const h = harness();
+    h.notifier.notice("t1");
+    h.notifier.notice("t2");
     h.output("t1");
     h.output("t2");
     h.flush();

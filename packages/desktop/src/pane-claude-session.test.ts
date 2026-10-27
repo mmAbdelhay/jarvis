@@ -93,4 +93,16 @@ describe("createPaneClaudeLookup", () => {
     await lookup.forProcess(processOf());
     expect(w.listings()).toBe(2); // forgotten, so looked up again
   });
+
+  it("retain keeps only the named sessions' paths", async () => {
+    const w = world();
+    const lookup = createPaneClaudeLookup(w.deps);
+    await lookup.forProcess(processOf());
+    lookup.retain(new Set(["s1"]));
+    await lookup.forProcess(processOf());
+    expect(w.listings()).toBe(1);
+    lookup.retain(new Set());
+    await lookup.forProcess(processOf());
+    expect(w.listings()).toBe(2);
+  });
 });

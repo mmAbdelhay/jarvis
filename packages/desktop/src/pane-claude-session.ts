@@ -35,6 +35,8 @@ export type PaneClaudeLookup = {
   forProcess(process: ExternalAgentProcess): Promise<PaneClaudeSession | undefined>;
   /** Drops the cached transcript paths of these sessions. */
   forget(sessionIds: ReadonlySet<string>): void;
+  /** Keeps only these sessions' cached transcript paths. */
+  retain(sessionIds: ReadonlySet<string>): void;
 };
 
 /** Claude's sessions and transcripts directories for the process's agent;
@@ -107,5 +109,6 @@ export function createPaneClaudeLookup(deps: PaneClaudeLookupDeps): PaneClaudeLo
       };
     },
     forget: (sessionIds) => transcriptPaths.forget(sessionIds),
+    retain: (sessionIds) => transcriptPaths.retain(sessionIds),
   };
 }
