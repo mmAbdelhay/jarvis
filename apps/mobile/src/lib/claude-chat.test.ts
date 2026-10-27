@@ -7,6 +7,7 @@ import {
   linkParts,
   meterWidth,
   modeKey,
+  sameFeedItem,
   toolText,
 } from "./claude-chat";
 
@@ -102,5 +103,30 @@ describe("claude chat model", () => {
     expect(answerNoticeKey({ ok: false, reason: "changed" })).toBe("claude.answerChanged");
     expect(answerNoticeKey({ ok: false, reason: "gone" })).toBe("claude.answerGone");
     expect(answerNoticeKey({ ok: true })).toBeUndefined();
+  });
+
+  it("sameFeedItem: equal content is the same row, whatever the object", () => {
+    expect(
+      sameFeedItem({ kind: "text", key: "1", text: "a" }, { kind: "text", key: "1", text: "a" }),
+    ).toBe(true);
+    expect(
+      sameFeedItem({ kind: "text", key: "1", text: "a" }, { kind: "text", key: "1", text: "b" }),
+    ).toBe(false);
+    expect(
+      sameFeedItem({ kind: "text", key: "1", text: "a" }, { kind: "user", key: "1", text: "a" }),
+    ).toBe(false);
+    const tool = { name: "Edit", target: "a.ts", added: 1, removed: 2 };
+    expect(
+      sameFeedItem(
+        { kind: "tool", key: "0t0", tool },
+        { kind: "tool", key: "0t0", tool: { ...tool } },
+      ),
+    ).toBe(true);
+    expect(
+      sameFeedItem(
+        { kind: "tool", key: "0t0", tool },
+        { kind: "tool", key: "0t0", tool: { ...tool, added: 3 } },
+      ),
+    ).toBe(false);
   });
 });

@@ -162,4 +162,67 @@ describe("Claude view store", () => {
     expect(e.store.get().answering).toBe(false);
     e.store.close();
   });
+
+  it("an equal view does not notify listeners; a changed one does", async () => {
+    const e = setup();
+    const view = {
+      kind: "claude",
+      sessionId: "s",
+      mode: "default",
+      turns: [{ role: "assistant", text: "hi", tools: [] }],
+      working: "Thinking… 3s",
+    };
+    e.store.open();
+    await e.reply(view);
+    const listener = vi.fn();
+    e.store.subscribe(listener);
+    const before = e.store.get();
+    let next = e.store.refresh();
+    await e.reply({ ...view, turns: [{ role: "assistant", text: "hi", tools: [] }] });
+    await next;
+    expect(listener).not.toHaveBeenCalled();
+    expect(e.store.get()).toBe(before);
+    for (const changed of [
+      { ...view, working: "Thinking… 4s" },
+      { ...view, mode: "plan" },
+      { ...view, turns: [{ role: "assistant", text: "hi there", tools: [] }] },
+      { ...view, prompt: { question: "Proceed?", options: [{ label: "Yes", keys: "\r" }] } },
+    ]) {
+      listener.mockClear();
+      next = e.store.refresh();
+      await e.reply(changed);
+      await next;
+      expect(listener).toHaveBeenCalledTimes(1);
+    }
+    e.store.close();
+  });
+
+  it("on the Term tab of a Claude pane, pushes do not refetch; back on Chat it refetches once", async () => {
+    const e = setup();
+    e.store.open();
+    await e.reply(claude);
+    e.store.setTab("term");
+    e.push({ paneKey: "p" });
+    e.push({ paneKey: "p" });
+    expect(e.call).toHaveBeenCalledTimes(1);
+    e.store.setTab("chat");
+    expect(e.call).toHaveBeenCalledTimes(2);
+    await e.reply(claude);
+    e.store.setTab("term");
+    e.store.setTab("chat");
+    expect(e.call).toHaveBeenCalledTimes(2); // nothing pushed meanwhile
+    e.store.close();
+  });
+
+  it("with no Claude in the pane, pushes still refetch so a starting Claude is seen", async () => {
+    const e = setup();
+    e.store.open();
+    await e.reply({ kind: "none" });
+    expect(e.store.get().tab).toBe("term");
+    e.push({ paneKey: "p" });
+    expect(e.call).toHaveBeenCalledTimes(2);
+    await e.reply(claude);
+    expect(e.store.get().tab).toBe("chat");
+    e.store.close();
+  });
 });

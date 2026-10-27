@@ -1,9 +1,9 @@
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 import { ChatToolRow } from "@/components/ChatToolRow";
 import { ClaudePromptCard } from "@/components/ClaudePromptCard";
 import { ClaudeStatusStrip } from "@/components/ClaudeStatusStrip";
-import { type FeedItem, chatFeed, linkParts } from "@/lib/claude-chat";
+import { type FeedItem, chatFeed, linkParts, sameFeedItem } from "@/lib/claude-chat";
 import { type ChatBlock, type ChatInline, parseChatText } from "@/lib/chat-text";
 import { type Language, t } from "@/lib/i18n";
 import { theme } from "@/lib/theme";
@@ -101,7 +101,16 @@ export function ClaudeTabToggle(props: {
   );
 }
 
-function FeedRow(props: { item: FeedItem; onOpenLink(url: string): void }) {
+// Memoised on content: each view rebuilds the feed's objects, and an
+// unchanged reply must not be re-parsed.
+const FeedRow = memo(
+  function FeedRow(props: { item: FeedItem; onOpenLink(url: string): void }) {
+    return <FeedRowBody {...props} />;
+  },
+  (prev, next) => prev.onOpenLink === next.onOpenLink && sameFeedItem(prev.item, next.item),
+);
+
+function FeedRowBody(props: { item: FeedItem; onOpenLink(url: string): void }) {
   const { item } = props;
   switch (item.kind) {
     case "user":

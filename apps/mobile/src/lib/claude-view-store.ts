@@ -22,6 +22,30 @@ export type ClaudeViewStore = {
   answer(index: number, label: string): Promise<ClaudeAnswerResult>;
 };
 
+/** Cheap equality for two views: enough to tell whether anything the chat
+ *  shows changed, without walking every turn. */
+export function sameClaudeView(a: ClaudeView, b: ClaudeView): boolean {
+  if (a.kind === "none" || b.kind === "none") return a.kind === b.kind;
+  const lastA = a.turns.at(-1);
+  const lastB = b.turns.at(-1);
+  const promptKey = (view: typeof a) =>
+    view.prompt === undefined
+      ? ""
+      : `${view.prompt.question}\n${view.prompt.options.map((option) => option.label).join("\n")}`;
+  return (
+    a.sessionId === b.sessionId &&
+    a.title === b.title &&
+    a.model === b.model &&
+    a.mode === b.mode &&
+    a.working === b.working &&
+    a.turns.length === b.turns.length &&
+    lastA?.role === lastB?.role &&
+    lastA?.text === lastB?.text &&
+    lastA?.tools.length === lastB?.tools.length &&
+    promptKey(a) === promptKey(b)
+  );
+}
+
 export function createClaudeViewStore(deps: {
   client: RpcClient;
   paneKey: string;
@@ -36,6 +60,8 @@ export function createClaudeViewStore(deps: {
   let off: (() => void) | undefined;
   let inFlight: Promise<void> | undefined;
   let queued = false;
+  /** A push arrived while the Term tab hid the chat: refetch on Chat. */
+  let stale = false;
 
   function setState(patch: Partial<ClaudeViewState>): void {
     state = { ...state, ...patch };
@@ -63,7 +89,8 @@ export function createClaudeViewStore(deps: {
             const tab = view.kind === "none" ? "term" : seenClaude ? state.tab : "chat";
             // Claude gone: a later Claude in this pane opens on Chat again.
             seenClaude = view.kind === "claude";
-            setState({ view, tab });
+            // An unchanged view re-renders nothing.
+            if (tab !== state.tab || !sameClaudeView(view, state.view)) setState({ view, tab });
           } else deps.log("claude-view: refresh failed");
         } catch {
           deps.log("claude-view: refresh failed");
@@ -88,13 +115,21 @@ export function createClaudeViewStore(deps: {
     },
     setTab(tab) {
       setState({ tab: state.view.kind === "none" ? "term" : tab });
+      if (state.tab === "chat" && stale) {
+        stale = false;
+        void refresh();
+      }
     },
     refresh,
     open() {
       if (opened) return;
       opened = true;
       off = deps.client.onPush(CLAUDE_VIEW_CHANGED, (payload) => {
-        if (opened && matchesPaneExit(payload, deps.paneKey)) void refresh();
+        if (!opened || !matchesPaneExit(payload, deps.paneKey)) return;
+        // Term shows the live stream already; the chat catches up when it
+        // is shown again. With no Claude in the pane, keep looking.
+        if (state.tab === "term" && state.view.kind === "claude") stale = true;
+        else void refresh();
       });
       deps.client.subscribe(target);
       void refresh();
@@ -102,6 +137,7 @@ export function createClaudeViewStore(deps: {
     close() {
       if (!opened) return;
       opened = false;
+      stale = false;
       generation++;
       queued = false;
       inFlight = undefined;

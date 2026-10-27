@@ -11,6 +11,21 @@ export type FeedItem =
   | { kind: "tool"; key: string; tool: ChatTool }
   | { kind: "working"; key: string; text: string };
 
+/** Whether two feed rows show the same thing, so a memoised row can skip
+ *  re-parsing its text when a new view rebuilt the feed. */
+export function sameFeedItem(a: FeedItem, b: FeedItem): boolean {
+  if (a.kind !== b.kind || a.key !== b.key) return false;
+  if (a.kind === "tool" && b.kind === "tool") {
+    return (
+      a.tool.name === b.tool.name &&
+      a.tool.target === b.tool.target &&
+      a.tool.added === b.tool.added &&
+      a.tool.removed === b.tool.removed
+    );
+  }
+  return "text" in a && "text" in b && a.text === b.text;
+}
+
 /** The chat key row; the "⋯" cap after it opens the full key panel. */
 export const CLAUDE_CHAT_KEYS: readonly BarKey[] = ["esc", "shiftTab", "ctrlC", "up", "down"];
 
