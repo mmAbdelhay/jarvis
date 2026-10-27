@@ -48,18 +48,26 @@ export function chatHeader(
   };
 }
 
-/** A link's visible text. Text that is not simply the address also shows
- *  the host, so a label cannot hide where the link goes. */
+/** A link's visible text, and the host beside it whenever the text does
+ *  not plainly start with that host: a label, a `user:pass@` prefix or a
+ *  look-alike cannot hide where the link goes. */
 export function linkParts(text: string, url: string): { text: string; host?: string } {
-  let host: string;
+  let parsed: URL;
   try {
-    host = new URL(url).host;
+    parsed = new URL(url);
   } catch {
     return { text: url };
   }
-  const bare = url.replace(/^https:\/\//, "").replace(/\/$/, "");
-  if (text === url || text === bare || text === host) return { text: bare };
-  return { text, host };
+  const host = parsed.host.toLowerCase();
+  const bare = url.replace(/^https:\/\//i, "").replace(/\/$/, "");
+  const shown = text === url || text === bare || text.toLowerCase() === host ? bare : text;
+  const leading = shown
+    .replace(/^https:\/\//i, "")
+    .split(/[/?#]/, 1)[0]
+    ?.toLowerCase();
+  const credentials = parsed.username !== "" || parsed.password !== "";
+  if (!credentials && leading === host) return { text: shown };
+  return { text: shown, host };
 }
 
 export function modeKey(mode: ClaudeMode | undefined): MessageKey {

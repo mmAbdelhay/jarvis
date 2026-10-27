@@ -29,6 +29,9 @@ export type AttachUploader = {
   attach(fileId: string): Promise<AttachUploadResult>;
   /** The screen is gone: stops the current upload and drops queued ones. */
   dispose(): void;
+  /** True once disposed: a screen whose effect ran twice (StrictMode)
+   *  builds a fresh one instead of reusing this. */
+  isDisposed(): boolean;
 };
 
 /** An image pick's optional size as the controller's byte count. A
@@ -135,6 +138,7 @@ export function createAttachUploader(deps: {
       }
       return { ok: false, error: deps.errorText("failed") };
     },
+    isDisposed: () => disposed,
     dispose() {
       disposed = true;
       current?.dispose();

@@ -87,6 +87,8 @@ export function ClaudeTabToggle(props: {
             accessibilityRole="tab"
             accessibilityState={{ selected: on }}
             onPress={() => props.onChange(tab)}
+            // 36-high segments: the slop makes each a 44-dp target.
+            hitSlop={{ top: 4, bottom: 4 }}
             style={[styles.toggleItem, on && styles.toggleOn]}
           >
             <Text style={[styles.toggleText, on && styles.toggleTextOn]}>

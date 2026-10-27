@@ -37,7 +37,12 @@ import {
   type TerminalWebViewHandle,
 } from "@/components/TerminalWebView";
 import { deviceOrientationPolicy } from "@/lib/app-orientation";
-import { type AttachPick, attachPickOf, createAttachUploader } from "@/lib/claude-attach";
+import {
+  type AttachPick,
+  type AttachUploader,
+  attachPickOf,
+  createAttachUploader,
+} from "@/lib/claude-attach";
 import { answerNoticeKey, CLAUDE_CHAT_KEYS, chatHeader } from "@/lib/claude-chat";
 import { createAttachTray, submit } from "@/lib/claude-compose";
 import { createClaudeViewStore } from "@/lib/claude-view-store";
@@ -220,7 +225,12 @@ function TerminalPaneBody({
   const chatShown = claudeView !== undefined && claude.tab === "chat";
   const languageRef = useRef(language);
   languageRef.current = language;
-  const uploader = useMemo(
+  // The uploader, behind a ref and rebuilt once disposed (the same guard
+  // connection-store.ts / push-context.tsx use): a StrictMode double-run
+  // effect disposes it and the re-run builds a fresh one at once, so the
+  // tray, which calls through the ref, never holds a dead uploader.
+  const uploaderRef = useRef<AttachUploader | undefined>(undefined);
+  const makeUploader = useCallback(
     () =>
       createAttachUploader({
         client,
@@ -230,15 +240,30 @@ function TerminalPaneBody({
       }),
     [client, paneKey],
   );
-  useEffect(() => () => uploader.dispose(), [uploader]);
+  if (uploaderRef.current === undefined) uploaderRef.current = makeUploader();
+  useEffect(() => {
+    if (uploaderRef.current === undefined || uploaderRef.current.isDisposed()) {
+      uploaderRef.current = makeUploader();
+    }
+    const current = uploaderRef.current;
+    return () => current.dispose();
+  }, [makeUploader]);
   const tray = useMemo(
     () =>
       createAttachTray<AttachPick>({
-        upload: uploader.upload,
-        attach: uploader.attach,
+        upload: (pick, onProgress, onCancel) => {
+          const uploader = uploaderRef.current;
+          if (uploader === undefined || uploader.isDisposed()) {
+            return Promise.resolve({ error: t(languageRef.current, "claude.upload.cancelled") });
+          }
+          return uploader.upload(pick, onProgress, onCancel);
+        },
+        attach: (fileId) =>
+          uploaderRef.current?.attach(fileId) ??
+          Promise.resolve({ ok: false, error: t(languageRef.current, "claude.upload.attach") }),
         maxFiles: MAX_ATTACH,
       }),
-    [uploader],
+    [],
   );
   const [trayItems, setTrayItems] = useState(() => tray.items());
   useEffect(() => tray.subscribe(() => setTrayItems(tray.items())), [tray]);
@@ -453,6 +478,10 @@ function TerminalPaneBody({
   useEffect(() => {
     if (chatShown) fitOff();
   }, [chatShown, fitOff]);
+  // The attach sheet belongs to Chat: leaving it closes the sheet for good.
+  useEffect(() => {
+    if (!chatShown) setAttachOpen(false);
+  }, [chatShown]);
 
   function toggleFit(): void {
     if (fit.isOn()) {
@@ -798,8 +827,11 @@ function TerminalPaneBody({
             {project ?? ""}
           </Text>
           <View style={styles.statusEnd}>
-            <Text style={styles.statusHint}>{t(language, "terminal.historyHint")}</Text>
-            {findControl}
+            {/* Find and the history hint act on the terminal, gone in Chat. */}
+            {!chatShown && (
+              <Text style={styles.statusHint}>{t(language, "terminal.historyHint")}</Text>
+            )}
+            {!chatShown && findControl}
           </View>
         </View>
       )}
@@ -892,7 +924,8 @@ function TerminalPaneBody({
         )}
       </View>
       <AttachSheet
-        visible={attachOpen}
+        // Claude leaving (or Term) closes the sheet.
+        visible={attachOpen && chatShown}
         language={language}
         onPick={(source) => {
           void attachFrom(source);

@@ -173,6 +173,18 @@ describe("attach uploader", () => {
     expect(files.remove).toHaveBeenCalledWith("file:///cache/b.jpg");
   });
 
+  it("reports when it is disposed, so a screen can build a fresh one", () => {
+    const uploader = createAttachUploader({
+      client: fakeClient(),
+      files: fakeFiles(),
+      paneKey: "pane",
+      errorText: (kind) => kind,
+    });
+    expect(uploader.isDisposed()).toBe(false);
+    uploader.dispose();
+    expect(uploader.isDisposed()).toBe(true);
+  });
+
   it("attachPickOf maps an image pick's optional size to bytes", () => {
     expect(attachPickOf({ uri: "u", name: "n.png", contentType: "image/png", size: 5 })).toEqual({
       uri: "u",

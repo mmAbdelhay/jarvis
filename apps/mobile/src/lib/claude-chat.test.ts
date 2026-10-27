@@ -65,6 +65,28 @@ describe("claude chat model", () => {
     });
   });
 
+  it("a host hidden behind credentials or other leading text is always shown", () => {
+    expect(linkParts("https://google.com@evil.com/", "https://google.com@evil.com/")).toEqual({
+      text: "google.com@evil.com",
+      host: "evil.com",
+    });
+    // Text equal to the host shows the whole address, credentials included.
+    expect(linkParts("google.com", "https://user:pw@google.com/")).toEqual({
+      text: "user:pw@google.com",
+      host: "google.com",
+    });
+    expect(linkParts("claude.ai/docs", "https://claude.ai/docs")).toEqual({
+      text: "claude.ai/docs",
+    });
+    expect(linkParts("claude.ai.evil.com", "https://claude.ai.evil.com/x")).toEqual({
+      text: "claude.ai.evil.com/x",
+    });
+    expect(linkParts("claude.ai", "https://evil.com/")).toEqual({
+      text: "claude.ai",
+      host: "evil.com",
+    });
+  });
+
   it("chat keys: one-tap interrupt, no Tab, no Ctrl latch", () => {
     expect(CLAUDE_CHAT_KEYS).toEqual(["esc", "shiftTab", "ctrlC", "up", "down"]);
   });
