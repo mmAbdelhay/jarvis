@@ -326,6 +326,8 @@ function flush(): Promise<void> {
 beforeEach(() => {
   harness();
   initSettings();
+  // terminal-font.ts's state outlives a test: back to the sample's 12.
+  setTerminalFontBase(12);
 });
 
 describe("openSettings", () => {
@@ -596,14 +598,13 @@ describe("Save and live apply", () => {
     expect(document.getElementById("settings-status")?.textContent).toBe(
       MESSAGES.settingsSavedLive(PRIMARY_LANGUAGE),
     );
-    setTerminalFontBase(12);
   });
 
-  it("puts an out-of-range font size back rather than keeping it", async () => {
+  it("puts an out-of-range or fractional font size back rather than keeping it", async () => {
     await openSettings();
     const input = document.getElementById("settings-terminal-font-size") as HTMLInputElement;
 
-    for (const bad of ["99", "2", ""]) {
+    for (const bad of ["99", "2", "", "12.5"]) {
       input.value = bad;
       change(input);
       expect(input.value).toBe("12");

@@ -226,7 +226,7 @@ describe("keyLabel", () => {
 });
 
 describe("font zoom chords", () => {
-  // Matched by physical key, so these carry `code` as a real event does.
+  // Real events carry both; the zoom keys go by the character typed.
   const zoom = (init: Partial<KeyboardEvent> & { key: string; code: string }): KeyboardEvent =>
     key(init);
 
@@ -242,6 +242,27 @@ describe("font zoom chords", () => {
     );
     expect(matchChord(zoom({ key: "0", code: "Digit0", metaKey: true }), "darwin")).toBe(
       "fontReset",
+    );
+  });
+
+  it("follows the printed + and - on a German layout, not the US key positions", () => {
+    // German: "+" is its own key (BracketRight), "-" sits on Slash, and the
+    // US Equal key is a dead ´.
+    expect(matchChord(zoom({ key: "+", code: "BracketRight", metaKey: true }), "darwin")).toBe(
+      "fontBigger",
+    );
+    expect(matchChord(zoom({ key: "-", code: "Slash", metaKey: true }), "darwin")).toBe(
+      "fontSmaller",
+    );
+    expect(matchChord(zoom({ key: "Dead", code: "Equal", metaKey: true }), "darwin")).toBe(
+      undefined,
+    );
+    // Shift+0 types "=" there: still a reset key, never a zoom.
+    expect(
+      matchChord(zoom({ key: "=", code: "Digit0", metaKey: true, shiftKey: true }), "darwin"),
+    ).toBeUndefined();
+    expect(matchChord(zoom({ key: "+", code: "BracketRight", ctrlKey: true }), "linux")).toBe(
+      "fontBigger",
     );
   });
 

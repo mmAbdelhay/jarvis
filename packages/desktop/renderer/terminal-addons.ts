@@ -169,21 +169,32 @@ function applyFontChord(action: ChordAction | undefined): boolean {
   return true;
 }
 
+/** Where the zoom keys work: anywhere focus can sit inside a terminal — the
+ *  xterm itself, the command editor, the find bar — and the Docker tab's
+ *  read-only log, which has no key handler of its own. */
+const FONT_KEY_SURFACES = ".terminal-pane, .workspace-docker-log";
+
 /**
  * The font zoom chords — ⌘+/⌘-/⌘0 on macOS, Ctrl+Shift+=/-/0 elsewhere —
- * for a keystroke xterm's own handler never sees: one aimed at the command
- * editor's field. Every terminal changes at once (terminal-font.ts), so it
- * does not matter which pane the key landed in.
- *
- * Returns false when the key was claimed, the same contract as
- * `handlePaletteKey`.
+ * taken once, at the window, in the capture phase: before xterm's handler or
+ * any field in the pane sees the key, so where focus is inside a terminal
+ * makes no difference. Every terminal changes at once (terminal-font.ts).
  */
-export function handleFontKey(
-  event: KeyboardEvent,
+export function initFontKeys(
+  target: Pick<Window, "addEventListener"> = window,
   platform: NodeJS.Platform = hostPlatform(),
-): boolean {
-  if (!applyFontChord(matchChord(event, platform))) return true;
-  return claim(event);
+): void {
+  target.addEventListener(
+    "keydown",
+    (event) => {
+      if (!(event.target instanceof Element)) return;
+      if (event.target.closest(FONT_KEY_SURFACES) === null) return;
+      if (!applyFontChord(matchChord(event, platform))) return;
+      event.preventDefault();
+      event.stopPropagation();
+    },
+    { capture: true },
+  );
 }
 
 /** ESC then CR. xterm encodes Shift+Enter as a bare CR, byte-identical to
@@ -439,10 +450,6 @@ function attachKeys(
       terminal.clear();
       return claim(event);
     }
-
-    // Font zoom. Never a byte a program could want on either platform —
-    // see keys.ts for why Linux takes Shift here.
-    if (applyFontChord(action)) return claim(event);
 
     return true;
   });

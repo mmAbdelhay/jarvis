@@ -1,17 +1,13 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  TERMINAL_FONT_SIZE_MAX as CONFIG_MAX,
-  TERMINAL_FONT_SIZE_MIN as CONFIG_MIN,
-} from "../src/config.js";
-import {
   onTerminalFontSize,
   resetTerminalFontZoom,
   setTerminalFontBase,
   terminalFontSize,
   zoomTerminalFont,
 } from "./terminal-font.js";
-import { TERMINAL_FONT_SIZE_MAX, TERMINAL_FONT_SIZE_MIN } from "./terminal-theme.js";
+import { TERMINAL_FONT_SIZE_MAX, TERMINAL_FONT_SIZE_MIN } from "../src/terminal-font-size.js";
 
 const cssSize = (): string =>
   document.documentElement.style.getPropertyValue("--terminal-font-size");
@@ -23,12 +19,6 @@ beforeEach(() => {
 });
 
 describe("terminal font size", () => {
-  it("accepts the same range config.ts does", () => {
-    // The renderer cannot import config.ts's values, so it keeps a copy.
-    expect(TERMINAL_FONT_SIZE_MIN).toBe(CONFIG_MIN);
-    expect(TERMINAL_FONT_SIZE_MAX).toBe(CONFIG_MAX);
-  });
-
   it("takes the saved size and tells the stylesheet and every listener", () => {
     const listener = vi.fn();
     const stop = onTerminalFontSize(listener);
@@ -41,8 +31,8 @@ describe("terminal font size", () => {
     stop();
   });
 
-  it("ignores a saved size that is missing, not a number, or out of range", () => {
-    for (const bad of [undefined, "16", Number.NaN, 4, 40]) setTerminalFontBase(bad);
+  it("ignores a saved size that is missing, not a number, fractional or out of range", () => {
+    for (const bad of [undefined, "16", Number.NaN, 4, 40, 12.5]) setTerminalFontBase(bad);
     expect(terminalFontSize()).toBe(12);
   });
 

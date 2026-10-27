@@ -1,12 +1,14 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import {
   enhanceTerminal,
   handlePaletteKey,
   handleSplitKey,
+  initFontKeys,
   type PaletteKeys,
   type SplitKeys,
 } from "./terminal-addons.js";
+import { resetTerminalFontZoom, setTerminalFontBase, terminalFontSize } from "./terminal-font.js";
 import type { Palette, PaletteAction } from "./terminal-palette.js";
 import { FakeTerminal } from "./terminal-double.js";
 
@@ -265,5 +267,61 @@ describe("the same chords, spelled for Linux", () => {
 
     expect(handlePaletteKey(keydown({ key: "r", ctrlKey: true }), keys, "linux")).toBe(false);
     expect(searched).toBe(1);
+  });
+});
+
+describe("initFontKeys", () => {
+  function setup(): { target: EventTarget; field: (className: string) => HTMLElement } {
+    document.body.replaceChildren();
+    const target = new EventTarget() as EventTarget & Pick<Window, "addEventListener">;
+    initFontKeys(target, "darwin");
+    const field = (className: string): HTMLElement => {
+      const surface = document.createElement("div");
+      surface.className = className;
+      const input = document.createElement("input");
+      surface.append(input);
+      document.body.append(surface);
+      return input;
+    };
+    return { target, field };
+  }
+
+  /** Dispatches ⌘= at `field` through `target`, as the window's capture
+   *  listener would see it. */
+  function press(target: EventTarget, field: HTMLElement): KeyboardEvent {
+    const event = new KeyboardEvent("keydown", {
+      key: "=",
+      code: "Equal",
+      metaKey: true,
+      cancelable: true,
+    });
+    Object.defineProperty(event, "target", { value: field });
+    target.dispatchEvent(event);
+    return event;
+  }
+
+  beforeEach(() => {
+    setTerminalFontBase(12);
+    resetTerminalFontZoom();
+  });
+
+  it("zooms from any field inside a terminal pane, the find bar included", () => {
+    const { target, field } = setup();
+    const event = press(target, field("terminal-pane"));
+    expect(event.defaultPrevented).toBe(true);
+    expect(terminalFontSize()).toBe(13);
+  });
+
+  it("zooms from the Docker tab's log", () => {
+    const { target, field } = setup();
+    press(target, field("workspace-docker-log"));
+    expect(terminalFontSize()).toBe(13);
+  });
+
+  it("leaves the key alone outside a terminal", () => {
+    const { target, field } = setup();
+    const event = press(target, field("settings"));
+    expect(event.defaultPrevented).toBe(false);
+    expect(terminalFontSize()).toBe(12);
   });
 });

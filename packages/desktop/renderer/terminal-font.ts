@@ -12,7 +12,12 @@
 // zoom keys move a session offset on top of it that is never written back —
 // a size wanted for one screen share is not a preference.
 
-import { TERMINAL_FONT, TERMINAL_FONT_SIZE_MAX, TERMINAL_FONT_SIZE_MIN } from "./terminal-theme.js";
+import {
+  isTerminalFontSize,
+  TERMINAL_FONT_SIZE_MAX,
+  TERMINAL_FONT_SIZE_MIN,
+} from "../src/terminal-font-size.js";
+import { TERMINAL_FONT } from "./terminal-theme.js";
 
 type Listener = (size: number) => void;
 
@@ -46,7 +51,7 @@ function publish(): void {
 }
 
 /**
- * The saved size from jarvis.yaml. Anything that is not a number in range
+ * The saved size from jarvis.yaml. Anything that is not a whole number in range
  * is ignored: it arrives over IPC, so it is not the type checker's to
  * promise, and a renderer talking to an older main gets no field at all.
  *
@@ -55,8 +60,7 @@ function publish(): void {
  * modules hand over the payload they each read without resetting a zoom.
  */
 export function setTerminalFontBase(size: unknown): void {
-  if (typeof size !== "number" || !Number.isFinite(size)) return;
-  if (size < TERMINAL_FONT_SIZE_MIN || size > TERMINAL_FONT_SIZE_MAX) return;
+  if (!isTerminalFontSize(size)) return;
   if (size === base) return;
   base = size;
   zoom = 0;

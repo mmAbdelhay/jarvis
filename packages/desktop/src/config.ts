@@ -27,6 +27,11 @@ import type {
 import { DB_GATE_ENGINES, isChatDriver } from "@jarvis/platform";
 import { PERSONAL_PROJECT } from "./personal.js";
 import { isAwakeMode } from "./keep-awake.js";
+import {
+  isTerminalFontSize,
+  TERMINAL_FONT_SIZE_MAX,
+  TERMINAL_FONT_SIZE_MIN,
+} from "./terminal-font-size.js";
 
 export function providerAgentListsEqual(
   left: readonly AgentConfig[],
@@ -1571,11 +1576,7 @@ export const DEFAULT_TERMINAL: TerminalConfig = {
   fontSize: 12,
 };
 
-/** The range `terminal.fontSize` accepts. Below 8 a cell is unreadable;
- *  above 32 a split pane is left a handful of columns wide. The renderer's
- *  zoom keys clamp to the same pair. */
-export const TERMINAL_FONT_SIZE_MIN = 8;
-export const TERMINAL_FONT_SIZE_MAX = 32;
+export { TERMINAL_FONT_SIZE_MAX, TERMINAL_FONT_SIZE_MIN };
 
 /** The same, for `sessions:`. */
 export const DEFAULT_SESSIONS: JarvisConfig["sessions"] = {
@@ -1674,14 +1675,9 @@ function parseNotifyAfterSeconds(rawValue: unknown, fallback: number): number {
 
 function parseFontSize(rawValue: unknown, fallback: number): number {
   if (rawValue === undefined) return fallback;
-  if (
-    typeof rawValue !== "number" ||
-    !Number.isFinite(rawValue) ||
-    rawValue < TERMINAL_FONT_SIZE_MIN ||
-    rawValue > TERMINAL_FONT_SIZE_MAX
-  ) {
+  if (!isTerminalFontSize(rawValue)) {
     throw new Error(
-      `Config \`terminal.fontSize\` must be a number from ${TERMINAL_FONT_SIZE_MIN} to ${TERMINAL_FONT_SIZE_MAX}`,
+      `Config \`terminal.fontSize\` must be a whole number from ${TERMINAL_FONT_SIZE_MIN} to ${TERMINAL_FONT_SIZE_MAX}`,
     );
   }
   return rawValue;

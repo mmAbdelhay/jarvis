@@ -121,6 +121,7 @@ function stubJarvis(overrides: Partial<RendererApi>): RendererApi {
       blocks: true,
       inputEditor: true,
       notifyAfterSeconds: 30,
+      fontSize: 12,
       home: "/home/x",
       scrollback: 5000,
     })),

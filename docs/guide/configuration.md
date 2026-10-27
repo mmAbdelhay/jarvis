@@ -83,7 +83,7 @@ terminal:
     enabled: true              # group commands into collapsible blocks
     inputEditor: true          # the multiline command editor at an idle prompt
   notifyAfterSeconds: 30       # notify when an unfocused pane's command runs this long; 0 disables it
-  fontSize: 12                 # terminal font size in pixels, 8 to 32; applies live on save
+  fontSize: 12                 # terminal font size in whole pixels, 8 to 32; applies live on save
 
 workflows:                      # optional; per project, on top of ~/.config/jarvis/workflows/
   acme: ./.jarvis/workflows
@@ -333,7 +333,7 @@ anything about the new terminal misbehaves.
 not looking at**, and defaults to `30`. Set it to `0` to turn these
 notifications off entirely; a lower number just notifies sooner.
 
-**`terminal.fontSize` is the terminal's font size in pixels**, from `8` to
+**`terminal.fontSize` is the terminal's font size in whole pixels**, from `8` to
 `32`, defaulting to `12`. It is the one `terminal:` key that needs no
 restart: saving it in Settings → Terminal resizes every open terminal,
 finished blocks and Docker logs included. **⌘+ / ⌘- / ⌘0** (Ctrl+Shift+= /

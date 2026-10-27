@@ -59,9 +59,8 @@ type Chord = (
       code?: never;
     }
   | {
-      /** `event.code`, the physical key, for a chord whose Shift changes
-       *  which character `event.key` reports: Ctrl+Shift+= arrives as "+"
-       *  on a US layout and as something else on others. */
+      /** `event.code`, the physical key, for a key that sits in the same
+       *  place on every layout the label means (the digit row). */
       code: string;
       key?: never;
     }
@@ -69,7 +68,10 @@ type Chord = (
   meta?: boolean;
   ctrl?: boolean;
   alt?: boolean;
-  shift?: boolean;
+  /** "either" for a character some layouts type with Shift and others
+   *  without: "+" is Shift+= on a US layout and a key of its own on a
+   *  German one. */
+  shift?: boolean | "either";
 };
 
 /** A side may list more than one chord when the platform's convention has
@@ -164,22 +166,32 @@ const BINDINGS: Record<LabelledChord, Binding> = {
     label: { darwin: "⌥⌘→", linux: "Alt+→" },
   },
   // Terminal font zoom, for the session — terminal-font.ts owns the size.
-  // Matched by physical key, so ⌘= and ⌘⇧= (which a Mac menu spells ⌘+)
-  // both grow it. On Linux bare Ctrl+- is ^_, readline's undo, so these
-  // take Shift like every other app chord there.
+  // Matched by the character typed, not the physical key: the label says
+  // "+" and "-", and on many layouts those are not on the US =/- keys
+  // (German "+" is its own key; ⌘ on the US "=" key there is a dead ´).
+  // ⌘= counts too, the unshifted spelling of ⌘+ on a US Mac. On Linux bare
+  // Ctrl+- is ^_, readline's undo, so smaller takes Shift ("_" on most
+  // layouts) like every other app chord there; Ctrl++ is not a control
+  // character, so bigger takes it with or without Shift.
   fontBigger: {
     darwin: [
-      { code: "Equal", meta: true },
-      { code: "Equal", meta: true, shift: true },
+      { key: "+", meta: true, shift: "either" },
+      // Unshifted only: Shift+0 types "=" on a German layout.
+      { key: "=", meta: true },
     ],
-    linux: { code: "Equal", ctrl: true, shift: true },
+    linux: { key: "+", ctrl: true, shift: "either" },
     label: { darwin: "⌘+", linux: "Ctrl+Shift+=" },
   },
   fontSmaller: {
-    darwin: { code: "Minus", meta: true },
-    linux: { code: "Minus", ctrl: true, shift: true },
+    darwin: { key: "-", meta: true },
+    linux: [
+      { key: "_", ctrl: true, shift: true },
+      { key: "-", ctrl: true, shift: true },
+    ],
     label: { darwin: "⌘-", linux: "Ctrl+Shift+-" },
   },
+  // The digit row is in the same place on every layout, and Shift turns
+  // 0 into a different character on each, so reset goes by the key.
   fontReset: {
     darwin: { code: "Digit0", meta: true },
     linux: { code: "Digit0", ctrl: true, shift: true },
@@ -229,7 +241,7 @@ function matches(event: KeyboardEvent, chord: Chord): boolean {
     event.metaKey === (chord.meta ?? false) &&
     event.ctrlKey === (chord.ctrl ?? false) &&
     event.altKey === (chord.alt ?? false) &&
-    event.shiftKey === (chord.shift ?? false)
+    (chord.shift === "either" || event.shiftKey === (chord.shift ?? false))
   );
 }
 

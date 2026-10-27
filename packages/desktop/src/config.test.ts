@@ -1264,7 +1264,7 @@ describe("terminal blocks and notifications", () => {
   });
 
   it("rejects a font size outside 8 to 32, or one that is not a number", () => {
-    for (const fontSize of [7, 33, "big", Number.NaN]) {
+    for (const fontSize of [7, 33, "big", Number.NaN, 12.5]) {
       const raw = { ...base, terminal: { fontSize } };
       expect(() => parseConfig(raw)).toThrow(/terminal\.fontSize/);
     }

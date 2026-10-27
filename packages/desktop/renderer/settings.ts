@@ -22,7 +22,7 @@ import { remoteDeviceClient, remoteWebState, remoteWebUrl } from "../src/remote-
 import { encodeQr, qrToCanvas } from "./vendor/qr.js";
 import { syncPrayerSettings } from "./prayer.js";
 import { setTerminalFontBase } from "./terminal-font.js";
-import { TERMINAL_FONT_SIZE_MAX, TERMINAL_FONT_SIZE_MIN } from "./terminal-theme.js";
+import { isTerminalFontSize } from "../src/terminal-font-size.js";
 
 // Settings' own route. One in-memory draft, edited in place and re-rendered
 // wholesale on every mutation — every field commits on "change" (blur or
@@ -2944,12 +2944,15 @@ export async function saveSettings(): Promise<void> {
     "sessions",
     "headlamp",
   ] as const;
-  // `terminal.fontSize` is the one key in those sections that applies live
-  // (terminal-font.ts), so changing only it must not ask for a restart.
+  // Keys inside those sections that apply live (`terminal.fontSize`:
+  // terminal-font.ts), so changing only them must not ask for a restart.
+  const liveKeys: Partial<Record<(typeof restartKeys)[number], readonly string[]>> = {
+    terminal: ["fontSize"],
+  };
   const restartView = (config: JarvisConfig, key: (typeof restartKeys)[number]): unknown => {
-    if (key !== "terminal") return config[key];
-    const { fontSize: _live, ...rest } = config.terminal;
-    return rest;
+    const live = liveKeys[key];
+    if (live === undefined) return config[key];
+    return Object.fromEntries(Object.entries(config[key]).filter(([name]) => !live.includes(name)));
   };
   const baseline = savedBaseline;
   const current = draft;
@@ -3047,14 +3050,9 @@ function wireStaticFields(): void {
     if (draft === undefined) return;
     const input = $("settings-terminal-font-size") as HTMLInputElement;
     const size = Number(input.value);
-    // Out of range or not a number: put the field back rather than save
-    // something config.ts would refuse to load.
-    if (
-      input.value.trim() === "" ||
-      !Number.isFinite(size) ||
-      size < TERMINAL_FONT_SIZE_MIN ||
-      size > TERMINAL_FONT_SIZE_MAX
-    ) {
+    // Out of range, fractional or not a number: put the field back rather
+    // than save something config.ts would refuse to load.
+    if (input.value.trim() === "" || !isTerminalFontSize(size)) {
       input.value = String(draft.terminal.fontSize);
       return;
     }

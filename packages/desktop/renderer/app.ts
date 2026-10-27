@@ -41,6 +41,7 @@ import { initRemoteStatus } from "./remote-status.js";
 import { initKeepAwake } from "./keep-awake.js";
 import { initBattery, topbarDate } from "./topbar-status.js";
 import { initTopbarFit } from "./topbar-fit.js";
+import { initFontKeys } from "./terminal-addons.js";
 import {
   detectLanguage,
   formatAgo,
@@ -540,6 +541,7 @@ function wireNav(): void {
   void initKeepAwake(window.jarvis).catch(() => undefined);
   void initBattery(navigator as Parameters<typeof initBattery>[0]).catch(() => undefined);
   initTopbarFit(document.querySelector<HTMLElement>(".topbar"));
+  initFontKeys();
 
   window.jarvis.onWorkspace((state) => renderWorkspace(state));
   // No catch here would be an unhandled rejection in the renderer on any
