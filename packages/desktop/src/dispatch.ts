@@ -32,6 +32,9 @@ import type { DockerConfig, PlanCommentStore, PlanFiles, SnippetLanguage } from 
 import { isWithin } from "@jarvis/platform";
 import { bracketedSubmit } from "./bracketed.js";
 import {
+  type AttachUploadResult,
+  type ClaudeAnswerResult,
+  type ClaudeView,
   isFileId,
   isPrKey,
   isSubscriptionKey,
@@ -428,6 +431,18 @@ export type DispatchDeps = {
   // Keep awake (Task 18): keep-awake.ts's createKeepAwake, built once in
   // compose.ts — narrowed to the two calls its channels make.
   awake: Pick<KeepAwake, "status" | "set">;
+  // The phone's chat view of a pane (claude-view.ts's handlers, built in
+  // compose.ts). Both validate their own arguments.
+  claudeView: {
+    view(paneKey: unknown): Promise<ClaudeView>;
+    answer(paneKey: unknown, index: unknown, label: unknown): ClaudeAnswerResult;
+  };
+  // pane-attach.ts's createPaneAttach, built in compose.ts over the same
+  // upload store remote:uploadFile stages into. `deviceId` is always the
+  // authenticated origin's, never a value from `args`.
+  attachUpload: {
+    attach(deviceId: string, paneKey: unknown, fileId: unknown): Promise<AttachUploadResult>;
+  };
 };
 
 /** awake:set's argument: an object with `mode` and/or `simulateInput` and
@@ -1129,6 +1144,24 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
     // empty cursor ShellManager.snapshot returns for one it has never seen.
     "terminal:snapshot": ([paneKey]) =>
       typeof paneKey === "string" ? deps.shells.snapshot(paneKey) : { text: "", end: 0 },
+    // The phone's chat view of a pane running Claude Code, and its
+    // prompt answers — read again from the screen at the moment of the
+    // tap, never trusted from the call (session:answer's rule).
+    "terminal:claudeView": ([paneKey]) => deps.claudeView.view(paneKey),
+    "terminal:answer": ([paneKey, index, label]) => deps.claudeView.answer(paneKey, index, label),
+    // A file this same device staged with remote:uploadFile, copied into
+    // the pane's project. Like remote:readJsonUpload, a desktop origin is
+    // refused here, not by policy alone, and the owner is always the
+    // authenticated origin's own deviceId.
+    "terminal:attachUpload": (
+      [paneKey, fileId],
+      origin,
+    ): Promise<AttachUploadResult> | AttachUploadResult => {
+      if (origin.kind !== "remote") {
+        return { ok: false, error: MESSAGES.fileUploadFailed(deps.language) };
+      }
+      return deps.attachUpload.attach(origin.deviceId, paneKey, fileId);
+    },
     // A tab's second (and third…) shell, and the one kill that is not the
     // tab's own — see TerminalHandlers.split/closePane.
     "terminal:split": ([tabId, paneId]) => {

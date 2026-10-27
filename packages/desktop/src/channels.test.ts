@@ -55,6 +55,7 @@ describe("the channel table", () => {
       "session:output",
       "sessions:update",
       "setup:output",
+      "terminal:claudeViewChanged",
       "terminal:data",
       "terminal:exit",
       "turn:new",

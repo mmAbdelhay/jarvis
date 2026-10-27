@@ -133,6 +133,12 @@ export const REMOTE_PUSH_POLICY: {
   // Keyed, unlike the six reliable channels above: a phone that only cares
   // about one pane subscribes to that pane's exit, not every pane's.
   "terminal:exit": { kind: "reliable", keyOf: (payload) => stringField(payload, "paneKey") },
+  // Keyed like terminal:exit: the phone's chat view subscribes to the one
+  // pane it shows, and re-fetches terminal:claudeView on each push.
+  "terminal:claudeViewChanged": {
+    kind: "reliable",
+    keyOf: (payload) => stringField(payload, "paneKey"),
+  },
 
   "terminal:data": terminalDataPolicy,
   "session:output": sessionOutputPolicy,
@@ -169,7 +175,8 @@ export type StreamOwners = {
 /**
  * Whether `device` may open a keyed subscription to `(channel, key)`
  * (spec, "Capability policy" — a bare channel name never grants a keyed
- * one; this is the other half). `terminal:data`/`terminal:exit` require the
+ * one; this is the other half). `terminal:data`/`terminal:exit`/
+ * `terminal:claudeViewChanged` require the
  * pane to still exist; `session:output` requires the session to still
  * exist; `docker:log` requires `key` (a tab id) to be a follower this exact
  * device opened — never another device's, and never the desktop window's
@@ -185,6 +192,7 @@ export function remoteKeyAuthorizer(owners: StreamOwners): AuthorizeKey {
     switch (channel) {
       case "terminal:data":
       case "terminal:exit":
+      case "terminal:claudeViewChanged":
         return owners.hasPane(key);
       case "session:output":
         return owners.hasSession(key);

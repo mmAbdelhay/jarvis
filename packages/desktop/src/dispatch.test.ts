@@ -279,6 +279,13 @@ export function fakeDeps(overrides: Partial<DispatchDeps> = {}): DispatchDeps {
       status: vi.fn(() => AWAKE_OFF),
       set: vi.fn(async () => AWAKE_OFF),
     },
+    claudeView: {
+      view: vi.fn(async () => ({ kind: "none" as const })),
+      answer: vi.fn(() => ({ ok: true as const })),
+    },
+    attachUpload: {
+      attach: vi.fn(async () => ({ ok: true as const, path: ".jarvis/uploads/x.png" })),
+    },
     ...overrides,
   } as DispatchDeps;
 }
@@ -1267,6 +1274,36 @@ describe("dispatch table: api, dialog, voices", () => {
     const fileId = "a".repeat(32);
     await callAs(table, REMOTE_ORIGIN, "remote:readJsonUpload", fileId);
     expect(deps.uploads.readJson).toHaveBeenCalledWith(REMOTE_ORIGIN.deviceId, fileId);
+  });
+
+  it("terminal:claudeView and terminal:answer pass their arguments through", async () => {
+    const deps = fakeDeps();
+    const table = createDispatchTable(deps);
+    expect(await callAs(table, REMOTE_ORIGIN, "terminal:claudeView", "t1")).toEqual({
+      kind: "none",
+    });
+    expect(deps.claudeView.view).toHaveBeenCalledWith("t1");
+    expect(await callAs(table, REMOTE_ORIGIN, "terminal:answer", "t1", 0, "Yes")).toEqual({
+      ok: true,
+    });
+    expect(deps.claudeView.answer).toHaveBeenCalledWith("t1", 0, "Yes");
+  });
+
+  it("terminal:attachUpload attaches with the authenticated origin's deviceId", async () => {
+    const deps = fakeDeps();
+    const table = createDispatchTable(deps);
+    const fileId = "a".repeat(32);
+    const result = await callAs(table, REMOTE_ORIGIN, "terminal:attachUpload", "t1", fileId, "d9");
+    expect(result).toEqual({ ok: true, path: ".jarvis/uploads/x.png" });
+    expect(deps.attachUpload.attach).toHaveBeenCalledWith(REMOTE_ORIGIN.deviceId, "t1", fileId);
+  });
+
+  it("terminal:attachUpload refuses a desktop origin with a generic error, without attaching", async () => {
+    const deps = fakeDeps();
+    const table = createDispatchTable(deps);
+    const result = await call(table, "terminal:attachUpload", "t1", "a".repeat(32));
+    expect(result).toEqual({ ok: false, error: MESSAGES.fileUploadFailed(deps.language) });
+    expect(deps.attachUpload.attach).not.toHaveBeenCalled();
   });
 
   it("api:importPostman forwards remote:true for a remote origin and remote:false for desktop", async () => {

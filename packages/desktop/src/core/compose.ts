@@ -31,8 +31,10 @@ import {
   chmod,
   mkdir,
   mkdtemp,
+  lstat,
   readdir,
   readFile,
+  realpath,
   rename,
   rm,
   stat,
@@ -118,6 +120,7 @@ import {
   createFaviconStore,
   createFsImportDeps,
   readFileTail,
+  CHAT_TAIL_BYTES,
   createGitProvider,
   createGitRemoteOps,
   createSqliteUsageStore,
@@ -235,6 +238,9 @@ import { writeSettingsFile } from "../settings-io.js";
 import { writeDaemonEnabled } from "../daemon/config-file.js";
 import { errorMessage, MESSAGES, PRIMARY_LANGUAGE } from "../messages.js";
 import { createPaneScreens } from "../pane-screen.js";
+import { createPaneClaudeLookup } from "../pane-claude-session.js";
+import { createPaneAttach } from "../pane-attach.js";
+import { createClaudeViewHandlers, createClaudeViewNotifier } from "../claude-view.js";
 import { createRecorderDeps, Recorder } from "../recorder.js";
 import { capacityReport, startupReport } from "../startup.js";
 import { createTerminalFitOverrides } from "../terminal-fit-overrides.js";
@@ -2135,6 +2141,8 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     safely("session tab names", () => {
       tabNamesStopped = sessionTabNamer.stop();
     });
+    // The chat view's transcript watches and its pending pushes.
+    safely("claude view", () => claudeViewNotifier.stop());
     // One headless terminal per pane that printed.
     safely("pane screens", () => paneScreens.dispose());
     // A recording started but never stopped holds ffmpeg — and the
@@ -2363,6 +2371,79 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
   // Every request handler, in one table (dispatch.ts). Each host registers
   // it on its own transport; the remote bridge calls the same table with a
   // different Origin.
+  // The phone's chat view of a Terminal pane running Claude Code
+  // (claude-view.ts), its "look again" push, and the attach of a staged
+  // upload into the pane's project (pane-attach.ts). Each call takes one
+  // fresh process scan — never refreshSessions()'s cached result.
+  const scanPaneAgents = () =>
+    listAgentProcesses({
+      exec: (command, args) => runCommand(command, args),
+      platform,
+      agents: registry.list(),
+      ownedPids: () => sessions.ownedPids(),
+      jarvisPid: process.pid,
+      terminalShells: () => shells.shellPids(),
+      now: () => Date.now(),
+    });
+  const claudeViewNotifier = createClaudeViewNotifier({
+    onOutput: (cb) => shells.onOutput(({ paneKey }) => cb(paneKey)),
+    onExit: (cb) => shells.onShellExit(({ paneKey }) => cb(paneKey)),
+    watch: (dir, cb) => {
+      const watcher = watchFs(dir, (_event, file) => cb(typeof file === "string" ? file : null));
+      // A watch that fails later (directory removed) costs transcript
+      // pushes only; output pushes still flow.
+      watcher.on("error", () => watcher.close());
+      return watcher;
+    },
+    schedule: (fn, ms) => {
+      const timer = setTimeout(fn, ms);
+      timer.unref();
+      return () => clearTimeout(timer);
+    },
+    emit: (paneKey) => broadcast.send("terminal:claudeViewChanged", { paneKey }),
+    log: (token) => console.warn(token),
+  });
+  const claudeView = createClaudeViewHandlers({
+    panes: () => shells.panes(),
+    scanAgents: scanPaneAgents,
+    lookup: createPaneClaudeLookup({
+      agents: () => registry.list(),
+      home: homedir(),
+      readFile: (path) => importFs.readHead(path),
+      listTranscripts: (dir) => importFs.listFiles(dir, "claude"),
+    }),
+    readTail: (path) => readFileTail(path, CHAT_TAIL_BYTES),
+    screenText: (paneKey) => paneScreens.screenText(paneKey),
+    write: (paneKey, data) => shells.write(paneKey, data),
+    log: (token) => console.warn(token),
+    follow: (paneKey, transcript) => claudeViewNotifier.follow(paneKey, transcript),
+  });
+  const paneAttach = createPaneAttach({
+    uploads: uploadStore,
+    // The Claude process's own cwd in that pane, else the directory the
+    // pane's tab was opened in.
+    cwdFor: async (paneKey) => {
+      try {
+        const agents = registry.list();
+        const claude = (await scanPaneAgents()).find(
+          (candidate) =>
+            candidate.terminalPaneKey === paneKey &&
+            candidate.foreground !== false &&
+            candidate.cwd !== null &&
+            agents.find((agent) => agent.id === candidate.agentId)?.vendor === "anthropic",
+        );
+        if (claude?.cwd) return claude.cwd;
+      } catch {
+        // No scan: the pane's own directory is still a safe answer.
+      }
+      return terminal.paneStartDir(paneKey);
+    },
+    fs: { mkdir, writeFile, realpath, lstat },
+    now: Date.now,
+    randomHex: (n) => randomBytes(n).toString("hex"),
+    log: (token) => console.warn(token),
+  });
+
   const dispatch = createDispatchTable({
     setup,
     orchestrator,
@@ -2442,6 +2523,8 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     openExternal: (url) => host.openExternal(url),
     reviews,
     awake,
+    claudeView,
+    attachUpload: paneAttach,
     plans: {
       files: planFiles,
       comments: planComments,

@@ -11,3 +11,4 @@ export * from "./voice.js";
 export * from "./workspace-views.js";
 export * from "./transcript.js";
 export * from "./attach-upload.js";
+export * from "./claude-view.js";
