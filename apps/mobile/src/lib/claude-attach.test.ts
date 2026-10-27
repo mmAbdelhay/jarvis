@@ -32,7 +32,11 @@ function fakeFiles(): UploadFiles {
 
 function staged(n: number) {
   const fileId = String(n).repeat(32);
-  return { fileId, name: "x.jpg", contentType: "image/jpeg", bytes: 1, expiresAt: 9e12 };
+  // Enveloped as the laptop's handler answers it (file-upload.ts put()).
+  return {
+    ok: true,
+    value: { fileId, name: "x.jpg", contentType: "image/jpeg", bytes: 1, expiresAt: 9e12 },
+  };
 }
 
 const PHOTO = (name: string): AttachPick => ({
