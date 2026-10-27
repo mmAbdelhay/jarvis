@@ -12,6 +12,8 @@ export type CapacityCard = {
   window: "5h" | "month" | "window";
   /** Remaining, 0–100, floored — never more than is really left. */
   left: number;
+  /** Remaining in the optional weekly window, clamped and floored like left. */
+  weekLeft?: number;
   /** Epoch ms the window resets. */
   resetsAt: number;
 };
@@ -43,14 +45,37 @@ export function parseProviderCapacity(value: unknown): CapacityCard[] {
     const resetsAt = Date.parse(window.resetsAt);
     if (!Number.isFinite(resetsAt)) continue;
     const vendor = typeof provider.vendor === "string" ? provider.vendor : "";
+    const secondary = known.secondary;
+    const usedPercent =
+      typeof secondary === "object" && secondary !== null
+        ? (secondary as Record<string, unknown>).usedPercent
+        : undefined;
+    const weekLeft =
+      typeof usedPercent === "number" && Number.isFinite(usedPercent)
+        ? Math.floor(Math.max(0, Math.min(100, 100 - usedPercent)))
+        : undefined;
     cards.push({
       id: provider.id,
       window: WINDOW_BY_VENDOR[vendor] ?? "window",
       left: Math.floor(Math.max(0, Math.min(100, 100 - window.usedPercent))),
+      ...(weekLeft === undefined ? {} : { weekLeft }),
       resetsAt,
     });
   }
   return cards;
+}
+
+/** Claude account IDs identify Anthropic capacity on the Home screen. */
+export function capacityFor(
+  cards: readonly CapacityCard[],
+  vendor: "anthropic",
+): { sessionUsed?: number; weekUsed?: number } {
+  const card = cards.find((card) => vendor === "anthropic" && /^claude(?:$|[-_ ])/i.test(card.id));
+  if (!card) return {};
+  return {
+    sessionUsed: 100 - card.left,
+    ...(card.weekLeft === undefined ? {} : { weekUsed: 100 - card.weekLeft }),
+  };
 }
 
 /** At most this many bars in a card's trend: enough to show a shape, few
