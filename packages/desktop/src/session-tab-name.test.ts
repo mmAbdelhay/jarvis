@@ -336,6 +336,39 @@ describe("session tab namer", () => {
     },
   );
 
+  // A session /renamed long ago, then resumed: Claude's newer ai-title in
+  // the tail must not beat the user's custom-title in the head.
+  it.each([
+    [
+      "custom in head, ai in tail",
+      ["ai-title:auto0", "custom-title:mine"],
+      ["ai-title:auto1"],
+      "mine",
+    ],
+    ["newest custom wins", ["custom-title:old"], ["ai-title:auto", "custom-title:new"], "new"],
+    ["custom in both: tail is newer", ["custom-title:old"], ["custom-title:new"], "new"],
+    ["two customs in head", ["custom-title:a", "custom-title:b"], ["ai-title:auto"], "b"],
+    ["no custom: newest ai", ["ai-title:a"], ["ai-title:b"], "b"],
+  ])("resumed session title: %s", async (_case, head, tail, expected) => {
+    const w = world();
+    w.setProcesses([w.claudeIn("t1", 101)]);
+    w.files.set(join(SESSIONS, "101.json"), pidFile(101, "s1"));
+    w.transcripts.push({ path: join(PROJECTS, "-w", "s1.jsonl"), mtime: 1 });
+    const text = (records: string[]) =>
+      records
+        .map((record) => {
+          const [type, title] = record.split(":");
+          return JSON.stringify(
+            type === "ai-title" ? { type, aiTitle: title } : { type, customTitle: title },
+          );
+        })
+        .join("\n");
+    w.deps.readHead = async () => text(head);
+    w.deps.readTail = async () => text(tail);
+    await createSessionTabNamer(w.deps).check();
+    expect(w.renames).toEqual([["t1", expected]]);
+  });
+
   it("caches transcript titles until the 10 second recheck, then discovers changes", async () => {
     const w = world();
     w.setProcesses([w.claudeIn("t1", 101)]);

@@ -121,11 +121,15 @@ export function createSessionTabNamer(deps: SessionTabNameDeps): SessionTabNamer
     const cached = titles.get(record.sessionId);
     const now = deps.now();
     if (cached !== undefined && now - cached.readAt < SESSION_TAB_RECHECK_MS) return cached.name;
+    // The user's /rename (custom-title) beats Claude's ai-title wherever
+    // it is: a session renamed long ago and then resumed has the rename in
+    // the head and newer ai-titles in the tail. Newest custom-title first
+    // (the tail is newer than the head), then the newest ai-title.
     const tail = await deps.readTail(path);
-    let name = lastCustomTitle(tail) ?? lastAiTitle(tail);
+    let name = lastCustomTitle(tail);
     if (name === undefined) {
       const head = await deps.readHead(path);
-      name = lastCustomTitle(head) ?? lastAiTitle(head);
+      name = lastCustomTitle(head) ?? lastAiTitle(tail) ?? lastAiTitle(head);
     }
     titles.set(record.sessionId, { name, readAt: now });
     return name;
