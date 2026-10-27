@@ -1,5 +1,8 @@
 // Browser photo selection for the attach sheet, using a transient file input.
+// Each pick is registered in `webBlobs`, so the upload controller reads it
+// through the web `RecordingFiles` by its blob url, as it does a picked file.
 import type { PickedFile } from "./image-pick";
+import { webBlobs } from "./web-blob-registry";
 export type { PickedFile } from "./image-pick";
 
 export async function pickImages(
@@ -25,7 +28,7 @@ export async function pickImages(
     });
     if (files.length === 0) return "cancelled";
     return files.slice(0, maxCount).map((file) => ({
-      uri: URL.createObjectURL(file),
+      uri: webBlobs.add(file),
       name: file.name,
       contentType: file.type || "image/jpeg",
       size: file.size,

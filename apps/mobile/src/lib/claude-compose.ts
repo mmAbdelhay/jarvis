@@ -22,13 +22,25 @@ export type AttachTray = {
 };
 
 export function createAttachTray<Pick extends { name: string }>(deps: {
-  upload(pick: Pick): Promise<{ fileId: string } | { error: string }>;
+  /** `onProgress` takes the sent fraction, 0..1, for the chip's bar;
+   *  `onCancel` registers what stops this upload when its chip goes. */
+  upload(
+    pick: Pick,
+    onProgress?: (fraction: number) => void,
+    onCancel?: (cancel: () => void) => void,
+  ): Promise<{ fileId: string } | { error: string }>;
   attach(fileId: string): Promise<AttachUploadResult>;
   maxFiles: number;
 }): Omit<AttachTray, "add"> & { add(pick: Pick): void } {
   let entries: TrayItem[] = [];
   let nextId = 0;
   const listeners = new Set<() => void>();
+  const cancels = new Map<string, () => void>();
+  function stop(id: string): void {
+    const cancel = cancels.get(id);
+    cancels.delete(id);
+    cancel?.();
+  }
   function emit(): void {
     for (const fn of [...listeners]) fn();
   }
@@ -39,7 +51,17 @@ export function createAttachTray<Pick extends { name: string }>(deps: {
   async function upload(id: string, pick: Pick): Promise<void> {
     const active = () => entries.some((item) => item.id === id);
     try {
-      const result = await deps.upload(pick);
+      const result = await deps.upload(
+        pick,
+        (fraction) => {
+          if (active()) update(id, { progress: Math.max(0, Math.min(1, fraction)) });
+        },
+        (cancel) => {
+          if (active()) cancels.set(id, cancel);
+          else cancel();
+        },
+      );
+      cancels.delete(id);
       if (!active()) return;
       if ("error" in result) {
         update(id, { state: "error", error: result.error });
@@ -70,6 +92,7 @@ export function createAttachTray<Pick extends { name: string }>(deps: {
       void upload(id, pick);
     },
     remove(id) {
+      stop(id);
       entries = entries.filter((item) => item.id !== id);
       emit();
     },
@@ -80,6 +103,7 @@ export function createAttachTray<Pick extends { name: string }>(deps: {
         item.state === "done" && item.path !== undefined ? [item.path] : [],
       ),
     clear() {
+      for (const id of [...cancels.keys()]) stop(id);
       entries = [];
       emit();
     },

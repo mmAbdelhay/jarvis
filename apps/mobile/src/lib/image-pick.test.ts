@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as picker from "expo-image-picker";
 import { pickImages } from "./image-pick";
 import { pickImages as pickWebImages } from "./image-pick.web";
+import { webBlobs } from "./web-blob-registry";
 
 vi.mock("expo-image-picker", () => ({
   requestMediaLibraryPermissionsAsync: vi.fn(),
@@ -160,6 +161,14 @@ describe("web pickImages", () => {
       expect(input.remove).toHaveBeenCalledOnce();
     },
   );
+  it("registers each pick so the upload path can read it by its blob url", async () => {
+    const file = { name: "one.png", type: "image/png", size: 12 };
+    browserInput([file]);
+    await pickWebImages("library", 1);
+    expect(webBlobs.get("blob:photo")).toBe(file);
+    expect(webBlobs.size("blob:photo")).toBe(12);
+    webBlobs.remove("blob:photo");
+  });
   it("allows multiple files and preserves their MIME type", async () => {
     const { input } = browserInput([{ name: "one.png", type: "image/png", size: 12 }]);
     await expect(pickWebImages("library", 2)).resolves.toEqual([
