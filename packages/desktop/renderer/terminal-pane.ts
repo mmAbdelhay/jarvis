@@ -22,9 +22,15 @@ import type { TerminalChips } from "../src/ipc.js";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 import { createBlockNav, type BlockNav } from "./block-nav.js";
 import { createBlockView, type BlockView } from "./block-view.js";
-import { handlePaletteKey, type PaletteKeys, type SplitKeys } from "./terminal-addons.js";
+import {
+  handleFontKey,
+  handlePaletteKey,
+  type PaletteKeys,
+  type SplitKeys,
+} from "./terminal-addons.js";
 import { createSplitter, type BlockEvent, type BlockRecord } from "./terminal-blocks.js";
 import { createChipRow } from "./terminal-chips.js";
+import { onTerminalFontSize, terminalFontSize } from "./terminal-font.js";
 import { createEditor, type TerminalEditor } from "./terminal-input.js";
 import { createPalette, type Palette, type PaletteAction } from "./terminal-palette.js";
 import { SCROLLBACK_LINES, TERMINAL_FONT, TERMINAL_THEME } from "./terminal-theme.js";
@@ -318,6 +324,7 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
         ? hooks.settings.scrollback
         : SCROLLBACK_LINES,
     ...TERMINAL_FONT,
+    fontSize: terminalFontSize(),
     theme: TERMINAL_THEME,
     cursorBlink: true,
     allowProposedApi: true,
@@ -507,6 +514,11 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
         return;
       }
       if (editor === undefined || !editor.isVisible()) return;
+      // Font zoom, which xterm's own handler takes in every other state.
+      if (!handleFontKey(event)) {
+        event.stopPropagation();
+        return;
+      }
       if (!handlePaletteKey(event, paletteKeys)) {
         event.stopPropagation();
         return;
@@ -1235,6 +1247,18 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
     liveObserver.observe(live);
   });
 
+  // A new font size changes how many cells fit in the same box, so it is a
+  // resize as far as the pty is concerned: refit() re-measures, and
+  // terminal.onResize above tells the shell. The live terminal is
+  // display:none at an idle prompt, where refit() does nothing — the
+  // observer refits it the moment it is shown again. Frozen blocks follow
+  // through the stylesheet's --terminal-font-size, without anything here.
+  const stopFollowingFont = onTerminalFontSize((size) => {
+    if (disposed) return;
+    terminal.options.fontSize = size;
+    refit();
+  });
+
   /**
    * Whether this pane is safe to feed a live push. False until attach()
    * settles, so `writeLive` drops everything pushed in that gap.
@@ -1296,6 +1320,7 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
       // Before the terminal goes: an observer left connected outlives the
       // pane and keeps its element (and this closure) alive.
       attempt(() => liveObserver?.disconnect());
+      stopFollowingFont();
       terminal.dispose();
       for (const view of views.splice(0)) view.element.remove();
       element.remove();

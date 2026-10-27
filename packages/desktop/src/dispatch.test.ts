@@ -88,6 +88,7 @@ export function fakeDeps(overrides: Partial<DispatchDeps> = {}): DispatchDeps {
         notifyAfterSeconds: 0,
         home: "",
         scrollback: 0,
+        fontSize: 12,
       })),
       workflows: vi.fn(async () => []),
       terminalAi: vi.fn(async () => ""),

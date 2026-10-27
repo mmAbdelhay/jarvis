@@ -6,6 +6,7 @@ import { PERSONAL_PROJECT } from "../src/personal.js";
 import type { BindChoice, RemoteStatus } from "@jarvis/remote";
 import { initSettings, openSettings, savePrayerSettings } from "./settings.js";
 import { initKeepAwake } from "./keep-awake.js";
+import { setTerminalFontBase, terminalFontSize } from "./terminal-font.js";
 import { encodeQr, qrToCanvas } from "./vendor/qr.js";
 
 // The real encoder is unit-tested on its own (vendor/qr.test.ts); here we
@@ -55,6 +56,7 @@ function sample(): JarvisConfig {
       completion: { enabled: true, historyPath: "/h", commandLogPath: "/l" },
       blocks: { enabled: true, inputEditor: true },
       notifyAfterSeconds: 30,
+      fontSize: 12,
     },
     voice: {
       engine: "say" as const,
@@ -140,6 +142,7 @@ function harness(config: JarvisConfig = sample()): { calls: Recorded[]; config: 
     <input id="settings-speak-greeting" type="checkbox" />
     <textarea id="settings-greeting-en"></textarea>
     <textarea id="settings-greeting-ar"></textarea>
+    <input id="settings-terminal-font-size" type="number" />
     <input id="settings-allow-popups" type="checkbox" />
     <input id="settings-browser-homepage" />
     <input id="settings-whisper-binary" />
@@ -572,6 +575,39 @@ describe("Save and live apply", () => {
     expect(document.getElementById("settings-status")?.textContent).toBe(
       MESSAGES.settingsSavedRestart(PRIMARY_LANGUAGE),
     );
+  });
+
+  it("saves a new terminal font size and applies it live, without a restart prompt", async () => {
+    const { calls } = harness();
+    initSettings();
+    await openSettings();
+    const input = document.getElementById("settings-terminal-font-size") as HTMLInputElement;
+    expect(input.value).toBe("12");
+
+    input.value = "16";
+    change(input);
+    document.getElementById("settings-save")?.click();
+    await Promise.resolve();
+
+    const saved = savedConfig(calls.find((entry) => entry.call === "saveSettings"));
+    expect(saved.terminal.fontSize).toBe(16);
+    expect(terminalFontSize()).toBe(16);
+    expect((document.getElementById("settings-restart") as HTMLElement).hidden).toBe(true);
+    expect(document.getElementById("settings-status")?.textContent).toBe(
+      MESSAGES.settingsSavedLive(PRIMARY_LANGUAGE),
+    );
+    setTerminalFontBase(12);
+  });
+
+  it("puts an out-of-range font size back rather than keeping it", async () => {
+    await openSettings();
+    const input = document.getElementById("settings-terminal-font-size") as HTMLInputElement;
+
+    for (const bad of ["99", "2", ""]) {
+      input.value = bad;
+      change(input);
+      expect(input.value).toBe("12");
+    }
   });
 
   it("shows the headline and technical detail on a failed save, without a restart prompt", async () => {

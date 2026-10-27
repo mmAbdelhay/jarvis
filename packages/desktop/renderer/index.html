@@ -683,6 +683,7 @@
         <a class="settings-nav-link" href="#settings-section-brain">Brain</a>
         <a class="settings-nav-link" href="#settings-section-voice">Voice</a>
         <a id="settings-nav-header" class="settings-nav-link" href="#settings-section-header">Header</a>
+        <a class="settings-nav-link" href="#settings-section-terminal">Terminal</a>
         <a class="settings-nav-link" href="#settings-section-browser">Browser</a>
         <a class="settings-nav-link" href="#settings-section-whisper">Whisper</a>
         <a id="settings-nav-remote" class="settings-nav-link" href="#settings-section-remote">Remote access</a>
@@ -922,6 +923,17 @@
             <span class="settings-switch-track" aria-hidden="true"></span>
           </span>
         </div>
+      </section>
+
+      <section class="settings-section" id="settings-section-terminal">
+        <div class="lbl">TERMINAL</div>
+        <!-- Applies to every open terminal the moment Save is pressed —
+             renderer/terminal-font.ts. The range matches config.ts's. -->
+        <div class="settings-field">
+          <label for="settings-terminal-font-size">font size</label>
+          <input id="settings-terminal-font-size" type="number" min="8" max="32" step="1" />
+        </div>
+        <div class="settings-note">In pixels, from 8 to 32. ⌘+ / ⌘- / ⌘0 (Ctrl+Shift+= / - / 0 on Linux) zoom every terminal for this session without changing it.</div>
       </section>
 
       <section class="settings-section" id="settings-section-browser">

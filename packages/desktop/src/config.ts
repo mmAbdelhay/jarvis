@@ -104,6 +104,11 @@ export type TerminalConfig = {
   /** A command that finishes after this many seconds with its pane
    *  unfocused raises a notification. 0 disables it. */
   notifyAfterSeconds: number;
+  /** The terminal's font size in pixels, between TERMINAL_FONT_SIZE_MIN and
+   *  TERMINAL_FONT_SIZE_MAX. Unlike the rest of this section it applies
+   *  live: the renderer re-fits every open pane on save. ⌘+/⌘-/⌘0 zoom
+   *  around it for the session without changing what is saved. */
+  fontSize: number;
 };
 
 /**
@@ -1563,7 +1568,14 @@ export const DEFAULT_TERMINAL: TerminalConfig = {
   },
   blocks: { enabled: true, inputEditor: true },
   notifyAfterSeconds: 30,
+  fontSize: 12,
 };
+
+/** The range `terminal.fontSize` accepts. Below 8 a cell is unreadable;
+ *  above 32 a split pane is left a handful of columns wide. The renderer's
+ *  zoom keys clamp to the same pair. */
+export const TERMINAL_FONT_SIZE_MIN = 8;
+export const TERMINAL_FONT_SIZE_MAX = 32;
 
 /** The same, for `sessions:`. */
 export const DEFAULT_SESSIONS: JarvisConfig["sessions"] = {
@@ -1593,6 +1605,7 @@ function parseTerminal(rawTerminal: unknown): TerminalConfig {
       terminal["notifyAfterSeconds"],
       defaults.notifyAfterSeconds,
     ),
+    fontSize: parseFontSize(terminal["fontSize"], defaults.fontSize),
   };
 }
 
@@ -1655,6 +1668,21 @@ function parseNotifyAfterSeconds(rawValue: unknown, fallback: number): number {
   if (rawValue === undefined) return fallback;
   if (typeof rawValue !== "number" || !Number.isFinite(rawValue) || rawValue < 0) {
     throw new Error("Config `terminal.notifyAfterSeconds` must be a number of seconds, or 0");
+  }
+  return rawValue;
+}
+
+function parseFontSize(rawValue: unknown, fallback: number): number {
+  if (rawValue === undefined) return fallback;
+  if (
+    typeof rawValue !== "number" ||
+    !Number.isFinite(rawValue) ||
+    rawValue < TERMINAL_FONT_SIZE_MIN ||
+    rawValue > TERMINAL_FONT_SIZE_MAX
+  ) {
+    throw new Error(
+      `Config \`terminal.fontSize\` must be a number from ${TERMINAL_FONT_SIZE_MIN} to ${TERMINAL_FONT_SIZE_MAX}`,
+    );
   }
   return rawValue;
 }

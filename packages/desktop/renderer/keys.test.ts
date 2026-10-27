@@ -211,6 +211,9 @@ describe("keyLabel", () => {
         "closePane",
         "focusPrev",
         "focusNext",
+        "fontBigger",
+        "fontSmaller",
+        "fontReset",
         "sendRequest",
         "saveRequest",
         "voiceStart",
@@ -219,5 +222,38 @@ describe("keyLabel", () => {
         expect(keyLabel(action, platform)).not.toBe("");
       }
     }
+  });
+});
+
+describe("font zoom chords", () => {
+  // Matched by physical key, so these carry `code` as a real event does.
+  const zoom = (init: Partial<KeyboardEvent> & { key: string; code: string }): KeyboardEvent =>
+    key(init);
+
+  it("grows on Cmd+= and Cmd+Shift+= (Cmd++), shrinks on Cmd+-, resets on Cmd+0", () => {
+    expect(matchChord(zoom({ key: "=", code: "Equal", metaKey: true }), "darwin")).toBe(
+      "fontBigger",
+    );
+    expect(
+      matchChord(zoom({ key: "+", code: "Equal", metaKey: true, shiftKey: true }), "darwin"),
+    ).toBe("fontBigger");
+    expect(matchChord(zoom({ key: "-", code: "Minus", metaKey: true }), "darwin")).toBe(
+      "fontSmaller",
+    );
+    expect(matchChord(zoom({ key: "0", code: "Digit0", metaKey: true }), "darwin")).toBe(
+      "fontReset",
+    );
+  });
+
+  it("takes Shift on linux, whatever character Shift turns the key into", () => {
+    const linux = (k: string, code: string): KeyboardEvent =>
+      zoom({ key: k, code, ctrlKey: true, shiftKey: true });
+    expect(matchChord(linux("+", "Equal"), "linux")).toBe("fontBigger");
+    expect(matchChord(linux("_", "Minus"), "linux")).toBe("fontSmaller");
+    expect(matchChord(linux(")", "Digit0"), "linux")).toBe("fontReset");
+  });
+
+  it("leaves bare Ctrl+- to the shell on linux — it is ^_, readline's undo", () => {
+    expect(matchChord(zoom({ key: "-", code: "Minus", ctrlKey: true }), "linux")).toBeUndefined();
   });
 });

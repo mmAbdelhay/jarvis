@@ -21,6 +21,8 @@ import { latestRemoteStatus, onRemoteStatusChange, withNameInBdi } from "./remot
 import { remoteDeviceClient, remoteWebState, remoteWebUrl } from "../src/remote-web.js";
 import { encodeQr, qrToCanvas } from "./vendor/qr.js";
 import { syncPrayerSettings } from "./prayer.js";
+import { setTerminalFontBase } from "./terminal-font.js";
+import { TERMINAL_FONT_SIZE_MAX, TERMINAL_FONT_SIZE_MIN } from "./terminal-theme.js";
 
 // Settings' own route. One in-memory draft, edited in place and re-rendered
 // wholesale on every mutation — every field commits on "change" (blur or
@@ -193,11 +195,17 @@ function renderSettings(): void {
   renderChat();
   renderBrain();
   renderVoice();
+  renderTerminal();
   renderBrowser();
   renderWhisper();
   renderRemote();
   renderReviews();
   renderAwake();
+}
+
+function renderTerminal(): void {
+  if (draft === undefined) return;
+  ($("settings-terminal-font-size") as HTMLInputElement).value = String(draft.terminal.fontSize);
 }
 
 function renderBrowser(): void {
@@ -2936,10 +2944,21 @@ export async function saveSettings(): Promise<void> {
     "sessions",
     "headlamp",
   ] as const;
+  // `terminal.fontSize` is the one key in those sections that applies live
+  // (terminal-font.ts), so changing only it must not ask for a restart.
+  const restartView = (config: JarvisConfig, key: (typeof restartKeys)[number]): unknown => {
+    if (key !== "terminal") return config[key];
+    const { fontSize: _live, ...rest } = config.terminal;
+    return rest;
+  };
   const baseline = savedBaseline;
+  const current = draft;
   const restartRequired =
     baseline !== undefined &&
-    restartKeys.some((key) => JSON.stringify(baseline[key]) !== JSON.stringify(draft?.[key]));
+    restartKeys.some(
+      (key) =>
+        JSON.stringify(restartView(baseline, key)) !== JSON.stringify(restartView(current, key)),
+    );
   const result = await window.jarvis.saveSettings(draft);
   const status = $("settings-status");
   if (!result.ok) {
@@ -2952,6 +2971,9 @@ export async function saveSettings(): Promise<void> {
     : MESSAGES.settingsSavedLive(PRIMARY_LANGUAGE);
   status.classList.remove("settings-status--error");
   ($("settings-restart") as HTMLElement).hidden = !restartRequired;
+  // Every open terminal, now. The same size as before is a no-op, so saving
+  // some other section leaves a session zoom alone.
+  setTerminalFontBase(current.terminal.fontSize);
   savedBaseline = structuredClone(draft);
   window.dispatchEvent(new Event("jarvis:settings-saved"));
 }
@@ -3021,6 +3043,24 @@ function wireStaticFields(): void {
   $("settings-voice-ar-play").addEventListener("click", () =>
     previewVoice("settings-voice-ar", "ar"),
   );
+  $("settings-terminal-font-size").addEventListener("change", () => {
+    if (draft === undefined) return;
+    const input = $("settings-terminal-font-size") as HTMLInputElement;
+    const size = Number(input.value);
+    // Out of range or not a number: put the field back rather than save
+    // something config.ts would refuse to load.
+    if (
+      input.value.trim() === "" ||
+      !Number.isFinite(size) ||
+      size < TERMINAL_FONT_SIZE_MIN ||
+      size > TERMINAL_FONT_SIZE_MAX
+    ) {
+      input.value = String(draft.terminal.fontSize);
+      return;
+    }
+    draft.terminal.fontSize = size;
+    clearSaveStatus();
+  });
   $("settings-allow-popups").addEventListener("change", () => {
     if (draft === undefined) return;
     draft.browser.allowPopups = ($("settings-allow-popups") as HTMLInputElement).checked;
