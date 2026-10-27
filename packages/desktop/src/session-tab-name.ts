@@ -5,16 +5,18 @@
 // service uses. Applied only when the session name changes, so a name the
 // user typed into the tab stands until the session's own name moves on.
 
-import { basename, join } from "node:path";
 import type { AgentConfig, WorkspaceState } from "@jarvis/core";
 import {
-  claudeSessionPaths,
   lastCustomTitle,
-  parseClaudePidRecord,
   type ExternalAgentProcess,
   type ShellManager,
   type TranscriptFile,
 } from "@jarvis/platform";
+import {
+  claudePathsFor,
+  createTranscriptPaths,
+  readClaudePidRecord,
+} from "./pane-claude-session.js";
 
 /** Quiet time after a sessions-directory event before the re-check. */
 export const SESSION_TAB_DEBOUNCE_MS = 500;
@@ -77,7 +79,7 @@ export function createSessionTabNamer(deps: SessionTabNameDeps): SessionTabNamer
   /** Sessions read during the current check, for pruning transcriptPaths. */
   const seenSessions = new Set<string>();
   /** Session id → its transcript path, once found (fallback only). */
-  const transcriptPaths = new Map<string, string>();
+  const transcriptPaths = createTranscriptPaths(deps.listTranscripts);
   const watchers = new Map<string, { close(): void }>();
   /** Panes whose output has been seen — a new one means a shell started. */
   const seenPanes = new Set<string>();
@@ -110,28 +112,17 @@ export function createSessionTabNamer(deps: SessionTabNameDeps): SessionTabNamer
     record: { sessionId: string; name?: string },
   ): Promise<string | undefined> {
     if (record.name !== undefined) return record.name;
-    let path = transcriptPaths.get(record.sessionId);
-    if (path === undefined) {
-      const files = await deps.listTranscripts(paths.transcriptsDir);
-      path = files.find((file) => basename(file.path) === `${record.sessionId}.jsonl`)?.path;
-      if (path === undefined) return undefined;
-      transcriptPaths.set(record.sessionId, path);
-    }
+    const path = await transcriptPaths.find(paths.transcriptsDir, record.sessionId);
+    if (path === undefined) return undefined;
     return lastCustomTitle(await deps.readTail(path));
   }
 
   async function applyTo(process: ExternalAgentProcess, paneKey: string): Promise<void> {
-    const agents = deps.agents();
-    const agent = agents.find((candidate) => candidate.id === process.agentId);
-    if (agent?.vendor !== "anthropic") return;
-    const paths = claudeSessionPaths(agents, deps.home, process.agentId);
+    const paths = claudePathsFor(deps.agents(), deps.home, process);
     if (paths === null) return;
     ensureWatch(paths.sessionsDir);
 
-    const record = parseClaudePidRecord(
-      await deps.readFile(join(paths.sessionsDir, `${process.pid}.json`)),
-      process.pid,
-    );
+    const record = await readClaudePidRecord(deps.readFile, paths.sessionsDir, process.pid);
     if (record === null) return;
     seenSessions.add(record.sessionId);
     const name = await nameFor(paths, record);
@@ -162,7 +153,7 @@ export function createSessionTabNamer(deps: SessionTabNameDeps): SessionTabNamer
     // Forget panes the shell manager no longer knows, so the map cannot grow.
     for (const paneKey of applied.keys()) if (!live.has(paneKey)) applied.delete(paneKey);
     if (live.size === 0) {
-      transcriptPaths.clear();
+      transcriptPaths.retain(new Set());
       return;
     }
 
@@ -184,9 +175,7 @@ export function createSessionTabNamer(deps: SessionTabNameDeps): SessionTabNamer
       }
     }
     // Pruned with `applied`: a session in no live pane needs no cached path.
-    for (const sessionId of transcriptPaths.keys()) {
-      if (!seenSessions.has(sessionId)) transcriptPaths.delete(sessionId);
-    }
+    transcriptPaths.retain(seenSessions);
   }
 
   /** At most one check queued behind the running one. */
@@ -245,7 +234,7 @@ export function createSessionTabNamer(deps: SessionTabNameDeps): SessionTabNamer
       }
       watchers.clear();
       applied.clear();
-      transcriptPaths.clear();
+      transcriptPaths.retain(new Set());
       seenPanes.clear();
       // A check already running sees `stopped` before any watch/rename/timer.
       while (queued !== undefined || running !== undefined) {
