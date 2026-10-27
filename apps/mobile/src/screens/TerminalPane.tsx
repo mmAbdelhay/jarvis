@@ -12,6 +12,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AppState,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   StyleSheet,
   Text,
@@ -20,6 +21,9 @@ import {
 } from "react-native";
 import { ComposeBar } from "@/components/ComposeBar";
 import { ArrowPad } from "@/components/ArrowPad";
+import { AttachSheet, type AttachSource } from "@/components/AttachSheet";
+import { AttachTray } from "@/components/AttachTray";
+import { ClaudeChatView, ClaudeTabToggle } from "@/components/ClaudeChatView";
 import { FileBrowserSheet } from "@/components/FileBrowserSheet";
 import { FileTree } from "@/components/FileTree";
 import { IconButton } from "@/components/IconButton";
@@ -33,6 +37,15 @@ import {
   type TerminalWebViewHandle,
 } from "@/components/TerminalWebView";
 import { deviceOrientationPolicy } from "@/lib/app-orientation";
+import { type AttachPick, attachPickOf, createAttachUploader } from "@/lib/claude-attach";
+import { answerNoticeKey, CLAUDE_CHAT_KEYS, chatHeader } from "@/lib/claude-chat";
+import { createAttachTray, submit } from "@/lib/claude-compose";
+import { createClaudeViewStore } from "@/lib/claude-view-store";
+import { nativeFilePicker } from "@/lib/file-picker";
+import { capacityFor } from "@/lib/home-capacity";
+import { pickImages } from "@/lib/image-pick";
+import { nativeRecordingFiles } from "@/lib/native-recording-files";
+import { topBarStoreFor } from "@/lib/top-bar-store";
 import { realClock } from "@/lib/clock";
 import { clientPlatformFor } from "@/lib/client-platform";
 import { t } from "@/lib/i18n";
@@ -50,7 +63,13 @@ import {
 import { sendResultText, streamStatusKey, trimmedAmount } from "@/lib/session-screen";
 import type { SessionStream, SessionStreamView } from "@/lib/session-stream";
 import { keyboardAvoidingBehavior, keyboardBottomPadding } from "@/lib/keyboard-offset";
-import { type BarKey, isTextKey, TEXT_KEY_VALUE, terminalFooterKeys } from "@/lib/terminal-keys";
+import {
+  type BarKey,
+  isTextKey,
+  NAV_KEYS,
+  TEXT_KEY_VALUE,
+  terminalFooterKeys,
+} from "@/lib/terminal-keys";
 import { paneChips, terminalTitle } from "@/lib/terminal-header";
 import { sgrWheelSequence } from "@/lib/terminal-keys";
 import type { TerminalKeyInput } from "@/lib/terminal-keyboard";
@@ -68,6 +87,9 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { MobileWorkspaceTab, TerminalPaneInfo } from "@jarvis/wire";
 
 type ValidationPhase = "checking" | "notFound" | "ok";
+
+/** Attachments one Claude message can carry. */
+const MAX_ATTACH = 4;
 
 /** One laptop terminal pane: the full-screen `/terminal/[paneKey]` route
  *  on a phone, or the inline Workspace tab on a wide screen (`embedded`: no
@@ -143,6 +165,7 @@ function TerminalPaneBody({
   const [panes, setPanes] = useState<TerminalPaneInfo[]>([]);
   const [filesOpen, setFilesOpen] = useState(false);
   const [, setPlanRevision] = useState(0);
+  const [attachOpen, setAttachOpen] = useState(false);
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const webRef = useRef<TerminalWebViewHandle>(null);
   const inputRef = useRef<SessionInput | undefined>(undefined);
@@ -185,6 +208,50 @@ function TerminalPaneBody({
     [],
   );
   const plansStore = useMemo(() => createPlansStore({ client, paneKey }), [client, paneKey]);
+  // Claude Code in this pane (Task 8): the parsed view and the Chat/Term
+  // choice live in the store; the attachments in the tray.
+  const claudeStore = useMemo(
+    () => createClaudeViewStore({ client, paneKey, log: console.log }),
+    [client, paneKey],
+  );
+  const [claude, setClaude] = useState(() => claudeStore.get());
+  useEffect(() => claudeStore.subscribe(setClaude), [claudeStore]);
+  const claudeView = claude.view.kind === "claude" ? claude.view : undefined;
+  const chatShown = claudeView !== undefined && claude.tab === "chat";
+  const languageRef = useRef(language);
+  languageRef.current = language;
+  const uploader = useMemo(
+    () =>
+      createAttachUploader({
+        client,
+        files: nativeRecordingFiles,
+        paneKey,
+        errorText: (kind) => t(languageRef.current, `claude.upload.${kind}`),
+      }),
+    [client, paneKey],
+  );
+  useEffect(() => () => uploader.dispose(), [uploader]);
+  const tray = useMemo(
+    () =>
+      createAttachTray<AttachPick>({
+        upload: uploader.upload,
+        attach: uploader.attach,
+        maxFiles: MAX_ATTACH,
+      }),
+    [uploader],
+  );
+  const [trayItems, setTrayItems] = useState(() => tray.items());
+  useEffect(() => tray.subscribe(() => setTrayItems(tray.items())), [tray]);
+  // The account's session/week use for the chat's meters, from the same
+  // store the wide shell's capacity reads; only while Claude is here.
+  const topBar = useMemo(() => topBarStoreFor(client), [client]);
+  const [capacity, setCapacity] = useState(() => topBar.get().capacity);
+  const claudePresent = claudeView !== undefined;
+  useEffect(() => {
+    if (!claudePresent) return;
+    setCapacity(topBar.get().capacity);
+    return topBar.subscribe((view) => setCapacity(view.capacity));
+  }, [topBar, claudePresent]);
   useEffect(() => plansStore.subscribe(() => setPlanRevision((value) => value + 1)), [plansStore]);
   // Final fix wave M5: the header's "Plan · N" counts the open plan's queued
   // comments, so the default plan is opened on mount, not first on sheet open.
@@ -276,7 +343,14 @@ function TerminalPaneBody({
   // effect) and shows the exited state, exactly as if the validation read
   // had already found it exited. Both subscriptions are released in this
   // same cleanup.
+  //
+  // Task 8: input stays attached in both Chat and Term; the terminal:data
+  // stream only while Term (the terminal itself) is on screen. The input is
+  // made afresh at each switch: one carried over from Term would still hold
+  // the terminal's size and send it again (reconnect, app back to front),
+  // and Chat never resizes the pty.
   useFocusEffect(
+    // biome-ignore lint/correctness/useExhaustiveDependencies: `chatShown` is the switch the input is remade at (above).
     useCallback(() => {
       if (phase !== "ok") return;
       const input = createTerminalInput({
@@ -286,39 +360,56 @@ function TerminalPaneBody({
         log: console.log,
       });
       input.setEnded(exitedRef.current);
-      const stream = createTerminalStream({
-        client,
-        paneKey,
-        clock: realClock,
-        log: console.log,
-      });
       const exitWatcher = watchTerminalExit({
         client,
         paneKey,
         onExit: () => setExited(true),
       });
       inputRef.current = input;
+      const appState = AppState.addEventListener("change", (state) => {
+        if (state === "active") input.reassert();
+      });
+      return () => {
+        exitWatcher.close();
+        input.dispose();
+        appState.remove();
+        inputRef.current = undefined;
+        clearTimeout(noticeTimer.current);
+        setArmed(NO_LATCHES);
+        setKeyNotice("");
+      };
+    }, [client, paneKey, phase, chatShown]),
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      if (phase !== "ok" || chatShown) return;
+      const stream = createTerminalStream({
+        client,
+        paneKey,
+        clock: realClock,
+        log: console.log,
+      });
       streamRef.current = stream;
       const unsubscribe = stream.subscribe(setStreamView);
       sink.reset();
       stream.open(sink);
       setStreamView(stream.get());
-      const appState = AppState.addEventListener("change", (state) => {
-        if (state === "active") input.reassert();
-      });
       return () => {
         unsubscribe();
         stream.close();
-        exitWatcher.close();
-        input.dispose();
-        appState.remove();
-        inputRef.current = undefined;
         streamRef.current = undefined;
-        clearTimeout(noticeTimer.current);
-        setArmed(NO_LATCHES);
-        setKeyNotice("");
       };
-    }, [client, paneKey, phase, sink]),
+    }, [client, paneKey, phase, sink, chatShown]),
+  );
+
+  // The Claude view's keyed subscription, for as long as the pane is open.
+  useFocusEffect(
+    useCallback(() => {
+      if (phase !== "ok") return;
+      claudeStore.open();
+      return () => claudeStore.close();
+    }, [claudeStore, phase]),
   );
 
   useEffect(() => {
@@ -357,6 +448,12 @@ function TerminalPaneBody({
     }, [fitOff]),
   );
 
+  // Chat shows no terminal, so it never sizes the pty: a Fit left on when
+  // Term goes away gives the desktop its size back, as leaving does.
+  useEffect(() => {
+    if (chatShown) fitOff();
+  }, [chatShown, fitOff]);
+
   function toggleFit(): void {
     if (fit.isOn()) {
       fitOff();
@@ -366,11 +463,63 @@ function TerminalPaneBody({
   }
   const disabled = exited || phase !== "ok" || connection !== "open";
 
-  function showResult(input: SessionInput, result: SendResult): void {
-    if (inputRef.current !== input) return;
-    setKeyNotice(sendResultText(result, language, clientPlatformFor(Platform.OS)));
+  function flashNotice(text: string): void {
+    setKeyNotice(text);
     clearTimeout(noticeTimer.current);
     noticeTimer.current = setTimeout(() => setKeyNotice(""), 4000);
+  }
+
+  function showResult(input: SessionInput, result: SendResult): void {
+    if (inputRef.current !== input) return;
+    flashNotice(sendResultText(result, language, clientPlatformFor(Platform.OS)));
+  }
+
+  // Chat's Enter: the attached paths, then the text, then Enter.
+  async function sendToClaude(text: string): Promise<SendResult> {
+    const input = inputRef.current;
+    if (input === undefined) return { kind: "offline" };
+    const result = await submit(input, tray, text);
+    if (result === "sent") return { kind: "sent" };
+    if (result === "blocked") return { kind: "failed", text: t(language, "claude.uploadWait") };
+    return result;
+  }
+
+  async function answerClaude(index: number, label: string): Promise<void> {
+    try {
+      const key = answerNoticeKey(await claudeStore.answer(index, label));
+      if (key !== undefined) flashNotice(t(language, key));
+    } catch {
+      flashNotice(t(language, "claude.answerFailed"));
+    }
+  }
+
+  function openLink(url: string): void {
+    if (!url.startsWith("https://")) return;
+    void Linking.openURL(url).catch(() => {});
+  }
+
+  async function attachFrom(source: AttachSource): Promise<void> {
+    setAttachOpen(false);
+    const remaining = MAX_ATTACH - tray.items().length;
+    if (remaining < 1) {
+      flashNotice(t(language, "claude.attachFull", { n: MAX_ATTACH }));
+      return;
+    }
+    // Native: the sheet's modal must be gone before a picker presents. The
+    // browser opens its file input at once, while the tap still counts.
+    if (Platform.OS !== "web") await new Promise((resolve) => setTimeout(resolve, 400));
+    if (source === "files") {
+      const picked = await nativeFilePicker.pick();
+      if (picked !== undefined) tray.add(picked);
+      return;
+    }
+    const picks = await pickImages(source, remaining);
+    if (picks === "denied") {
+      flashNotice(t(language, source === "camera" ? "claude.cameraDenied" : "claude.photosDenied"));
+      return;
+    }
+    if (picks === "cancelled") return;
+    for (const pick of picks) tray.add(attachPickOf(pick));
   }
 
   async function onKey(key: BarKey) {
@@ -416,6 +565,7 @@ function TerminalPaneBody({
   }
 
   const statusKey = streamStatusKey(streamView);
+  const trayBusy = trayItems.some((item) => item.state === "uploading");
   const queuedNotes = plansStore.state.comments.filter(
     (comment) => comment.sentAt === undefined,
   ).length;
@@ -462,13 +612,28 @@ function TerminalPaneBody({
   );
   // The phone's header keeps both; the wide pane moves find into its status
   // bar and shows the Files button only when no aside holds the tree.
+  const tabToggle =
+    claudeView === undefined ? null : (
+      <ClaudeTabToggle
+        language={language}
+        tab={claude.tab}
+        onChange={(next) => claudeStore.setTab(next)}
+      />
+    );
+  // With Claude here, the header carries Chat|Term; Chat keeps Files, Term
+  // keeps Fit and find (Files is one tap away on Chat).
   const headerActions = (
     <View style={styles.headerActions}>
-      {fitButton}
-      {filesButton}
-      {findControl}
+      {tabToggle}
+      {!chatShown && fitButton}
+      {(claudeView === undefined || chatShown) && filesButton}
+      {!chatShown && findControl}
     </View>
   );
+  const header =
+    claudeView === undefined
+      ? { title: terminalTitle(tab, paneKey), subtitle: tab?.project }
+      : chatHeader(claudeView, paneKey, tab?.project);
   const dockShown = planDock && plansStore.state.doc !== undefined;
   const chips = embedded ? [] : paneChips(panes, paneKey);
   const showChips = chips.length > 1;
@@ -487,12 +652,12 @@ function TerminalPaneBody({
     >
       {!embedded && (
         <ScreenHeader
-          title={terminalTitle(tab, paneKey)}
-          {...(view.back
+          title={header.title}
+          {...(view.back && !chatShown
             ? { subtitle: t(language, "terminal.scrolledBack"), subtitleTone: "warning" as const }
-            : tab === undefined
+            : header.subtitle === undefined
               ? {}
-              : { subtitle: tab.project, subtitleMono: true })}
+              : { subtitle: header.subtitle, subtitleMono: claudeView === undefined })}
           onBack={router.back}
           trailing={headerActions}
           bordered={!showChips}
@@ -524,19 +689,24 @@ function TerminalPaneBody({
       )}
       {/* Wide layout: no stack header, so the Files button sits above the pane
           (unless the aside shows the tree); find is in the status bar. */}
-      {embedded && !filesAside && <View style={styles.planRow}>{filesButton}</View>}
-      {fitOn && (
+      {embedded && (tabToggle !== null || !filesAside) && (
+        <View style={styles.planRow}>
+          {tabToggle}
+          {!filesAside && filesButton}
+        </View>
+      )}
+      {fitOn && !chatShown && (
         <Text style={styles.fitNote} numberOfLines={1}>
           {t(language, "terminal.fitOn")}
         </Text>
       )}
       {exited && <Text style={styles.status}>{t(language, "terminal.exited")}</Text>}
-      {streamView.gapCount > 0 && (
+      {!chatShown && streamView.gapCount > 0 && (
         <Text style={styles.badge}>
           {t(language, "session.trimmed", { amount: trimmedAmount(streamView) || "⋯" })}
         </Text>
       )}
-      {statusKey && (
+      {!chatShown && statusKey && (
         <TouchableOpacity
           disabled={streamView.phase !== "failed"}
           onPress={() => streamRef.current?.retry()}
@@ -546,53 +716,72 @@ function TerminalPaneBody({
           </Text>
         </TouchableOpacity>
       )}
-      <View style={styles.output}>
-        <TerminalWebView
-          ref={webRef}
-          onReady={({ cols, rows }) => {
-            inputRef.current?.resize(cols, rows);
-            inputRef.current?.reassert();
-            fit.pageSize({ cols, rows });
+      {chatShown && claudeView !== undefined ? (
+        <ClaudeChatView
+          language={language}
+          view={claudeView}
+          {...capacityFor(capacity, "anthropic")}
+          answering={claude.answering}
+          disabled={disabled}
+          onMode={() => {
+            void onKey("shiftTab");
           }}
-          onResize={({ cols, rows }) => {
-            inputRef.current?.resize(cols, rows);
-            fit.pageSize({ cols, rows });
+          onAnswer={(index, label) => {
+            void answerClaude(index, label);
           }}
-          onModes={(modes) => inputRef.current?.setModes(modes)}
-          onNeedsReplay={() => streamRef.current?.restart(sink)}
-          fixedSize={fitOn ? undefined : ptySize}
-          onWheel={(direction) => {
-            void inputRef.current?.sendText(sgrWheelSequence(direction));
-          }}
-          onView={setView}
-          onFound={setFound}
-          onHardwareInput={
-            hardwareKeys
-              ? (key) => {
-                  void onHardwareInput(key);
-                }
-              : undefined
-          }
+          onOpenLink={openLink}
         />
-        {view.back && (
-          <TerminalLatestPill
-            language={language}
-            compact={!embedded}
-            onPress={() => webRef.current?.jump("latest")}
+      ) : (
+        <View style={styles.output}>
+          <TerminalWebView
+            ref={webRef}
+            onReady={({ cols, rows }) => {
+              inputRef.current?.resize(cols, rows);
+              inputRef.current?.reassert();
+              fit.pageSize({ cols, rows });
+            }}
+            onResize={({ cols, rows }) => {
+              inputRef.current?.resize(cols, rows);
+              fit.pageSize({ cols, rows });
+            }}
+            onModes={(modes) => inputRef.current?.setModes(modes)}
+            onNeedsReplay={() => streamRef.current?.restart(sink)}
+            fixedSize={fitOn ? undefined : ptySize}
+            onWheel={(direction) => {
+              void inputRef.current?.sendText(sgrWheelSequence(direction));
+            }}
+            onView={setView}
+            onFound={setFound}
+            onHardwareInput={
+              hardwareKeys
+                ? (key) => {
+                    void onHardwareInput(key);
+                  }
+                : undefined
+            }
           />
-        )}
-      </View>
+          {view.back && (
+            <TerminalLatestPill
+              language={language}
+              compact={!embedded}
+              onPress={() => webRef.current?.jump("latest")}
+            />
+          )}
+        </View>
+      )}
       {keyNotice !== "" && <Text style={styles.status}>{keyNotice}</Text>}
-      <TerminalNavBar
-        language={language}
-        finding={finding}
-        query={query}
-        found={found}
-        onFind={(text, direction) => webRef.current?.find(text, direction)}
-        onCloseFind={closeFind}
-        // The wide layout keeps its own row; the phone's are key bar caps.
-        {...(embedded ? { jumps: { view, onJump: (to) => webRef.current?.jump(to) } } : {})}
-      />
+      {!chatShown && (
+        <TerminalNavBar
+          language={language}
+          finding={finding}
+          query={query}
+          found={found}
+          onFind={(text, direction) => webRef.current?.find(text, direction)}
+          onCloseFind={closeFind}
+          // The wide layout keeps its own row; the phone's are key bar caps.
+          {...(embedded ? { jumps: { view, onJump: (to) => webRef.current?.jump(to) } } : {})}
+        />
+      )}
       {plansStore.state.doc !== undefined && !dockShown && (
         <PlanStrip
           language={language}
@@ -617,13 +806,13 @@ function TerminalPaneBody({
       <View style={styles.footer}>
         <KeyBar
           variant="footer"
-          keys={terminalFooterKeys(navMode)}
+          keys={navMode ? NAV_KEYS : chatShown ? CLAUDE_CHAT_KEYS : terminalFooterKeys(false)}
           disabled={disabled}
           armed={armed}
           // Previous / next command, when the shell marks its prompts (the
           // phone's; the wide layout has its own row above).
           actions={
-            view.commands && !embedded
+            view.commands && !embedded && !chatShown
               ? (["prevCommand", "nextCommand"] as const).map((to) => ({
                   id: to,
                   icon: to === "prevCommand" ? ("chevronUp" as const) : ("chevronDown" as const),
@@ -656,17 +845,60 @@ function TerminalPaneBody({
             }}
           />
         ) : (
-          <ComposeBar
-            mono
-            disabled={disabled}
-            placeholder={t(language, "terminal.typePlaceholder")}
-            onSend={(text) =>
-              inputRef.current?.sendText(text) ?? Promise.resolve({ kind: "offline" })
-            }
-            onSent={() => setArmed(latchesOf(inputRef.current))}
-          />
+          <>
+            {chatShown && (
+              <AttachTray
+                language={language}
+                items={trayItems}
+                onRemove={(id) => tray.remove(id)}
+              />
+            )}
+            {/* One ComposeBar for both tabs, so a draft survives Chat ⇄ Term. */}
+            <ComposeBar
+              mono={!chatShown}
+              disabled={disabled}
+              placeholder={t(
+                language,
+                !chatShown
+                  ? "terminal.typePlaceholder"
+                  : claudeView?.prompt !== undefined
+                    ? "claude.answerPlaceholder"
+                    : "claude.placeholder",
+              )}
+              {...(chatShown
+                ? {
+                    leading: (
+                      <IconButton
+                        icon="plus"
+                        size={46}
+                        label={t(language, "claude.attach")}
+                        disabled={disabled}
+                        onPress={() => setAttachOpen(true)}
+                      />
+                    ),
+                    submitIcon: "enter" as const,
+                    submitDisabled: trayBusy,
+                    submitLabel: t(language, trayBusy ? "claude.enterWaiting" : "claude.enter"),
+                  }
+                : {})}
+              onSend={(text) =>
+                chatShown
+                  ? sendToClaude(text)
+                  : (inputRef.current?.sendText(text) ?? Promise.resolve({ kind: "offline" }))
+              }
+              onSent={() => setArmed(latchesOf(inputRef.current))}
+            />
+          </>
         )}
       </View>
+      <AttachSheet
+        visible={attachOpen}
+        language={language}
+        onPick={(source) => {
+          void attachFrom(source);
+        }}
+        onClose={() => setAttachOpen(false)}
+      />
       <FileBrowserSheet
         visible={filesOpen}
         client={client}

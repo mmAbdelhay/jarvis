@@ -20,6 +20,14 @@ export function ComposeBar(props: {
   beforeSend?: ReactNode;
   /** "inline" (wide Session card): a 42-high field and a text Send button. */
   variant?: "inline";
+  /** Sits before the field (the Claude chat's attach button). */
+  leading?: ReactNode;
+  /** "enter" (Claude chat): the button types the text and presses Enter. */
+  submitIcon?: "send" | "enter";
+  /** The button alone is off (uploads still running); the field stays editable. */
+  submitDisabled?: boolean;
+  /** The button's accessibility name; defaults to "Send text". */
+  submitLabel?: string;
 }) {
   const inline = props.variant === "inline";
   const language = useLanguage();
@@ -38,7 +46,7 @@ export function ComposeBar(props: {
   }, []);
 
   async function send() {
-    if (props.disabled || sendingRef.current) return;
+    if (props.disabled || props.submitDisabled === true || sendingRef.current) return;
     sendingRef.current = true;
     setSending(true);
     const sentValue = value;
@@ -69,6 +77,7 @@ export function ComposeBar(props: {
         </Text>
       )}
       <View style={styles.row}>
+        {props.leading}
         <TextInput
           value={value}
           onChangeText={setValue}
@@ -118,11 +127,11 @@ export function ComposeBar(props: {
           </Pressable>
         ) : (
           <IconButton
-            icon="send"
+            icon={props.submitIcon ?? "send"}
             size={46}
             filled
-            label={t(language, "session.sendText")}
-            disabled={props.disabled || sending}
+            label={props.submitLabel ?? t(language, "session.sendText")}
+            disabled={props.disabled || sending || props.submitDisabled === true}
             onPress={() => {
               void send();
             }}

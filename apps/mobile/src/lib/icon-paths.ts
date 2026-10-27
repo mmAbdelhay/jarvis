@@ -115,6 +115,26 @@ export const ICONS = {
     strokeWidth: 2.2,
     shapes: [path("M4 5v14M20 5v14M8 12h8M11 9l-3 3 3 3M13 9l3 3-3 3")],
   },
+  // Claude chat view (mockup boards 1-4).
+  enter: { strokeWidth: 2.4, shapes: [path("M20 5v7a3 3 0 0 1-3 3H5M9 11l-4 4 4 4")] },
+  image: {
+    shapes: [
+      { kind: "rect", attrs: { x: 3, y: 5, width: 18, height: 14, rx: 2 } },
+      circle(9, 10, 2),
+      path("M21 16l-5-5-8 8"),
+    ],
+  },
+  camera: { shapes: [path("M4 8h3l2-3h6l2 3h3v11H4z"), circle(12, 13, 3.5)] },
+  external: {
+    shapes: [path("M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5")],
+  },
+  laptop: {
+    shapes: [
+      { kind: "rect", attrs: { x: 3, y: 4, width: 18, height: 12, rx: 2 } },
+      path("M2 20h20"),
+    ],
+  },
+  bolt: { strokeWidth: 2.4, shapes: [path("M13 3L5 14h6l-1 7 8-11h-6z")] },
 } as const satisfies Record<string, IconSpec>;
 
 export type IconName = keyof typeof ICONS;
