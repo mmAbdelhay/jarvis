@@ -175,6 +175,16 @@ describe("session tab namer", () => {
     expect(w.renames).toEqual([["t1", "fix-login"]]);
   });
 
+  it("leaves a tab named after a PR alone", async () => {
+    const w = world();
+    w.setProcesses([w.claudeIn("t1", 101)]);
+    w.files.set(join(SESSIONS, "101.json"), pidFile(101, "s1", "fix-login"));
+
+    await createSessionTabNamer({ ...w.deps, isPrNamedTab: (id) => id === "t1" }).check();
+
+    expect(w.renames).toEqual([]);
+  });
+
   it("maps a split pane to its tab", async () => {
     const w = world();
     w.panes.push({ paneKey: "t2:2", exited: false });

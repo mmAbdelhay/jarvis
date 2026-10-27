@@ -4,6 +4,7 @@ import { MESSAGES, PRIMARY_LANGUAGE, type MessageKey } from "../src/messages.js"
 import { enhanceTerminal, handleSplitKey, type SplitKeys } from "./terminal-addons.js";
 import { attachCompletion, type Completion } from "./terminal-completion.js";
 import { createTerminalExplorer, type TerminalExplorer } from "./terminal-explorer.js";
+import { setTerminalFontBase } from "./terminal-font.js";
 import { hostPlatform } from "./keys.js";
 import { createPlanPanel, type PlanPanel } from "./plan-panel.js";
 import type { ReviewListItem } from "../src/review-service.js";
@@ -573,6 +574,7 @@ try {
     .terminalSettings()
     .then((settings) => {
       terminalSettings = settings;
+      setTerminalFontBase(settings.fontSize);
     })
     .catch(() => {
       // Today's terminal. Nothing else about the tab is affected.
@@ -995,8 +997,9 @@ function ensurePane(
   planHandle.hidden = true;
 
   // The panel's visible switch (the tab menu and the palette are the
-  // other two): floated in the panes' own top corner, so it costs the
-  // terminal no width and stays left of the panel once that is open.
+  // other two): in a slim band above the panes (styles.css), so it costs
+  // the terminal no width, stays left of the panel once that is open, and
+  // never sits on a block's own buttons.
   const planToggle = document.createElement("button");
   planToggle.type = "button";
   planToggle.className = "plan-toggle";

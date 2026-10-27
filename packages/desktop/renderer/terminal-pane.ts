@@ -25,6 +25,7 @@ import { createBlockView, type BlockView } from "./block-view.js";
 import { handlePaletteKey, type PaletteKeys, type SplitKeys } from "./terminal-addons.js";
 import { createSplitter, type BlockEvent, type BlockRecord } from "./terminal-blocks.js";
 import { createChipRow } from "./terminal-chips.js";
+import { onTerminalFontSize, terminalFontSize } from "./terminal-font.js";
 import { createEditor, type TerminalEditor } from "./terminal-input.js";
 import { createPalette, type Palette, type PaletteAction } from "./terminal-palette.js";
 import { SCROLLBACK_LINES, TERMINAL_FONT, TERMINAL_THEME } from "./terminal-theme.js";
@@ -318,6 +319,7 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
         ? hooks.settings.scrollback
         : SCROLLBACK_LINES,
     ...TERMINAL_FONT,
+    fontSize: terminalFontSize(),
     theme: TERMINAL_THEME,
     cursorBlink: true,
     allowProposedApi: true,
@@ -368,6 +370,9 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
   /** A tab can be closed while its buffered prologue is still in flight, and
    *  writing to a disposed xterm throws. */
   let disposed = false;
+  /** The grid the last real fit measured, and the font size it measured at:
+   *  what a font change while the live terminal is hidden scales from. */
+  let fitted: { cols: number; rows: number; size: number } | undefined;
   /** Whether the shell has ever said "here is a prompt". Until it has, there
    *  is no integration to trust: Jarvis cannot tell a prompt from `sudo`
    *  asking for a password, so the editor never appears and every keystroke
@@ -567,6 +572,24 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
   function refit(): void {
     if (live.clientWidth === 0 || live.clientHeight === 0) return;
     attempt(() => fit.fit());
+    fitted = { cols: terminal.cols, rows: terminal.rows, size: terminalFontSize() };
+  }
+
+  /**
+   * A font change while the live terminal is display:none (the idle prompt,
+   * where the zoom keys are most often pressed) cannot be measured, but the
+   * shell must hear about it now — the next command reads its width the
+   * moment it starts, before the observer refits the terminal it shows. A
+   * monospace cell scales with the font, so the grid is estimated from the
+   * last real fit; the observer corrects it to the measured one on show.
+   */
+  function estimateFit(size: number): void {
+    if (fitted === undefined) return;
+    const scale = fitted.size / size;
+    const cols = Math.max(2, Math.floor(fitted.cols * scale));
+    const rows = Math.max(1, Math.floor(fitted.rows * scale));
+    if (cols === terminal.cols && rows === terminal.rows) return;
+    attempt(() => terminal.resize(cols, rows));
   }
 
   /** Whether the shell is sitting at a prompt with nothing running: the one
@@ -1235,6 +1258,20 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
     liveObserver.observe(live);
   });
 
+  // A new font size changes how many cells fit in the same box, so it is a
+  // resize as far as the pty is concerned: refit() re-measures, and
+  // terminal.onResize above tells the shell. The live terminal is
+  // display:none at an idle prompt, where refit() cannot measure, so the
+  // grid is estimated there (estimateFit) and the observer refits it the
+  // moment it is shown. Frozen blocks follow through the stylesheet's
+  // --terminal-font-size, without anything here.
+  const stopFollowingFont = onTerminalFontSize((size) => {
+    if (disposed) return;
+    terminal.options.fontSize = size;
+    if (live.clientWidth === 0 || live.clientHeight === 0) estimateFit(size);
+    else refit();
+  });
+
   /**
    * Whether this pane is safe to feed a live push. False until attach()
    * settles, so `writeLive` drops everything pushed in that gap.
@@ -1296,6 +1333,7 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
       // Before the terminal goes: an observer left connected outlives the
       // pane and keeps its element (and this closure) alive.
       attempt(() => liveObserver?.disconnect());
+      stopFollowingFont();
       terminal.dispose();
       for (const view of views.splice(0)) view.element.remove();
       element.remove();

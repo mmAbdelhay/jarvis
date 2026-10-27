@@ -8,6 +8,21 @@ version and the downloads. This file is the index.
 
 ## Unreleased
 
+## [0.1.11] — 2026-10-27
+
+- Terminal: a font size setting (Settings → Terminal, or `terminal.fontSize`)
+  that applies to every open terminal on save, and ⌘+ / ⌘- / ⌘0
+  (Ctrl+Shift+= / - / 0 on Linux) to zoom for the session.
+- Terminal: when an agent opens a PR in a tab, the tab is renamed
+  "PR #N · title" and linked to that PR in Reviews (only for an open PR
+  created in the last 30 minutes; a manual Reviews link is never replaced).
+- Topbar: fits the window instead of clipping — the history button always
+  shows; lower-priority items hide one at a time as the window narrows.
+- Topbar: CPU/memory readouts turn amber and red as they climb; the battery
+  icon fills to the charge level and changes colour as it drains.
+- Terminal: the Plan and Reviews toggles get their own strip and no longer
+  cover a block's action buttons.
+
 ## [0.1.10] — 2026-10-21
 
 - Reviews: Jarvis watches your open PRs through `gh` and pastes each new

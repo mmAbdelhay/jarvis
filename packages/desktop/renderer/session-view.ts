@@ -18,6 +18,7 @@ import {
   type SortDirection,
 } from "./session-filter.js";
 import { enhanceTerminal } from "./terminal-addons.js";
+import { setTerminalFontBase } from "./terminal-font.js";
 import { createPane, type TerminalPane } from "./terminal-pane.js";
 
 // The Session view: one agent process's real terminal.
@@ -83,6 +84,7 @@ try {
     .terminalSettings()
     .then((settings) => {
       terminalSettings = settings;
+      setTerminalFontBase(settings.fontSize);
     })
     .catch(() => {
       // Today's terminal. Nothing else about the session is affected.

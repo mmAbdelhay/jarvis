@@ -31,9 +31,10 @@ describe("design tokens", () => {
     const declared = new Set(
       [...css.matchAll(/^\s*(--[a-z0-9-]+)\s*:/gm)].map((match) => match[1]),
     );
-    // Set from JS per element rather than declared here — the renderer
-    // writes it inline as each tab's own accent.
-    const setAtRuntime = new Set(["--tab-color"]);
+    // Set from JS rather than declared here — the renderer writes
+    // --tab-color inline as each tab's own accent, and terminal-font.ts
+    // writes --terminal-font-size on the root (its uses carry a fallback).
+    const setAtRuntime = new Set(["--tab-color", "--terminal-font-size"]);
     const used = new Set([...css.matchAll(/var\((--[a-z0-9-]+)/g)].map((match) => match[1]));
     const undeclared = [...used].filter(
       (name) => !declared.has(name) && !setAtRuntime.has(name as string),

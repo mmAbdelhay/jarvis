@@ -148,6 +148,9 @@ export type ReviewService = {
   sendReview(prKey: PrKey, paneKey: string): Promise<DeliveryOutcome>;
   postSummary(prKey: PrKey): Promise<DeliveryOutcome>;
   pollNow(): Promise<void>;
+  /** Adds a repository to the poll set — one a pane's output named (a PR an
+   *  agent opened there) that no project or pane directory led to. */
+  trackRepo(repo: string): void;
   /** The delivery gate's view of one pane, from a fresh process scan. Shared
    *  with the Plan panel's send (Task 14). agentPresent and idleSupported
    *  distinguish an absent process from a vendor without idle markers;
@@ -841,6 +844,10 @@ export function createReviewService(deps: ReviewServiceDeps): ReviewService {
     async pollNow() {
       await poller.pollNow();
       await requestEvaluation();
+    },
+
+    trackRepo(repo) {
+      if (!disposed) knownRepos.add(repo);
     },
 
     paneStateOf,

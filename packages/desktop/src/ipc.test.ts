@@ -1602,6 +1602,7 @@ const sampleConfig: JarvisConfig = {
     completion: { enabled: true, historyPath: "/h", commandLogPath: "/l" },
     blocks: { enabled: true, inputEditor: true },
     notifyAfterSeconds: 30,
+    fontSize: 12,
   },
   voice: {
     engine: "say" as const,
@@ -2175,6 +2176,7 @@ describe("terminal handlers", () => {
     completion: { enabled: true, historyPath: "/h", commandLogPath: "/l" },
     blocks: { enabled: true, inputEditor: true },
     notifyAfterSeconds: 30,
+    fontSize: 14,
   };
 
   function shells(): {
@@ -2987,6 +2989,7 @@ describe("terminal handlers", () => {
       // Not from the terminal: section — it is a memory setting — but it
       // rides this payload because this is the one every pane already reads.
       scrollback: 5000,
+      fontSize: 14,
     });
   });
 
@@ -6237,6 +6240,7 @@ describe("terminal open with an explicit directory", () => {
         completion: { enabled: true, historyPath: "/h", commandLogPath: "/l" },
         blocks: { enabled: true, inputEditor: true },
         notifyAfterSeconds: 30,
+        fontSize: 12,
       },
       terminalScrollback: 5000,
     });

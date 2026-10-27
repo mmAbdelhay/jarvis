@@ -32,6 +32,9 @@ export const TERMINAL_THEME = {
   brightWhite: "#ffffff",
 };
 
+/** `fontSize` here is only the size a terminal starts at before
+ *  `terminal.fontSize` has arrived — terminal-font.ts owns the size that is
+ *  actually drawn. */
 export const TERMINAL_FONT = {
   fontFamily: '"JetBrains Mono", ui-monospace, monospace',
   fontSize: 12,

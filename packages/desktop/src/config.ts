@@ -27,6 +27,11 @@ import type {
 import { DB_GATE_ENGINES, isChatDriver } from "@jarvis/platform";
 import { PERSONAL_PROJECT } from "./personal.js";
 import { isAwakeMode } from "./keep-awake.js";
+import {
+  isTerminalFontSize,
+  TERMINAL_FONT_SIZE_MAX,
+  TERMINAL_FONT_SIZE_MIN,
+} from "./terminal-font-size.js";
 
 export function providerAgentListsEqual(
   left: readonly AgentConfig[],
@@ -104,6 +109,11 @@ export type TerminalConfig = {
   /** A command that finishes after this many seconds with its pane
    *  unfocused raises a notification. 0 disables it. */
   notifyAfterSeconds: number;
+  /** The terminal's font size in pixels, between TERMINAL_FONT_SIZE_MIN and
+   *  TERMINAL_FONT_SIZE_MAX. Unlike the rest of this section it applies
+   *  live: the renderer re-fits every open pane on save. ⌘+/⌘-/⌘0 zoom
+   *  around it for the session without changing what is saved. */
+  fontSize: number;
 };
 
 /**
@@ -1563,7 +1573,10 @@ export const DEFAULT_TERMINAL: TerminalConfig = {
   },
   blocks: { enabled: true, inputEditor: true },
   notifyAfterSeconds: 30,
+  fontSize: 12,
 };
+
+export { TERMINAL_FONT_SIZE_MAX, TERMINAL_FONT_SIZE_MIN };
 
 /** The same, for `sessions:`. */
 export const DEFAULT_SESSIONS: JarvisConfig["sessions"] = {
@@ -1593,6 +1606,7 @@ function parseTerminal(rawTerminal: unknown): TerminalConfig {
       terminal["notifyAfterSeconds"],
       defaults.notifyAfterSeconds,
     ),
+    fontSize: parseFontSize(terminal["fontSize"], defaults.fontSize),
   };
 }
 
@@ -1655,6 +1669,16 @@ function parseNotifyAfterSeconds(rawValue: unknown, fallback: number): number {
   if (rawValue === undefined) return fallback;
   if (typeof rawValue !== "number" || !Number.isFinite(rawValue) || rawValue < 0) {
     throw new Error("Config `terminal.notifyAfterSeconds` must be a number of seconds, or 0");
+  }
+  return rawValue;
+}
+
+function parseFontSize(rawValue: unknown, fallback: number): number {
+  if (rawValue === undefined) return fallback;
+  if (!isTerminalFontSize(rawValue)) {
+    throw new Error(
+      `Config \`terminal.fontSize\` must be a whole number from ${TERMINAL_FONT_SIZE_MIN} to ${TERMINAL_FONT_SIZE_MAX}`,
+    );
   }
   return rawValue;
 }

@@ -29,6 +29,7 @@ const draft: JarvisConfig = {
     completion: { enabled: true, historyPath: "/h", commandLogPath: "/l" },
     blocks: { enabled: true, inputEditor: true },
     notifyAfterSeconds: 30,
+    fontSize: 12,
   },
   voice: {
     engine: "say" as const,
@@ -82,6 +83,7 @@ const fullDraft: JarvisConfig = {
     completion: { enabled: false, historyPath: "/h", commandLogPath: "/l" },
     blocks: { enabled: false, inputEditor: false },
     notifyAfterSeconds: 90,
+    fontSize: 15,
   },
   performance: {
     suspendTabsAfterMinutes: 0,
@@ -390,6 +392,7 @@ describe("writeSettingsFile", () => {
 
     const written = parse(await readFile(path, "utf8"));
     expect(written.terminal.notifyAfterSeconds).toBe(90);
+    expect(written.terminal.fontSize).toBe(15);
     expect(written.terminal.blocks).toEqual({ enabled: false, inputEditor: false });
     expect(written.workflows).toEqual(fullDraft.workflows);
     expect(written.sessions).toEqual({ importWindowDays: 90 });

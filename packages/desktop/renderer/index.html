@@ -33,16 +33,17 @@
     <!-- board 0 removed this ambient CPU/RAM/DISK/network readout in favour
          of the danger dot alone; brought back on request. renderMetrics
          (app.ts) fills it from the same values as the Dashboard's SYSTEM
-         card. Collapses below 900px (styles.css's @container rule) so the
-         topbar never wraps — the danger dot below still covers that width. -->
+         card. topbar-fit.ts hides the net readout, then the whole readout,
+         when the window is too narrow — the danger dot below still covers
+         that width. -->
     <span id="topbar-metrics" class="topbar-metrics mono">
       <span class="unit">CPU</span><span id="header-cpu">--%</span>
       <span class="sep">·</span>
       <span class="unit">RAM</span><span id="header-mem">--%</span>
       <span class="sep">·</span>
       <span class="unit">DISK</span><span id="header-disk">--%</span>
-      <span class="sep">·</span>
-      <span id="header-net">↓0.0 ↑0.0 Mbps</span>
+      <span class="sep metric-net">·</span>
+      <span id="header-net" class="metric-net">↓0.0 ↑0.0 Mbps</span>
     </span>
     <!-- board 0's danger dot: shown only when renderMetrics() finds disk or
          CPU at/above 95%, named in its own tooltip so "why is there a red
@@ -84,7 +85,7 @@
     <!-- Battery (topbar-status.ts, Chromium's Battery Status API): hidden
          until a battery is read. data-battery-state colours it. -->
     <span id="battery-chip" class="battery-chip mono" hidden>
-      <svg class="battery-glyph" aria-hidden="true" width="18" height="12" viewBox="0 0 26 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><rect x="1" y="1" width="21" height="12" rx="2.5"></rect><path d="M24.5 5v4" stroke-linecap="round"></path><path class="battery-bolt" d="M12.5 3 9 7.5h3.5L10.5 11" stroke-linecap="round"></path></svg>
+      <svg class="battery-glyph" aria-hidden="true" width="18" height="12" viewBox="0 0 26 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><rect x="1" y="1" width="21" height="12" rx="2.5"></rect><rect class="battery-fill" x="3" y="3" width="17" height="8" rx="1" fill="currentColor" stroke="none"></rect><path d="M24.5 5v4" stroke-linecap="round"></path><path class="battery-bolt" d="M12.5 3 9 7.5h3.5L10.5 11" stroke-linecap="round"></path></svg>
       <span id="battery-text" dir="ltr">--%</span>
     </span>
     <div class="clock mono">
@@ -682,6 +683,7 @@
         <a class="settings-nav-link" href="#settings-section-brain">Brain</a>
         <a class="settings-nav-link" href="#settings-section-voice">Voice</a>
         <a id="settings-nav-header" class="settings-nav-link" href="#settings-section-header">Header</a>
+        <a class="settings-nav-link" href="#settings-section-terminal">Terminal</a>
         <a class="settings-nav-link" href="#settings-section-browser">Browser</a>
         <a class="settings-nav-link" href="#settings-section-whisper">Whisper</a>
         <a id="settings-nav-remote" class="settings-nav-link" href="#settings-section-remote">Remote access</a>
@@ -921,6 +923,17 @@
             <span class="settings-switch-track" aria-hidden="true"></span>
           </span>
         </div>
+      </section>
+
+      <section class="settings-section" id="settings-section-terminal">
+        <div class="lbl">TERMINAL</div>
+        <!-- Applies to every open terminal the moment Save is pressed —
+             renderer/terminal-font.ts. The range matches config.ts's. -->
+        <div class="settings-field">
+          <label for="settings-terminal-font-size">font size</label>
+          <input id="settings-terminal-font-size" type="number" min="8" max="32" step="1" />
+        </div>
+        <div class="settings-note">In pixels, from 8 to 32. ⌘+ / ⌘- / ⌘0 (Ctrl+Shift+= / - / 0 on Linux) zoom every terminal for this session without changing it.</div>
       </section>
 
       <section class="settings-section" id="settings-section-browser">
