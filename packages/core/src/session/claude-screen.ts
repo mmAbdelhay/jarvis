@@ -3,7 +3,7 @@ import { type PendingPrompt, readPrompt, stripAnsi } from "./awaiting-input.js";
 
 export type ClaudeMode = "default" | "auto" | "plan" | "acceptEdits";
 
-const SPINNER_ROW = /^\s*[✻✶✳✢·*]\s+(\S+….*)$/;
+const SPINNER_ROW = /^\s*[✻✶✳✢·✽*]\s+(\S+….*)$/;
 
 /** Reads Claude Code's prompt, mode and live spinner from the last 40 screen rows. */
 export function readClaudeScreen(screen: string): {

@@ -47,6 +47,10 @@ describe("readClaudeScreen", () => {
     expect(readClaudeScreen(IDLE)).toEqual({ mode: "default" });
   });
 
+  it("sets working for a ✽ spinner frame", () => {
+    expect(readClaudeScreen(`✽ Crunching… 5m 43s\n${IDLE}`).working).toBe("Crunching… 5m 43s");
+  });
+
   it("ignores markers above the last 40 rows, including blank rows", () => {
     for (const marker of ["plan mode on", MENU, "✻ Crunching… (esc to interrupt)"]) {
       expect(readClaudeScreen(`${marker}\n${"\n".repeat(37)}${IDLE}`)).toEqual({
