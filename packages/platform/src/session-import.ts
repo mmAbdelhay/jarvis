@@ -796,7 +796,107 @@ export type TranscriptEntry = {
  * all.
  */
 export function parseTranscript(text: string): TranscriptEntry[] {
-  const entries: TranscriptEntry[] = [];
+  return readTurns(text, (name) => name).turns;
+}
+
+/** Turns kept for the phone's chat view: enough to scroll back a while. */
+export const MAX_CHAT_TURNS = 200;
+
+/**
+ * How much of a transcript's end the chat view reads. The view wants the
+ * latest turns, not the opening, so this is a tail; it can start mid-record,
+ * and that first partial line fails to parse and is skipped like any other.
+ */
+export const CHAT_TAIL_BYTES = 2 * 1024 * 1024;
+
+/** A tool call as the chat view shows it: what it ran on, and how much it changed. */
+export type ChatTool = { name: string; target?: string; added?: number; removed?: number };
+
+/** One turn of the chat view: a TranscriptEntry whose tools carry their target. */
+export type ChatTurn = { role: "user" | "assistant"; text: string; tools: ChatTool[] };
+
+/**
+ * A transcript as the phone's chat view lays it out — parseTranscript's
+ * turns, same skip and fold rules, but each tool says what it touched (a
+ * file's name, a command's first line) and an edit says how many lines it
+ * added and removed. Still never the input itself: a count, not the file.
+ *
+ * Only the last `maxTurns` are kept, oldest first. `model` is the last
+ * assistant record's, which is the model the session is running now.
+ */
+export function parseChatTranscript(
+  text: string,
+  maxTurns = MAX_CHAT_TURNS,
+): { turns: ChatTurn[]; model?: string } {
+  const { turns, model } = readTurns(text, chatTool);
+  const kept = turns.slice(Math.max(0, turns.length - maxTurns));
+  return model === undefined ? { turns: kept } : { turns: kept, model };
+}
+
+/** The longest command line a chat tool shows before cutting it. */
+const TARGET_CHARS = 80;
+
+function chatTool(name: string, input: unknown): ChatTool {
+  const tool: ChatTool = { name };
+  if (typeof input !== "object" || input === null) return tool;
+  const fields = input as Record<string, unknown>;
+  const target = toolTarget(fields);
+  if (target !== undefined) tool.target = target;
+
+  if (name === "Edit") {
+    tool.added = lineCount(fields["new_string"]);
+    tool.removed = lineCount(fields["old_string"]);
+  } else if (name === "MultiEdit" && Array.isArray(fields["edits"])) {
+    let added = 0;
+    let removed = 0;
+    for (const edit of fields["edits"]) {
+      if (typeof edit !== "object" || edit === null) continue;
+      const change = edit as Record<string, unknown>;
+      added += lineCount(change["new_string"]);
+      removed += lineCount(change["old_string"]);
+    }
+    tool.added = added;
+    tool.removed = removed;
+  } else if (name === "Write") {
+    tool.added = lineCount(fields["content"]);
+  }
+  return tool;
+}
+
+/** What a tool call ran on, from the first input field that names it. */
+function toolTarget(fields: Record<string, unknown>): string | undefined {
+  const path = fields["file_path"];
+  if (typeof path === "string" && path !== "") return basename(path);
+  const command = fields["command"];
+  if (typeof command === "string" && command !== "") {
+    const first = command.split("\n")[0] ?? "";
+    return first.length > TARGET_CHARS ? `${first.slice(0, TARGET_CHARS)}…` : first;
+  }
+  for (const key of ["pattern", "url"]) {
+    const value = fields[key];
+    if (typeof value === "string" && value !== "") return value;
+  }
+  return undefined;
+}
+
+/** Lines in a string as an editor counts them: a trailing newline ends a line, it does not start one. */
+function lineCount(value: unknown): number {
+  if (typeof value !== "string" || value === "") return 0;
+  const lines = value.split("\n").length;
+  return value.endsWith("\n") ? lines - 1 : lines;
+}
+
+/**
+ * The conversation in a Claude transcript, with each tool call shaped by
+ * `toTool` — the reading both parseTranscript and parseChatTranscript share,
+ * so the two can never disagree about which turns exist.
+ */
+function readTurns<T>(
+  text: string,
+  toTool: (name: string, input: unknown) => T,
+): { turns: { role: "user" | "assistant"; text: string; tools: T[] }[]; model?: string } {
+  const entries: { role: "user" | "assistant"; text: string; tools: T[] }[] = [];
+  let model: string | undefined;
   for (const line of text.split("\n")) {
     if (line.trim() === "") continue;
     let record: unknown;
@@ -817,7 +917,9 @@ export function parseTranscript(text: string): TranscriptEntry[] {
     if (fields["isMeta"] === true) continue;
     const message = fields["message"];
     if (typeof message !== "object" || message === null) continue;
-    const turn = transcriptTurn((message as Record<string, unknown>)["content"]);
+    const body = message as Record<string, unknown>;
+    if (role === "assistant" && typeof body["model"] === "string") model = body["model"];
+    const turn = transcriptTurn(body["content"], toTool);
     if (turn === undefined) continue;
     if (turn.text === "" && turn.tools.length === 0) continue;
 
@@ -833,7 +935,7 @@ export function parseTranscript(text: string): TranscriptEntry[] {
     }
     entries.push({ role, ...turn });
   }
-  return entries;
+  return model === undefined ? { turns: entries } : { turns: entries, model };
 }
 
 /**
@@ -920,8 +1022,11 @@ export function transcriptSource(path: string): {
   return { path, parse: parseTranscript };
 }
 
-/** One message's readable text and the tools it used. */
-function transcriptTurn(content: unknown): { text: string; tools: string[] } | undefined {
+/** One message's readable text and the tools it used, each shaped by `toTool`. */
+function transcriptTurn<T>(
+  content: unknown,
+  toTool: (name: string, input: unknown) => T,
+): { text: string; tools: T[] } | undefined {
   if (typeof content === "string") {
     if (isLocalCommandNoise(content)) return undefined;
     return { text: readableCommand(content).trim(), tools: [] };
@@ -929,7 +1034,7 @@ function transcriptTurn(content: unknown): { text: string; tools: string[] } | u
   if (!Array.isArray(content)) return undefined;
 
   const parts: string[] = [];
-  const tools: string[] = [];
+  const tools: T[] = [];
   for (const block of content) {
     if (typeof block !== "object" || block === null) continue;
     const fields = block as Record<string, unknown>;
@@ -941,7 +1046,7 @@ function transcriptTurn(content: unknown): { text: string; tools: string[] } | u
     }
     if (kind === "tool_use") {
       const name = fields["name"];
-      tools.push(typeof name === "string" ? name : "tool");
+      tools.push(toTool(typeof name === "string" ? name : "tool", fields["input"]));
     }
     // thinking and tool_result are deliberately dropped — see the doc above.
   }

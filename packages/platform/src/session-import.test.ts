@@ -8,6 +8,7 @@ import {
   isSessionTranscriptEntry,
   parseCopilotTranscript,
   parseTranscript,
+  parseChatTranscript,
   createFsImportDeps,
   createSessionImporter,
   HEAD_BYTES,
@@ -333,6 +334,140 @@ describe("parseTranscript", () => {
 
   it("returns nothing for a transcript with no conversation", () => {
     expect(parseTranscript(line({ type: "cost-state" }))).toEqual([]);
+  });
+});
+
+describe("parseChatTranscript", () => {
+  const line = (record: unknown): string => JSON.stringify(record);
+  const toolTurn = (name: string, input: unknown): string =>
+    line({ type: "assistant", message: { content: [{ type: "tool_use", name, input }] } });
+
+  it("gives an Edit its file's basename and the lines it added and removed", () => {
+    const out = parseChatTranscript(
+      toolTurn("Edit", {
+        file_path: "/a/b/styles.css",
+        old_string: "one\ntwo",
+        new_string: "1\n2\n3\n4\n5\n6",
+      }),
+    );
+    expect(out.turns).toEqual([
+      {
+        role: "assistant",
+        text: "",
+        tools: [{ name: "Edit", target: "styles.css", added: 6, removed: 2 }],
+      },
+    ]);
+  });
+
+  it("sums a MultiEdit's edits, and counts a Write as all added", () => {
+    const out = parseChatTranscript(
+      [
+        toolTurn("MultiEdit", {
+          file_path: "/a/app.ts",
+          edits: [
+            { old_string: "a", new_string: "b\nc" },
+            { old_string: "d\ne\nf", new_string: "g" },
+          ],
+        }),
+        toolTurn("Write", { file_path: "/a/new.ts", content: "x\ny\nz\n" }),
+      ].join("\n"),
+    );
+    expect(out.turns[0]?.tools).toEqual([
+      { name: "MultiEdit", target: "app.ts", added: 3, removed: 4 },
+      { name: "Write", target: "new.ts", added: 3 },
+    ]);
+  });
+
+  it("targets a Bash call by its command's first line, cut at 80 with …", () => {
+    const long = "x".repeat(100);
+    const out = parseChatTranscript(
+      [
+        toolTurn("Bash", { command: `${long}\nsecond line` }),
+        toolTurn("Bash", { command: "ls -la\npwd" }),
+      ].join("\n"),
+    );
+    expect(out.turns[0]?.tools).toEqual([
+      { name: "Bash", target: `${"x".repeat(80)}…` },
+      { name: "Bash", target: "ls -la" },
+    ]);
+  });
+
+  it("falls back to a pattern, then a url, and names a tool with neither", () => {
+    const out = parseChatTranscript(
+      [
+        toolTurn("Grep", { pattern: "TODO", path: "/a" }),
+        toolTurn("WebFetch", { url: "https://example.com" }),
+        toolTurn("TodoWrite", { todos: [] }),
+      ].join("\n"),
+    );
+    expect(out.turns[0]?.tools).toEqual([
+      { name: "Grep", target: "TODO" },
+      { name: "WebFetch", target: "https://example.com" },
+      { name: "TodoWrite" },
+    ]);
+  });
+
+  // The tail of a transcript starts wherever the byte cut fell, which is
+  // almost never a line boundary.
+  it("skips a truncated first line and keeps the rest", () => {
+    const whole = line({ type: "user", message: { content: "cut off" } });
+    const out = parseChatTranscript(
+      [whole.slice(12), line({ type: "user", message: { content: "kept" } })].join("\n"),
+    );
+    expect(out.turns).toEqual([{ role: "user", text: "kept", tools: [] }]);
+  });
+
+  it("keeps only the last maxTurns, oldest first", () => {
+    const text = Array.from({ length: 205 }, (_, i) =>
+      line({ type: "user", message: { content: `#${i + 1}` } }),
+    ).join("\n");
+    const out = parseChatTranscript(text, 200);
+    expect(out.turns).toHaveLength(200);
+    expect(out.turns[0]?.text).toBe("#6");
+    expect(out.turns.at(-1)?.text).toBe("#205");
+  });
+
+  it("returns the model from the last assistant record", () => {
+    const out = parseChatTranscript(
+      [
+        line({ type: "assistant", message: { model: "claude-a", content: "first" } }),
+        line({ type: "user", message: { content: "next" } }),
+        line({ type: "assistant", message: { model: "claude-b", content: [] } }),
+      ].join("\n"),
+    );
+    expect(out.model).toBe("claude-b");
+  });
+
+  it("returns no model when no assistant has spoken", () => {
+    expect(parseChatTranscript(line({ type: "user", message: { content: "hi" } })).model).toBe(
+      undefined,
+    );
+  });
+
+  it("drops isMeta user records, as parseTranscript does", () => {
+    const out = parseChatTranscript(
+      [
+        line({
+          type: "user",
+          isMeta: true,
+          message: { content: [{ type: "text", text: "Base directory for this skill: ..." }] },
+        }),
+        line({ type: "user", message: { content: "what I actually asked" } }),
+      ].join("\n"),
+    );
+    expect(out.turns).toEqual([{ role: "user", text: "what I actually asked", tools: [] }]);
+  });
+
+  it("folds wordless tool turns into the reply before them", () => {
+    const out = parseChatTranscript(
+      [
+        line({ type: "assistant", message: { content: [{ type: "text", text: "Looking." }] } }),
+        toolTurn("Read", { file_path: "/a/b.ts" }),
+      ].join("\n"),
+    );
+    expect(out.turns).toEqual([
+      { role: "assistant", text: "Looking.", tools: [{ name: "Read", target: "b.ts" }] },
+    ]);
   });
 });
 
