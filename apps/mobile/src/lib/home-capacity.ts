@@ -7,6 +7,7 @@ import { type Language, t } from "./i18n";
 
 export type CapacityCard = {
   id: string;
+  vendor?: string;
   /** Which window the figure is: "5h" for Claude and Codex, "month" for
    *  Copilot's premium-request allowance. */
   window: "5h" | "month" | "window";
@@ -44,7 +45,7 @@ export function parseProviderCapacity(value: unknown): CapacityCard[] {
     if (typeof window.resetsAt !== "string") continue;
     const resetsAt = Date.parse(window.resetsAt);
     if (!Number.isFinite(resetsAt)) continue;
-    const vendor = typeof provider.vendor === "string" ? provider.vendor : "";
+    const vendor = typeof provider.vendor === "string" ? provider.vendor : undefined;
     const secondary = known.secondary;
     const usedPercent =
       typeof secondary === "object" && secondary !== null
@@ -56,7 +57,8 @@ export function parseProviderCapacity(value: unknown): CapacityCard[] {
         : undefined;
     cards.push({
       id: provider.id,
-      window: WINDOW_BY_VENDOR[vendor] ?? "window",
+      ...(vendor === undefined ? {} : { vendor }),
+      window: (vendor === undefined ? undefined : WINDOW_BY_VENDOR[vendor]) ?? "window",
       left: Math.floor(Math.max(0, Math.min(100, 100 - window.usedPercent))),
       ...(weekLeft === undefined ? {} : { weekLeft }),
       resetsAt,
@@ -65,12 +67,14 @@ export function parseProviderCapacity(value: unknown): CapacityCard[] {
   return cards;
 }
 
-/** Claude account IDs identify Anthropic capacity on the Home screen. */
+/** Prefer the provider vendor, falling back to legacy cards without one. */
 export function capacityFor(
   cards: readonly CapacityCard[],
   vendor: "anthropic",
 ): { sessionUsed?: number; weekUsed?: number } {
-  const card = cards.find((card) => vendor === "anthropic" && /^claude(?:$|[-_ ])/i.test(card.id));
+  const card =
+    cards.find((card) => card.vendor === vendor) ??
+    cards.find((card) => card.vendor === undefined && /^claude(?:$|[-_ ])/i.test(card.id));
   if (!card) return {};
   return {
     sessionUsed: 100 - card.left,

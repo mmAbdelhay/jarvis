@@ -90,7 +90,13 @@ describe("weekly capacity", () => {
 
   it("capacityFor anthropic", () => {
     expect(
-      capacityFor([card({ id: "codex", left: 10 }), card({ weekLeft: 75 })], "anthropic"),
+      capacityFor(
+        [
+          card({ id: "claude-other", vendor: "openai", left: 10 }),
+          card({ vendor: "anthropic", weekLeft: 75 }),
+        ],
+        "anthropic",
+      ),
     ).toEqual({ sessionUsed: 38, weekUsed: 25 });
     expect(capacityFor(parseProviderCapacity(payload({ usedPercent: 20 })), "anthropic")).toEqual({
       sessionUsed: 38,
@@ -99,5 +105,21 @@ describe("weekly capacity", () => {
     expect(capacityFor([card({})], "anthropic")).toEqual({ sessionUsed: 38 });
     expect(capacityFor([], "anthropic")).toEqual({});
     expect(capacityFor([card({ id: "codex" })], "anthropic")).toEqual({});
+    expect(capacityFor([card({ vendor: "openai" })], "anthropic")).toEqual({});
+  });
+
+  it("capacityFor picks by vendor when id is not claude-like", () => {
+    const providers = payload({ usedPercent: 20 });
+    const cards = parseProviderCapacity([
+      { ...providers[0], id: "mm" },
+      { ...providers[0], id: "work-claude" },
+    ]);
+    expect(cards.map((entry) => entry.vendor)).toEqual(["anthropic", "anthropic"]);
+    expect(
+      capacityFor(
+        [card({ left: 10 }), ...cards, card({ vendor: "anthropic", left: 5 })],
+        "anthropic",
+      ),
+    ).toEqual({ sessionUsed: 38, weekUsed: 20 });
   });
 });
