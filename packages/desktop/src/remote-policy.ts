@@ -151,6 +151,13 @@ export const CHANNEL_POLICY = {
   // then call this, then drop any push already covered by the returned
   // `end` (`o + c.length <= end`) rather than rendering it a second time.
   "terminal:snapshot": "remote",
+  // The phone's chat view of a pane running Claude Code (claude-view.ts):
+  // a read, a prompt answer the host verifies against the screen first
+  // (session:answer's rule), and the attach of a file this same device
+  // staged — dispatch.ts refuses a desktop origin for that one itself.
+  "terminal:claudeView": "remote",
+  "terminal:answer": "remote",
+  "terminal:attachUpload": "remote",
   "terminal:input": "remote",
   "terminal:resize": "remote",
   "terminal:split": "desktop-only",
@@ -434,6 +441,9 @@ export const REMOTE_EFFECT = {
   "terminal:attach": "mutate",
   "terminal:panes": "read",
   "terminal:snapshot": "read",
+  "terminal:claudeView": "read",
+  "terminal:answer": "input",
+  "terminal:attachUpload": "mutate",
   "terminal:input": "input",
   "terminal:resize": "input",
   "docker:names": "read",

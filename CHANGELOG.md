@@ -8,6 +8,26 @@ version and the downloads. This file is the index.
 
 ## Unreleased
 
+## [0.1.12] — 2026-10-28
+
+- Phone: a Claude Code chat view for terminal panes running Claude — chat
+  turns and tool rows, permission and question prompts answered by tap, a
+  status strip (mode, model, session/weekly usage), Chat | Term tabs, and an
+  ⏎ Enter button that types the message into the terminal and runs it. The
+  phone never resizes the laptop's terminal.
+- Phone: attach photos, a camera shot or files to a Claude message; they are
+  saved on the laptop under `<project>/.jarvis/uploads/` (git-ignored) and
+  inserted as `@path`.
+- Phone: updates itself like the desktop — Settings → Updates checks GitHub
+  releases, downloads `jarvis-mobile-<version>.apk`, verifies it against
+  `SHA256SUMS` and opens Android's installer. The app version now follows the
+  desktop release.
+- Desktop: a Terminal tab takes the session's name when you resume a Claude
+  session (from Sessions or `claude --resume`); a `/rename` name wins over
+  Claude's automatic title.
+- Desktop: a Jarvis started with another `HOME` (development or test) gets
+  its own background service and can no longer restart the installed one.
+
 ## [0.1.11] — 2026-10-27
 
 - Terminal: a font size setting (Settings → Terminal, or `terminal.fontSize`)

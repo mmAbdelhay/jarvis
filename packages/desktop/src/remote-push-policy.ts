@@ -130,9 +130,15 @@ export const REMOTE_PUSH_POLICY: {
   // Keep awake (Task 18): unkeyed; the payload is the whole status, so a
   // phone's toggle redraws from the push alone.
   "awake:changed": { kind: "reliable" },
-  // Keyed, unlike the six reliable channels above: a phone that only cares
+  // Keyed, unlike the reliable channels above: a phone that only cares
   // about one pane subscribes to that pane's exit, not every pane's.
   "terminal:exit": { kind: "reliable", keyOf: (payload) => stringField(payload, "paneKey") },
+  // Keyed like terminal:exit: the phone's chat view subscribes to the one
+  // pane it shows, and re-fetches terminal:claudeView on each push.
+  "terminal:claudeViewChanged": {
+    kind: "reliable",
+    keyOf: (payload) => stringField(payload, "paneKey"),
+  },
 
   "terminal:data": terminalDataPolicy,
   "session:output": sessionOutputPolicy,
@@ -169,22 +175,24 @@ export type StreamOwners = {
 /**
  * Whether `device` may open a keyed subscription to `(channel, key)`
  * (spec, "Capability policy" — a bare channel name never grants a keyed
- * one; this is the other half). `terminal:data`/`terminal:exit` require the
+ * one; this is the other half). `terminal:data`/`terminal:exit`/
+ * `terminal:claudeViewChanged` require the
  * pane to still exist; `session:output` requires the session to still
  * exist; `docker:log` requires `key` (a tab id) to be a follower this exact
  * device opened — never another device's, and never the desktop window's
  * own (`followerOwner` returning `"desktop"` compares unequal to any real
  * device id already, so no separate check is needed for it). Every other
- * channel refuses — including the nine unkeyed latest/reliable channels
- * above (the four "latest" ones, plus the five unkeyed "reliable" ones;
- * terminal:exit, the sixth "reliable" channel, is keyed and handled by the
- * case above instead), none of which is keyed at all.
+ * channel refuses — including every "latest" channel and every unkeyed
+ * "reliable" one in REMOTE_PUSH_POLICY, none of which is keyed at all (the
+ * keyed reliable ones, terminal:exit and terminal:claudeViewChanged, are
+ * the cases above).
  */
 export function remoteKeyAuthorizer(owners: StreamOwners): AuthorizeKey {
   return (channel, key, device: AuthenticatedDevice) => {
     switch (channel) {
       case "terminal:data":
       case "terminal:exit":
+      case "terminal:claudeViewChanged":
         return owners.hasPane(key);
       case "session:output":
         return owners.hasSession(key);

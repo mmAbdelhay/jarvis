@@ -1,0 +1,228 @@
+import { describe, expect, it, vi } from "vitest";
+import type { RpcClient, RpcResult } from "./rpc-client";
+import { createClaudeViewStore } from "./claude-view-store";
+
+function setup() {
+  let push: (payload: unknown) => void = () => {};
+  const pending: ((result: RpcResult) => void)[] = [];
+  const call = vi.fn(() => new Promise<RpcResult>((resolve) => pending.push(resolve)));
+  const off = vi.fn();
+  const client = {
+    call,
+    onPush: vi.fn((_channel, handler) => {
+      push = handler;
+      return off;
+    }),
+    subscribe: vi.fn(),
+    unsubscribe: vi.fn(),
+  } as unknown as RpcClient;
+  const store = createClaudeViewStore({ client, paneKey: "p", log: vi.fn() });
+  return {
+    store,
+    client,
+    call,
+    off,
+    push: (payload: unknown) => push(payload),
+    /** Settles the oldest call without waiting for its continuation. */
+    settle: (value: unknown) => pending.shift()?.({ ok: true, value }),
+    reply: async (value: unknown) => {
+      const resolve = pending.shift();
+      if (!resolve) throw new Error("no pending call");
+      resolve({ ok: true, value });
+      await Promise.resolve();
+      await Promise.resolve();
+    },
+  };
+}
+const claude = { kind: "claude", sessionId: "s", turns: [] };
+
+describe("Claude view store", () => {
+  it("claude view → tab chat; later none → tab term", async () => {
+    const e = setup();
+    const listener = vi.fn();
+    const stop = e.store.subscribe(listener);
+    e.store.open();
+    await e.reply(claude);
+    expect(e.store.get().tab).toBe("chat");
+    e.store.setTab("term");
+    const refresh = e.store.refresh();
+    await e.reply(claude);
+    await refresh;
+    expect(e.store.get().tab).toBe("term");
+    e.store.setTab("chat");
+    const next = e.store.refresh();
+    await e.reply({ kind: "none" });
+    await next;
+    expect(e.store.get().tab).toBe("term");
+    expect(listener).toHaveBeenCalled();
+    stop();
+    e.store.close();
+  });
+
+  it("three pushes during one refresh → exactly two calls", async () => {
+    const e = setup();
+    e.store.open();
+    e.store.open();
+    expect(e.client.subscribe).toHaveBeenCalledExactlyOnceWith({
+      ch: "terminal:claudeViewChanged",
+      key: "p",
+    });
+    e.push({ paneKey: "other" });
+    for (let i = 0; i < 3; i++) e.push({ paneKey: "p" });
+    expect(e.call).toHaveBeenCalledTimes(1);
+    await e.reply(claude);
+    expect(e.call).toHaveBeenCalledTimes(2);
+    await e.reply(claude);
+    e.store.close();
+    expect(e.off).toHaveBeenCalledTimes(1);
+    expect(e.client.unsubscribe).toHaveBeenCalledWith({
+      ch: "terminal:claudeViewChanged",
+      key: "p",
+    });
+    e.push({ paneKey: "p" });
+    expect(e.call).toHaveBeenCalledTimes(2);
+  });
+
+  it("answer changed → refresh called", async () => {
+    const e = setup();
+    e.store.open();
+    await e.reply(claude);
+    const answering = e.store.answer(2, "Yes");
+    expect(e.store.get().answering).toBe(true);
+    expect(e.call).toHaveBeenLastCalledWith("terminal:answer", ["p", 2, "Yes"], {
+      whenNotOpen: "reject",
+    });
+    await e.reply({ ok: false, reason: "changed" });
+    expect(e.call).toHaveBeenLastCalledWith("terminal:claudeView", ["p"], {
+      whenNotOpen: "reject",
+    });
+    await e.reply(claude);
+    expect(await answering).toEqual({ ok: false, reason: "changed" });
+    expect(e.store.get().answering).toBe(false);
+  });
+
+  it("close while an answer is pending → no state update, no RPC", async () => {
+    const e = setup();
+    e.store.open();
+    await e.reply(claude);
+    const listener = vi.fn();
+    e.store.subscribe(listener);
+    const answering = e.store.answer(0, "Yes");
+    listener.mockClear();
+    e.store.close();
+    const calls = e.call.mock.calls.length;
+    await e.reply({ ok: false, reason: "changed" });
+    expect(await answering).toEqual({ ok: false, reason: "changed" });
+    expect(e.call).toHaveBeenCalledTimes(calls);
+    expect(listener).not.toHaveBeenCalled();
+    await e.store.refresh();
+    expect(e.call).toHaveBeenCalledTimes(calls);
+  });
+
+  it("refresh() from a microtask right after a run finishes still calls", async () => {
+    const e = setup();
+    e.store.open();
+    expect(e.call).toHaveBeenCalledTimes(1);
+    e.settle(claude);
+    // Runs right after the run's continuation leaves its loop, before a
+    // `.finally` on the run would have cleared `inFlight`.
+    queueMicrotask(() => void e.store.refresh());
+    for (let i = 0; i < 6; i++) await Promise.resolve();
+    expect(e.call).toHaveBeenCalledTimes(2);
+    e.store.close();
+  });
+
+  it("Claude restarting in the same pane defaults the tab back to chat", async () => {
+    const e = setup();
+    e.store.open();
+    await e.reply(claude);
+    e.store.setTab("term");
+    let next = e.store.refresh();
+    await e.reply({ kind: "none" });
+    await next;
+    expect(e.store.get().tab).toBe("term");
+    next = e.store.refresh();
+    await e.reply(claude);
+    await next;
+    expect(e.store.get().tab).toBe("chat");
+    e.store.close();
+  });
+
+  it("a second answer while one is pending is rejected unsent; answering stays true", async () => {
+    const e = setup();
+    e.store.open();
+    await e.reply(claude);
+    const first = e.store.answer(0, "Yes");
+    const calls = e.call.mock.calls.length;
+    await expect(e.store.answer(1, "No")).rejects.toThrow("claude-view: answer pending");
+    expect(e.call).toHaveBeenCalledTimes(calls);
+    expect(e.store.get().answering).toBe(true);
+    await e.reply({ ok: true });
+    expect(await first).toEqual({ ok: true });
+    expect(e.store.get().answering).toBe(false);
+    e.store.close();
+  });
+
+  it("an equal view does not notify listeners; a changed one does", async () => {
+    const e = setup();
+    const view = {
+      kind: "claude",
+      sessionId: "s",
+      mode: "default",
+      turns: [{ role: "assistant", text: "hi", tools: [] }],
+      working: "Thinking… 3s",
+    };
+    e.store.open();
+    await e.reply(view);
+    const listener = vi.fn();
+    e.store.subscribe(listener);
+    const before = e.store.get();
+    let next = e.store.refresh();
+    await e.reply({ ...view, turns: [{ role: "assistant", text: "hi", tools: [] }] });
+    await next;
+    expect(listener).not.toHaveBeenCalled();
+    expect(e.store.get()).toBe(before);
+    for (const changed of [
+      { ...view, working: "Thinking… 4s" },
+      { ...view, mode: "plan" },
+      { ...view, turns: [{ role: "assistant", text: "hi there", tools: [] }] },
+      { ...view, prompt: { question: "Proceed?", options: [{ label: "Yes", keys: "\r" }] } },
+    ]) {
+      listener.mockClear();
+      next = e.store.refresh();
+      await e.reply(changed);
+      await next;
+      expect(listener).toHaveBeenCalledTimes(1);
+    }
+    e.store.close();
+  });
+
+  it("on the Term tab of a Claude pane, pushes do not refetch; back on Chat it refetches once", async () => {
+    const e = setup();
+    e.store.open();
+    await e.reply(claude);
+    e.store.setTab("term");
+    e.push({ paneKey: "p" });
+    e.push({ paneKey: "p" });
+    expect(e.call).toHaveBeenCalledTimes(1);
+    e.store.setTab("chat");
+    expect(e.call).toHaveBeenCalledTimes(2);
+    await e.reply(claude);
+    e.store.setTab("term");
+    e.store.setTab("chat");
+    expect(e.call).toHaveBeenCalledTimes(2); // nothing pushed meanwhile
+    e.store.close();
+  });
+
+  it("with no Claude in the pane, pushes still refetch so a starting Claude is seen", async () => {
+    const e = setup();
+    e.store.open();
+    await e.reply({ kind: "none" });
+    expect(e.store.get().tab).toBe("term");
+    e.push({ paneKey: "p" });
+    expect(e.call).toHaveBeenCalledTimes(2);
+    await e.reply(claude);
+    expect(e.store.get().tab).toBe("chat");
+    e.store.close();
+  });
+});

@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { LaptopSettingsSection } from "./LaptopSettingsSection";
+import { UpdatesSection } from "./UpdatesSection";
 import { Linking, Platform, StyleSheet, Switch, Text, TouchableOpacity, View } from "react-native";
 import { PasskeyRegisterForm } from "@/components/PasskeyRegisterForm";
 import { SETTINGS_CARD, SETTINGS_CARD_TITLE } from "@/components/SettingsCard";
@@ -36,6 +37,8 @@ type Props = {
   onValueChange(on: boolean): void;
   onLogout(): void;
   onUnpair(): void;
+  /** The Updates section's y inside these sections, once laid out. */
+  onUpdatesLayout?(y: number): void;
 };
 
 export function SettingsSections(props: Props): React.JSX.Element {
@@ -249,6 +252,16 @@ export function SettingsSections(props: Props): React.JSX.Element {
               </TouchableOpacity>
             ))}
           </View>
+        </View>
+      )}
+
+      {shown("updates") && (
+        <View
+          {...section("updates")}
+          onLayout={(event) => props.onUpdatesLayout?.(event.nativeEvent.layout.y)}
+        >
+          <Text style={sectionTitle}>{t(props.language, "updates.title")}</Text>
+          <UpdatesSection language={props.language} />
         </View>
       )}
 

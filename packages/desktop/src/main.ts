@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { homedir } from "node:os";
+import { homedir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
@@ -109,6 +109,17 @@ app.on("will-quit", () => stayAwake.set(false));
 
 /** One app per user data directory (single-instance.ts, review I1). */
 const onlyInstance = !launchingDaemon && claimSingleInstance(app, () => focusAppWindow());
+
+/** The OS account's home, which $HOME does not change: an instance run with
+ *  another HOME gets a service of its own (daemon/service-name.ts). Without
+ *  an account entry, the HOME in use is taken as the account's. */
+function accountHomedir(): string {
+  try {
+    return userInfo().homedir;
+  } catch {
+    return homedir();
+  }
+}
 
 /** An asset beside the compiled main process. `import.meta.url` is
  *  dist/src/main.js at runtime and the build copies assets to dist/assets,
@@ -420,6 +431,7 @@ app.whenReady().then(async () => {
     const nodeDeps = nodeDaemonModeDeps({
       platform,
       home: homedir(),
+      accountHome: accountHomedir(),
       uid: process.getuid?.() ?? 0,
       execPath: process.execPath,
       // An AppImage's own file: execPath is inside its temporary mount.

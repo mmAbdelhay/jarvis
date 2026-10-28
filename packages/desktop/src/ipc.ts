@@ -33,7 +33,14 @@ import {
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import type { Brain, ReviewComment, WorkspaceState, WorkspaceTab } from "@jarvis/core";
 import type { BindChoice, OwnerStatus, RemoteStatus, SetOwnerPasswordResult } from "@jarvis/remote";
-import type { PushRegisterResult, PushRegistration, TerminalPaneInfo } from "@jarvis/wire";
+import type {
+  AttachUploadResult,
+  ClaudeAnswerResult,
+  ClaudeView,
+  PushRegisterResult,
+  PushRegistration,
+  TerminalPaneInfo,
+} from "@jarvis/wire";
 import {
   checkPrerequisites,
   installFor,
@@ -138,6 +145,9 @@ export type IpcChannels = {
   // `chunk` (ruling 10) — see ShellOutput.
   "terminal:data": { paneKey: string; chunk: string; offset: number };
   "terminal:exit": { paneKey: string; code: number };
+  // The phone's chat view of a pane (claude-view.ts): "look again", keyed
+  // by pane and throttled per pane. The key is the whole payload.
+  "terminal:claudeViewChanged": { paneKey: string };
 };
 
 /**
@@ -966,6 +976,18 @@ export type RendererApi = {
    * subscribes, so it never needs this either.
    */
   terminalSnapshot(paneKey: string): Promise<StreamSnapshot>;
+  /** The phone's chat view of a pane running Claude Code: transcript turns
+   *  plus the prompt, mode and spinner on its screen; `none` otherwise. */
+  terminalClaudeView(paneKey: string): Promise<ClaudeView>;
+  /** Chooses option `index` of the prompt on the pane's screen. `label` is
+   *  the option as it was shown; the screen is read again first, and a
+   *  prompt that is gone or changed is refused rather than typed into. */
+  terminalAnswer(paneKey: string, index: number, label: string): Promise<ClaudeAnswerResult>;
+  /** Copies a file this device staged with remote:uploadFile into the
+   *  pane's project (`.jarvis/uploads/`), answering its path relative to
+   *  there. A phone's call only: a desktop origin is refused. */
+  terminalAttachUpload(paneKey: string, fileId: string): Promise<AttachUploadResult>;
+  onTerminalClaudeViewChanged(cb: (payload: { paneKey: string }) => void): void;
   /** Starts a second shell in the same tab and the same directory, for a
    *  pane the renderer has just split off. */
   splitTerminal(tabId: string, paneId: string): Promise<void>;

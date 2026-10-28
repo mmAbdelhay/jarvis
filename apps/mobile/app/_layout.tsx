@@ -24,6 +24,8 @@ import { nativeTransport } from "@/lib/native-transport";
 import { isClearingPairing } from "@/lib/pairing-guard";
 import { clearPairing } from "@/lib/pairing-record";
 import { filePrefsStore } from "@/lib/prefs-file";
+import { createAppPhoneUpdateStore } from "@/lib/phone-update-app";
+import { PhoneUpdateProvider } from "@/lib/phone-update-context";
 import { createRefreshStoredFlag, DEFAULT_IDLE_LOCK_MINUTES, loadPrefs } from "@/lib/prefs";
 import { PushProvider } from "@/lib/push-context";
 import { createDeviceAuth } from "@/lib/device-auth";
@@ -42,6 +44,9 @@ import { VoiceProvider } from "@/lib/voice-context";
 
 const CLIENT_STRING = clientStringFor(Platform.OS, Constants.expoConfig?.version ?? "0.0.0");
 const PLATFORM = clientPlatformFor(Platform.OS);
+// The app's one phone-update store, started by PhoneUpdateProvider for the
+// app's lifetime (Settings → Updates, Home's banner).
+const phoneUpdateStore = createAppPhoneUpdateStore();
 // M11 rule 6: constructed once, module-wide — a pairing with a `name`
 // routes through `systemTransport` (OS trust store), one without pins
 // natively through `nativeTransport`, exactly as before. Task 13: the
@@ -59,9 +64,11 @@ const transport = createAppTransport(PLATFORM, {
 // providers' order.
 function Providers(props: { children: React.ReactNode }): React.JSX.Element {
   return (
-    <PushProvider>
-      <VoiceProvider>{props.children}</VoiceProvider>
-    </PushProvider>
+    <PhoneUpdateProvider store={phoneUpdateStore}>
+      <PushProvider>
+        <VoiceProvider>{props.children}</VoiceProvider>
+      </PushProvider>
+    </PhoneUpdateProvider>
   );
 }
 

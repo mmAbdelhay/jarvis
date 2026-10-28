@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { type CapacityCard, capacityTone, resetLabel } from "./home-capacity";
+import {
+  type CapacityCard,
+  capacityFor,
+  capacityTone,
+  parseProviderCapacity,
+  resetLabel,
+} from "./home-capacity";
 
 const NOW = Date.UTC(2026, 9, 3, 12, 0, 0);
 function card(overrides: Partial<CapacityCard>): CapacityCard {
@@ -38,5 +44,82 @@ describe("capacityTone", () => {
   it("warns at 30 or less and goes danger at 10 or less", () => {
     expect(capacityTone(card({ left: 30, window: "month" }))).toBe("warning");
     expect(capacityTone(card({ left: 10 }))).toBe("danger");
+  });
+});
+
+describe("weekly capacity", () => {
+  function payload(secondary?: unknown) {
+    return [
+      {
+        id: "claude-main",
+        vendor: "anthropic",
+        capacity: {
+          state: "known",
+          primary: { usedPercent: 37.6, resetsAt: "2026-10-03T14:00:00Z" },
+          ...(secondary === undefined ? {} : { secondary }),
+        },
+      },
+    ];
+  }
+
+  it("secondary window parsed into weekLeft", () => {
+    for (const [usedPercent, left] of [
+      [37.6, 62],
+      [-10, 100],
+      [120, 0],
+    ]) {
+      expect(parseProviderCapacity(payload({ usedPercent }))[0]?.weekLeft).toBe(left);
+    }
+  });
+
+  it("payload without secondary still parses (weekLeft undefined)", () => {
+    for (const secondary of [
+      undefined,
+      null,
+      {},
+      { usedPercent: "20" },
+      { usedPercent: NaN },
+      { usedPercent: Infinity },
+    ]) {
+      const cards = parseProviderCapacity(payload(secondary));
+      expect(cards).toHaveLength(1);
+      expect(cards[0]?.left).toBe(62);
+      expect(cards[0]?.weekLeft).toBeUndefined();
+    }
+  });
+
+  it("capacityFor anthropic", () => {
+    expect(
+      capacityFor(
+        [
+          card({ id: "claude-other", vendor: "openai", left: 10 }),
+          card({ vendor: "anthropic", weekLeft: 75 }),
+        ],
+        "anthropic",
+      ),
+    ).toEqual({ sessionUsed: 38, weekUsed: 25 });
+    expect(capacityFor(parseProviderCapacity(payload({ usedPercent: 20 })), "anthropic")).toEqual({
+      sessionUsed: 38,
+      weekUsed: 20,
+    });
+    expect(capacityFor([card({})], "anthropic")).toEqual({ sessionUsed: 38 });
+    expect(capacityFor([], "anthropic")).toEqual({});
+    expect(capacityFor([card({ id: "codex" })], "anthropic")).toEqual({});
+    expect(capacityFor([card({ vendor: "openai" })], "anthropic")).toEqual({});
+  });
+
+  it("capacityFor picks by vendor when id is not claude-like", () => {
+    const providers = payload({ usedPercent: 20 });
+    const cards = parseProviderCapacity([
+      { ...providers[0], id: "mm" },
+      { ...providers[0], id: "work-claude" },
+    ]);
+    expect(cards.map((entry) => entry.vendor)).toEqual(["anthropic", "anthropic"]);
+    expect(
+      capacityFor(
+        [card({ left: 10 }), ...cards, card({ vendor: "anthropic", left: 5 })],
+        "anthropic",
+      ),
+    ).toEqual({ sessionUsed: 38, weekUsed: 20 });
   });
 });

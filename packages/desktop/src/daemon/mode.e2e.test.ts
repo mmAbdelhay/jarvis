@@ -1,7 +1,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
@@ -110,6 +110,7 @@ async function setup(
   const real = nodeDaemonModeDeps({
     platform: process.platform,
     home,
+    accountHome: userInfo().homedir,
     uid: process.getuid?.() ?? 0,
     execPath: process.execPath,
     daemonScript: SCRIPT,

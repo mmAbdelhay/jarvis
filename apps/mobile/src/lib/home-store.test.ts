@@ -98,8 +98,20 @@ describe("parseProviderCapacity", () => {
       "junk",
     ]);
     expect(cards).toEqual([
-      { id: "claude-main", window: "5h", left: 62, resetsAt: Date.parse("2026-10-02T12:00:00Z") },
-      { id: "copilot", window: "month", left: 0, resetsAt: Date.parse("2026-11-01T00:00:00Z") },
+      {
+        id: "claude-main",
+        vendor: "anthropic",
+        window: "5h",
+        left: 62,
+        resetsAt: Date.parse("2026-10-02T12:00:00Z"),
+      },
+      {
+        id: "copilot",
+        vendor: "github",
+        window: "month",
+        left: 0,
+        resetsAt: Date.parse("2026-11-01T00:00:00Z"),
+      },
     ]);
   });
 

@@ -62,6 +62,10 @@ export function HomeTop(props: {
     label: string,
   ): Promise<"answered" | "changed" | "offline">;
   onOpen(sessionId: string): void;
+  /** "Update available" text, or undefined when there is no update. */
+  updateBanner: string | undefined;
+  /** Opens Settings at its Updates section. */
+  onOpenUpdates(): void;
 }) {
   const [busy, setBusy] = useState<string | undefined>(undefined);
   const [notes, setNotes] = useState<Record<string, string>>({});
@@ -119,6 +123,20 @@ export function HomeTop(props: {
           </View>
         </View>
       )}
+      {props.updateBanner !== undefined && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityHint={t(props.language, "updates.bannerOpen")}
+          onPress={props.onOpenUpdates}
+          style={styles.updateBanner}
+        >
+          <View style={styles.updateDot} />
+          <Text style={styles.updateBannerText} numberOfLines={1}>
+            {props.updateBanner}
+          </Text>
+          <Text style={styles.updateBannerChevron}>›</Text>
+        </Pressable>
+      )}
       {props.home.waiting.slice(0, MAX_WAITING_CARDS).map((entry) => {
         const session = props.sessions.find((candidate) => candidate.id === entry.sessionId);
         const context = [
@@ -174,6 +192,25 @@ export function HomeTop(props: {
 
 const styles = StyleSheet.create({
   top: { gap: 16 },
+  updateBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    minHeight: 44,
+    paddingHorizontal: 14,
+    borderRadius: theme.radius.card,
+    borderWidth: 1,
+    borderColor: theme.colors.accentBorder,
+    backgroundColor: theme.colors.accentSoft,
+  },
+  updateDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: theme.colors.accent },
+  updateBannerText: {
+    flex: 1,
+    color: theme.colors.accentText,
+    fontFamily: theme.font.bold,
+    fontSize: 14,
+  },
+  updateBannerChevron: { color: theme.colors.accentText, fontSize: 20 },
   topWide: { gap: 22 },
   headerWide: {
     flexDirection: "row",

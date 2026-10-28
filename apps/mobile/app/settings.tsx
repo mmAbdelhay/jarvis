@@ -1,6 +1,6 @@
 import Constants from "expo-constants";
-import { useFocusEffect, useRouter } from "expo-router";
-import { useCallback, useMemo, useState } from "react";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { useCallback, useMemo, useRef, useState } from "react";
 import {
   I18nManager,
   Platform,
@@ -55,6 +55,19 @@ function SettingsScreen() {
   const push = usePushRegistration();
   const authSession = useAuthSession();
   const [scope, setScope] = useState<SettingsScope>("browser");
+  // Home's update banner opens /settings?section=updates: scroll there once
+  // both the sections and the Updates section have been laid out.
+  const { section } = useLocalSearchParams<{ section?: string }>();
+  const scrollRef = useRef<ScrollView>(null);
+  const sectionsY = useRef<number | undefined>(undefined);
+  const updatesY = useRef<number | undefined>(undefined);
+  const scrolledToSection = useRef(false);
+  const scrollToUpdates = useCallback(() => {
+    if (section !== "updates" || scrolledToSection.current) return;
+    if (sectionsY.current === undefined || updatesY.current === undefined) return;
+    scrolledToSection.current = true;
+    scrollRef.current?.scrollTo({ y: sectionsY.current + updatesY.current, animated: true });
+  }, [section]);
   const wide = layout.kind === "wide";
   const wideLayout = settingsWideLayout({
     language,
@@ -129,38 +142,50 @@ function SettingsScreen() {
   }
 
   const content = (
-    <SettingsSections
-      language={language}
-      platform={PLATFORM}
-      view={view}
-      store={store}
-      wide={wide}
-      scope={wide ? scope : undefined}
-      onSpeakReplies={(on) => {
-        // Prefs first, controller only once the write actually lands —
-        // `store.setSpeakReplies` leaves its own view unchanged on a
-        // rejected write, and since the switch is bound to that view
-        // (not local state), a failed write reverts the switch on its
-        // own without the controller ever having heard about the
-        // change (fix round 1, Minor 1).
-        void store
-          .setSpeakReplies(on)
-          .then(() => voiceController.setSpeakReplies(on))
-          // M6: a rejected write already leaves the store's view (and
-          // so the switch, bound to it) unchanged on its own — this
-          // only keeps that rejection from surfacing as an unhandled
-          // promise rejection (a RN LogBox warning in dev).
-          .catch(() => {});
+    <View
+      onLayout={(event) => {
+        sectionsY.current = event.nativeEvent.layout.y;
+        scrollToUpdates();
       }}
-      onValueChange={(on) => void store.setNotifications(on)}
-      onLogout={handleLogout}
-      onUnpair={handleUnpair}
-    />
+    >
+      <SettingsSections
+        language={language}
+        platform={PLATFORM}
+        view={view}
+        store={store}
+        wide={wide}
+        scope={wide ? scope : undefined}
+        onSpeakReplies={(on) => {
+          // Prefs first, controller only once the write actually lands —
+          // `store.setSpeakReplies` leaves its own view unchanged on a
+          // rejected write, and since the switch is bound to that view
+          // (not local state), a failed write reverts the switch on its
+          // own without the controller ever having heard about the
+          // change (fix round 1, Minor 1).
+          void store
+            .setSpeakReplies(on)
+            .then(() => voiceController.setSpeakReplies(on))
+            // M6: a rejected write already leaves the store's view (and
+            // so the switch, bound to it) unchanged on its own — this
+            // only keeps that rejection from surfacing as an unhandled
+            // promise rejection (a RN LogBox warning in dev).
+            .catch(() => {});
+        }}
+        onValueChange={(on) => void store.setNotifications(on)}
+        onLogout={handleLogout}
+        onUnpair={handleUnpair}
+        onUpdatesLayout={(y) => {
+          updatesY.current = y;
+          scrollToUpdates();
+        }}
+      />
+    </View>
   );
 
   if (wide) {
     return (
       <ScrollView
+        ref={scrollRef}
         style={[styles.container, { direction: wideLayout.direction }]}
         contentContainerStyle={styles.wideContent}
       >
@@ -189,6 +214,7 @@ function SettingsScreen() {
 
   return (
     <ScrollView
+      ref={scrollRef}
       style={styles.container}
       contentContainerStyle={[styles.phoneContent, { paddingTop: insets.top + 8 }]}
     >

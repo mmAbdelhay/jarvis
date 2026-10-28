@@ -219,6 +219,27 @@ describe("reviews:* policy", () => {
   });
 });
 
+// The phone's chat view of a terminal pane: a read, a verified prompt
+// answer (a keystroke into the pane, like session:answer), and the attach
+// handoff of a staged upload (a write into the project, like
+// remote:readJsonUpload's handoff).
+describe("terminal chat view policy", () => {
+  it.each([
+    ["terminal:claudeView", "read"],
+    ["terminal:answer", "input"],
+    ["terminal:attachUpload", "mutate"],
+  ] as const)("lets a phone call %s, classified %s", (channel, effect) => {
+    expect(isRemoteAllowed(channel)).toBe(true);
+    expect(REMOTE_EFFECT[channel]).toBe(effect);
+  });
+
+  it("classifies them like their session/upload counterparts", () => {
+    expect(REMOTE_EFFECT["terminal:claudeView"]).toBe(REMOTE_EFFECT["session:transcript"]);
+    expect(REMOTE_EFFECT["terminal:answer"]).toBe(REMOTE_EFFECT["session:answer"]);
+    expect(REMOTE_EFFECT["terminal:attachUpload"]).toBe(REMOTE_EFFECT["remote:readJsonUpload"]);
+  });
+});
+
 describe("awake:* policy", () => {
   it("lets a phone read the keep-awake status", () => {
     expect(isRemoteAllowed("awake:status")).toBe(true);
