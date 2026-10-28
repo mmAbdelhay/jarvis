@@ -2,12 +2,18 @@
 // ever evaluated by the Expo CLI's config loader (Node.js), never bundled
 // into the app itself (it lives outside `app/` and `src/`, so
 // no-node-imports.test.ts's scan doesn't reach it either).
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExpoConfig } from "expo/config";
+// Expo loads this in Node, which needs the extension; mobile tsc only checks it.
+// @ts-expect-error Mobile tsconfig does not enable allowImportingTsExtensions.
+import { appVersion } from "./app-version.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+const { version, versionCode } = appVersion(
+  readFileSync(join(HERE, "../../packages/desktop/package.json"), "utf8"),
+);
 // Rule: `android.googleServicesFile` only if the file actually exists —
 // a checkout without Firebase credentials must still produce a valid
 // config instead of failing prebuild on a missing path.
@@ -18,7 +24,7 @@ const config: ExpoConfig = {
   name: "Jarvis",
   slug: "jarvis-mobile",
   scheme: "jarvis",
-  version: "0.0.0",
+  version,
   // "default" (not "portrait"): orientation is decided at the JS level
   // (`expo-screen-orientation`, src/lib/orientation-policy.ts via
   // app/_layout.tsx). A phone is locked portrait except while the terminal,
@@ -59,6 +65,7 @@ const config: ExpoConfig = {
   },
   android: {
     package: "dev.jarvis.mobile",
+    versionCode,
     adaptiveIcon: {
       foregroundImage: "./assets/adaptive-icon.png",
       backgroundColor: "#0B0D12",

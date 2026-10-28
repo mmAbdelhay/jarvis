@@ -96,6 +96,13 @@ node scripts/release-sums.mjs --out SHA256SUMS \
   jarvis-mobile-<version>.apk
 ```
 
+Build the phone APK with `eas build --local --profile preview` from
+`apps/mobile`, using the same EAS signing credentials as previous releases so
+Android can install it over the existing app. The phone version follows
+`packages/desktop/package.json`; its Android `versionCode`
+(`major * 10000 + minor * 100 + patch`) must increase with every release.
+Minor and patch must each be at most 99 to avoid versionCode collisions.
+
 Upload `SHA256SUMS` with the release, beside the files it lists — and list
 every file the release uploads, so each one can be checked. The desktop
 app's **Install update** downloads it and refuses to install anything whose

@@ -8,6 +8,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 import config from "../app.config";
+import { appVersion } from "../app-version";
 import { theme } from "./lib/theme";
 
 const AR_CODE_POINT = /[؀-ۿ]/;
@@ -158,5 +159,17 @@ describe("app.config.ts: web target (Task 12)", () => {
     );
     expect(packageJson.dependencies?.["react-dom"]).toBe("19.2.3");
     expect(packageJson.dependencies?.["react-native-web"]).toBe("0.21.3");
+  });
+});
+
+describe("app.config.ts: release version", () => {
+  test("uses the desktop release version and Android versionCode", () => {
+    const desktopText = readFileSync(
+      fileURLToPath(new URL("../../../packages/desktop/package.json", import.meta.url)),
+      "utf8",
+    );
+    const { version, versionCode } = appVersion(desktopText);
+    expect(config.version).toBe(version);
+    expect(config.android?.versionCode).toBe(versionCode);
   });
 });
