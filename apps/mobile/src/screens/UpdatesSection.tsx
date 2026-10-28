@@ -20,6 +20,7 @@ export function UpdatesSection(props: { language: Language }): React.JSX.Element
       {card.newest !== undefined && <Text style={styles.cardLine}>{card.newest}</Text>}
       {card.lastChecked !== undefined && <Text style={styles.cardLine}>{card.lastChecked}</Text>}
       {card.status !== undefined && <Text style={styles.status}>{card.status}</Text>}
+      {card.hint !== undefined && <Text style={styles.status}>{card.hint}</Text>}
       {card.notes !== undefined && (
         <>
           <TouchableOpacity

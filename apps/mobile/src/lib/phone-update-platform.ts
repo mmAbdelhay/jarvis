@@ -47,9 +47,10 @@ export function createPhoneUpdateDeps(): PhoneUpdateDeps {
     platform: Platform.OS,
     current: installedVersion(),
     fetch: (url, init) => globalThis.fetch(url, init),
-    async download(url, dest, onProgress) {
+    async download(url, dest, onProgress, signal) {
       const task = new DownloadTask(url, new File(dest), {
         onProgress: ({ bytesWritten, totalBytes }) => onProgress(bytesWritten, totalBytes),
+        signal,
       });
       const file = await task.downloadAsync();
       if (file === null) throw new Error("paused");

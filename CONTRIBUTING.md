@@ -102,6 +102,9 @@ Android can install it over the existing app. The phone version follows
 `packages/desktop/package.json`; its Android `versionCode`
 (`major * 10000 + minor * 100 + patch`) must increase with every release.
 Minor and patch must each be at most 99 to avoid versionCode collisions.
+Bump `packages/desktop/package.json` first, then build the APK: an APK built
+before the bump reports the old version, and the phone keeps offering the
+update after installing it.
 
 Upload `SHA256SUMS` with the release, beside the files it lists — and list
 every file the release uploads, so each one can be checked. The desktop

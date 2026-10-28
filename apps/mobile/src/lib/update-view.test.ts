@@ -22,7 +22,7 @@ const ALL_STATES: UpdateState[] = [
   { kind: "current", checkedAt: CHECKED_AT },
   { kind: "available", version: "0.1.12", notes: "Faster terminal." },
   { kind: "downloading", version: "0.1.12", progress: 0.42 },
-  { kind: "verifying", version: "0.1.12" },
+  { kind: "verifying", version: "0.1.12", progress: 0.5 },
   { kind: "ready", version: "0.1.12" },
   { kind: "failed", reason: "offline" },
   { kind: "failed", reason: "download", version: "0.1.12" },
@@ -96,10 +96,22 @@ describe("updateCardView", () => {
     expect(card.progress).toBe(0.42);
   });
 
-  it("verifying says Verifying…, disabled", () => {
-    const card = updateCardView(android({ kind: "verifying", version: "0.1.12" }), "en");
-    expect(card.update).toEqual({ label: "Verifying…", disabled: true });
-    expect(card.progress).toBeUndefined();
+  it("verifying shows the percentage hashed, disabled, with progress", () => {
+    const card = updateCardView(
+      android({ kind: "verifying", version: "0.1.12", progress: 0.42 }),
+      "en",
+    );
+    expect(card.update).toEqual({ label: "Verifying 42%", disabled: true });
+    expect(card.progress).toBe(0.42);
+  });
+
+  it("explains how to get a newer version only where the phone cannot install it", () => {
+    const available: UpdateState = { kind: "available", version: "0.1.12", notes: "" };
+    expect(updateCardView(ios(available), "en").hint).toBe(
+      "This phone can't install updates from here. Install the new build the same way you installed this one.",
+    );
+    expect(updateCardView(ios({ kind: "idle" }), "en").hint).toBeUndefined();
+    expect(updateCardView(android(available), "en").hint).toBeUndefined();
   });
 
   it("ready says it is verified and lets Update open the installer again", () => {
@@ -116,6 +128,10 @@ describe("updateCardView", () => {
       "The download didn't match its checksum, so it was deleted. Tap Update to try again.",
     ],
     ["install", "Allow installs from Jarvis, then tap Update again."],
+    [
+      "unverifiable",
+      "This release has no checksum for the phone app, so it can't be installed safely.",
+    ],
   ] as const)("failed %s shows its own error", (reason, text) => {
     expect(updateCardView(android({ kind: "failed", reason }), "en").error).toBe(text);
   });

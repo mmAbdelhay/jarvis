@@ -14,6 +14,8 @@ export const RELEASES_HEADERS: Record<string, string> = {
 export const CHECK_EVERY_MS = 24 * 60 * 60 * 1000;
 /** A release-list or SUMS request that takes longer than this has failed. */
 export const FETCH_TIMEOUT_MS = 30_000;
+/** A download with no progress event for this long has stalled. */
+export const DOWNLOAD_STALL_MS = 60_000;
 /** Hash this many bytes per read: never the whole APK in memory. */
 export const HASH_CHUNK_BYTES = 1024 * 1024;
 
@@ -37,9 +39,24 @@ export function progressFraction(written: number, total: number, assetSize: numb
   return Math.min(1, written / whole);
 }
 
-/** Lowercase hex SHA-256 of a stream of chunks, hashed incrementally. */
-export async function sha256Hex(chunks: AsyncIterable<Uint8Array>): Promise<string> {
+/** Lowercase hex SHA-256 of a stream of chunks, hashed incrementally.
+ *  `onBytes` hears the running byte count after each chunk. */
+export async function sha256Hex(
+  chunks: AsyncIterable<Uint8Array>,
+  onBytes?: (hashed: number) => void,
+): Promise<string> {
   const hash = sha256.create();
-  for await (const chunk of chunks) hash.update(chunk);
+  let hashed = 0;
+  for await (const chunk of chunks) {
+    hash.update(chunk);
+    hashed += chunk.length;
+    onBytes?.(hashed);
+  }
   return bytesToHex(hash.digest());
+}
+
+/** Whether `next` is at least one whole percent past `shown`: progress
+ *  is only emitted then, so a download re-renders the UI ≤ 100 times. */
+export function risesWholePercent(shown: number, next: number): boolean {
+  return Math.floor(next * 100) > Math.floor(shown * 100);
 }

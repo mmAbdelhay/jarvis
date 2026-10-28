@@ -16,8 +16,10 @@ export type UpdateCardView = {
   check: { label: string; disabled: boolean } | undefined;
   /** Undefined when there is nothing to install, or the platform cannot. */
   update: { label: string; disabled: boolean } | undefined;
-  /** 0..1 while downloading. */
+  /** 0..1 while downloading or verifying. */
   progress: number | undefined;
+  /** Where the phone cannot install a newer version it found: how to get it. */
+  hint: string | undefined;
 };
 
 const BUSY: ReadonlySet<UpdateState["kind"]> = new Set(["checking", "downloading", "verifying"]);
@@ -49,6 +51,8 @@ function errorText(language: Language, state: UpdateState): string | undefined {
       return t(language, "updates.error.download");
     case "checksum":
       return t(language, "updates.error.checksum");
+    case "unverifiable":
+      return t(language, "updates.error.unverifiable");
     case "install":
       return t(language, "updates.error.install");
   }
@@ -81,7 +85,10 @@ function updateButton(
         disabled: true,
       };
     case "verifying":
-      return { label: t(language, "updates.verifying"), disabled: true };
+      return {
+        label: t(language, "updates.verifying", { percent: percent(state.progress) }),
+        disabled: true,
+      };
     case "failed":
       // A failed check has nothing to install; a failed update can retry.
       return state.version === undefined
@@ -117,7 +124,14 @@ export function updateCardView(view: PhoneUpdateView, language: Language): Updat
       ? { label: t(language, "updates.checkNow"), disabled: BUSY.has(state.kind) }
       : undefined,
     update: view.canInstall ? updateButton(language, state) : undefined,
-    progress: view.canInstall && state.kind === "downloading" ? state.progress : undefined,
+    progress:
+      view.canInstall && (state.kind === "downloading" || state.kind === "verifying")
+        ? state.progress
+        : undefined,
+    hint:
+      !view.canInstall && offered !== undefined
+        ? t(language, "updates.installElsewhere")
+        : undefined,
   };
 }
 

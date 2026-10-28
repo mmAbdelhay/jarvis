@@ -18,6 +18,12 @@
 //   opens: its result can be lost (the activity never returns), and that
 //   must not block later checks or updates. A late installer rejection only
 //   lands while that same "ready" state is still showing.
+// - A background check (24 h timer, foreground) never shows "checking" over
+//   an offer. While an offer (available / ready / a failed update) is held,
+//   a failed check keeps it, a same-version check keeps "ready", and only a
+//   newer release replaces it.
+// - A download with no progress for DOWNLOAD_STALL_MS is aborted and fails.
+// - Progress (download and verify) is emitted per whole percent only.
 // - In "ready", update() re-verifies the kept file and re-opens the
 //   installer (after "Allow installs from Jarvis"); a missing file is
 //   downloaded again.
@@ -27,11 +33,13 @@ import { isReleaseDownloadUrl, parseReleaseList, parseSums, type ReleaseAsset } 
 import {
   CHECK_EVERY_MS,
   cachePath,
+  DOWNLOAD_STALL_MS,
   FETCH_TIMEOUT_MS,
   isUpdateFileName,
   progressFraction,
   RELEASES_HEADERS,
   RELEASES_URL,
+  risesWholePercent,
   sha256Hex,
 } from "./phone-update";
 import type { PhoneUpdateStore, PhoneUpdateView, UpdateState } from "./phone-update-types";
@@ -48,11 +56,13 @@ export type PhoneUpdateDeps = {
   /** The installed app version. */
   current: string;
   fetch(url: string, init?: { headers?: Record<string, string> }): Promise<FetchResponse>;
-  /** Downloads `url` to `dest` (a cache path), reporting bytes as it goes. */
+  /** Downloads `url` to `dest` (a cache path), reporting bytes as it goes;
+   *  cancels when `signal` aborts. */
   download(
     url: string,
     dest: string,
     onProgress: (written: number, total: number) => void,
+    signal: AbortSignal,
   ): Promise<void>;
   /** The file's bytes in bounded chunks; throws when it cannot be read. */
   readChunks(path: string): AsyncIterable<Uint8Array>;
@@ -122,11 +132,20 @@ export function createPhoneUpdateStore(deps: PhoneUpdateDeps): PhoneUpdateStore 
     });
   }
 
-  async function check(): Promise<void> {
+  /** The offer being shown, if any: what a failed check falls back to. */
+  function heldOffer(): UpdateState | undefined {
+    if (release === undefined) return undefined;
+    if (state.kind === "available" || state.kind === "ready") return state;
+    if (state.kind === "failed" && state.version !== undefined) return state;
+    return undefined;
+  }
+
+  async function check(background = false): Promise<void> {
     if (!canCheck || busy) return;
     busy = true;
     lastCheckAt = deps.now();
-    set({ kind: "checking" });
+    const offer = heldOffer();
+    if (!(background && offer !== undefined)) set({ kind: "checking" });
     try {
       const raw = await withTimeout(
         deps.fetch(RELEASES_URL, { headers: RELEASES_HEADERS }).then((response) => {
@@ -143,12 +162,14 @@ export function createPhoneUpdateStore(deps: PhoneUpdateDeps): PhoneUpdateStore 
         set({ kind: "current", checkedAt: lastCheckedAt });
         return;
       }
-      if (release?.version !== result.version) verifiedPath = undefined;
+      const same = release?.version === result.version;
+      if (!same) verifiedPath = undefined;
       release = { version: result.version, apk: result.apk, sums: result.sums };
-      set({ kind: "available", version: result.version, notes: result.notes });
+      if (same && offer?.kind === "ready") set(offer);
+      else set({ kind: "available", version: result.version, notes: result.notes });
     } catch {
       deps.log("check-failed");
-      set({ kind: "failed", reason: "offline" });
+      set(offer ?? { kind: "failed", reason: "offline" });
     } finally {
       busy = false;
     }
@@ -167,11 +188,56 @@ export function createPhoneUpdateStore(deps: PhoneUpdateDeps): PhoneUpdateStore 
     return parseSums(text).get(apk.name);
   }
 
-  async function hashMatches(path: string, expected: string): Promise<boolean> {
+  async function hashMatches(target: Release, path: string, expected: string): Promise<boolean> {
+    const { version, apk } = target;
+    let shown = 0;
+    set({ kind: "verifying", version, progress: 0 });
     try {
-      return (await sha256Hex(deps.readChunks(path))) === expected;
+      const actual = await sha256Hex(deps.readChunks(path), (hashed) => {
+        const fraction = progressFraction(hashed, -1, apk.size);
+        if (!risesWholePercent(shown, fraction)) return;
+        shown = fraction;
+        set({ kind: "verifying", version, progress: fraction });
+      });
+      return actual === expected;
     } catch {
       return false;
+    }
+  }
+
+  /** The download, aborted when no progress arrives for DOWNLOAD_STALL_MS. */
+  async function downloadWatched(target: Release, path: string): Promise<void> {
+    const { version, apk } = target;
+    const controller = new AbortController();
+    let stall: unknown;
+    const arm = (): void => {
+      deps.clearTimeout(stall);
+      stall = deps.setTimeout(() => controller.abort(), DOWNLOAD_STALL_MS);
+    };
+    const stalled = new Promise<never>((_resolve, reject) => {
+      controller.signal.addEventListener("abort", () => reject(new Error("stalled")));
+    });
+    let shown = 0;
+    arm();
+    try {
+      await Promise.race([
+        deps.download(
+          apk.url,
+          path,
+          (written, total) => {
+            if (controller.signal.aborted) return;
+            arm();
+            const fraction = progressFraction(written, total, apk.size);
+            if (!risesWholePercent(shown, fraction)) return;
+            shown = fraction;
+            set({ kind: "downloading", version, progress: fraction });
+          },
+          controller.signal,
+        ),
+        stalled,
+      ]);
+    } finally {
+      deps.clearTimeout(stall);
     }
   }
 
@@ -192,7 +258,7 @@ export function createPhoneUpdateStore(deps: PhoneUpdateDeps): PhoneUpdateStore 
       }
       if (expected === undefined) {
         deps.log("sums-missing");
-        set({ kind: "failed", reason: "checksum", version });
+        set({ kind: "failed", reason: "unverifiable", version });
         return;
       }
 
@@ -205,14 +271,8 @@ export function createPhoneUpdateStore(deps: PhoneUpdateDeps): PhoneUpdateStore 
         }
         deps.deleteFile(path);
         set({ kind: "downloading", version, progress: 0 });
-        let shown = 0;
         try {
-          await deps.download(apk.url, path, (written, total) => {
-            const fraction = progressFraction(written, total, apk.size);
-            if (fraction <= shown) return;
-            shown = fraction;
-            set({ kind: "downloading", version, progress: fraction });
-          });
+          await downloadWatched(target, path);
         } catch {
           deps.log("download-failed");
           deps.deleteFile(path);
@@ -221,8 +281,7 @@ export function createPhoneUpdateStore(deps: PhoneUpdateDeps): PhoneUpdateStore 
         }
       }
 
-      set({ kind: "verifying", version });
-      if (!(await hashMatches(path, expected))) {
+      if (!(await hashMatches(target, path, expected))) {
         deps.log("checksum-failed");
         verifiedPath = undefined;
         deps.deleteFile(path);
@@ -250,9 +309,11 @@ export function createPhoneUpdateStore(deps: PhoneUpdateDeps): PhoneUpdateStore 
     for (const name of deps.listCache()) {
       if (isUpdateFileName(name)) deps.deleteFile(cachePath(deps.cacheDir, name));
     }
-    interval = deps.setInterval(() => void check(), CHECK_EVERY_MS);
+    interval = deps.setInterval(() => void check(true), CHECK_EVERY_MS);
     stopForeground = deps.onForeground(() => {
-      if (lastCheckAt === undefined || deps.now() - lastCheckAt >= CHECK_EVERY_MS) void check();
+      if (lastCheckAt === undefined || deps.now() - lastCheckAt >= CHECK_EVERY_MS) {
+        void check(true);
+      }
     });
     void check();
   }
@@ -273,7 +334,7 @@ export function createPhoneUpdateStore(deps: PhoneUpdateDeps): PhoneUpdateStore 
         listeners.delete(fn);
       };
     },
-    check,
+    check: () => check(),
     update,
     start,
     stop,

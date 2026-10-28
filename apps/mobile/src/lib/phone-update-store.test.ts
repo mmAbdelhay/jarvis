@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { CHECK_EVERY_MS, FETCH_TIMEOUT_MS, RELEASES_URL } from "./phone-update";
+import { CHECK_EVERY_MS, DOWNLOAD_STALL_MS, FETCH_TIMEOUT_MS, RELEASES_URL } from "./phone-update";
 import { createPhoneUpdateStore, type PhoneUpdateDeps } from "./phone-update-store";
 import type { UpdateState } from "./phone-update-types";
 
@@ -224,10 +224,58 @@ describe("phone update store: check", () => {
     expect(store.get()).toMatchObject({ state: { kind: "ready" }, lastCheckedAt: 1_000_000 });
     f.offline = true;
     await store.check();
-    expect(store.get()).toMatchObject({ state: { kind: "failed" }, lastCheckedAt: 1_000_000 });
+    expect(store.get()).toMatchObject({ state: { kind: "ready" }, lastCheckedAt: 1_000_000 });
     f.offline = false;
     await store.check();
     expect(store.get().lastCheckedAt).toBe(2_000_000);
+  });
+
+  test("a failed background check keeps available and ready; Update still works", async () => {
+    const f = fake();
+    const store = createPhoneUpdateStore(f.deps);
+    store.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.get().state.kind).toBe("available");
+    f.offline = true;
+    await vi.advanceTimersByTimeAsync(CHECK_EVERY_MS);
+    expect(store.get().state).toEqual({
+      kind: "available",
+      version: "0.1.12",
+      notes: "notes 0.1.12",
+    });
+    expect(f.logs).toContain("check-failed");
+    f.offline = false;
+    await store.update();
+    expect(store.get().state).toEqual({ kind: "ready", version: "0.1.12" });
+    f.offline = true;
+    await vi.advanceTimersByTimeAsync(CHECK_EVERY_MS);
+    expect(store.get().state).toEqual({ kind: "ready", version: "0.1.12" });
+    store.stop();
+  });
+
+  test("a background check never flashes checking over an offer", async () => {
+    const f = fake();
+    const store = createPhoneUpdateStore(f.deps);
+    store.start();
+    await vi.advanceTimersByTimeAsync(0);
+    const seen: string[] = [];
+    store.subscribe((view) => seen.push(view.state.kind));
+    await vi.advanceTimersByTimeAsync(CHECK_EVERY_MS);
+    expect(seen).not.toContain("checking");
+    expect(store.get().state.kind).toBe("available");
+    store.stop();
+  });
+
+  test("a same-version check keeps ready; a newer release replaces the offer", async () => {
+    const f = fake();
+    const store = createPhoneUpdateStore(f.deps);
+    await store.check();
+    await store.update();
+    await store.check();
+    expect(store.get().state).toEqual({ kind: "ready", version: "0.1.12" });
+    f.releases = [release("v0.1.13"), release("v0.1.12")];
+    await store.check();
+    expect(store.get().state).toMatchObject({ kind: "available", version: "0.1.13" });
   });
 
   test("subscribers get each view; unsubscribe stops them", async () => {
@@ -260,11 +308,56 @@ describe("phone update store: update", () => {
       { kind: "downloading", version: "0.1.12", progress: 0 },
       { kind: "downloading", version: "0.1.12", progress: 0.5 },
       { kind: "downloading", version: "0.1.12", progress: 1 },
-      { kind: "verifying", version: "0.1.12" },
+      { kind: "verifying", version: "0.1.12", progress: 0 },
+      { kind: "verifying", version: "0.1.12", progress: 0.3 },
+      { kind: "verifying", version: "0.1.12", progress: 0.6 },
+      { kind: "verifying", version: "0.1.12", progress: 0.9 },
+      { kind: "verifying", version: "0.1.12", progress: 1 },
       { kind: "ready", version: "0.1.12" },
     ]);
     expect(f.downloads).toEqual([`${BASE}/download/v0.1.12/jarvis-mobile-0.1.12.apk`]);
     expect(f.installs).toEqual([APK_PATH]);
+  });
+
+  test("progress emits only when the whole percent rises", async () => {
+    const f = fake();
+    f.deps.download = async (_url, dest, onProgress) => {
+      for (const written of [1, 2, 3, 10, 11, 19, 20, 1000]) onProgress(written, 1000);
+      f.files.set(dest, APK_BYTES);
+    };
+    const store = createPhoneUpdateStore(f.deps);
+    await store.check();
+    const seen: number[] = [];
+    store.subscribe((view) => {
+      if (view.state.kind === "downloading") seen.push(view.state.progress);
+    });
+    await store.update();
+    expect(seen).toEqual([0, 0.01, 0.02, 1]);
+  });
+
+  test("a download with no progress for the stall time → aborted, file deleted, failed download", async () => {
+    const f = fake();
+    let aborted = false;
+    f.deps.download = (_url, dest, onProgress, signal) =>
+      new Promise((_resolve, reject) => {
+        f.files.set(dest, new Uint8Array([1]));
+        f.deps.setTimeout(() => onProgress(1, 10), DOWNLOAD_STALL_MS - 1000);
+        signal.addEventListener("abort", () => {
+          aborted = true;
+          reject(new Error("aborted"));
+        });
+      });
+    const store = createPhoneUpdateStore(f.deps);
+    await store.check();
+    const done = store.update();
+    await vi.advanceTimersByTimeAsync(DOWNLOAD_STALL_MS * 2 - 2000);
+    expect(store.get().state.kind).toBe("downloading");
+    await vi.advanceTimersByTimeAsync(2000);
+    await done;
+    expect(aborted).toBe(true);
+    expect(store.get().state).toEqual({ kind: "failed", reason: "download", version: "0.1.12" });
+    expect(f.files.has(APK_PATH)).toBe(false);
+    expect(f.installs).toEqual([]);
   });
 
   test("RF3: checksum mismatch → file deleted, failed checksum, installer never called", async () => {
@@ -290,13 +383,17 @@ describe("phone update store: update", () => {
     expect(f.installs).toEqual([]);
   });
 
-  test("SUMS without a line for the APK → failed checksum, nothing downloaded", async () => {
+  test("SUMS without a line for the APK → failed unverifiable, nothing downloaded", async () => {
     const f = fake();
     f.sums = `${"b".repeat(64)}  something-else.apk\n`;
     const store = createPhoneUpdateStore(f.deps);
     await store.check();
     await store.update();
-    expect(store.get().state).toEqual({ kind: "failed", reason: "checksum", version: "0.1.12" });
+    expect(store.get().state).toEqual({
+      kind: "failed",
+      reason: "unverifiable",
+      version: "0.1.12",
+    });
     expect(f.downloads).toEqual([]);
     expect(f.installs).toEqual([]);
   });
@@ -434,11 +531,12 @@ describe("phone update store: update", () => {
     await store.check();
     void store.update();
     await vi.advanceTimersByTimeAsync(0);
+    f.releases = [release("v0.1.13")];
     await store.check();
-    expect(store.get().state.kind).toBe("available");
+    expect(store.get().state).toMatchObject({ kind: "available", version: "0.1.13" });
     reject(new Error("late"));
     await vi.advanceTimersByTimeAsync(0);
-    expect(store.get().state.kind).toBe("available");
+    expect(store.get().state).toMatchObject({ kind: "available", version: "0.1.13" });
   });
 
   test.each(["ios", "web"])("%s: canInstall false and update() is a no-op", async (platform) => {

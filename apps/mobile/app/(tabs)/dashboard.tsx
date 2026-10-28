@@ -36,7 +36,8 @@ import { loadPairing } from "@/lib/pairing-record";
 import { createReviewsStore, type ReviewListItem, reviewRoute } from "@/lib/reviews-store";
 import { useConnectionStore, useRpcClient } from "@/lib/rpc-context";
 import { expoSecureStore } from "@/lib/secure-store";
-import { usePhoneUpdate } from "@/lib/phone-update-context";
+import { usePhoneUpdateSelect } from "@/lib/phone-update-context";
+import type { PhoneUpdateView } from "@/lib/phone-update-types";
 import { openSession, sessionTarget } from "@/lib/session-nav";
 import { answerPrompt } from "@/lib/session-prompt";
 import { theme } from "@/lib/theme";
@@ -59,7 +60,9 @@ export default function DashboardScreen() {
   const store = useMemo(() => createDashboardStore({ client }), [client]);
   const [view, setView] = useState<DashboardView>(store.get());
   const homeStore = useMemo(() => createHomeStore({ client }), [client]);
-  const updateBanner = updateBannerText(usePhoneUpdate(), language);
+  const updateBanner = usePhoneUpdateSelect(
+    useCallback((view: PhoneUpdateView) => updateBannerText(view, language), [language]),
+  );
   const openUpdates = useCallback(() => {
     router.push({ pathname: "/settings", params: { section: "updates" } });
   }, [router]);

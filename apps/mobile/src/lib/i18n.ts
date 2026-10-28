@@ -318,7 +318,14 @@ export const STRINGS = {
   },
   "updates.update": { en: "Update", ar: "حدّث" },
   "updates.downloading": { en: "Downloading {percent}%", ar: "جارٍ التنزيل {percent}%" },
-  "updates.verifying": { en: "Verifying…", ar: "جارٍ التحقق من الملف…" },
+  "updates.verifying": {
+    en: "Verifying {percent}%",
+    ar: "جارٍ التحقق من الملف {percent}%",
+  },
+  "updates.installElsewhere": {
+    en: "This phone can't install updates from here. Install the new build the same way you installed this one.",
+    ar: "لا يمكن لهذا الهاتف تثبيت التحديثات من هنا. ثبّت الإصدار الجديد بالطريقة نفسها التي ثبّتّ بها هذا الإصدار.",
+  },
   "updates.ready": {
     en: "Jarvis {version} is downloaded and verified. Tap Install on Android's screen.",
     ar: "نُزِّل الإصدار {version} وتم التحقق منه. اضغط «تثبيت» في شاشة أندرويد.",
@@ -336,6 +343,10 @@ export const STRINGS = {
   "updates.error.checksum": {
     en: "The download didn't match its checksum, so it was deleted. Tap Update to try again.",
     ar: "لم يطابق الملف المنزَّل بصمته، فحُذف. اضغط «حدّث» للمحاولة مرة أخرى.",
+  },
+  "updates.error.unverifiable": {
+    en: "This release has no checksum for the phone app, so it can't be installed safely.",
+    ar: "لا يحتوي هذا الإصدار على بصمة لتطبيق الهاتف، لذا لا يمكن تثبيته بأمان.",
   },
   "updates.error.install": {
     en: "Allow installs from Jarvis, then tap Update again.",

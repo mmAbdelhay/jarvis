@@ -29,6 +29,19 @@ export function usePhoneUpdateStore(): PhoneUpdateStore {
   return value;
 }
 
+/** One value picked from the store's view, kept live. Re-renders only when
+ *  the picked value changes (Object.is), so Home's banner does not re-render
+ *  on every download percent. `select` must be stable (useCallback). */
+export function usePhoneUpdateSelect<T>(select: (view: PhoneUpdateView) => T): T {
+  const store = usePhoneUpdateStore();
+  const [value, setValue] = useState<T>(() => select(store.get()));
+  useEffect(() => {
+    setValue(() => select(store.get()));
+    return store.subscribe((view) => setValue(() => select(view)));
+  }, [store, select]);
+  return value;
+}
+
 /** The store's current view, kept live. */
 export function usePhoneUpdate(): PhoneUpdateView {
   const store = usePhoneUpdateStore();

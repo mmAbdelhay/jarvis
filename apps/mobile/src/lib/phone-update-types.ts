@@ -8,11 +8,13 @@ export type UpdateState =
   | { kind: "current"; checkedAt: number }
   | { kind: "available"; version: string; notes: string }
   | { kind: "downloading"; version: string; progress: number }
-  | { kind: "verifying"; version: string }
+  /** progress: 0..1 of the file hashed so far. */
+  | { kind: "verifying"; version: string; progress: number }
   | { kind: "ready"; version: string }
   | {
       kind: "failed";
-      reason: "offline" | "download" | "checksum" | "install";
+      /** unverifiable: the release's SHA256SUMS has no line for the APK. */
+      reason: "offline" | "download" | "checksum" | "unverifiable" | "install";
       version?: string;
     };
 
