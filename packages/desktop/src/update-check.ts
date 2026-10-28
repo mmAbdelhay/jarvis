@@ -3,11 +3,11 @@
 // automatic checks. It is one GET to GitHub's public releases API: no
 // token, nothing about this machine in it.
 
-export const RELEASES_API = "https://api.github.com/repos/mmAbdelhay/jarvis/releases/latest";
+import { isNewer, type ReleaseAsset } from "@jarvis/wire";
 
-/** One file attached to a release. Not yet trusted: which of these may be
- *  downloaded is decided by `update-asset.ts`, not here. */
-export type ReleaseAsset = { name: string; url: string; size: number };
+export { isNewer, type ReleaseAsset } from "@jarvis/wire";
+
+export const RELEASES_API = "https://api.github.com/repos/mmAbdelhay/jarvis/releases/latest";
 
 export type UpdateCheck =
   | { kind: "current"; current: string }
@@ -23,26 +23,6 @@ export type UpdateCheck =
 
 /** Release notes are shown in Settings; a runaway body is cut, not refused. */
 const MAX_NOTES = 4000;
-
-/** `0.1.5` / `v0.1.5` → [0, 1, 5]; undefined for anything else. A
- *  pre-release suffix ("-beta.2") is not newer than its own release. */
-function parseVersion(version: string): [number, number, number] | undefined {
-  const match = /^v?(\d+)\.(\d+)\.(\d+)/.exec(version.trim());
-  if (match === null) return undefined;
-  return [Number(match[1]), Number(match[2]), Number(match[3])];
-}
-
-export function isNewer(latest: string, current: string): boolean {
-  const a = parseVersion(latest);
-  const b = parseVersion(current);
-  if (a === undefined || b === undefined) return false;
-  for (let i = 0; i < 3; i++) {
-    const x = a[i] ?? 0;
-    const y = b[i] ?? 0;
-    if (x !== y) return x > y;
-  }
-  return false;
-}
 
 /** GitHub's `assets` array → the well-formed entries; anything else → []. */
 function parseAssets(raw: unknown): ReleaseAsset[] {
