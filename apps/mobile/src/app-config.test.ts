@@ -47,6 +47,10 @@ describe("app.config.ts", () => {
     expect(config.android?.permissions).toContain("CAMERA");
   });
 
+  test("android.permissions lets the phone updater open the installer", () => {
+    expect(config.android?.permissions).toContain("REQUEST_INSTALL_PACKAGES");
+  });
+
   test("ios.infoPlist has no UIBackgroundModes", () => {
     expect(config.ios?.infoPlist?.UIBackgroundModes).toBeUndefined();
   });

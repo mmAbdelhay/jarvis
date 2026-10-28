@@ -70,7 +70,7 @@ const config: ExpoConfig = {
       foregroundImage: "./assets/adaptive-icon.png",
       backgroundColor: "#0B0D12",
     },
-    permissions: ["CAMERA", "RECORD_AUDIO"],
+    permissions: ["CAMERA", "RECORD_AUDIO", "REQUEST_INSTALL_PACKAGES"],
     ...(HAS_GOOGLE_SERVICES ? { googleServicesFile: GOOGLE_SERVICES_FILE } : {}),
   },
   // Browser client (Task 12): a single-page app (one index.html, client-side
