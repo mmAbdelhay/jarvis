@@ -6,10 +6,18 @@
 //
 // Rules (task-3-brief.md):
 // - canInstall only on Android; elsewhere update() is a no-op.
+// - canCheck everywhere but web: the bridge serves the web build with a CSP
+//   whose connect-src allows wss only, so a fetch to api.github.com always
+//   fails there. Web start()/check() do nothing and the store stays idle.
+//   iOS checks (it can name a newer version) but never installs.
 // - One operation at a time: check() and update() are ignored while a
 //   check, download or verify runs (Update tapped twice → one download).
 // - A failed or unreadable verify deletes the file; the installer is never
 //   called with anything that did not just hash to the SUMS line.
+// - busy ends once the file is verified ("ready"), before the installer
+//   opens: its result can be lost (the activity never returns), and that
+//   must not block later checks or updates. A late installer rejection only
+//   lands while that same "ready" state is still showing.
 // - In "ready", update() re-verifies the kept file and re-opens the
 //   installer (after "Allow installs from Jarvis"); a missing file is
 //   downloaded again.
@@ -73,19 +81,23 @@ class Timeout extends Error {}
 
 export function createPhoneUpdateStore(deps: PhoneUpdateDeps): PhoneUpdateStore {
   const canInstall = deps.platform === "android";
+  const canCheck = deps.platform !== "web";
   const listeners = new Set<(view: PhoneUpdateView) => void>();
   let state: UpdateState = { kind: "idle" };
   let release: Release | undefined;
   /** The file that last verified for `release`, kept for an installer retry. */
   let verifiedPath: string | undefined;
   let busy = false;
+  /** When the last check started; drives the 24 h foreground re-check. */
   let lastCheckAt: number | undefined;
+  /** When a check last succeeded; shown as "Last checked". */
+  let lastCheckedAt: number | undefined;
   let started = false;
   let interval: unknown;
   let stopForeground: (() => void) | undefined;
 
   function view(): PhoneUpdateView {
-    return { state, current: deps.current, canInstall };
+    return { state, current: deps.current, canInstall, canCheck, lastCheckedAt };
   }
 
   function set(next: UpdateState): void {
@@ -111,7 +123,7 @@ export function createPhoneUpdateStore(deps: PhoneUpdateDeps): PhoneUpdateStore 
   }
 
   async function check(): Promise<void> {
-    if (busy) return;
+    if (!canCheck || busy) return;
     busy = true;
     lastCheckAt = deps.now();
     set({ kind: "checking" });
@@ -124,10 +136,11 @@ export function createPhoneUpdateStore(deps: PhoneUpdateDeps): PhoneUpdateStore 
       );
       const result = parseReleaseList(raw, deps.current);
       if (result.kind === "failed") throw new Error("parse");
+      lastCheckedAt = deps.now();
       if (result.kind === "current") {
         release = undefined;
         verifiedPath = undefined;
-        set({ kind: "current", checkedAt: deps.now() });
+        set({ kind: "current", checkedAt: lastCheckedAt });
         return;
       }
       if (release?.version !== result.version) verifiedPath = undefined;
@@ -217,12 +230,14 @@ export function createPhoneUpdateStore(deps: PhoneUpdateDeps): PhoneUpdateStore 
         return;
       }
       verifiedPath = path;
-      set({ kind: "ready", version });
+      const ready: UpdateState = { kind: "ready", version };
+      set(ready);
+      busy = false;
       try {
         await deps.openInstaller(path);
       } catch {
         deps.log("install-failed");
-        set({ kind: "failed", reason: "install", version });
+        if (state === ready) set({ kind: "failed", reason: "install", version });
       }
     } finally {
       busy = false;
@@ -230,7 +245,7 @@ export function createPhoneUpdateStore(deps: PhoneUpdateDeps): PhoneUpdateStore 
   }
 
   function start(): void {
-    if (started) return;
+    if (started || !canCheck) return;
     started = true;
     for (const name of deps.listCache()) {
       if (isUpdateFileName(name)) deps.deleteFile(cachePath(deps.cacheDir, name));

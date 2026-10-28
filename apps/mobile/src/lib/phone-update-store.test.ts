@@ -151,6 +151,8 @@ describe("phone update store: check", () => {
       state: { kind: "available", version: "0.1.12", notes: "notes 0.1.12" },
       current: "0.1.10",
       canInstall: true,
+      canCheck: true,
+      lastCheckedAt: 1_000_000,
     });
   });
 
@@ -209,6 +211,23 @@ describe("phone update store: check", () => {
     await vi.advanceTimersByTimeAsync(FETCH_TIMEOUT_MS);
     await done;
     expect(hung.get().state).toEqual({ kind: "failed", reason: "offline" });
+  });
+
+  test("lastCheckedAt: unset before a check, kept through later states and a failed check", async () => {
+    const f = fake();
+    const store = createPhoneUpdateStore(f.deps);
+    expect(store.get().lastCheckedAt).toBeUndefined();
+    await store.check();
+    expect(store.get().lastCheckedAt).toBe(1_000_000);
+    vi.setSystemTime(2_000_000);
+    await store.update();
+    expect(store.get()).toMatchObject({ state: { kind: "ready" }, lastCheckedAt: 1_000_000 });
+    f.offline = true;
+    await store.check();
+    expect(store.get()).toMatchObject({ state: { kind: "failed" }, lastCheckedAt: 1_000_000 });
+    f.offline = false;
+    await store.check();
+    expect(store.get().lastCheckedAt).toBe(2_000_000);
   });
 
   test("subscribers get each view; unsubscribe stops them", async () => {
@@ -362,16 +381,77 @@ describe("phone update store: update", () => {
     expect(store.get().state).toEqual({ kind: "idle" });
   });
 
+  test("web never fetches: start() and check() leave it idle, canCheck false", async () => {
+    const f = fake("web");
+    const store = createPhoneUpdateStore(f.deps);
+    store.start();
+    await store.check();
+    await vi.advanceTimersByTimeAsync(CHECK_EVERY_MS * 2);
+    f.foreground();
+    await store.update();
+    expect(f.fetchCalls).toEqual([]);
+    expect(store.get()).toMatchObject({
+      state: { kind: "idle" },
+      canCheck: false,
+      canInstall: false,
+    });
+    store.stop();
+  });
+
+  test("a lost installer result never blocks Check or Update; a second launch that rejects → failed install", async () => {
+    const f = fake();
+    const store = createPhoneUpdateStore(f.deps);
+    await store.check();
+    f.deps.openInstaller = (path) => {
+      f.installs.push(path);
+      return new Promise(() => {});
+    };
+    void store.update();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.get().state).toEqual({ kind: "ready", version: "0.1.12" });
+    f.deps.openInstaller = (path) => {
+      f.installs.push(path);
+      return Promise.reject(new Error("already started"));
+    };
+    await store.update();
+    expect(f.installs.length).toBe(2);
+    expect(f.downloads.length).toBe(1);
+    expect(store.get().state).toEqual({ kind: "failed", reason: "install", version: "0.1.12" });
+    const fetches = f.fetchCalls.length;
+    await store.check();
+    expect(f.fetchCalls.length).toBe(fetches + 1);
+    expect(store.get().state.kind).toBe("available");
+  });
+
+  test("a late installer rejection does not overwrite a newer state", async () => {
+    const f = fake();
+    let reject: (error: Error) => void = () => {};
+    f.deps.openInstaller = () =>
+      new Promise((_resolve, rej) => {
+        reject = rej;
+      });
+    const store = createPhoneUpdateStore(f.deps);
+    await store.check();
+    void store.update();
+    await vi.advanceTimersByTimeAsync(0);
+    await store.check();
+    expect(store.get().state.kind).toBe("available");
+    reject(new Error("late"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.get().state.kind).toBe("available");
+  });
+
   test.each(["ios", "web"])("%s: canInstall false and update() is a no-op", async (platform) => {
     const f = fake(platform);
     const store = createPhoneUpdateStore(f.deps);
     await store.check();
     expect(store.get().canInstall).toBe(false);
-    expect(store.get().state).toMatchObject({ kind: "available", version: "0.1.12" });
+    const before = store.get().state;
+    expect(before.kind).toBe(platform === "ios" ? "available" : "idle");
     await store.update();
     expect(f.downloads).toEqual([]);
     expect(f.installs).toEqual([]);
-    expect(store.get().state.kind).toBe("available");
+    expect(store.get().state).toEqual(before);
   });
 });
 

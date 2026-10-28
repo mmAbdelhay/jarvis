@@ -5,14 +5,15 @@ import type { PhoneUpdateView, UpdateState } from "./phone-update-types";
 
 export type UpdateCardView = {
   installed: string;
-  /** The newer version on offer; Android only. */
+  /** The newer version on offer; wherever the platform checks. */
   newest: string | undefined;
   lastChecked: string | undefined;
   status: string | undefined;
   error: string | undefined;
   /** Release notes, drawn collapsed; Android only. */
   notes: string | undefined;
-  check: { label: string; disabled: boolean };
+  /** Undefined where the platform never checks (web). */
+  check: { label: string; disabled: boolean } | undefined;
   /** Undefined when there is nothing to install, or the platform cannot. */
   update: { label: string; disabled: boolean } | undefined;
   /** 0..1 while downloading. */
@@ -93,14 +94,14 @@ function updateButton(
 
 export function updateCardView(view: PhoneUpdateView, language: Language): UpdateCardView {
   const { state } = view;
-  const offered = view.canInstall ? offeredVersion(state) : undefined;
+  const offered = view.canCheck ? offeredVersion(state) : undefined;
   return {
     installed: t(language, "updates.installed", { version: view.current }),
     newest: offered === undefined ? undefined : t(language, "updates.newest", { version: offered }),
     lastChecked:
-      state.kind === "current"
+      view.lastCheckedAt !== undefined
         ? t(language, "updates.lastChecked", {
-            time: new Date(state.checkedAt).toLocaleString(language === "ar" ? "ar" : "en-US", {
+            time: new Date(view.lastCheckedAt).toLocaleString(language === "ar" ? "ar" : "en-US", {
               dateStyle: "medium",
               timeStyle: "short",
             }),
@@ -112,7 +113,9 @@ export function updateCardView(view: PhoneUpdateView, language: Language): Updat
       view.canInstall && state.kind === "available" && state.notes.trim() !== ""
         ? state.notes
         : undefined,
-    check: { label: t(language, "updates.checkNow"), disabled: BUSY.has(state.kind) },
+    check: view.canCheck
+      ? { label: t(language, "updates.checkNow"), disabled: BUSY.has(state.kind) }
+      : undefined,
     update: view.canInstall ? updateButton(language, state) : undefined,
     progress: view.canInstall && state.kind === "downloading" ? state.progress : undefined,
   };

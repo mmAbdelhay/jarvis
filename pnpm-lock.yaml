@@ -72,7 +72,7 @@ importers:
         specifier: ~57.0.20
         version: 57.0.20(expo@57.0.23)
       expo-intent-launcher:
-        specifier: ~57.0.1
+        specifier: 57.0.1
         version: 57.0.1(expo@57.0.23)
       expo-linking:
         specifier: 57.0.10

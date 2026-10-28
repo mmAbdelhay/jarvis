@@ -22,6 +22,11 @@ export type PhoneUpdateView = {
   current: string;
   /** Only Android can download and install an update. */
   canInstall: boolean;
+  /** False on web: the bridge's CSP blocks api.github.com, so the browser
+   *  build never checks and shows the version only. */
+  canCheck: boolean;
+  /** When a check last succeeded; kept through every later state. */
+  lastCheckedAt: number | undefined;
 };
 
 export type PhoneUpdateStore = {

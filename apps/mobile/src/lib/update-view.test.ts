@@ -1,20 +1,25 @@
 import { describe, expect, it } from "vitest";
-import { createIdlePhoneUpdateStore } from "./phone-update-idle";
 import type { PhoneUpdateView, UpdateState } from "./phone-update-types";
 import { updateBannerText, updateCardView } from "./update-view";
 
-function android(state: UpdateState): PhoneUpdateView {
-  return { state, current: "0.1.11", canInstall: true };
+const CHECKED_AT = Date.UTC(2026, 9, 28, 9, 30);
+
+function android(state: UpdateState, lastCheckedAt?: number): PhoneUpdateView {
+  return { state, current: "0.1.11", canInstall: true, canCheck: true, lastCheckedAt };
 }
 
 function ios(state: UpdateState): PhoneUpdateView {
-  return { state, current: "0.1.11", canInstall: false };
+  return { state, current: "0.1.11", canInstall: false, canCheck: true, lastCheckedAt: undefined };
+}
+
+function web(state: UpdateState): PhoneUpdateView {
+  return { state, current: "0.1.11", canInstall: false, canCheck: false, lastCheckedAt: undefined };
 }
 
 const ALL_STATES: UpdateState[] = [
   { kind: "idle" },
   { kind: "checking" },
-  { kind: "current", checkedAt: Date.UTC(2026, 9, 28, 9, 30) },
+  { kind: "current", checkedAt: CHECKED_AT },
   { kind: "available", version: "0.1.12", notes: "Faster terminal." },
   { kind: "downloading", version: "0.1.12", progress: 0.42 },
   { kind: "verifying", version: "0.1.12" },
@@ -30,13 +35,13 @@ describe("updateCardView", () => {
     for (const state of ALL_STATES) {
       const card = updateCardView(android(state), "en");
       expect(card.installed).toBe("Installed: 0.1.11");
-      expect(card.check.label).toBe("Check now");
+      expect(card.check?.label).toBe("Check now");
     }
   });
 
   it("disables Check now only while busy", () => {
     const disabled = ALL_STATES.filter(
-      (state) => updateCardView(android(state), "en").check.disabled,
+      (state) => updateCardView(android(state), "en").check?.disabled,
     ).map((state) => state.kind);
     expect(disabled).toEqual(["checking", "downloading", "verifying"]);
   });
@@ -57,10 +62,19 @@ describe("updateCardView", () => {
   });
 
   it("current says up to date with the last check", () => {
-    const card = updateCardView(android(ALL_STATES[2] as UpdateState), "en");
+    const card = updateCardView(android(ALL_STATES[2] as UpdateState, CHECKED_AT), "en");
     expect(card.status).toBe("You're on the latest version (0.1.11).");
     expect(card.lastChecked).toMatch(/^Last checked /);
     expect(card.update).toBeUndefined();
+  });
+
+  it("shows Last checked in every state once a check succeeded, never before", () => {
+    for (const state of ALL_STATES) {
+      expect(updateCardView(android(state, CHECKED_AT), "en").lastChecked).toMatch(
+        /^Last checked /,
+      );
+      expect(updateCardView(android(state), "en").lastChecked).toBeUndefined();
+    }
   });
 
   it("available shows the newest version, the notes and Update", () => {
@@ -125,14 +139,30 @@ describe("updateCardView", () => {
     expect(card.update?.label).toBe("جارٍ التنزيل 50%");
   });
 
-  it("iOS and web hide Update, the newest version, notes and progress", () => {
+  it("iOS checks and names a newer version, but hides Update, notes and progress", () => {
     for (const state of ALL_STATES) {
       const card = updateCardView(ios(state), "en");
       expect(card.update).toBeUndefined();
-      expect(card.newest).toBeUndefined();
       expect(card.notes).toBeUndefined();
       expect(card.progress).toBeUndefined();
-      expect(card.check.label).toBe("Check now");
+      expect(card.check?.label).toBe("Check now");
+    }
+    expect(
+      updateCardView(ios({ kind: "available", version: "0.1.12", notes: "x" }), "en").newest,
+    ).toBe("Newest: 0.1.12");
+  });
+
+  it("web shows the version only: no Check now, Update, newest, notes or progress", () => {
+    for (const state of ALL_STATES) {
+      const card = updateCardView(web(state), "en");
+      expect(card.installed).toBe("Installed: 0.1.11");
+      expect(card).toMatchObject({
+        check: undefined,
+        update: undefined,
+        newest: undefined,
+        notes: undefined,
+        progress: undefined,
+      });
     }
   });
 });
@@ -152,24 +182,5 @@ describe("updateBannerText", () => {
     for (const state of ALL_STATES) {
       expect(updateBannerText(ios(state), "en")).toBeUndefined();
     }
-  });
-});
-
-describe("the idle store at the app-root seam", () => {
-  it("reports idle and does nothing", async () => {
-    const store = createIdlePhoneUpdateStore({
-      state: { kind: "idle" },
-      current: "0.0.0",
-      canInstall: false,
-    });
-    store.start();
-    await store.check();
-    await store.update();
-    const unsubscribe = store.subscribe(() => {
-      throw new Error("never notifies");
-    });
-    unsubscribe();
-    store.stop();
-    expect(store.get()).toEqual({ state: { kind: "idle" }, current: "0.0.0", canInstall: false });
   });
 });

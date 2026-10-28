@@ -1,5 +1,5 @@
-// Settings → Updates: the installed version, the newest one, Check now and
-// (Android only) Update. The phone-update store decides everything; this
+// Settings → Updates: the installed version, the newest one, Check now
+// (not on web) and (Android only) Update. The phone-update store decides everything; this
 // only draws update-view.ts's words and passes the presses back.
 import { useState } from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
@@ -40,15 +40,17 @@ export function UpdatesSection(props: { language: Language }): React.JSX.Element
         </View>
       )}
       <View style={styles.row}>
-        <TouchableOpacity
-          accessibilityRole="button"
-          accessibilityState={{ disabled: card.check.disabled }}
-          disabled={card.check.disabled}
-          style={[styles.secondary, card.check.disabled && styles.disabled]}
-          onPress={() => void store.check()}
-        >
-          <Text style={styles.secondaryText}>{card.check.label}</Text>
-        </TouchableOpacity>
+        {card.check !== undefined && (
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityState={{ disabled: card.check.disabled }}
+            disabled={card.check.disabled}
+            style={[styles.secondary, card.check.disabled && styles.disabled]}
+            onPress={() => void store.check()}
+          >
+            <Text style={styles.secondaryText}>{card.check.label}</Text>
+          </TouchableOpacity>
+        )}
         {card.update !== undefined && (
           <TouchableOpacity
             accessibilityRole="button"
