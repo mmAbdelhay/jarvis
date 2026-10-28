@@ -74,7 +74,7 @@ describe("attach", () => {
     const { deps, attach } = harness();
     deps.uploads.release.mockImplementation(async () => {
       expect(deps.fs.writeFile).toHaveBeenCalledWith(
-        "/project/.jarvis/uploads/20260102-030405-abcdef.jpg",
+        join("/project", ".jarvis", "uploads", "20260102-030405-abcdef.jpg"),
         new Uint8Array([1, 2]),
         { flag: "wx", mode: 0o600 },
       );
@@ -83,14 +83,18 @@ describe("attach", () => {
       ok: true,
       path: ".jarvis/uploads/20260102-030405-abcdef.jpg",
     });
-    expect(deps.fs.mkdir).toHaveBeenCalledWith("/project/.jarvis/uploads", {
+    expect(deps.fs.mkdir).toHaveBeenCalledWith(join("/project", ".jarvis", "uploads"), {
       recursive: true,
       mode: 0o700,
     });
-    expect(deps.fs.writeFile).toHaveBeenCalledWith("/project/.jarvis/uploads/.gitignore", "*\n", {
-      flag: "wx",
-      mode: 0o600,
-    });
+    expect(deps.fs.writeFile).toHaveBeenCalledWith(
+      join("/project", ".jarvis", "uploads", ".gitignore"),
+      "*\n",
+      {
+        flag: "wx",
+        mode: 0o600,
+      },
+    );
     expect(deps.uploads.release).toHaveBeenCalledWith("device", fileId);
     expect(deps.randomHex).toHaveBeenCalledWith(3);
   });
@@ -157,7 +161,7 @@ describe("attach", () => {
     });
   });
 
-  it.each([["/project/.jarvis"], ["/project/.jarvis/uploads"]])(
+  it.each([[join("/project", ".jarvis")], [join("/project", ".jarvis", "uploads")]])(
     "symlink at %s → refused before any mkdir",
     async (link) => {
       const { deps, attach } = harness();
@@ -179,13 +183,13 @@ describe("attach", () => {
     const beforeMkdir = deps.fs.lstat.mock.calls.filter(
       (_, i) => (deps.fs.lstat.mock.invocationCallOrder[i] ?? 0) < mkdirAt,
     );
-    expect(beforeMkdir).toEqual([["/project/.jarvis"]]);
+    expect(beforeMkdir).toEqual([[join("/project", ".jarvis")]]);
   });
 
   it("chmods the uploads dir to 0700 after the realpath check", async () => {
     const { deps, attach } = harness();
     expect((await attach("device", "pane", fileId)).ok).toBe(true);
-    expect(deps.fs.chmod).toHaveBeenCalledWith("/project/.jarvis/uploads", 0o700);
+    expect(deps.fs.chmod).toHaveBeenCalledWith(join("/project", ".jarvis", "uploads"), 0o700);
     expect(deps.fs.chmod.mock.invocationCallOrder[0]).toBeGreaterThan(
       deps.fs.realpath.mock.invocationCallOrder.at(-1) ?? Number.POSITIVE_INFINITY,
     );
@@ -206,9 +210,12 @@ describe("attach", () => {
       .mockResolvedValueOnce(undefined)
       .mockRejectedValueOnce(Object.assign(new Error("disk full"), { code: "ENOSPC" }));
     expect((await attach("device", "pane", fileId)).ok).toBe(false);
-    expect(deps.fs.rm).toHaveBeenCalledWith("/project/.jarvis/uploads/20260102-030405-abcdef.jpg", {
-      force: true,
-    });
+    expect(deps.fs.rm).toHaveBeenCalledWith(
+      join("/project", ".jarvis", "uploads", "20260102-030405-abcdef.jpg"),
+      {
+        force: true,
+      },
+    );
     expect(deps.uploads.release).not.toHaveBeenCalled();
   });
 
