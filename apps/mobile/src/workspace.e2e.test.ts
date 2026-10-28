@@ -399,12 +399,16 @@ describe("workspace.e2e: Workspace panes, Changes, uploads/Postman import, api:s
     expect(blob.ch).toBe(FILE_UPLOAD_CHANNEL);
     expect(blob.a).toEqual([{ name: "c.json", contentType: "application/json" }]);
     const fileId = "1".repeat(32);
+    // The laptop answers a GitViewResult envelope (desktop file-upload.ts put()).
     answerBlob(socket, {
-      fileId,
-      name: "c.json",
-      contentType: "application/json",
-      bytes: collectionBytes.length,
-      expiresAt: Date.now() + 3_600_000,
+      ok: true,
+      value: {
+        fileId,
+        name: "c.json",
+        contentType: "application/json",
+        bytes: collectionBytes.length,
+        expiresAt: Date.now() + 3_600_000,
+      },
     });
     const uploadResult = await uploadPromise;
     expect(uploadResult.kind).toBe("ok");
