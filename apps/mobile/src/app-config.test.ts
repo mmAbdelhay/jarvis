@@ -4,11 +4,11 @@
 // this task did not drop an existing plugin. `app.config.ts` has no native
 // code of its own — plain data — so it is safe to import directly here,
 // unlike a `native-*.ts(x)` file.
+import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
-import config from "../app.config";
-import { appVersion } from "../app-version";
+import config, { appVersion } from "../app.config";
 import { theme } from "./lib/theme";
 
 const AR_CODE_POINT = /[؀-ۿ]/;
@@ -167,6 +167,23 @@ describe("app.config.ts: web target (Task 12)", () => {
 });
 
 describe("app.config.ts: release version", () => {
+  test("Expo loads release config without Node TypeScript stripping", () => {
+    const result = spawnSync(
+      process.execPath,
+      [
+        "--no-experimental-strip-types",
+        fileURLToPath(new URL("../node_modules/expo/bin/cli", import.meta.url)),
+        "config",
+        "--json",
+      ],
+      { cwd: fileURLToPath(new URL("..", import.meta.url)), encoding: "utf8" },
+    );
+    expect(result.status, result.stderr).toBe(0);
+    const loaded = JSON.parse(result.stdout);
+    expect(loaded.version).toBe(config.version);
+    expect(loaded.android.versionCode).toBe(config.android?.versionCode);
+  }, 30_000);
+
   test("uses the desktop release version and Android versionCode", () => {
     const desktopText = readFileSync(
       fileURLToPath(new URL("../../../packages/desktop/package.json", import.meta.url)),

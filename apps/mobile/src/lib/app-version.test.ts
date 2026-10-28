@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { appVersion } from "../../app-version";
+import { appVersion } from "../../app.config";
 import { installedVersion } from "./app-version";
 
 const constants = vi.hoisted(() => ({
