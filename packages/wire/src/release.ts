@@ -45,19 +45,7 @@ export function parseSums(text: string): Map<string, string> {
 
 /** Only this project's HTTPS download for exactly this version and file. */
 export function isReleaseDownloadUrl(url: string, version: string, name: string): boolean {
-  try {
-    const parsed = new URL(url);
-    return (
-      parsed.protocol === "https:" &&
-      parsed.hostname === "github.com" &&
-      parsed.port === "" &&
-      parsed.username === "" &&
-      parsed.password === "" &&
-      parsed.pathname === `/mmAbdelhay/jarvis/releases/download/v${version}/${name}`
-    );
-  } catch {
-    return false;
-  }
+  return url === `https://github.com/mmAbdelhay/jarvis/releases/download/v${version}/${name}`;
 }
 
 /** GitHub's `assets` array → the well-formed entries; anything else → []. */
@@ -98,6 +86,7 @@ export function parseReleaseList(raw: unknown, current: string): ReleaseList {
     const pageUrl = release["html_url"];
     if (
       typeof tag !== "string" ||
+      /^v(\d+)\.(\d+)\.(\d+)$/.exec(tag)?.[0] !== tag ||
       typeof pageUrl !== "string" ||
       !pageUrl.startsWith("https://github.com/mmAbdelhay/jarvis/releases/")
     )

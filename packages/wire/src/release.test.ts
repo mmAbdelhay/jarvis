@@ -41,6 +41,12 @@ describe("shared release helpers", () => {
       url.replace("github.com", "user@github.com"),
       url.replace("github.com", "github.com:8443"),
       url.replace("SHA256SUMS", "other"),
+      url.replace("github.com", "GITHUB.COM"),
+      url.replace("github.com", "github.com:443"),
+      url.replace("/SHA256SUMS", "/other/../SHA256SUMS"),
+      `${url}?download=1`,
+      `${url}#fragment`,
+      ` ${url}`,
       "not a URL",
     ]) {
       expect(isReleaseDownloadUrl(bad, "0.1.9", "SHA256SUMS"), bad).toBe(false);
@@ -70,6 +76,22 @@ describe("parseReleaseList", () => {
         parseReleaseList([{ ...release("0.1.11"), assets }, release("0.1.10")], "0.1.9"),
       ).toMatchObject({ kind: "newer", version: "0.1.10" });
     }
+  });
+
+  it.each(["0.2.0-rc1", "0.2.0foo", "0.2.0/x", "0.2.0%2Fx", "0.2.0\n"])(
+    "skips a non-stable tag v%s and selects an older valid release",
+    (version) => {
+      expect(parseReleaseList([release(version), release("0.1.10")], "0.1.9")).toMatchObject({
+        kind: "newer",
+        version: "0.1.10",
+      });
+    },
+  );
+
+  it("skips a tag without the required v prefix", () => {
+    expect(
+      parseReleaseList([{ ...release("0.2.0"), tag_name: "0.2.0" }, release("0.1.10")], "0.1.9"),
+    ).toMatchObject({ kind: "newer", version: "0.1.10" });
   });
 
   it("skips draft and prerelease entries", () => {
