@@ -36,9 +36,11 @@ import { loadPairing } from "@/lib/pairing-record";
 import { createReviewsStore, type ReviewListItem, reviewRoute } from "@/lib/reviews-store";
 import { useConnectionStore, useRpcClient } from "@/lib/rpc-context";
 import { expoSecureStore } from "@/lib/secure-store";
+import { usePhoneUpdate } from "@/lib/phone-update-context";
 import { openSession, sessionTarget } from "@/lib/session-nav";
 import { answerPrompt } from "@/lib/session-prompt";
 import { theme } from "@/lib/theme";
+import { updateBannerText } from "@/lib/update-view";
 import { useLayoutClass } from "@/lib/use-layout-class";
 import { contentWidth, homeSideBySide } from "@/lib/wide-breakpoints";
 import { WIDE_PANEL_MAX_WIDTH } from "@/lib/wide-panel";
@@ -57,6 +59,10 @@ export default function DashboardScreen() {
   const store = useMemo(() => createDashboardStore({ client }), [client]);
   const [view, setView] = useState<DashboardView>(store.get());
   const homeStore = useMemo(() => createHomeStore({ client }), [client]);
+  const updateBanner = updateBannerText(usePhoneUpdate(), language);
+  const openUpdates = useCallback(() => {
+    router.push({ pathname: "/settings", params: { section: "updates" } });
+  }, [router]);
   const [home, setHome] = useState<HomeView>(homeStore.get());
   const countsStore = useMemo(() => createChangeCountsStore({ client }), [client]);
   const [counts, setCounts] = useState<ChangeCountsView>(countsStore.get());
@@ -277,6 +283,8 @@ export default function DashboardScreen() {
             }}
             onAnswer={answer}
             onOpen={openById}
+            updateBanner={updateBanner}
+            onOpenUpdates={openUpdates}
           />
           <View style={[styles.lower, homeSideBySide(content) && styles.lowerRow]}>
             <View style={[styles.activeStack, homeSideBySide(content) && styles.activeCol]}>
@@ -326,6 +334,8 @@ export default function DashboardScreen() {
             wide={undefined}
             onAnswer={answer}
             onOpen={openById}
+            updateBanner={updateBanner}
+            onOpenUpdates={openUpdates}
           />
           <MetricStrip language={language} metrics={view.metrics} />
           <View style={styles.quickActions}>

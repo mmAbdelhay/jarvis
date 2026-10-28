@@ -306,6 +306,50 @@ export const STRINGS = {
     en: "App version {version}",
     ar: "إصدار التطبيق {version}",
   },
+  "updates.title": { en: "Updates", ar: "التحديثات" },
+  "updates.installed": { en: "Installed: {version}", ar: "المثبّت: {version}" },
+  "updates.newest": { en: "Newest: {version}", ar: "الأحدث: {version}" },
+  "updates.lastChecked": { en: "Last checked {time}", ar: "آخر تحقق {time}" },
+  "updates.checkNow": { en: "Check now", ar: "تحقّق الآن" },
+  "updates.checking": { en: "Checking…", ar: "جارٍ التحقق…" },
+  "updates.current": {
+    en: "You're on the latest version ({version}).",
+    ar: "هذا أحدث إصدار ({version}).",
+  },
+  "updates.update": { en: "Update", ar: "حدّث" },
+  "updates.downloading": { en: "Downloading {percent}%", ar: "جارٍ التنزيل {percent}%" },
+  "updates.verifying": { en: "Verifying…", ar: "جارٍ التحقق من الملف…" },
+  "updates.ready": {
+    en: "Jarvis {version} is downloaded and verified. Tap Install on Android's screen.",
+    ar: "نُزِّل الإصدار {version} وتم التحقق منه. اضغط «تثبيت» في شاشة أندرويد.",
+  },
+  "updates.showNotes": { en: "Show release notes", ar: "اعرض ملاحظات الإصدار" },
+  "updates.hideNotes": { en: "Hide release notes", ar: "أخفِ ملاحظات الإصدار" },
+  "updates.error.offline": {
+    en: "Couldn't check for updates. Check your connection and try again.",
+    ar: "تعذّر التحقق من التحديثات. تحقّق من اتصالك وحاول مرة أخرى.",
+  },
+  "updates.error.download": {
+    en: "The download failed. Tap Update to try again.",
+    ar: "فشل التنزيل. اضغط «حدّث» للمحاولة مرة أخرى.",
+  },
+  "updates.error.checksum": {
+    en: "The download didn't match its checksum, so it was deleted. Tap Update to try again.",
+    ar: "لم يطابق الملف المنزَّل بصمته، فحُذف. اضغط «حدّث» للمحاولة مرة أخرى.",
+  },
+  "updates.error.install": {
+    en: "Allow installs from Jarvis, then tap Update again.",
+    ar: "اسمح بالتثبيت من جارفيس، ثم اضغط «حدّث» مرة أخرى.",
+  },
+  "updates.bannerAvailable": {
+    en: "Update available: Jarvis {version}",
+    ar: "يتوفر تحديث: جارفيس {version}",
+  },
+  "updates.bannerReady": {
+    en: "Jarvis {version} is ready to install",
+    ar: "جارفيس {version} جاهز للتثبيت",
+  },
+  "updates.bannerOpen": { en: "Open Updates in Settings", ar: "افتح التحديثات في الإعدادات" },
   "settings.notPaired": {
     en: "Not paired.",
     ar: "غير مقترن.",

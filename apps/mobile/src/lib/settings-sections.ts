@@ -15,6 +15,7 @@ const NATIVE_SECTIONS = [
   { id: "laptop", labelKey: "laptopSettings.title" },
   { id: "connection", labelKey: "settings.connection" },
   { id: "security", labelKey: "settings.security" },
+  { id: "updates", labelKey: "updates.title" },
 ] as const satisfies readonly SettingsSection[];
 
 const WEB_SECTIONS = [
