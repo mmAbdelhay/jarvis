@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createIdlePhoneUpdateStore } from "./phone-update-app";
+import { createIdlePhoneUpdateStore } from "./phone-update-idle";
 import type { PhoneUpdateView, UpdateState } from "./phone-update-types";
 import { updateBannerText, updateCardView } from "./update-view";
 
