@@ -104,6 +104,40 @@ const HISTORY_LIMIT = 200;
 
 const panes = new Map<string, Pane>();
 
+/** The file sidebar switch's glyph: a window with its left column ruled
+ *  off. Drawn rather than typed — no text glyph for it matches the plan
+ *  toggle's ☰ in weight, and the font fallback for one draws it small and
+ *  filled. `currentColor`, so it follows the button's own states. */
+function sidebarIcon(): SVGSVGElement {
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("width", "14");
+  svg.setAttribute("height", "14");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", "2");
+  svg.setAttribute("stroke-linecap", "round");
+  svg.setAttribute("stroke-linejoin", "round");
+  svg.setAttribute("aria-hidden", "true");
+  const frame = document.createElementNS(SVG_NS, "rect");
+  for (const [name, value] of Object.entries({
+    x: "3",
+    y: "4",
+    width: "18",
+    height: "16",
+    rx: "2",
+  })) {
+    frame.setAttribute(name, value);
+  }
+  const rule = document.createElementNS(SVG_NS, "line");
+  for (const [name, value] of Object.entries({ x1: "9", y1: "4", x2: "9", y2: "20" })) {
+    rule.setAttribute(name, value);
+  }
+  svg.append(frame, rule);
+  return svg;
+}
+
 // ------------------------------------------------------------- Plan panel
 
 /** Adapts plan-panel.ts's `t: (key: MessageKey) => string` to this app's
@@ -873,10 +907,29 @@ function ensurePane(
   // `planPanel` holds its real value.
   let planPanel: PlanPanel | undefined;
 
+  // The sidebar's visible switch (the palette is the other one), at the
+  // left end of the same band as the plan toggle, over the sidebar's own
+  // side. Built before the sidebar so its onVisibility can draw it from
+  // the first change; appended to the split once that exists, below.
+  // Disabled until the sidebar has a directory: a toggle then would do
+  // nothing (terminal-explorer.ts's own `toggle`).
+  const explorerToggle = document.createElement("button");
+  explorerToggle.type = "button";
+  explorerToggle.className = "explorer-toggle";
+  explorerToggle.append(sidebarIcon());
+  explorerToggle.title = planPanelT("explorerToggle");
+  explorerToggle.setAttribute("aria-label", planPanelT("explorerToggle"));
+  explorerToggle.setAttribute("aria-pressed", "false");
+  explorerToggle.disabled = true;
+
   // The tab's file sidebar, on the left — one for the whole tab, however
   // many panes it is split into, following whichever of them has the
   // focus. Appended before the tree so it sits left of the panes.
   const explorer = createTerminalExplorer(element, terminalSettings.home, {
+    onVisibility: (open, canToggle) => {
+      explorerToggle.setAttribute("aria-pressed", String(open));
+      explorerToggle.disabled = !canToggle;
+    },
     // Guarded: a preload without the channel leaves a sidebar with nothing
     // to draw, never a terminal that throws. The pane key travels with
     // every listing rather than being assumed from the tab because it is
@@ -946,11 +999,8 @@ function ensurePane(
             scheduleSessionPlanRefresh(tabId, paneKey, path);
           }
         },
-        // The sidebar's only way out: no chord, one palette action.
-        () => {
-          explorer.toggle();
-          handlePlanPanelWindowResize();
-        },
+        // No chord: one palette action, and the button below.
+        toggleExplorer,
         // A re-read now, keeping open folders open. The prompt and the
         // sidebar's own on-screen check already do this; the palette entry
         // is for not wanting to wait.
@@ -978,6 +1028,13 @@ function ensurePane(
     },
   );
   tree = built;
+
+  function toggleExplorer(): void {
+    explorer.toggle();
+    handlePlanPanelWindowResize();
+  }
+  explorerToggle.addEventListener("click", toggleExplorer);
+  built.element.append(explorerToggle);
 
   /** The focused pane's shell key. Resolved through the same WeakMap the
    *  pty stream is routed by, so it can never name a pane that is gone. */
