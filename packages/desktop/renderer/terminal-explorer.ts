@@ -44,6 +44,10 @@ export type TerminalExplorerHooks = {
   /** How often an on-screen sidebar re-reads; tests shorten or disable
    *  it. 0 turns the check off. */
   pollMs?: number;
+  /** Visibility just changed hands: `open` is what `isOpen` now says, and
+   *  `canToggle` whether a toggle would do anything — false while there is
+   *  no directory to show. What the tab's own switch draws itself from. */
+  onVisibility?: (open: boolean, canToggle: boolean) => void;
 };
 
 /** The default re-read interval while the sidebar is on screen. A listing
@@ -129,6 +133,7 @@ export function createTerminalExplorer(
    *  it. Nothing else writes `hidden`. */
   function applyVisibility(): void {
     element.hidden = dismissed || rooted === undefined;
+    attempt(() => hooks.onVisibility?.(!element.hidden, rooted !== undefined));
   }
 
   const writes = hooks.writes;

@@ -2205,7 +2205,7 @@
   /* The Plan and Reviews switches get a band of their own above the panes.
      Floated over the panes' top corner they sat on the first block's
      collapse/copy/re-run buttons and took their clicks. */
-  .terminal-split:has(> .plan-toggle, > .reviews-toggle) { padding-block-start: 30px; }
+  .terminal-split:has(> .plan-toggle, > .reviews-toggle, > .explorer-toggle) { padding-block-start: 30px; }
   /* The plan panel's own switch, in that band (the split is its positioned
      box). Quiet until hovered, accent while the panel is open, and a dot
      when the tab's session has a plan to show. */
@@ -2218,6 +2218,17 @@
   .plan-toggle[aria-pressed="true"] { opacity: 1; color: var(--accent); border-color: var(--accent); }
   .plan-toggle--has-plan::after { content: ""; position: absolute; inset-block-start: -3px;
     inset-inline-end: -3px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+  /* The file sidebar's switch: the plan toggle's twin, at the band's other
+     end, over the sidebar's side. Dimmer still while there is nothing to
+     show. */
+  .explorer-toggle { position: absolute; inset-block-start: 3px; inset-inline-start: 10px; z-index: 5;
+    width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;
+    padding: 0; border: 1px solid var(--border); border-radius: 6px; background: var(--panel);
+    color: var(--text-muted); font: 13px/1 var(--font-mono); cursor: pointer; opacity: 0.7; }
+  .explorer-toggle:hover:not(:disabled) { opacity: 1; color: var(--text); border-color: var(--accent); }
+  .explorer-toggle:focus-visible { opacity: 1; outline: 1px solid var(--accent); }
+  .explorer-toggle[aria-pressed="true"] { opacity: 1; color: var(--accent); border-color: var(--accent); }
+  .explorer-toggle:disabled { opacity: 0.35; cursor: default; }
   .terminal-split-branch { flex: 1 1 0; display: flex; min-width: 0; min-height: 0; }
   .terminal-split-leaf { position: relative; flex: 1 1 0; min-width: 0; min-height: 0;
     overflow: hidden; }
