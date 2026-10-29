@@ -3486,12 +3486,17 @@
     border-color: var(--accent);
   }
 
+  /* No `display` in the base rule — the same [hidden] trap as
+     .session-detail: session-view.ts hides this whole region while the
+     table is up, and an unconditional `display: flex` would keep it on
+     screen, splitting the column with the table. */
   .session-log-wrap {
     position: relative;
     flex-grow: 1;
     min-height: 0;
-    display: flex;
   }
+
+  .session-log-wrap:not([hidden]) { display: flex; }
 
   .changes-head {
     display: flex;

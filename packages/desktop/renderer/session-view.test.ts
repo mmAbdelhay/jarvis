@@ -34,9 +34,11 @@ function layoutDom(): void {
       <div id="session-view-agent"></div>
       <button id="session-back" hidden></button>
       <div id="session-detail" hidden></div>
-      <div id="session-terminal"></div>
-      <div id="session-transcript" hidden></div>
-      <div id="session-empty" hidden></div>
+      <div id="session-log">
+        <div id="session-terminal"></div>
+        <div id="session-transcript" hidden></div>
+        <div id="session-empty" hidden></div>
+      </div>
       <div id="session-table" hidden>
         <input id="session-search" />
         <select id="session-filter-project"></select>
@@ -882,6 +884,53 @@ describe("resume", () => {
 });
 
 describe("session table", () => {
+  // The table and an open session's terminal/transcript share one column.
+  // Returning to the table — Back, the Session nav button after a Resume —
+  // left the session's surface on screen under it: the table squeezed to a
+  // sliver, two scrollbars, and no Back button to close the session with.
+  it("puts an open session's terminal away when the table comes back", async () => {
+    const { openSession, renderSessionTable } = await import("./session-view.js");
+    await openSession(makeSession());
+    expect(document.getElementById("session-log")?.hidden).toBe(false);
+
+    await renderSessionTable();
+
+    expect(document.getElementById("session-table")?.hidden).toBe(false);
+    expect(document.getElementById("session-log")?.hidden).toBe(true);
+  });
+
+  it("puts an open transcript away when the table comes back", async () => {
+    stubJarvis({
+      getSessionTranscript: vi.fn(async () => [{ role: "user" as const, text: "hi", tools: [] }]),
+    });
+    const { openSession, renderSessionTable } = await import("./session-view.js");
+    await openSession(makeSession({ state: "done" }));
+    expect(document.getElementById("session-transcript")?.hidden).toBe(false);
+
+    await renderSessionTable();
+
+    expect(document.getElementById("session-log")?.hidden).toBe(true);
+  });
+
+  it("drops the open session's Resume button when the table comes back", async () => {
+    const { openSession, renderSessionTable } = await import("./session-view.js");
+    await openSession(makeSession({ state: "done" }));
+    expect(document.getElementById("session-resume")?.hidden).toBe(false);
+
+    await renderSessionTable();
+
+    expect(document.getElementById("session-resume")?.hidden).toBe(true);
+  });
+
+  it("brings the session's surface back when one is opened from the table", async () => {
+    const { openSession, renderSessionTable } = await import("./session-view.js");
+    await renderSessionTable();
+    await openSession(makeSession());
+
+    expect(document.getElementById("session-table")?.hidden).toBe(true);
+    expect(document.getElementById("session-log")?.hidden).toBe(false);
+  });
+
   const rows = (): HTMLElement[] =>
     [...document.querySelectorAll("#session-table-body > tr")] as HTMLElement[];
 
