@@ -890,10 +890,19 @@ function showTable(): void {
   if (back !== null) back.hidden = true;
   const empty = $("session-empty");
   if (empty !== null) empty.hidden = true;
+  // The table and the open session's terminal/transcript share one column.
+  // Left up, that surface split the column with the table — a squeezed
+  // list, two scrollbars, and Back already hidden so nothing closed it.
+  setLogVisible(false);
   // Whatever session was open, its terminal is no longer what is on
   // screen — see `terminalVisible`'s own comment.
   terminalVisible = false;
   showView("session");
+}
+
+function setLogVisible(visible: boolean): void {
+  const log = $("session-log");
+  if (log !== null) log.hidden = !visible;
 }
 
 function setDetailVisible(visible: boolean): void {
@@ -909,6 +918,7 @@ function setDetailVisible(visible: boolean): void {
 function showTerminal(): void {
   const table = $("session-table");
   if (table !== null) table.hidden = true;
+  setLogVisible(true);
   setDetailVisible(true);
   const back = $("session-back");
   if (back !== null) {
@@ -1036,6 +1046,9 @@ export async function openSession(session: Session): Promise<void> {
  * nothing is actually attached to.
  */
 async function openExternalSession(session: Session): Promise<void> {
+  const table = $("session-table");
+  if (table !== null) table.hidden = true;
+  setLogVisible(true);
   setDetailVisible(true);
   const back = $("session-back");
   if (back !== null) {
