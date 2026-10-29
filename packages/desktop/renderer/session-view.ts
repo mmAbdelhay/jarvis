@@ -888,6 +888,10 @@ function showTable(): void {
   setDetailVisible(false);
   const back = $("session-back");
   if (back !== null) back.hidden = true;
+  // Resume belongs to the session that was open; left up over the table it
+  // would resume that session from a screen that no longer shows it.
+  const resume = $("session-resume");
+  if (resume !== null) resume.hidden = true;
   const empty = $("session-empty");
   if (empty !== null) empty.hidden = true;
   // The table and the open session's terminal/transcript share one column.

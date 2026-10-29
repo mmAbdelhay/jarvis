@@ -912,6 +912,16 @@ describe("session table", () => {
     expect(document.getElementById("session-log")?.hidden).toBe(true);
   });
 
+  it("drops the open session's Resume button when the table comes back", async () => {
+    const { openSession, renderSessionTable } = await import("./session-view.js");
+    await openSession(makeSession({ state: "done" }));
+    expect(document.getElementById("session-resume")?.hidden).toBe(false);
+
+    await renderSessionTable();
+
+    expect(document.getElementById("session-resume")?.hidden).toBe(true);
+  });
+
   it("brings the session's surface back when one is opened from the table", async () => {
     const { openSession, renderSessionTable } = await import("./session-view.js");
     await renderSessionTable();
