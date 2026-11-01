@@ -1327,6 +1327,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
         ownedPids: () => sessions.ownedPids(),
         jarvisPid: process.pid,
         terminalShells: () => shells.shellPids(),
+        claimsPid: (agentId, pid) => sessionImporter.claimsPid(agentId, pid),
         now: () => Date.now(),
       }),
     agents: () => registry.list(),
@@ -1399,6 +1400,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
         ownedPids: () => sessions.ownedPids(),
         jarvisPid: process.pid,
         terminalShells: () => shells.shellPids(),
+        claimsPid: (agentId, pid) => sessionImporter.claimsPid(agentId, pid),
         now: () => Date.now(),
       }),
     agents: () => registry.list(),
@@ -1510,6 +1512,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
         // — reported, tagged with the pane, rather than dropped with the
         // rest of this process's own tree.
         terminalShells: () => shells.shellPids(),
+        claimsPid: (agentId, pid) => sessionImporter.claimsPid(agentId, pid),
         now: () => Date.now(),
       });
 
@@ -1843,6 +1846,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
         ownedPids: () => sessions.ownedPids(),
         jarvisPid: process.pid,
         terminalShells: () => shells.shellPids(),
+        claimsPid: (agentId, pid) => sessionImporter.claimsPid(agentId, pid),
         now: () => Date.now(),
       }),
     idleSeconds: async () => {
@@ -2384,6 +2388,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
       ownedPids: () => sessions.ownedPids(),
       jarvisPid: process.pid,
       terminalShells: () => shells.shellPids(),
+      claimsPid: (agentId, pid) => sessionImporter.claimsPid(agentId, pid),
       now: () => Date.now(),
     });
   const claudeViewNotifier = createClaudeViewNotifier({

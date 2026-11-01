@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   commandBasename,
   isAgentServiceCommand,
@@ -494,10 +494,11 @@ describe("listAgentProcesses", () => {
       "98000     1   00:08 claude",
     ].join("\n");
 
-    function scan(agents: ProcessScanDeps["agents"]) {
+    function scan(agents: ProcessScanDeps["agents"], claimsPid?: ProcessScanDeps["claimsPid"]) {
       return listAgentProcesses(
         deps({
           agents,
+          claimsPid,
           jarvisPid: 500,
           terminalShells: () =>
             new Map([
@@ -533,6 +534,34 @@ describe("listAgentProcesses", () => {
     it("leaves a binary outside Jarvis's tree unmatched", async () => {
       const result = await scan(WRAPPERS);
       expect(result.some((r) => r.pid === 98000)).toBe(false);
+    });
+
+    it("matches a binary to the account whose records claim its pid", async () => {
+      const claimsPid = vi.fn(
+        async (agentId: string, pid: number) => agentId === "claude-work" && pid === 96359,
+      );
+      const result = await scan(WRAPPERS, claimsPid);
+      expect(result.find((r) => r.pid === 96359)?.agentId).toBe("claude-work");
+      expect(claimsPid).toHaveBeenCalledWith("claude-mm", 96359);
+    });
+
+    it("falls back to the default agent when no account claims the pid", async () => {
+      const result = await scan(WRAPPERS, async () => false);
+      expect(result.find((r) => r.pid === 96359)?.agentId).toBe("claude-mm");
+    });
+
+    it("treats a failing claim check as no claim", async () => {
+      const result = await scan(WRAPPERS, async (agentId) => {
+        if (agentId === "claude-mm") throw new Error("unreadable");
+        return agentId === "claude-work";
+      });
+      expect(result.find((r) => r.pid === 96359)?.agentId).toBe("claude-work");
+    });
+
+    it("does not ask when the vendor has only one agent", async () => {
+      const claimsPid = vi.fn(async () => true);
+      await scan([{ id: "claude-mm", command: "claude-mm", vendor: "anthropic" }], claimsPid);
+      expect(claimsPid).not.toHaveBeenCalled();
     });
 
     it("matches nothing for a binary whose vendor no agent has", async () => {

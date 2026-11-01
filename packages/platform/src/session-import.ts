@@ -557,6 +557,13 @@ export type SessionImporter = {
     agentId: string,
     pid: number,
   ): Promise<{ session: TranscriptSession; path: string } | null>;
+  /**
+   * Whether this agent's `<configDir>/sessions/<pid>.json` names `pid` —
+   * which of several accounts sharing one binary a running process is.
+   * False for a non-Claude agent, or when the file is missing or names
+   * another pid.
+   */
+  claimsPid(agentId: string, pid: number): Promise<boolean>;
 };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -740,6 +747,19 @@ export function createSessionImporter(deps: SessionImporterDeps): SessionImporte
         }
       }
       return best;
+    },
+
+    async claimsPid(agentId, pid) {
+      const paths = claudeSessionPaths(deps.agents, deps.home, agentId);
+      if (paths === null) return false;
+      try {
+        return (
+          parseClaudePidRecord(await deps.readHead(join(paths.sessionsDir, `${pid}.json`)), pid) !==
+          null
+        );
+      } catch {
+        return false;
+      }
     },
 
     async transcriptForPid(agentId, pid) {

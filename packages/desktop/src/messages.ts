@@ -60,6 +60,8 @@ export const MESSAGES = {
   // sidebar's matching action stays a plain English literal in
   // terminal-pane.ts (that one is out of scope here), but this one is new
   // and goes through MESSAGES from the start.
+  explorerToggle: (language: "ar" | "en"): string =>
+    language === "ar" ? "تبديل الشريط الجانبي للملفات" : "Toggle file sidebar",
   planPanelToggle: (language: "ar" | "en"): string =>
     language === "ar" ? "تبديل لوحة الخطة" : "Toggle plan panel",
   // ---- Reviews (Task 12): the Terminal tab's dock, its PR link chip and

@@ -1226,6 +1226,44 @@ describe("the terminal tab's file sidebar", () => {
     expect(sidebar()?.textContent).toContain("src");
   });
 
+  describe("the file sidebar toggle button", () => {
+    const toggle = () => document.querySelector<HTMLButtonElement>(".explorer-toggle");
+
+    it("sits in the tab's panes area, labelled, and disabled until there is a directory", async () => {
+      const { renderWorkspaceTerminals } = await tabWithSidebar();
+      renderWorkspaceTerminals([tab()], "tab-1", "acme");
+      await settle();
+
+      const button = toggle();
+      expect(button?.parentElement?.className).toBe("terminal-split");
+      expect(button?.getAttribute("aria-label")).toBe("Toggle file sidebar");
+      expect(button?.title).toBe("Toggle file sidebar");
+      expect(button?.disabled).toBe(true);
+      expect(button?.getAttribute("aria-pressed")).toBe("false");
+
+      dataListener?.("tab-1", CWD("/proj"));
+      await settle();
+      expect(toggle()?.disabled).toBe(false);
+      expect(toggle()?.getAttribute("aria-pressed")).toBe("true");
+    });
+
+    it("closes and reopens the sidebar on click, showing pressed while open", async () => {
+      const { renderWorkspaceTerminals } = await tabWithSidebar();
+      renderWorkspaceTerminals([tab()], "tab-1", "acme");
+      await settle();
+      dataListener?.("tab-1", CWD("/proj"));
+      await settle();
+
+      toggle()?.click();
+      expect(sidebar()?.hidden).toBe(true);
+      expect(toggle()?.getAttribute("aria-pressed")).toBe("false");
+
+      toggle()?.click();
+      expect(sidebar()?.hidden).toBe(false);
+      expect(toggle()?.getAttribute("aria-pressed")).toBe("true");
+    });
+  });
+
   // A tab whose shell never reports a directory is the terminal Jarvis had
   // before this sidebar existed: no column beside it, and no listing.
   it("shows nothing for a pane with no shell integration", async () => {

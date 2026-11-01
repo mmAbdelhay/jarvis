@@ -54,14 +54,14 @@ describe("plan panel CSS", () => {
   });
 });
 
-describe("the Plan and Reviews switches", () => {
+describe("the Plan, Reviews and file sidebar switches", () => {
   // Floated over the panes they covered the first block's action buttons.
   it("get a band of their own above the panes", () => {
     const band = css.match(
-      /\.terminal-split:has\(> \.plan-toggle, > \.reviews-toggle\) \{ padding-block-start: (\d+)px; \}/,
+      /\.terminal-split:has\(> \.plan-toggle, > \.reviews-toggle, > \.explorer-toggle\) \{ padding-block-start: (\d+)px; \}/,
     );
     expect(Number(band?.[1])).toBeGreaterThanOrEqual(30);
-    for (const toggle of ["plan-toggle", "reviews-toggle"]) {
+    for (const toggle of ["plan-toggle", "reviews-toggle", "explorer-toggle"]) {
       const rule = css.match(new RegExp(`\\.${toggle} \\{([^}]*)\\}`))?.[1] ?? "";
       const top = Number(rule.match(/inset-block-start: (\d+)px/)?.[1]);
       const height = Number(rule.match(/height: (\d+)px/)?.[1]);

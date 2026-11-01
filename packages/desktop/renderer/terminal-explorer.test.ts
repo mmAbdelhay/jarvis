@@ -131,6 +131,24 @@ describe("the terminal explorer", () => {
     expect(list).toHaveBeenCalledTimes(1);
   });
 
+  it("reports every visibility change, and whether a toggle could act", async () => {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const onVisibility = vi.fn();
+    const view = createTerminalExplorer(host, "", {
+      list: async (_paneKey: string, path: string) => listing[path] ?? [],
+      choose: vi.fn(),
+      onVisibility,
+    });
+    view.setRoot("tab-1", "/proj");
+    expect(onVisibility).toHaveBeenLastCalledWith(true, true);
+    view.toggle();
+    expect(onVisibility).toHaveBeenLastCalledWith(false, true);
+    view.clear();
+    expect(onVisibility).toHaveBeenLastCalledWith(false, false);
+    view.dispose();
+  });
+
   // A closed sidebar stays closed through a `cd`: re-opening is the user's.
   it("does not re-open itself when the shell moves while it is closed", async () => {
     const { view } = explorer();
