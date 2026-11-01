@@ -1254,6 +1254,28 @@ describe("createSessionImporter", () => {
       expect(await importer.transcriptForPid("no-such-agent", 4242)).toBeNull();
     });
   });
+
+  describe("claimsPid", () => {
+    const pidFile = join("/h/.claude-main", "sessions", "4242.json");
+
+    it("is true only when the agent's pid file names that pid", async () => {
+      const { deps } = world({
+        [pidFile]: { head: JSON.stringify({ pid: 4242, sessionId: "mine" }), dir: "elsewhere" },
+      });
+      const importer = createSessionImporter(deps);
+
+      expect(await importer.claimsPid("claude-main", 4242)).toBe(true);
+      expect(await importer.claimsPid("claude-main", 7)).toBe(false);
+      expect(await importer.claimsPid("no-such-agent", 4242)).toBe(false);
+    });
+
+    it("is false for a pid file written for another pid", async () => {
+      const { deps } = world({
+        [pidFile]: { head: JSON.stringify({ pid: 1, sessionId: "mine" }), dir: "elsewhere" },
+      });
+      expect(await createSessionImporter(deps).claimsPid("claude-main", 4242)).toBe(false);
+    });
+  });
 });
 
 describe("createFsImportDeps", () => {
