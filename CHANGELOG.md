@@ -8,6 +8,22 @@ version and the downloads. This file is the index.
 
 ## Unreleased
 
+## [0.1.13] — 2026-11-01
+
+- Phone: the Claude chat view now works for every Claude account, not only
+  the default one (e.g. a `claude-saudisale` wrapper with its own
+  `CLAUDE_CONFIG_DIR`). The session row also gets that account's transcript.
+- Terminal: a file sidebar button at the left of the band above the panes,
+  beside the existing ⌘P action; pressed while the sidebar is open.
+  Thanks @mohamedgaber-intake40 (#26).
+- Sessions: going back to the sessions table after opening or resuming a
+  session no longer leaves that session's terminal or transcript squeezed
+  under the list, and its Resume button no longer stays up.
+  Thanks @mohamedgaber-intake40 (#25).
+- Settings: an enabled "This machine only" (127.0.0.1) remote bind is kept;
+  opening Settings no longer swaps in the Tailscale address on the next
+  unrelated Save (#20).
+
 ## [0.1.12] — 2026-10-28
 
 - Phone: a Claude Code chat view for terminal panes running Claude — chat
