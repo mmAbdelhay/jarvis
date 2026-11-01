@@ -1,5 +1,6 @@
 import { copyFile, readFile } from "node:fs/promises";
 import { parse, stringify } from "yaml";
+import { DEFAULT_REVIEWS_CONFIG } from "@jarvis/core";
 import { writeAtomically } from "@jarvis/platform";
 import type { JarvisConfig, RemoteConfig } from "./config.js";
 import {
@@ -10,6 +11,7 @@ import {
   DEFAULT_REMOTE,
   DEFAULT_SESSIONS,
   DEFAULT_TERMINAL,
+  DEFAULT_AWAKE,
   parseConfig,
   parseDaemon,
 } from "./config.js";
@@ -157,6 +159,11 @@ export function toRawConfig(config: JarvisConfig): unknown {
     // Never written at its default, by the rule `remote:` follows: a fresh
     // jarvis.yaml has no `daemon:` section.
     ...(isDefault(config.daemon, DEFAULT_DAEMON) ? {} : { daemon: config.daemon }),
+    // Never written at its defaults, like `daemon:`; guarded because a
+    // draft from an older renderer may not carry the key at all.
+    ...(isDefault(config.reviews, DEFAULT_REVIEWS_CONFIG) ? {} : { reviews: config.reviews }),
+    // Same rule: a fresh jarvis.yaml has no `awake:` section.
+    ...(isDefault(config.awake, DEFAULT_AWAKE) ? {} : { awake: config.awake }),
     brain: {
       ...(config.brain.accountId === undefined ? {} : { accountId: config.brain.accountId }),
       cwd: config.brain.cwd,

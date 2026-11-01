@@ -49,7 +49,7 @@ export type SplitTreeOptions = {
 
 /** How narrow a dragged pane may get. Below this a terminal is no longer
  *  one — the divider stops rather than following the pointer. */
-const MIN_PANE_PX = 80;
+export const MIN_PANE_PX = 80;
 
 type Leaf = { kind: "leaf"; key: string; element: HTMLElement; pane: TerminalPane };
 type Branch = {

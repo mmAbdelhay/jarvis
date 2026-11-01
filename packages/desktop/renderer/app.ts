@@ -18,6 +18,7 @@ import {
   wireSyncBar,
 } from "./changes.js";
 import { showView, syncHostedView } from "./views.js";
+import { initReviews, listTerminalPanes, type ReviewsView } from "./reviews-view.js";
 import {
   focusTerminalPane,
   initWorkspace,
@@ -37,6 +38,10 @@ import {
   setPrayerSnapshot,
 } from "./prayer.js";
 import { initRemoteStatus } from "./remote-status.js";
+import { initKeepAwake } from "./keep-awake.js";
+import { initBattery, topbarDate } from "./topbar-status.js";
+import { initTopbarFit } from "./topbar-fit.js";
+import { initFontKeys } from "./terminal-addons.js";
 import {
   detectLanguage,
   formatAgo,
@@ -425,6 +430,37 @@ function wireNav(): void {
     void renderSessionTable().then(() => reassertSessionSize());
     claimVoice();
   });
+  // The Reviews page (Task 11). Guarded like initSettings below: a minimal
+  // harness may lay down none of its markup. It reads once now so the nav
+  // badge counts queued comments before the page is ever opened, then on
+  // every reviews:changed push.
+  let reviews: ReviewsView | undefined;
+  try {
+    reviews = initReviews({
+      api: window.jarvis,
+      panes: () => listTerminalPanes(window.jarvis),
+      openPane: (paneKey) => {
+        focusTerminalPane(paneKey);
+      },
+    });
+    void reviews.refresh();
+  } catch {
+    // The Reviews page's own markup is absent in this harness.
+  }
+  document.getElementById("nav-reviews")?.addEventListener("click", () => {
+    releaseVoice();
+    showView("reviews");
+    void reviews?.refresh();
+  });
+  // Task 12: the Terminal tab's Reviews dock, "Open in Reviews" — the
+  // dock only names the PR; this page shows its whole thread.
+  window.addEventListener("jarvis:open-reviews", (event) => {
+    const prKey = (event as CustomEvent<unknown>).detail;
+    if (typeof prKey !== "string") return;
+    releaseVoice();
+    showView("reviews");
+    void reviews?.open(prKey);
+  });
   document.getElementById("nav-workspace")?.addEventListener("click", () => {
     releaseVoice();
     showView("workspace");
@@ -500,6 +536,12 @@ function wireNav(): void {
   } catch {
     // The topbar indicator's own markup is absent in this harness.
   }
+  // Keep awake (Task 18): the topbar button. Absent markup is a no-op, and
+  // a failed first read only waits for the first awake:changed push.
+  void initKeepAwake(window.jarvis).catch(() => undefined);
+  void initBattery(navigator as Parameters<typeof initBattery>[0]).catch(() => undefined);
+  initTopbarFit(document.querySelector<HTMLElement>(".topbar"));
+  initFontKeys();
 
   window.jarvis.onWorkspace((state) => renderWorkspace(state));
   // No catch here would be an unhandled rejection in the renderer on any
@@ -519,6 +561,15 @@ function wireNav(): void {
     .catch(() => undefined);
 }
 
+/** The header metric readout's 3-tier colour: green below 85%, amber from
+ *  85% up to (not including) 95%, red at 95% and up — same thresholds as
+ *  the SYSTEM card's warn/crit split and the danger dot below. */
+export function metricTone(percent: number): "good" | "warn" | "bad" {
+  if (percent >= 95) return "bad";
+  if (percent >= 85) return "warn";
+  return "good";
+}
+
 function renderMetrics(metrics: SystemMetrics): void {
   $("cpu-value").textContent = `${metrics.cpuPercent}%`;
   $("cpu-bar").style.width = `${metrics.cpuPercent}%`;
@@ -533,7 +584,6 @@ function renderMetrics(metrics: SystemMetrics): void {
   $("mem-detail").textContent =
     `${formatBytes(metrics.memoryUsedBytes)} / ${formatBytes(metrics.memoryTotalBytes)}`;
   $("mem-bar").style.width = `${memPercent}%`;
-  const memCrit = memPercent >= 95;
 
   // A disk at 98% used to be stated in exactly the same colour as a disk at
   // 12%, which makes the number decorative: nobody reads a strip of
@@ -560,15 +610,18 @@ function renderMetrics(metrics: SystemMetrics): void {
   $("net-up").textContent = `↑${metrics.networkUpMbps.toFixed(1)}`;
 
   // The compact topbar readout users asked back after board 0 removed it —
-  // same values as the Dashboard's SYSTEM card above, just glanceable from
-  // every route. `metric--danger` names the same >=95% threshold as the
-  // danger dot below, per number rather than one dot for the whole machine.
+  // same values as the Dashboard's SYSTEM card above, coloured per number by
+  // metricTone() (85/95, same thresholds as the danger dot below) rather
+  // than one dot for the whole machine.
+  const cpuTone = metricTone(metrics.cpuPercent);
   $("header-cpu").textContent = `${metrics.cpuPercent}%`;
-  $("header-cpu").classList.toggle("metric--danger", cpuCrit);
+  $("header-cpu").className = `metric--${cpuTone}`;
+  const memTone = metricTone(memPercent);
   $("header-mem").textContent = `${memPercent}%`;
-  $("header-mem").classList.toggle("metric--danger", memCrit);
+  $("header-mem").className = `metric--${memTone}`;
+  const diskTone = metricTone(diskPercent);
   $("header-disk").textContent = `${diskPercent}%`;
-  $("header-disk").classList.toggle("metric--danger", diskCrit);
+  $("header-disk").className = `metric--${diskTone}`;
   $("header-net").textContent =
     `↓${metrics.networkDownMbps.toFixed(1)} ↑${metrics.networkUpMbps.toFixed(1)} Mbps`;
 
@@ -1363,14 +1416,17 @@ function startClock(): void {
   const timeEl = document.getElementById("clock-time");
   const clock = timeEl?.closest<HTMLElement>(".clock");
   if (timeEl === null || clock === null || clock === undefined) return;
+  // Looked up once, like timeEl: the tick must not touch `document` itself.
+  const dateEl = document.getElementById("clock-date");
 
   const tick = (): void => {
     const now = new Date();
-    timeEl.textContent = now.toLocaleTimeString("en-GB", {
-      hour: "2-digit",
+    timeEl.textContent = now.toLocaleTimeString("en-US", {
+      hour: "numeric",
       minute: "2-digit",
-      hour12: false,
+      hour12: true,
     });
+    if (dateEl !== null) dateEl.textContent = topbarDate(now);
     clock.title = now.toLocaleDateString("en-GB", {
       day: "2-digit",
       month: "short",

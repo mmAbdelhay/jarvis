@@ -86,6 +86,9 @@ describe("relevantChannels", () => {
       [{ channel: "terminal:data", key: "p1" }],
     ],
     [{ kind: "reply", replyTo: "t1" }, [{ channel: "turn:new" }]],
+    [{ kind: "review-comment", pr: "acme/web#18" }, [{ channel: "reviews:changed" }]],
+    [{ kind: "review-queued", pr: "acme/web#18" }, [{ channel: "reviews:changed" }]],
+    [{ kind: "review-requested", pr: "acme/web#18" }, [{ channel: "reviews:changed" }]],
   ])("maps %j to %j", (event, expected) => {
     expect(relevantChannels(event)).toEqual(expected);
   });
@@ -214,6 +217,21 @@ describe("buildPushMessage", () => {
     const event: NotifyEvent = { kind: "reply", replyTo: "turn-1" };
     const message = buildPushMessage(d1, event, true);
     expect(message.data).toEqual({ kind: "reply" });
+  });
+
+  it("keeps the repo out of a review push entirely when includeProjectNames is off", () => {
+    const event: NotifyEvent = { kind: "review-comment", pr: "acme/web#18" };
+    const message = buildPushMessage(d1, event, false);
+    expect(message.data).toEqual({ kind: "review-comment" });
+    expect(message.body).toContain("#18");
+    expect(JSON.stringify(message)).not.toContain("acme");
+  });
+
+  it("carries exactly {kind, pr} and names acme/web#18 when includeProjectNames is on", () => {
+    const event: NotifyEvent = { kind: "review-comment", pr: "acme/web#18" };
+    const message = buildPushMessage(d1, event, true);
+    expect(message.data).toEqual({ kind: "review-comment", pr: "acme/web#18" });
+    expect(message.body).toContain("acme/web#18");
   });
 
   it("sets `to` to the target's token", () => {
@@ -496,6 +514,20 @@ describe("createNotifier", () => {
     expect(sent).toHaveLength(1);
     expect(sent[0]?.[0]?.data).toEqual({ kind: "command-finished" });
     notifier.dispose();
+  });
+
+  it("review emits a review push with data exactly {kind, pr}, coalesced per PR", () => {
+    const { notifier, sent, auditCalls } = makeNotifier({ includeProjectNames: true });
+    notifier.review({ kind: "review-comment", pr: "acme/web#18" });
+    notifier.review({ kind: "review-comment", pr: "acme/web#18" });
+    notifier.review({ kind: "review-comment", pr: "acme/web#19" });
+    expect(sent).toHaveLength(2);
+    expect(sent[0]?.[0]?.data).toEqual({ kind: "review-comment", pr: "acme/web#18" });
+    expect(sent[1]?.[0]?.data).toEqual({ kind: "review-comment", pr: "acme/web#19" });
+    expect(auditCalls[0]?.[0]?.kind).toBe("review-comment");
+    notifier.dispose();
+    notifier.review({ kind: "review-queued", pr: "acme/web#18" });
+    expect(sent).toHaveLength(2);
   });
 
   // M12 Task 3, rule 7.

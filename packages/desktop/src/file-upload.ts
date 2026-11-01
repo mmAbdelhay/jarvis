@@ -116,6 +116,7 @@ export type UploadStore = {
     deviceId: string,
     fileId: string,
   ): Promise<{ bytes: Uint8Array; name: string; contentType: string } | undefined>;
+  release(deviceId: string, fileId: string): Promise<void>;
   readJson(deviceId: string, fileId: string): Promise<GitViewResult<unknown>>;
   revoke(deviceId: string): Promise<void>;
   sweep(): Promise<void>;
@@ -588,6 +589,17 @@ export function createFileUploadStore(deps: FileUploadStoreDeps): UploadStore {
     return { ok: true, value: parsed };
   }
 
+  /** Drop the owned record synchronously so concurrent reads cannot return
+   *  it during cleanup. Pending writes keep their quota until they finish;
+   *  only a committed staged file can be released by an attachment. */
+  async function release(deviceId: string, fileId: string): Promise<void> {
+    const state = devices.get(deviceId);
+    const entry = state?.entries.get(fileId);
+    if (entry === undefined || entry.status !== "done") return;
+    state?.entries.delete(fileId);
+    await removeFile(entry.path);
+  }
+
   async function revoke(deviceId: string): Promise<void> {
     const state = devices.get(deviceId);
     // M12 Task 7 (M9 T3 minor): no early return when `state` is already
@@ -670,7 +682,7 @@ export function createFileUploadStore(deps: FileUploadStoreDeps): UploadStore {
     await Promise.all(deviceIds.map((deviceId) => removeDeviceDir(deps.baseDir, deviceId)));
   }
 
-  return { put, resolve, readJson, revoke, sweep, stop };
+  return { put, resolve, release, readJson, revoke, sweep, stop };
 }
 
 /** `remote:uploadFile`'s BlobHandler: validates the header's meta and the

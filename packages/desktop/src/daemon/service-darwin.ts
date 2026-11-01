@@ -1,8 +1,12 @@
+import { serviceInstanceId } from "./service-name.js";
+
+/** The account's own install's label; another HOME suffixes it (service-name.ts). */
 export const DARWIN_SERVICE_LABEL = "dev.jarvis.daemon";
 
 type Command = readonly [command: string, args: readonly string[]];
 
 export interface DarwinServiceDefinition {
+  label: string;
   filePath: string;
   fileMode: number;
   logDirectory: string;
@@ -46,19 +50,33 @@ export function darwinRecordedExecPath(plist: string): string | undefined {
 
 export function buildDarwinService(options: {
   home: string;
+  /** The OS account's home (os.userInfo().homedir): any other home is a
+   *  separate instance with its own label. */
+  accountHome: string;
   uid: number;
   execPath: string;
   daemonScript: string;
 }): DarwinServiceDefinition {
-  const filePath = `${options.home}/Library/LaunchAgents/${DARWIN_SERVICE_LABEL}.plist`;
+  const instance = serviceInstanceId(options.home, options.accountHome);
+  const label =
+    instance === undefined ? DARWIN_SERVICE_LABEL : `${DARWIN_SERVICE_LABEL}.${instance}`;
+  const filePath = `${options.home}/Library/LaunchAgents/${label}.plist`;
   const logDirectory = `${options.home}/.config/jarvis/logs`;
-  const target = `gui/${options.uid}/${DARWIN_SERVICE_LABEL}`;
+  const target = `gui/${options.uid}/${label}`;
+  // launchd gives an agent the account's HOME; another instance's daemon
+  // must run under its own, or it would use the real one's files.
+  const home =
+    instance === undefined
+      ? ""
+      : `
+    <key>HOME</key>
+    <string>${xml(options.home)}</string>`;
   const contents = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>${DARWIN_SERVICE_LABEL}</string>
+  <string>${xml(label)}</string>
   <key>ProgramArguments</key>
   <array>
     <string>${xml(options.execPath)}</string>
@@ -70,7 +88,7 @@ export function buildDarwinService(options: {
     <key>ELECTRON_RUN_AS_NODE</key>
     <string>1</string>
     <key>JARVISD_SUPERVISOR</key>
-    <string>launchd</string>
+    <string>launchd</string>${home}
   </dict>
   <key>RunAtLoad</key>
   <true/>
@@ -88,6 +106,7 @@ export function buildDarwinService(options: {
 `;
 
   return {
+    label,
     filePath,
     fileMode: 0o644,
     logDirectory,

@@ -197,6 +197,9 @@ export async function connectSocketCoreClient(
           ?.trashItem(String(p.path))
           .catch((error: unknown) => deps.log(`move to trash failed: ${describe(error)}`));
         return;
+      case DAEMON_PUSHES.stayAwake:
+        host?.setStayAwake(p.on === true);
+        return;
       case DAEMON_PUSHES.restart:
         // Sent only to the app that asked. The daemon restarts itself for
         // the settings it reads; this app relaunches only if a setting it
@@ -272,6 +275,9 @@ export async function connectSocketCoreClient(
       offPush();
       if (connection !== opened) return;
       connection = undefined;
+      // The core that wanted the stay-awake is gone; a reconnect's attach
+      // hands it back if it still wants it.
+      host?.setStayAwake(false);
       if (!stopped) void reconnect();
     });
     let snapshot: DaemonSnapshot;

@@ -34,6 +34,10 @@ export type DesktopHost = {
   trashItem(path: string): Promise<void>;
   /** Settings' Restart button: relaunch the app. */
   restart(): void;
+  /** Keep awake (keep-awake.ts): hold (true) or release (false) the OS
+   *  stay-awake — Electron's powerSaveBlocker, which only an app has. Sent
+   *  on change only; a host attached while it is held is told on attach. */
+  setStayAwake(on: boolean): void;
 };
 
 /**
@@ -65,6 +69,7 @@ function describe(error: unknown): string {
 
 export function createHostLink(): HostLink {
   let attached: DesktopHost | undefined;
+  let stayAwake = false;
   const listeners = new Set<PushSink>();
 
   const host: DesktopHost = {
@@ -96,12 +101,19 @@ export function createHostLink(): HostLink {
       }
       console.error("restart not done: no desktop app is attached");
     },
+    // Remembered, so the window that attaches after the core decided (the
+    // core starts before the window exists) still holds it.
+    setStayAwake: (on) => {
+      stayAwake = on;
+      attached?.setStayAwake(on);
+    },
   };
 
   return {
     host,
     attach(desktop) {
       attached = desktop;
+      if (stayAwake) desktop.setStayAwake(true);
       return () => {
         if (attached === desktop) attached = undefined;
       };

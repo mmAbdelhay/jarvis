@@ -8,10 +8,15 @@ import {
   isSessionTranscriptEntry,
   parseCopilotTranscript,
   parseTranscript,
+  parseChatTranscript,
   createFsImportDeps,
   createSessionImporter,
   HEAD_BYTES,
   isWithin,
+  claudeSessionPaths,
+  lastCustomTitle,
+  lastAiTitle,
+  parseClaudePidRecord,
   resolveProject,
   sessionFromTranscript,
   transcriptDirs,
@@ -330,6 +335,176 @@ describe("parseTranscript", () => {
 
   it("returns nothing for a transcript with no conversation", () => {
     expect(parseTranscript(line({ type: "cost-state" }))).toEqual([]);
+  });
+});
+
+describe("parseChatTranscript", () => {
+  const line = (record: unknown): string => JSON.stringify(record);
+  const toolTurn = (name: string, input: unknown): string =>
+    line({ type: "assistant", message: { content: [{ type: "tool_use", name, input }] } });
+
+  it("gives an Edit its file's basename and the lines it added and removed", () => {
+    const out = parseChatTranscript(
+      toolTurn("Edit", {
+        file_path: "/a/b/styles.css",
+        old_string: "one\ntwo",
+        new_string: "1\n2\n3\n4\n5\n6",
+      }),
+    );
+    expect(out.turns).toEqual([
+      {
+        role: "assistant",
+        text: "",
+        tools: [{ name: "Edit", target: "styles.css", added: 6, removed: 2 }],
+      },
+    ]);
+  });
+
+  it("sums a MultiEdit's edits, and counts a Write as all added", () => {
+    const out = parseChatTranscript(
+      [
+        toolTurn("MultiEdit", {
+          file_path: "/a/app.ts",
+          edits: [
+            { old_string: "a", new_string: "b\nc" },
+            { old_string: "d\ne\nf", new_string: "g" },
+          ],
+        }),
+        toolTurn("Write", { file_path: "/a/new.ts", content: "x\ny\nz\n" }),
+      ].join("\n"),
+    );
+    expect(out.turns[0]?.tools).toEqual([
+      { name: "MultiEdit", target: "app.ts", added: 3, removed: 4 },
+      { name: "Write", target: "new.ts", added: 3 },
+    ]);
+  });
+
+  it("targets a Bash call by its command's first line, cut at 80 with …", () => {
+    const long = "x".repeat(100);
+    const out = parseChatTranscript(
+      [
+        toolTurn("Bash", { command: `${long}\nsecond line` }),
+        toolTurn("Bash", { command: "ls -la\npwd" }),
+      ].join("\n"),
+    );
+    expect(out.turns[0]?.tools).toEqual([
+      { name: "Bash", target: `${"x".repeat(80)}…` },
+      { name: "Bash", target: "ls -la" },
+    ]);
+  });
+
+  it("targets a command by its first non-blank line, whatever the line ending", () => {
+    const out = parseChatTranscript(
+      [
+        toolTurn("Bash", { command: "\ncd x && ls" }),
+        toolTurn("Bash", { command: "a\r\nb" }),
+        toolTurn("Bash", { command: "  \n\n", pattern: "fallback" }),
+      ].join("\n"),
+    );
+    expect(out.turns[0]?.tools).toEqual([
+      { name: "Bash", target: "cd x && ls" },
+      { name: "Bash", target: "a" },
+      { name: "Bash", target: "fallback" },
+    ]);
+  });
+
+  it("keeps an exactly-80-character command whole, with no …", () => {
+    const exact = "y".repeat(80);
+    const out = parseChatTranscript(toolTurn("Bash", { command: exact }));
+    expect(out.turns[0]?.tools).toEqual([{ name: "Bash", target: exact }]);
+  });
+
+  it("falls back to a pattern, then a url, and names a tool with neither", () => {
+    const out = parseChatTranscript(
+      [
+        toolTurn("Grep", { pattern: "TODO", path: "/a" }),
+        toolTurn("WebFetch", { url: "https://example.com" }),
+        toolTurn("TodoWrite", { todos: [] }),
+      ].join("\n"),
+    );
+    expect(out.turns[0]?.tools).toEqual([
+      { name: "Grep", target: "TODO" },
+      { name: "WebFetch", target: "https://example.com" },
+      { name: "TodoWrite" },
+    ]);
+  });
+
+  // The tail of a transcript starts wherever the byte cut fell, which is
+  // almost never a line boundary.
+  it("skips a truncated first line and keeps the rest", () => {
+    const whole = line({ type: "user", message: { content: "cut off" } });
+    const out = parseChatTranscript(
+      [whole.slice(12), line({ type: "user", message: { content: "kept" } })].join("\n"),
+    );
+    expect(out.turns).toEqual([{ role: "user", text: "kept", tools: [] }]);
+  });
+
+  it("keeps only the last maxTurns, oldest first", () => {
+    const text = Array.from({ length: 205 }, (_, i) =>
+      line({ type: "user", message: { content: `#${i + 1}` } }),
+    ).join("\n");
+    const out = parseChatTranscript(text, 200);
+    expect(out.turns).toHaveLength(200);
+    expect(out.turns[0]?.text).toBe("#6");
+    expect(out.turns.at(-1)?.text).toBe("#205");
+  });
+
+  it("returns the model from the last assistant record", () => {
+    const out = parseChatTranscript(
+      [
+        line({ type: "assistant", message: { model: "claude-a", content: "first" } }),
+        line({ type: "user", message: { content: "next" } }),
+        line({ type: "assistant", message: { model: "claude-b", content: [] } }),
+      ].join("\n"),
+    );
+    expect(out.model).toBe("claude-b");
+  });
+
+  // An API error is recorded as an assistant turn whose model is
+  // "<synthetic>" — not a model anyone chose, so it must not replace one.
+  it("ignores the <synthetic> model of an API-error record", () => {
+    const out = parseChatTranscript(
+      [
+        line({ type: "assistant", message: { model: "claude-a", content: "first" } }),
+        line({
+          type: "assistant",
+          message: { model: "<synthetic>", content: [{ type: "text", text: "API Error" }] },
+        }),
+      ].join("\n"),
+    );
+    expect(out.model).toBe("claude-a");
+  });
+
+  it("returns no model when no assistant has spoken", () => {
+    expect(parseChatTranscript(line({ type: "user", message: { content: "hi" } })).model).toBe(
+      undefined,
+    );
+  });
+
+  it("drops isMeta user records, as parseTranscript does", () => {
+    const out = parseChatTranscript(
+      [
+        line({
+          type: "user",
+          isMeta: true,
+          message: { content: [{ type: "text", text: "Base directory for this skill: ..." }] },
+        }),
+        line({ type: "user", message: { content: "what I actually asked" } }),
+      ].join("\n"),
+    );
+    expect(out.turns).toEqual([{ role: "user", text: "what I actually asked", tools: [] }]);
+  });
+
+  it("folds wordless tool turns into the reply before them", () => {
+    const out = parseChatTranscript(
+      [
+        line({ type: "assistant", message: { content: [{ type: "text", text: "Looking." }] } }),
+        toolTurn("Read", { file_path: "/a/b.ts" }),
+      ].join("\n"),
+    );
+    expect(out.turns).toEqual([
+      { role: "assistant", text: "Looking.", tools: [{ name: "Read", target: "b.ts" }] },
+    ]);
   });
 });
 
@@ -1106,5 +1281,103 @@ describe("createFsImportDeps", () => {
     const { readHead } = createFsImportDeps();
 
     await expect(readHead("/nonexistent-jarvis-session-import-test/a.jsonl")).rejects.toThrow();
+  });
+});
+
+describe("claudeSessionPaths", () => {
+  const agents: AgentConfig[] = [
+    { id: "claude-x", command: "claude-x", vendor: "anthropic", configDir: "/home/u/.claude-x" },
+    { id: "claude", command: "claude", vendor: "anthropic" },
+    { id: "codex", command: "codex", vendor: "openai" },
+    { id: "copilot", command: "copilot", vendor: "github" },
+  ];
+
+  it("names the sessions and transcripts directories under a Claude agent's configDir", () => {
+    expect(claudeSessionPaths(agents, "/home/u", "claude-x")).toEqual({
+      sessionsDir: join("/home/u/.claude-x", "sessions"),
+      transcriptsDir: join("/home/u/.claude-x", "projects"),
+    });
+    expect(claudeSessionPaths(agents, "/home/u", "claude")?.sessionsDir).toBe(
+      join("/home/u", ".claude", "sessions"),
+    );
+  });
+
+  it("is null for a non-Claude or unknown agent", () => {
+    expect(claudeSessionPaths(agents, "/home/u", "codex")).toBeNull();
+    expect(claudeSessionPaths(agents, "/home/u", "copilot")).toBeNull();
+    expect(claudeSessionPaths(agents, "/home/u", "nope")).toBeNull();
+  });
+});
+
+describe("parseClaudePidRecord", () => {
+  it("reads the session id and its current name", () => {
+    const text = JSON.stringify({
+      pid: 13591,
+      sessionId: "s-1",
+      name: "github-pr-comment-listener",
+      nameSource: "auto",
+    });
+    expect(parseClaudePidRecord(text, 13591)).toEqual({
+      sessionId: "s-1",
+      name: "github-pr-comment-listener",
+    });
+  });
+
+  it("leaves name out when it is missing, empty or not a string", () => {
+    expect(parseClaudePidRecord(JSON.stringify({ pid: 1, sessionId: "s" }), 1)).toEqual({
+      sessionId: "s",
+    });
+    expect(parseClaudePidRecord(JSON.stringify({ pid: 1, sessionId: "s", name: "  " }), 1)).toEqual(
+      { sessionId: "s" },
+    );
+    expect(parseClaudePidRecord(JSON.stringify({ pid: 1, sessionId: "s", name: 4 }), 1)).toEqual({
+      sessionId: "s",
+    });
+  });
+
+  it("is null for another pid, no session id, or text that is not JSON", () => {
+    expect(parseClaudePidRecord(JSON.stringify({ pid: 2, sessionId: "s" }), 1)).toBeNull();
+    expect(parseClaudePidRecord(JSON.stringify({ pid: 1 }), 1)).toBeNull();
+    expect(parseClaudePidRecord('{"pid":1,"sessi', 1)).toBeNull();
+    expect(parseClaudePidRecord("null", 1)).toBeNull();
+  });
+});
+
+describe("lastCustomTitle", () => {
+  it("returns the newest custom-title in the text", () => {
+    const text = [
+      JSON.stringify({ type: "user", message: { content: "hi" } }),
+      JSON.stringify({ type: "custom-title", customTitle: "first", sessionId: "s" }),
+      JSON.stringify({ type: "custom-title", customTitle: "PR 42 review", sessionId: "s" }),
+      "",
+    ].join("\n");
+    expect(lastCustomTitle(text)).toBe("PR 42 review");
+  });
+
+  it("skips a cut-off first line, a bad line and an empty title", () => {
+    const text = [
+      'tle","customTitle":"cut"}',
+      JSON.stringify({ type: "custom-title", customTitle: "kept" }),
+      "{not json",
+      JSON.stringify({ type: "custom-title", customTitle: "" }),
+    ].join("\n");
+    expect(lastCustomTitle(text)).toBe("kept");
+    expect(lastCustomTitle("")).toBeUndefined();
+  });
+});
+
+describe("lastAiTitle", () => {
+  it("returns the newest non-empty trimmed ai title, ignoring fragments and other records", () => {
+    const text = [
+      'Title":"fragment"}',
+      JSON.stringify({ type: "ai-title", aiTitle: "first" }),
+      JSON.stringify({ type: "ai-title", aiTitle: " latest " }),
+      JSON.stringify({ type: "ai-title", aiTitle: "  " }),
+      JSON.stringify({ type: "ai-title", aiTitle: 12 }),
+      JSON.stringify({ type: "user", aiTitle: "wrong type" }),
+      '{"type":"ai-title","aiTitle":',
+    ].join("\n");
+    expect(lastAiTitle(text)).toBe("latest");
+    expect(lastAiTitle("")).toBeUndefined();
   });
 });

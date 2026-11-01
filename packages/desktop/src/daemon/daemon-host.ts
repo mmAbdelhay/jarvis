@@ -24,6 +24,9 @@
 //     trash the same path. With no such app it rejects. The app's answer
 //     does not travel back: the sidebar re-lists either way, and a file
 //     still there says what a result would have;
+//   - setStayAwake: pushed to every attached app, and remembered, so an app
+//     that attaches while the stay-awake is held is told on attach. With no
+//     app attached nothing holds it: the OS stay-awake is an app's;
 //   - restart (Settings' Restart) restarts the daemon, since the settings it
 //     applies live here. Under a service manager every client is told
 //     `daemon:restarting` and the daemon exits DAEMON_EXIT.restart, to be
@@ -68,6 +71,7 @@ export function createDaemonHost(deps: {
 }): DaemonHost {
   const attached = new Map<number, HostWindowState>();
   const queue: SecurityAlert[] = [];
+  let stayAwake = false;
   const anyApp = (read: (state: HostWindowState) => boolean): boolean => {
     for (const state of attached.values()) if (read(state)) return true;
     return false;
@@ -123,6 +127,10 @@ export function createDaemonHost(deps: {
       deps.push(DAEMON_PUSHES.restarting, null);
       deps.restartDaemon();
     },
+    setStayAwake(on) {
+      stayAwake = on;
+      if (attached.size > 0) deps.push(DAEMON_PUSHES.stayAwake, { on });
+    },
   };
 
   return {
@@ -130,6 +138,7 @@ export function createDaemonHost(deps: {
     attach(id, state) {
       attached.set(id, { ...state });
       for (const alert of queue.splice(0)) deps.push(DAEMON_PUSHES.alert, alert);
+      if (stayAwake) deps.pushTo(id, DAEMON_PUSHES.stayAwake, { on: true });
     },
     report(id, state) {
       if (attached.has(id)) attached.set(id, { ...state });

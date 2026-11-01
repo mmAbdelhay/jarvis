@@ -1,4 +1,4 @@
-import type { AgentConfig } from "@jarvis/core";
+import type { AgentConfig, ProviderVendor } from "@jarvis/core";
 
 /**
  * Finds coding-agent processes running on this machine that Jarvis did not
@@ -32,13 +32,35 @@ export type ExternalAgentProcess = {
    *  (the user typed the agent into it): that pane's key, so a click can
    *  take the user to it. Absent for a process outside Jarvis entirely. */
   terminalPaneKey?: string;
+  /** Whether it is in its terminal's foreground process group (pgid ===
+   *  tpgid) — the job at the prompt the user sees. False for a job sent to
+   *  the background (`claude &`, `bg`); absent when ps gave no job columns.
+   *  Only `true` may ever be pasted into. */
+  foreground?: boolean;
 };
 
-/** One row of `ps -axo pid=,ppid=,etime=,command=`. */
-export type PsRow = { pid: number; ppid: number; etime: string; command: string };
+/** One row of `ps -axo pid=,ppid=,pgid=,tpgid=,stat=,etime=,command=`. The
+ *  job-control columns are absent from a row in the older
+ *  `pid=,ppid=,etime=,command=` shape. */
+export type PsRow = {
+  pid: number;
+  ppid: number;
+  pgid?: number;
+  /** The controlling terminal's foreground process group; -1 (linux) or 0
+   *  (darwin) for a process with no terminal. */
+  tpgid?: number;
+  /** Process state flags, "T" among them for a stopped job (ctrl-Z). */
+  stat?: string;
+  etime: string;
+  command: string;
+};
+
+/** The columns listAgentProcesses asks ps for; parsePsOutput reads them. */
+export const PS_COLUMNS = "pid=,ppid=,pgid=,tpgid=,stat=,etime=,command=";
 
 /**
- * Parses `ps -axo pid=,ppid=,etime=,command=` output.
+ * Parses `ps -axo` output in the {@link PS_COLUMNS} shape, or the older
+ * `pid=,ppid=,etime=,command=` one (no job-control fields on such a row).
  *
  * The `=` suffix on each column asks `ps` for no header, which is what lets
  * this parse by position rather than by name. `command` is always the last
@@ -48,6 +70,20 @@ export type PsRow = { pid: number; ppid: number; etime: string; command: string 
 export function parsePsOutput(text: string): PsRow[] {
   const rows: PsRow[] = [];
   for (const line of text.split("\n")) {
+    const job = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(-?\d+)\s+(\S+)\s+(\S+)\s+(.+)$/.exec(line);
+    if (job !== null) {
+      const [, pid, ppid, pgid, tpgid, stat, etime, command] = job;
+      rows.push({
+        pid: Number(pid),
+        ppid: Number(ppid),
+        pgid: Number(pgid),
+        tpgid: Number(tpgid),
+        stat: stat ?? "",
+        etime: etime ?? "",
+        command: command ?? "",
+      });
+      continue;
+    }
     const match = /^\s*(\d+)\s+(\d+)\s+(\S+)\s+(.+)$/.exec(line);
     if (match === null) continue;
     const [, pid, ppid, etime, command] = match;
@@ -84,6 +120,14 @@ const SERVICE_SUBCOMMANDS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
  *  one (an account wrapper like `claude-acme` is still Claude Code), else
  *  its command's own name. */
 const CLI_BY_VENDOR: Readonly<Record<string, string>> = { anthropic: "claude", openai: "codex" };
+
+/** The binary each vendor's CLI runs as, for matching a wrapper agent's
+ *  process (see listAgentProcesses). */
+const VENDOR_BY_BINARY: Readonly<Record<string, ProviderVendor>> = {
+  claude: "anthropic",
+  codex: "openai",
+  copilot: "github",
+};
 
 /**
  * Whether a command line is `agent` running as a service, not a session —
@@ -268,7 +312,7 @@ export async function listAgentProcesses(deps: ProcessScanDeps): Promise<Externa
 
   let psResult: { code: number; stdout: string };
   try {
-    psResult = await deps.exec("ps", ["-axo", "pid=,ppid=,etime=,command="]);
+    psResult = await deps.exec("ps", ["-axo", PS_COLUMNS]);
   } catch {
     return [];
   }
@@ -288,6 +332,18 @@ export async function listAgentProcesses(deps: ProcessScanDeps): Promise<Externa
     agentByCommand.set(commandBasename(agent.command), agent);
   }
 
+  // A wrapper agent (`claude-mm`: an sh script that `exec`s claude) shows
+  // in ps as the binary it ran, never as itself. Inside a Jarvis pane such
+  // a binary stands for the agent of its vendor — the default one, else the
+  // first. Never outside that tree: an unrelated `claude` elsewhere on the
+  // machine is not the user's wrapper agent.
+  const agentByBinary = new Map<string, AgentConfig>();
+  for (const [binary, vendor] of Object.entries(VENDOR_BY_BINARY)) {
+    const ofVendor = deps.agents.filter((agent) => agent.vendor === vendor);
+    const chosen = ofVendor.find((agent) => agent.default === true) ?? ofVendor[0];
+    if (chosen !== undefined) agentByBinary.set(binary, chosen);
+  }
+
   const now = deps.now();
   const candidates: {
     row: PsRow;
@@ -297,7 +353,12 @@ export async function listAgentProcesses(deps: ProcessScanDeps): Promise<Externa
   }[] = [];
   for (const row of rows) {
     if (owned.has(row.pid)) continue;
-    const agent = agentByCommand.get(commandBasename(row.command));
+    // A stopped job (ctrl-Z) is not at any prompt.
+    if (row.stat?.includes("T") === true) continue;
+    const basename = commandBasename(row.command);
+    const agent =
+      agentByCommand.get(basename) ??
+      (ownTree.has(row.pid) ? agentByBinary.get(basename) : undefined);
     if (agent === undefined) continue;
     if (isAgentServiceCommand(agent, row.command)) continue;
     const agentId = agent.id;
@@ -336,6 +397,9 @@ export async function listAgentProcesses(deps: ProcessScanDeps): Promise<Externa
     cwd: cwds.get(row.pid) ?? null,
     startedAt,
     ...(terminalPaneKey === undefined ? {} : { terminalPaneKey }),
+    ...(row.pgid === undefined || row.tpgid === undefined
+      ? {}
+      : { foreground: row.pgid === row.tpgid }),
   }));
 }
 

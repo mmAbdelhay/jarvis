@@ -211,6 +211,9 @@ describe("keyLabel", () => {
         "closePane",
         "focusPrev",
         "focusNext",
+        "fontBigger",
+        "fontSmaller",
+        "fontReset",
         "sendRequest",
         "saveRequest",
         "voiceStart",
@@ -219,5 +222,59 @@ describe("keyLabel", () => {
         expect(keyLabel(action, platform)).not.toBe("");
       }
     }
+  });
+});
+
+describe("font zoom chords", () => {
+  // Real events carry both; the zoom keys go by the character typed.
+  const zoom = (init: Partial<KeyboardEvent> & { key: string; code: string }): KeyboardEvent =>
+    key(init);
+
+  it("grows on Cmd+= and Cmd+Shift+= (Cmd++), shrinks on Cmd+-, resets on Cmd+0", () => {
+    expect(matchChord(zoom({ key: "=", code: "Equal", metaKey: true }), "darwin")).toBe(
+      "fontBigger",
+    );
+    expect(
+      matchChord(zoom({ key: "+", code: "Equal", metaKey: true, shiftKey: true }), "darwin"),
+    ).toBe("fontBigger");
+    expect(matchChord(zoom({ key: "-", code: "Minus", metaKey: true }), "darwin")).toBe(
+      "fontSmaller",
+    );
+    expect(matchChord(zoom({ key: "0", code: "Digit0", metaKey: true }), "darwin")).toBe(
+      "fontReset",
+    );
+  });
+
+  it("follows the printed + and - on a German layout, not the US key positions", () => {
+    // German: "+" is its own key (BracketRight), "-" sits on Slash, and the
+    // US Equal key is a dead ´.
+    expect(matchChord(zoom({ key: "+", code: "BracketRight", metaKey: true }), "darwin")).toBe(
+      "fontBigger",
+    );
+    expect(matchChord(zoom({ key: "-", code: "Slash", metaKey: true }), "darwin")).toBe(
+      "fontSmaller",
+    );
+    expect(matchChord(zoom({ key: "Dead", code: "Equal", metaKey: true }), "darwin")).toBe(
+      undefined,
+    );
+    // Shift+0 types "=" there: still a reset key, never a zoom.
+    expect(
+      matchChord(zoom({ key: "=", code: "Digit0", metaKey: true, shiftKey: true }), "darwin"),
+    ).toBeUndefined();
+    expect(matchChord(zoom({ key: "+", code: "BracketRight", ctrlKey: true }), "linux")).toBe(
+      "fontBigger",
+    );
+  });
+
+  it("takes Shift on linux, whatever character Shift turns the key into", () => {
+    const linux = (k: string, code: string): KeyboardEvent =>
+      zoom({ key: k, code, ctrlKey: true, shiftKey: true });
+    expect(matchChord(linux("+", "Equal"), "linux")).toBe("fontBigger");
+    expect(matchChord(linux("_", "Minus"), "linux")).toBe("fontSmaller");
+    expect(matchChord(linux(")", "Digit0"), "linux")).toBe("fontReset");
+  });
+
+  it("leaves bare Ctrl+- to the shell on linux — it is ^_, readline's undo", () => {
+    expect(matchChord(zoom({ key: "-", code: "Minus", ctrlKey: true }), "linux")).toBeUndefined();
   });
 });

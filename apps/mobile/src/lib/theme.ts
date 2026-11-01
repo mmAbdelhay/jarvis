@@ -52,6 +52,17 @@ export const theme = {
     ringTrack: "#1E2433",
     link: "#8CBEFF",
     checkboxOff: "#3A4152",
+    // Claude chat view (phone-term mockups): the user's bubble and its
+    // border (also the waiting Enter button), the working row's orange, the
+    // mode pill's border in auto mode, the ask card / link ground and the
+    // attached paths' text.
+    claudeBubble: "#13233B",
+    claudeBubbleBorder: "#23406A",
+    claudeWorking: "#F0B27A",
+    claudeWorkingBorder: "#5B4026",
+    claudeAskGround: "#0E1626",
+    claudePath: "#9AB8E0",
+    scrim: "rgba(3,4,7,0.72)",
   },
   spacing: { xs: 4, sm: 8, md: 14, lg: 20, xl: 32, gutter: 20, section: 18 },
   radius: {

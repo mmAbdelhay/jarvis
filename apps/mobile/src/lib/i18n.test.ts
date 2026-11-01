@@ -289,3 +289,8 @@ describe("counted nouns and the send hint", () => {
     expect(t("en", platformKey("settings.thisDevice", "web"))).toBe("This browser");
   });
 });
+
+it("labels unsupported review delivery in both languages", () => {
+  expect(t("en", "reviews.wait.unsupported")).toBe("agent not supported for auto-delivery");
+  expect(t("ar", "reviews.wait.unsupported")).toBe("الوكيل غير مدعوم للتسليم التلقائي");
+});

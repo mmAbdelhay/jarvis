@@ -203,6 +203,7 @@ function recordingHost() {
       seen.push(["openExternal", url]);
     },
     restart: () => seen.push(["restart"]),
+    setStayAwake: (on) => seen.push(["setStayAwake", on]),
   };
   return { host, seen, state };
 }
@@ -505,6 +506,23 @@ describe("socket CoreClient: the desktop host", () => {
 
     detach();
     await until(() => daemon.binding.daemonHost.attachedCount === 0, "the detach");
+  });
+
+  it("holds the stay-awake the daemon's core wants, from before and after the attach", async () => {
+    const run = await runDirectory();
+    const fake = fakeCore();
+    await startDaemon(run, fake.core);
+    fake.link.host.setStayAwake(true);
+    const client = await connect(run);
+    const { host, seen } = recordingHost();
+    client.attachHost(host);
+    await until(() => seen.length === 1, "the replayed stay-awake");
+    fake.link.host.setStayAwake(false);
+    await until(() => seen.length === 2, "the release");
+    expect(seen).toEqual([
+      ["setStayAwake", true],
+      ["setStayAwake", false],
+    ]);
   });
 
   it("gets the alerts queued while no app was attached once it attaches", async () => {

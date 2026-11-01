@@ -19,6 +19,8 @@ function setup(
     file?: string;
     execPath?: string;
     appImage?: string;
+    /** This instance's HOME; the account's own home by default. */
+    home?: string;
   } = {},
 ) {
   const operations: Operation[] = [];
@@ -39,7 +41,8 @@ function setup(
   const results = [...(options.results ?? [])];
   const manager = createServiceManager({
     platform,
-    home: "/Users/Jarvis User",
+    home: options.home ?? "/Users/Jarvis User",
+    accountHome: "/Users/Jarvis User",
     uid: 502,
     execPath:
       options.execPath ??
@@ -225,9 +228,16 @@ describe("createServiceManager", () => {
   describe("isStale: the installed service names another binary (a moved app)", () => {
     const definition = (platform: "darwin" | "linux", execPath: string, appImage?: string) =>
       platform === "darwin"
-        ? buildDarwinService({ home: "/h", uid: 1, execPath, daemonScript: "/d.js" }).contents
+        ? buildDarwinService({
+            home: "/Users/Jarvis User",
+            accountHome: "/Users/Jarvis User",
+            uid: 1,
+            execPath,
+            daemonScript: "/d.js",
+          }).contents
         : buildLinuxService({
-            home: "/h",
+            home: "/Users/Jarvis User",
+            accountHome: "/Users/Jarvis User",
             execPath,
             daemonScript: "/d.js",
             ...(appImage === undefined ? {} : { appImage }),
@@ -278,6 +288,76 @@ describe("createServiceManager", () => {
       await expect(same.manager.isStale()).resolves.toBe(false);
       const absent = setup("win32", { results: [{ code: 1, stdout: "", stderr: "not found" }] });
       await expect(absent.manager.isStale()).resolves.toBe(false);
+    });
+  });
+
+  // A dev or test instance (HOME=/tmp/... scripts/start.mjs) found no daemon
+  // under its HOME, installed one, and kickstarted the shared label: the
+  // user's real daemon restarted and every terminal died. Another HOME now
+  // addresses only its own service.
+  describe("an instance whose HOME is not the account's home", () => {
+    const home = "/Users/Jarvis User/test-home";
+
+    it("darwin: installs, starts and stops only its own launch agent", async () => {
+      const target = "gui/502/dev.jarvis.daemon.d31ad8dd";
+      const { manager, operations, invocations } = setup("darwin", { home });
+      await manager.install();
+      await manager.start();
+      await manager.stop();
+      expect(invocations).toEqual([
+        ["launchctl", ["print", target]],
+        ["launchctl", ["bootout", target]],
+        [
+          "launchctl",
+          ["bootstrap", "gui/502", `${home}/Library/LaunchAgents/dev.jarvis.daemon.d31ad8dd.plist`],
+        ],
+        ["launchctl", ["print", target]],
+        ["launchctl", ["kickstart", "-k", target]],
+        ["launchctl", ["bootout", target]],
+      ]);
+      expect(operations.map((operation) => operation[1])).toEqual([
+        `${home}/Library/LaunchAgents`,
+        `${home}/.config/jarvis/logs`,
+        `${home}/Library/LaunchAgents/dev.jarvis.daemon.d31ad8dd.plist`,
+      ]);
+    });
+
+    it("linux: installs and restarts only its own unit", async () => {
+      const { manager, invocations } = setup("linux", { home });
+      await manager.install();
+      expect(invocations).toEqual([
+        ["systemctl", ["--user", "daemon-reload"]],
+        ["systemctl", ["--user", "is-active", "jarvisd-d31ad8dd.service"]],
+        ["systemctl", ["--user", "enable", "jarvisd-d31ad8dd.service"]],
+        ["systemctl", ["--user", "restart", "jarvisd-d31ad8dd.service"]],
+      ]);
+    });
+
+    it("win32: writes, removes and reads only its own Run value", async () => {
+      const { manager, invocations } = setup("win32", { home });
+      await manager.install();
+      await manager.uninstall();
+      await manager.status();
+      expect(invocations.map(([, args]) => args[args.indexOf("/v") + 1])).toEqual([
+        "JarvisDaemon-d31ad8dd",
+        "JarvisDaemon-d31ad8dd",
+        "JarvisDaemon-d31ad8dd",
+      ]);
+    });
+
+    it("win32: reads its own Run value back for isStale", async () => {
+      const { manager } = setup("win32", {
+        home,
+        results: [
+          {
+            code: 0,
+            stdout:
+              '    JarvisDaemon-d31ad8dd    REG_SZ    "C:\\Program Files\\Jarvis\\Jarvis.exe" --jarvis-daemon',
+            stderr: "",
+          },
+        ],
+      });
+      await expect(manager.isStale()).resolves.toBe(false);
     });
   });
 });

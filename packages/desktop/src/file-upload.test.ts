@@ -214,6 +214,26 @@ describe("createFileUploadStore", () => {
     store = createFileUploadStore(h.deps);
   });
 
+  it("store.release frees quota", async () => {
+    for (let i = 0; i < 16; i += 1) {
+      expect(
+        (await store.put(DEVICE_A, { name: "a", contentType: "x" }, new Uint8Array([1]))).ok,
+      ).toBe(true);
+    }
+    expect(
+      (await store.put(DEVICE_A, { name: "a", contentType: "x" }, new Uint8Array([1]))).ok,
+    ).toBe(false);
+    await store.release(DEVICE_B, hexId(0));
+    expect(await store.resolve(DEVICE_A, hexId(0))).toBeDefined();
+    await store.release(DEVICE_A, hexId(0));
+    await store.release(DEVICE_A, hexId(0));
+    expect(await store.resolve(DEVICE_A, hexId(0))).toBeUndefined();
+    await expect(stat(join(baseDir, DEVICE_A, hexId(0)))).rejects.toMatchObject({ code: "ENOENT" });
+    expect(
+      (await store.put(DEVICE_A, { name: "a", contentType: "x" }, new Uint8Array([1]))).ok,
+    ).toBe(true);
+  });
+
   afterEach(async () => {
     await rm(baseDir, RM_OPTIONS);
   });
@@ -998,6 +1018,7 @@ describe("createFileUploadHandler", () => {
   function stubStore(put: UploadStore["put"]): UploadStore {
     return {
       put,
+      release: vi.fn(async () => undefined),
       resolve: vi.fn(async () => undefined),
       readJson: vi.fn(async () => ({ ok: false, text: "n/a", language: "en" }) as const),
       revoke: vi.fn(async () => undefined),

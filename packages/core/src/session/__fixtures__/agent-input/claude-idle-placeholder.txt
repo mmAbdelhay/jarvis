@@ -1,0 +1,39 @@
+# rendered — Claude Code v2.1.302, captured from a real pane and rendered through @xterm/headless at 213x38; personal paths/accounts replaced.
+
+ ▐▛███▛█   Claude Code v2.1.302
+▝▜██████▀  Opus 5.5 · Claude Plan
+ ▝▝   ▝▝   /Users/dev/projects/scratch-repo
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                                                                                                                                                                 ◐ medium · /effort
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ Try "write a test for <filepath>"
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  claude-acme  dev@example.com
+  [dev@host:/Users/dev/projects/scratch-repo]  [Opus 5.5]
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents

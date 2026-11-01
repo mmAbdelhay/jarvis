@@ -25,6 +25,7 @@ const CONFIG: JarvisConfig = {
     completion: { enabled: true, historyPath: "/h", commandLogPath: "/l" },
     blocks: { enabled: true, inputEditor: true },
     notifyAfterSeconds: 30,
+    fontSize: 12,
   },
   voice: {
     engine: "say" as const,

@@ -1,6 +1,9 @@
+import { serviceInstanceId } from "./service-name.js";
+
 type Command = readonly [command: string, args: readonly string[]];
 
 export interface LinuxServiceDefinition {
+  unit: string;
   filePath: string;
   fileMode: number;
   contents: string;
@@ -20,6 +23,11 @@ function systemdQuote(value: string): string {
     .replaceAll('"', '\\"')
     .replaceAll("%", "%%")
     .replaceAll("$", () => "$$")}"`;
+}
+
+/** Environment= takes C-style escapes and % specifiers, but no $ expansion. */
+function systemdEnvironmentQuote(value: string): string {
+  return `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"').replaceAll("%", "%%")}"`;
 }
 
 /** This process's AppImage file, or undefined. APPIMAGE is inherited by
@@ -66,12 +74,24 @@ export function linuxRecordedExecPath(unit: string): string | undefined {
  */
 export function buildLinuxService(options: {
   home: string;
+  /** The OS account's home (os.userInfo().homedir): any other home is a
+   *  separate instance with its own unit. */
+  accountHome: string;
   execPath: string;
   daemonScript: string;
   /** $APPIMAGE, when the app runs from an AppImage. */
   appImage?: string;
 }): LinuxServiceDefinition {
-  const filePath = `${options.home}/.config/systemd/user/jarvisd.service`;
+  const instance = serviceInstanceId(options.home, options.accountHome);
+  const unit = instance === undefined ? "jarvisd.service" : `jarvisd-${instance}.service`;
+  const filePath = `${options.home}/.config/systemd/user/${unit}`;
+  // systemd gives a user unit the account's HOME; another instance's daemon
+  // must run under its own, or it would use the real one's files.
+  const home =
+    instance === undefined
+      ? ""
+      : `Environment=${systemdEnvironmentQuote(`HOME=${options.home}`)}
+`;
   const exec =
     options.appImage === undefined
       ? `ExecStart=${systemdQuote(options.execPath)} ${systemdQuote(options.daemonScript)} ${systemdQuote("run")}
@@ -85,7 +105,7 @@ StartLimitBurst=5
 [Service]
 ${exec}
 Environment=JARVISD_SUPERVISOR=systemd
-Restart=on-failure
+${home}Restart=on-failure
 RestartSec=5
 RestartPreventExitStatus=3
 KillMode=process
@@ -94,16 +114,17 @@ KillMode=process
 WantedBy=default.target
 `;
   return {
+    unit,
     filePath,
     fileMode: 0o644,
     contents,
     commands: {
       reload: ["systemctl", ["--user", "daemon-reload"]],
-      enable: ["systemctl", ["--user", "enable", "jarvisd.service"]],
-      start: ["systemctl", ["--user", "enable", "--now", "jarvisd.service"]],
-      stop: ["systemctl", ["--user", "disable", "--now", "jarvisd.service"]],
-      restart: ["systemctl", ["--user", "restart", "jarvisd.service"]],
-      status: ["systemctl", ["--user", "is-active", "jarvisd.service"]],
+      enable: ["systemctl", ["--user", "enable", unit]],
+      start: ["systemctl", ["--user", "enable", "--now", unit]],
+      stop: ["systemctl", ["--user", "disable", "--now", unit]],
+      restart: ["systemctl", ["--user", "restart", unit]],
+      status: ["systemctl", ["--user", "is-active", unit]],
     },
   };
 }

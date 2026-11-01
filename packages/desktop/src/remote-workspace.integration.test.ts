@@ -280,6 +280,7 @@ describe("remote-workspace.integration: dispatch + policy + blob + api-executor 
         shellPids: () => new Map(),
         write: () => {},
         resize: () => {},
+        termSize: () => undefined,
         kill: () => {},
         stopAll: async () => {},
       },

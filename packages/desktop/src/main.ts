@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { homedir } from "node:os";
+import { homedir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
@@ -11,6 +11,7 @@ import {
   dialog,
   globalShortcut,
   ipcMain,
+  powerSaveBlocker,
   screen,
   session,
   shell as electronShell,
@@ -37,6 +38,7 @@ import {
 import { nodeDaemonModeDeps } from "./daemon/mode-node.js";
 import { answerDbGateChallenge } from "./dbgate-login.js";
 import { ELECTRON_BOUND_CHANNELS, registerDesktopOnly } from "./desktop-only.js";
+import { createPowerBlocker } from "./keep-awake.js";
 import {
   countRunning,
   createUpdater,
@@ -100,8 +102,24 @@ if (launchingDaemon) {
 /** The app's window, once there is one: a second instance brings it forward. */
 let focusAppWindow: () => void = () => {};
 
+// Keep awake (keep-awake.ts): at most one OS stay-awake, for this app's
+// whole life — the core asks for it through DesktopHost.setStayAwake.
+const stayAwake = createPowerBlocker(powerSaveBlocker);
+app.on("will-quit", () => stayAwake.set(false));
+
 /** One app per user data directory (single-instance.ts, review I1). */
 const onlyInstance = !launchingDaemon && claimSingleInstance(app, () => focusAppWindow());
+
+/** The OS account's home, which $HOME does not change: an instance run with
+ *  another HOME gets a service of its own (daemon/service-name.ts). Without
+ *  an account entry, the HOME in use is taken as the account's. */
+function accountHomedir(): string {
+  try {
+    return userInfo().homedir;
+  } catch {
+    return homedir();
+  }
+}
 
 /** An asset beside the compiled main process. `import.meta.url` is
  *  dist/src/main.js at runtime and the build copies assets to dist/assets,
@@ -307,6 +325,8 @@ function createDesktopHost(client: CoreClient) {
       app.relaunch();
       app.exit(0);
     },
+    // Keep awake: the core decides when; this app holds the one blocker.
+    setStayAwake: (on) => stayAwake.set(on),
   });
 
   // The window is going: stop reaching into it, then drop its pages here,
@@ -320,6 +340,8 @@ function createDesktopHost(client: CoreClient) {
     stopPushes();
     detach();
     views.destroy();
+    // Nothing of this window holds the machine awake past it.
+    stayAwake.set(false);
   });
 
   /** A push about this window alone — its DevTools, its tab chips — which
@@ -409,6 +431,7 @@ app.whenReady().then(async () => {
     const nodeDeps = nodeDaemonModeDeps({
       platform,
       home: homedir(),
+      accountHome: accountHomedir(),
       uid: process.getuid?.() ?? 0,
       execPath: process.execPath,
       // An AppImage's own file: execPath is inside its temporary mount.

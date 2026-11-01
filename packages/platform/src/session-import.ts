@@ -131,6 +131,108 @@ export function transcriptDirs(
   });
 }
 
+/**
+ * Where one Claude-format agent keeps its per-process session records
+ * (`<configDir>/sessions/<pid>.json`) and its transcripts, resolved the way
+ * transcriptDirs resolves them. Null for any other vendor or an unknown id.
+ */
+export function claudeSessionPaths(
+  agents: readonly AgentConfig[],
+  home: string,
+  agentId: string,
+): { sessionsDir: string; transcriptsDir: string } | null {
+  const entry = transcriptDirs(agents, home).find((candidate) => candidate.agentId === agentId);
+  if (entry === undefined || entry.format !== "claude") return null;
+  return { sessionsDir: join(dirname(entry.dir), "sessions"), transcriptsDir: entry.dir };
+}
+
+/** What Claude Code's `<configDir>/sessions/<pid>.json` says about the
+ *  process: the session it is in and, once it has one, that session's
+ *  current name (Claude's own topic name or one set with `/rename`). */
+export type ClaudePidRecord = { sessionId: string; name?: string };
+
+/**
+ * Parses a pid file. Null when the text is not (yet) whole JSON — Claude
+ * rewrites the file while it runs — or when it names another pid: a file
+ * left by an earlier process that held this pid is someone else's session.
+ */
+export function parseClaudePidRecord(text: string, pid: number): ClaudePidRecord | null {
+  let record: unknown;
+  try {
+    record = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (typeof record !== "object" || record === null) return null;
+  const { pid: recordPid, sessionId, name } = record as Record<string, unknown>;
+  if (recordPid !== pid || typeof sessionId !== "string") return null;
+  return typeof name === "string" && name.trim() !== ""
+    ? { sessionId, name: name.trim() }
+    : { sessionId };
+}
+
+/**
+ * The newest non-empty `/rename` title in a stretch of transcript — its
+ * `{"type":"custom-title","customTitle":…}` records. Lines that do not
+ * parse (a tail read cut mid-record, a record being written) are skipped.
+ */
+export function lastCustomTitle(text: string): string | undefined {
+  let title: string | undefined;
+  for (const line of text.split("\n")) {
+    if (!line.includes('"custom-title"')) continue;
+    try {
+      const record = JSON.parse(line) as { type?: unknown; customTitle?: unknown };
+      if (
+        record.type === "custom-title" &&
+        typeof record.customTitle === "string" &&
+        record.customTitle.trim() !== ""
+      ) {
+        title = record.customTitle.trim();
+      }
+    } catch {
+      // A fragment, not a record.
+    }
+  }
+  return title;
+}
+
+/** The newest non-empty automatic title; malformed transcript fragments are skipped. */
+export function lastAiTitle(text: string): string | undefined {
+  let title: string | undefined;
+  for (const line of text.split("\n")) {
+    if (!line.includes('"ai-title"')) continue;
+    try {
+      const record = JSON.parse(line) as { type?: unknown; aiTitle?: unknown };
+      if (
+        record.type === "ai-title" &&
+        typeof record.aiTitle === "string" &&
+        record.aiTitle.trim() !== ""
+      ) {
+        title = record.aiTitle.trim();
+      }
+    } catch {
+      // A fragment, not a record.
+    }
+  }
+  return title;
+}
+
+/** At most the last `maxBytes` of `path`, as text — readHead's mirror, for
+ *  records appended late in a transcript (a `/rename`). Rejects when the
+ *  file cannot be read. */
+export async function readFileTail(path: string, maxBytes: number): Promise<string> {
+  const handle = await open(path, "r");
+  try {
+    const { size } = await handle.stat();
+    const start = Math.max(0, size - maxBytes);
+    const buffer = Buffer.alloc(size - start);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, start);
+    return buffer.subarray(0, bytesRead).toString("utf8");
+  } finally {
+    await handle.close();
+  }
+}
+
 /** What one transcript says about its session. Everything else a session
  *  row needs — which agent's directory it was found under, which project
  *  its cwd resolves to — is the importer's to supply. */
@@ -641,18 +743,17 @@ export function createSessionImporter(deps: SessionImporterDeps): SessionImporte
     },
 
     async transcriptForPid(agentId, pid) {
-      const entry = dirs.find((candidate) => candidate.agentId === agentId);
-      if (entry === undefined || entry.format !== "claude") return null;
+      const paths = claudeSessionPaths(deps.agents, deps.home, agentId);
+      if (paths === null) return null;
 
       // Beside the transcripts directory, under the same configDir.
       let sessionId: string;
       try {
-        const record = JSON.parse(
-          await deps.readHead(join(dirname(entry.dir), "sessions", `${pid}.json`)),
-        ) as { pid?: unknown; sessionId?: unknown };
-        // A file left by an earlier process that held this pid names
-        // someone else's session.
-        if (record.pid !== pid || typeof record.sessionId !== "string") return null;
+        const record = parseClaudePidRecord(
+          await deps.readHead(join(paths.sessionsDir, `${pid}.json`)),
+          pid,
+        );
+        if (record === null) return null;
         sessionId = record.sessionId;
       } catch {
         return null;
@@ -660,7 +761,7 @@ export function createSessionImporter(deps: SessionImporterDeps): SessionImporte
 
       let files: TranscriptFile[];
       try {
-        files = await deps.listFiles(entry.dir, entry.format);
+        files = await deps.listFiles(paths.transcriptsDir, "claude");
       } catch {
         return null;
       }
@@ -716,7 +817,114 @@ export type TranscriptEntry = {
  * all.
  */
 export function parseTranscript(text: string): TranscriptEntry[] {
-  const entries: TranscriptEntry[] = [];
+  return readTurns(text, (name) => name).turns;
+}
+
+/** Turns kept for the phone's chat view: enough to scroll back a while. */
+export const MAX_CHAT_TURNS = 200;
+
+/**
+ * How much of a transcript's end the chat view reads. The view wants the
+ * latest turns, not the opening, so this is a tail; it can start mid-record,
+ * and that first partial line fails to parse and is skipped like any other.
+ */
+export const CHAT_TAIL_BYTES = 2 * 1024 * 1024;
+
+/** A tool call as the chat view shows it: what it ran on, and how much it changed. */
+export type ChatTool = { name: string; target?: string; added?: number; removed?: number };
+
+/** One turn of the chat view: a TranscriptEntry whose tools carry their target. */
+export type ChatTurn = { role: "user" | "assistant"; text: string; tools: ChatTool[] };
+
+/**
+ * A transcript as the phone's chat view lays it out — parseTranscript's
+ * turns, same skip and fold rules, but each tool says what it touched (a
+ * file's name, a command's first line) and an edit says how many lines it
+ * added and removed. Still never the input itself: a count, not the file.
+ *
+ * Only the last `maxTurns` are kept, oldest first. `model` is the last
+ * assistant record's, which is the model the session is running now.
+ */
+export function parseChatTranscript(
+  text: string,
+  maxTurns = MAX_CHAT_TURNS,
+): { turns: ChatTurn[]; model?: string } {
+  const { turns, model } = readTurns(text, chatTool);
+  const kept = turns.slice(Math.max(0, turns.length - maxTurns));
+  return model === undefined ? { turns: kept } : { turns: kept, model };
+}
+
+/** The longest command line a chat tool shows before cutting it. */
+const TARGET_CHARS = 80;
+
+function chatTool(name: string, input: unknown): ChatTool {
+  const tool: ChatTool = { name };
+  if (typeof input !== "object" || input === null) return tool;
+  const fields = input as Record<string, unknown>;
+  const target = toolTarget(fields);
+  if (target !== undefined) tool.target = target;
+
+  if (name === "Edit") {
+    tool.added = lineCount(fields["new_string"]);
+    tool.removed = lineCount(fields["old_string"]);
+  } else if (name === "MultiEdit" && Array.isArray(fields["edits"])) {
+    let added = 0;
+    let removed = 0;
+    for (const edit of fields["edits"]) {
+      if (typeof edit !== "object" || edit === null) continue;
+      const change = edit as Record<string, unknown>;
+      added += lineCount(change["new_string"]);
+      removed += lineCount(change["old_string"]);
+    }
+    tool.added = added;
+    tool.removed = removed;
+  } else if (name === "Write") {
+    tool.added = lineCount(fields["content"]);
+  }
+  return tool;
+}
+
+/** What a tool call ran on, from the first input field that names it. */
+function toolTarget(fields: Record<string, unknown>): string | undefined {
+  const path = fields["file_path"];
+  if (typeof path === "string" && path !== "") return basename(path);
+  const command = fields["command"];
+  if (typeof command === "string" && command !== "") {
+    // A command can open on a blank line, or end its lines Windows-style;
+    // the first line with something on it is the one that says what ran.
+    const first = command.split(/\r?\n/).find((row) => row.trim() !== "");
+    if (first !== undefined) {
+      return first.length > TARGET_CHARS ? `${first.slice(0, TARGET_CHARS)}…` : first;
+    }
+  }
+  for (const key of ["pattern", "url"]) {
+    const value = fields[key];
+    if (typeof value === "string" && value !== "") return value;
+  }
+  return undefined;
+}
+
+/** Lines in a string as an editor counts them: a trailing newline ends a line, it does not start one. */
+function lineCount(value: unknown): number {
+  if (typeof value !== "string" || value === "") return 0;
+  const lines = value.split("\n").length;
+  return value.endsWith("\n") ? lines - 1 : lines;
+}
+
+/** The model the CLI records on an API-error turn it wrote itself. */
+const SYNTHETIC_MODEL = "<synthetic>";
+
+/**
+ * The conversation in a Claude transcript, with each tool call shaped by
+ * `toTool` — the reading both parseTranscript and parseChatTranscript share,
+ * so the two can never disagree about which turns exist.
+ */
+function readTurns<T>(
+  text: string,
+  toTool: (name: string, input: unknown) => T,
+): { turns: { role: "user" | "assistant"; text: string; tools: T[] }[]; model?: string } {
+  const entries: { role: "user" | "assistant"; text: string; tools: T[] }[] = [];
+  let model: string | undefined;
   for (const line of text.split("\n")) {
     if (line.trim() === "") continue;
     let record: unknown;
@@ -737,7 +945,17 @@ export function parseTranscript(text: string): TranscriptEntry[] {
     if (fields["isMeta"] === true) continue;
     const message = fields["message"];
     if (typeof message !== "object" || message === null) continue;
-    const turn = transcriptTurn((message as Record<string, unknown>)["content"]);
+    const body = message as Record<string, unknown>;
+    // An API error is written as an assistant record whose model is
+    // "<synthetic>": not a model, so it must not replace the real one.
+    if (
+      role === "assistant" &&
+      typeof body["model"] === "string" &&
+      body["model"] !== SYNTHETIC_MODEL
+    ) {
+      model = body["model"];
+    }
+    const turn = transcriptTurn(body["content"], toTool);
     if (turn === undefined) continue;
     if (turn.text === "" && turn.tools.length === 0) continue;
 
@@ -753,7 +971,7 @@ export function parseTranscript(text: string): TranscriptEntry[] {
     }
     entries.push({ role, ...turn });
   }
-  return entries;
+  return model === undefined ? { turns: entries } : { turns: entries, model };
 }
 
 /**
@@ -840,8 +1058,11 @@ export function transcriptSource(path: string): {
   return { path, parse: parseTranscript };
 }
 
-/** One message's readable text and the tools it used. */
-function transcriptTurn(content: unknown): { text: string; tools: string[] } | undefined {
+/** One message's readable text and the tools it used, each shaped by `toTool`. */
+function transcriptTurn<T>(
+  content: unknown,
+  toTool: (name: string, input: unknown) => T,
+): { text: string; tools: T[] } | undefined {
   if (typeof content === "string") {
     if (isLocalCommandNoise(content)) return undefined;
     return { text: readableCommand(content).trim(), tools: [] };
@@ -849,7 +1070,7 @@ function transcriptTurn(content: unknown): { text: string; tools: string[] } | u
   if (!Array.isArray(content)) return undefined;
 
   const parts: string[] = [];
-  const tools: string[] = [];
+  const tools: T[] = [];
   for (const block of content) {
     if (typeof block !== "object" || block === null) continue;
     const fields = block as Record<string, unknown>;
@@ -861,7 +1082,7 @@ function transcriptTurn(content: unknown): { text: string; tools: string[] } | u
     }
     if (kind === "tool_use") {
       const name = fields["name"];
-      tools.push(typeof name === "string" ? name : "tool");
+      tools.push(toTool(typeof name === "string" ? name : "tool", fields["input"]));
     }
     // thinking and tool_result are deliberately dropped — see the doc above.
   }

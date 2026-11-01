@@ -71,6 +71,9 @@ export const DAEMON_PUSHES = {
   /** To the app that asked: no service manager runs this daemon, so it
    *  can't restart itself — the user has to restart jarvisd. */
   restartManual: "daemon:restartManual",
+  /** To every app (and to one attaching while it is held): hold or release
+   *  the OS stay-awake (keep-awake.ts). Payload: { on: boolean }. */
+  stayAwake: "daemon:stayAwake",
   /** notifyDesktop in daemon mode: the app shows it as an OS notification.
    *  Payload: SecurityAlert. */
   alert: "security:alert",

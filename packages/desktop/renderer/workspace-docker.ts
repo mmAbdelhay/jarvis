@@ -1,5 +1,7 @@
 import type { DockerRow, DockerView, GitViewResult } from "../src/ipc.js";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
+import { onTerminalFontSize, terminalFontSize } from "./terminal-font.js";
+import { TERMINAL_FONT } from "./terminal-theme.js";
 import { FitAddon } from "./vendor/addon-fit.mjs";
 import { Terminal } from "./vendor/xterm.mjs";
 
@@ -80,6 +82,9 @@ type Pane = {
    *  watches, the same discipline workspace-terminal.ts follows. */
   fit: FitAddon | undefined;
   observer: ResizeObserver | undefined;
+  /** Stops the log following terminal-font.ts — set with `terminal`, and
+   *  called on detach for the same reason the observer is disconnected. */
+  stopFollowingFont: (() => void) | undefined;
   /** The container currently selected for its log tail, if any. Survives a
    *  re-render (the 3s poll) so the highlighted row and the running
    *  follower do not reset every tick. */
@@ -127,6 +132,7 @@ function getPane(tabId: string): Pane {
     terminal: undefined,
     fit: undefined,
     observer: undefined,
+    stopFollowingFont: undefined,
     selected: undefined,
   };
   panes.set(tabId, pane);
@@ -146,9 +152,8 @@ function ensureTerminal(pane: Pane): Terminal {
   pane.empty = undefined;
   const terminal = new Terminal({
     scrollback: LOG_TAIL_LINES,
-    fontFamily: '"JetBrains Mono", ui-monospace, monospace',
-    fontSize: 12,
-    lineHeight: 1.35,
+    ...TERMINAL_FONT,
+    fontSize: terminalFontSize(),
     theme: THEME,
     disableStdin: true,
     cursorBlink: false,
@@ -159,6 +164,11 @@ function ensureTerminal(pane: Pane): Terminal {
   pane.terminal = terminal;
   pane.fit = fit;
   refit(pane);
+  // The same size as the Terminal tabs, zoom included.
+  pane.stopFollowingFont = onTerminalFontSize((size) => {
+    terminal.options.fontSize = size;
+    refit(pane);
+  });
 
   if (typeof ResizeObserver !== "undefined") {
     pane.observer = new ResizeObserver(() => refit(pane));
@@ -478,6 +488,7 @@ export function detachDockerPane(tabId: string): void {
 
   const pane = panes.get(tabId);
   pane?.observer?.disconnect();
+  pane?.stopFollowingFont?.();
   pane?.terminal?.dispose();
   panes.delete(tabId);
 }

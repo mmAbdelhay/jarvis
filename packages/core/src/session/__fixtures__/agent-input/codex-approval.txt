@@ -1,0 +1,16 @@
+# synthetic — built from the Codex CLI TUI's command approval ("› 1. Yes, proceed (y)" menu, "Press enter to confirm or esc to cancel" footer); launching codex makes network calls.
+› delete the build output and rebuild
+
+• I'll remove the stale build output first.
+
+  Would you like to run the following command?
+
+  Reason: remove the stale desktop build output
+
+  $ rm -rf packages/desktop/dist
+
+› 1. Yes, proceed (y)
+  2. Yes, and don't ask again for this command (a)
+  3. No, and tell Codex what to do differently (esc)
+
+  Press enter to confirm or esc to cancel

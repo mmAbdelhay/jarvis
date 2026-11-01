@@ -376,6 +376,26 @@ describe("daemon host: security alerts", () => {
     expect(sent).toEqual([[2, DAEMON_PUSHES.trashItem, { path: "/proj/a.ts" }]]);
   });
 
+  it("sends the stay-awake to every attached app, and to one attaching while it is held", () => {
+    const pushes: Array<[string, unknown]> = [];
+    const sent: Array<[number, string, unknown]> = [];
+    const daemonHost = createDaemonHost({
+      push: (channel, payload) => pushes.push([channel, payload]),
+      pushTo: (id, channel, payload) => sent.push([id, channel, payload]),
+      initiator: () => undefined,
+      log: () => {},
+      now: () => 0,
+    });
+    daemonHost.host.setStayAwake(true);
+    expect(pushes).toEqual([]);
+    daemonHost.attach(1, { focused: false, awake: false });
+    expect(sent).toEqual([[1, DAEMON_PUSHES.stayAwake, { on: true }]]);
+    daemonHost.host.setStayAwake(false);
+    expect(pushes).toEqual([[DAEMON_PUSHES.stayAwake, { on: false }]]);
+    daemonHost.attach(2, { focused: false, awake: false });
+    expect(sent).toHaveLength(1);
+  });
+
   it("answers focus and visibility from what the attached apps report", () => {
     const { daemonHost } = hostDouble();
     expect(daemonHost.host.isAwake()).toBe(false);

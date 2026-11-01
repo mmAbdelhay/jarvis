@@ -5,6 +5,7 @@ describe("buildLinuxService", () => {
   it("builds a quoted user unit and exact systemctl argv", () => {
     const service = buildLinuxService({
       home: "/home/Jarvis User",
+      accountHome: "/home/Jarvis User",
       execPath: "/opt/Jarvis %App/bin/jarvis\\preview$",
       daemonScript: '/home/Jarvis User/a "quoted" daemon.js',
     });
@@ -43,6 +44,7 @@ WantedBy=default.target
     // gone once the app quits (fix-wave ruling).
     const service = buildLinuxService({
       home: "/home/u",
+      accountHome: "/home/u",
       execPath: "/tmp/.mount_JarvisX1/jarvis",
       daemonScript: "/tmp/.mount_JarvisX1/resources/app.asar/dist/src/daemon-main.js",
       appImage: "/home/u/Apps/Jarvis 1.0 $beta%.AppImage",
@@ -64,6 +66,7 @@ WantedBy=default.target
   ])("reads back the binary a unit records: %s", (execPath, appImage) => {
     const service = buildLinuxService({
       home: "/home/u",
+      accountHome: "/home/u",
       execPath,
       daemonScript: "/x/daemon-main.js",
       ...(appImage === undefined ? {} : { appImage }),
@@ -84,5 +87,44 @@ WantedBy=default.target
     // A sibling directory that only shares the prefix is not inside it.
     expect(appImageOf(image, "/tmp/.mount_Jarv1x/jarvis")).toBeUndefined();
     expect(appImageOf({}, "/tmp/.mount_Jarv1/jarvis")).toBeUndefined();
+  });
+
+  // A dev or test instance run with another HOME must never address the
+  // user's real unit (the shared name restarted the real daemon).
+  describe("an instance whose HOME is not the account's home", () => {
+    const build = (home: string) =>
+      buildLinuxService({
+        home,
+        accountHome: "/home/u",
+        execPath: "/opt/jarvis/jarvis",
+        daemonScript: "/d.js",
+      });
+
+    it("gets its own unit name in the file and every systemctl call", () => {
+      const service = build("/tmp/jp/home");
+      const unit = "jarvisd-26f9ba41.service";
+      expect(service.unit).toBe(unit);
+      expect(service.filePath).toBe(`/tmp/jp/home/.config/systemd/user/${unit}`);
+      expect(service.commands).toEqual({
+        reload: ["systemctl", ["--user", "daemon-reload"]],
+        enable: ["systemctl", ["--user", "enable", unit]],
+        start: ["systemctl", ["--user", "enable", "--now", unit]],
+        stop: ["systemctl", ["--user", "disable", "--now", unit]],
+        restart: ["systemctl", ["--user", "restart", unit]],
+        status: ["systemctl", ["--user", "is-active", unit]],
+      });
+    });
+
+    it("runs its daemon with its own HOME, which systemd would otherwise reset", () => {
+      expect(build("/tmp/jp/my %home").contents).toContain(
+        'Environment="HOME=/tmp/jp/my %%home"\n',
+      );
+      expect(build("/home/u").contents).not.toContain("HOME=");
+    });
+
+    it("gives two different homes two different unit names", () => {
+      expect(build("/tmp/jp/other").unit).toBe("jarvisd-a2cc2acb.service");
+      expect(build("/home/u/").unit).toBe("jarvisd.service");
+    });
   });
 });

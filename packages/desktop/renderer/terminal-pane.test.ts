@@ -2246,3 +2246,43 @@ describe("a terminal pane over a ConPTY", () => {
     expect(terminal.cleared).toBe(0);
   });
 });
+
+describe("a font change while the live terminal is hidden", () => {
+  it("tells the shell the estimated grid now, not when the terminal is next shown", async () => {
+    const { setTerminalFontBase, zoomTerminalFont } = await import("./terminal-font.js");
+    setTerminalFontBase(12);
+    const resize = vi.fn();
+    const host = document.createElement("div");
+    document.body.append(host);
+    const pane = createPane(host, {
+      sendInput: vi.fn(),
+      resize,
+      attach: async () => "",
+      settings: {
+        blocks: true,
+        inputEditor: false,
+        notifyAfterSeconds: 0,
+        home: "/Users/x",
+        scrollback: 0,
+      },
+      notify: vi.fn(),
+    });
+    const terminal = FakeTerminal.instances[0]!;
+
+    // Laid out: a real fit at 13px records the 80×24 grid it measured.
+    const width = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(800);
+    const height = vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(600);
+    zoomTerminalFont(1);
+    width.mockRestore();
+    height.mockRestore();
+
+    // Hidden (display:none, no layout): 14px is estimated from that fit.
+    zoomTerminalFont(1);
+    expect(terminal.options["fontSize"]).toBe(14);
+    expect(resize).toHaveBeenLastCalledWith(Math.floor((80 * 13) / 14), Math.floor((24 * 13) / 14));
+
+    pane.dispose();
+    setTerminalFontBase(16);
+    setTerminalFontBase(12);
+  });
+});

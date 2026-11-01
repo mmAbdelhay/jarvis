@@ -225,6 +225,7 @@ export function inProcessCoreClient(core: Core, options: InProcessOptions = {}):
           settle(host.openExternal(wire(url, "openExternal")), "openExternal result"),
         trashItem: (path) => settle(host.trashItem(wire(path, "trashItem")), "trashItem result"),
         restart: () => host.restart(),
+        setStayAwake: (on) => host.setStayAwake(wire(on, "setStayAwake")),
       }),
 
     voice: { start: () => core.voiceControl.start(), stop: () => core.voiceControl.stop() },

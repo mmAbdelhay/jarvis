@@ -905,6 +905,32 @@ describe("push notification catalogue", () => {
     expect(MESSAGES.pushBody("reply", "acme", "en", undefined)).not.toContain("acme");
   });
 
+  // Reviews: a review push names the PR number, and never the comment's
+  // own text — pushBody is never even handed it.
+  it.each(["review-comment", "review-queued", "review-requested"] as const)(
+    "names #18 for %s in both languages and never carries comment text",
+    (kind) => {
+      const sample = "please rename this variable";
+      for (const language of ["ar", "en"] as const) {
+        const withRepo = MESSAGES.pushBody(kind, undefined, language, undefined, {
+          number: 18,
+          repo: "acme/web",
+        });
+        const bare = MESSAGES.pushBody(kind, undefined, language, undefined, { number: 18 });
+        for (const text of [withRepo, bare]) {
+          expect(text).toContain("#18");
+          expect(text).not.toContain(sample);
+          expect(text).not.toContain("undefined");
+        }
+        expect(withRepo).toContain("acme/web#18");
+        expect(bare).not.toContain("acme");
+      }
+      expect(MESSAGES.pushBody(kind, undefined, "ar", undefined, { number: 18 })).not.toBe(
+        MESSAGES.pushBody(kind, undefined, "en", undefined, { number: 18 }),
+      );
+    },
+  );
+
   it("says why registration failed, in both languages, and this is the laptop's only registered:false text", () => {
     expect(MESSAGES.pushRegisterInvalid("en")).toBe(
       "This device could not be registered for notifications",
@@ -981,4 +1007,20 @@ describe("MESSAGES: daemon", () => {
       "The background service didn't answer (timed out).\nLast log line: boom",
     );
   });
+});
+
+it("explains plan send refusals in both languages", () => {
+  expect(MESSAGES.planSendErrorBusy("en")).toBe("Agent busy — try again when idle");
+  expect(MESSAGES.planSendErrorApproval("en")).toBe(
+    "The agent is waiting for an approval — answer it in the terminal first",
+  );
+  expect(MESSAGES.planSendErrorNoAgent("en")).toBe("No agent is running in this pane");
+  for (const key of [
+    "planSendErrorBusy",
+    "planSendErrorApproval",
+    "planSendErrorNoAgent",
+  ] as const) {
+    expect(MESSAGES[key]("ar")).toBeTruthy();
+    expect(MESSAGES[key]("ar")).not.toBe(MESSAGES[key]("en"));
+  }
 });

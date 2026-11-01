@@ -33,6 +33,9 @@ export type ChordAction =
   | "closePane"
   | "focusPrev"
   | "focusNext"
+  | "fontBigger"
+  | "fontSmaller"
+  | "fontReset"
   | "sendRequest"
   | "saveRequest";
 
@@ -49,16 +52,35 @@ export type LabelledChord = ChordAction | "voiceStart" | "voiceStop";
  * table without an ordering rule between them: neither matches the other's
  * event, so the table can be read in any order.
  */
-type Chord = {
-  /** `event.key`, compared case-insensitively — Shift changes its case. */
-  key: string;
+type Chord = (
+  | {
+      /** `event.key`, compared case-insensitively — Shift changes its case. */
+      key: string;
+      code?: never;
+    }
+  | {
+      /** `event.code`, the physical key, for a key that sits in the same
+       *  place on every layout the label means (the digit row). */
+      code: string;
+      key?: never;
+    }
+) & {
   meta?: boolean;
   ctrl?: boolean;
   alt?: boolean;
-  shift?: boolean;
+  /** "either" for a character some layouts type with Shift and others
+   *  without: "+" is Shift+= on a US layout and a key of its own on a
+   *  German one. */
+  shift?: boolean | "either";
 };
 
-type Binding = { darwin: Chord; linux: Chord; label: { darwin: string; linux: string } };
+/** A side may list more than one chord when the platform's convention has
+ *  two spellings of the same thing — ⌘= and ⌘+ are both "bigger" on a Mac. */
+type Binding = {
+  darwin: Chord | readonly Chord[];
+  linux: Chord | readonly Chord[];
+  label: { darwin: string; linux: string };
+};
 
 const BINDINGS: Record<LabelledChord, Binding> = {
   palette: {
@@ -143,6 +165,38 @@ const BINDINGS: Record<LabelledChord, Binding> = {
     linux: { key: "ArrowRight", alt: true },
     label: { darwin: "⌥⌘→", linux: "Alt+→" },
   },
+  // Terminal font zoom, for the session — terminal-font.ts owns the size.
+  // Matched by the character typed, not the physical key: the label says
+  // "+" and "-", and on many layouts those are not on the US =/- keys
+  // (German "+" is its own key; ⌘ on the US "=" key there is a dead ´).
+  // ⌘= counts too, the unshifted spelling of ⌘+ on a US Mac. On Linux bare
+  // Ctrl+- is ^_, readline's undo, so smaller takes Shift ("_" on most
+  // layouts) like every other app chord there; Ctrl++ is not a control
+  // character, so bigger takes it with or without Shift.
+  fontBigger: {
+    darwin: [
+      { key: "+", meta: true, shift: "either" },
+      // Unshifted only: Shift+0 types "=" on a German layout.
+      { key: "=", meta: true },
+    ],
+    linux: { key: "+", ctrl: true, shift: "either" },
+    label: { darwin: "⌘+", linux: "Ctrl+Shift+=" },
+  },
+  fontSmaller: {
+    darwin: { key: "-", meta: true },
+    linux: [
+      { key: "_", ctrl: true, shift: true },
+      { key: "-", ctrl: true, shift: true },
+    ],
+    label: { darwin: "⌘-", linux: "Ctrl+Shift+-" },
+  },
+  // The digit row is in the same place on every layout, and Shift turns
+  // 0 into a different character on each, so reset goes by the key.
+  fontReset: {
+    darwin: { code: "Digit0", meta: true },
+    linux: { code: "Digit0", ctrl: true, shift: true },
+    label: { darwin: "⌘0", linux: "Ctrl+Shift+0" },
+  },
   // The API tab's request editor, not the terminal. Ctrl+Enter and Ctrl+S are
   // safe there precisely because no shell is listening: a text field is.
   sendRequest: {
@@ -178,12 +232,16 @@ function side(platform: NodeJS.Platform): "darwin" | "linux" {
 }
 
 function matches(event: KeyboardEvent, chord: Chord): boolean {
+  const sameKey =
+    chord.code !== undefined
+      ? event.code === chord.code
+      : event.key.toLowerCase() === chord.key.toLowerCase();
   return (
-    event.key.toLowerCase() === chord.key.toLowerCase() &&
+    sameKey &&
     event.metaKey === (chord.meta ?? false) &&
     event.ctrlKey === (chord.ctrl ?? false) &&
     event.altKey === (chord.alt ?? false) &&
-    event.shiftKey === (chord.shift ?? false)
+    (chord.shift === "either" || event.shiftKey === (chord.shift ?? false))
   );
 }
 
@@ -202,7 +260,8 @@ export function matchChord(
   const which = side(platform);
   for (const [action, binding] of Object.entries(BINDINGS)) {
     if (action === "voiceStart" || action === "voiceStop") continue;
-    if (matches(event, binding[which])) return action as ChordAction;
+    const chords = ([] as readonly Chord[]).concat(binding[which]);
+    if (chords.some((chord) => matches(event, chord))) return action as ChordAction;
   }
   return undefined;
 }

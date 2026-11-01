@@ -32,6 +32,7 @@ import type { UploadedFile } from "@jarvis/wire";
 import type { Language } from "./i18n";
 import type { FilePicker } from "./file-picker";
 import type { RpcClient } from "./rpc-client";
+import { MALFORMED_REPLY_NOTICE, parseGitViewResult } from "./workspace-results";
 
 export type UploadFiles = {
   readBase64(uri: string): Promise<string>;
@@ -207,8 +208,16 @@ export function createFileUploadController(deps: FileUploadControllerDeps): File
           return { kind: "failed" };
       }
     }
-    const file = parseUploadedFile(result.value);
-    return file === undefined ? { kind: "failed" } : { kind: "ok", file };
+    // The laptop's handler answers a GitViewResult envelope (desktop
+    // file-upload.ts put()): its own refusal is shown verbatim, and only
+    // an `ok: true` whose value parses as an UploadedFile is a success.
+    const reply = parseGitViewResult(result.value, parseUploadedFile);
+    if (!reply.ok) {
+      return reply.text === MALFORMED_REPLY_NOTICE
+        ? { kind: "failed" }
+        : { kind: "refused", text: reply.text, language: reply.language };
+    }
+    return { kind: "ok", file: reply.value };
   }
 
   function cancel(): void {

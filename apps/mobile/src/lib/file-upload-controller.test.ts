@@ -123,7 +123,10 @@ describe("createFileUploadController", () => {
       bytes: PICKED.bytes,
       expiresAt: 1_000,
     };
-    const client = fakeClient({ upload: vi.fn(async (): Promise<RpcResult> => ok(uploaded)) });
+    // The laptop's handler answers a GitViewResult envelope (file-upload.ts put()).
+    const client = fakeClient({
+      upload: vi.fn(async (): Promise<RpcResult> => ok({ ok: true, value: uploaded })),
+    });
     const controller = createFileUploadController({ client, files, picker: fakePicker(PICKED) });
 
     await expect(controller.pickAndUpload()).resolves.toEqual({ kind: "ok", file: uploaded });
@@ -161,10 +164,41 @@ describe("createFileUploadController", () => {
     }
   });
 
+  it("resolves refused with the laptop's own text when its handler answers ok:false", async () => {
+    const files = fakeFiles();
+    const client = fakeClient({
+      upload: vi.fn(
+        async (): Promise<RpcResult> => ok({ ok: false, text: "Quota exceeded", language: "en" }),
+      ),
+    });
+    const controller = createFileUploadController({ client, files, picker: fakePicker(PICKED) });
+
+    await expect(controller.pickAndUpload()).resolves.toEqual({
+      kind: "refused",
+      text: "Quota exceeded",
+      language: "en",
+    });
+  });
+
+  it("resolves failed for a bare (unenveloped) upload reply", async () => {
+    const files = fakeFiles();
+    const bare = {
+      fileId: "a".repeat(32),
+      name: "x.png",
+      contentType: "image/png",
+      bytes: 1,
+      expiresAt: 1,
+    };
+    const client = fakeClient({ upload: vi.fn(async (): Promise<RpcResult> => ok(bare)) });
+    const controller = createFileUploadController({ client, files, picker: fakePicker(PICKED) });
+
+    await expect(controller.pickAndUpload()).resolves.toEqual({ kind: "failed" });
+  });
+
   it("resolves failed for a malformed upload reply rather than trusting it", async () => {
     const files = fakeFiles();
     const client = fakeClient({
-      upload: vi.fn(async (): Promise<RpcResult> => ok({ oops: true })),
+      upload: vi.fn(async (): Promise<RpcResult> => ok({ ok: true, value: { oops: true } })),
     });
     const controller = createFileUploadController({ client, files, picker: fakePicker(PICKED) });
 

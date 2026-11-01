@@ -15,6 +15,7 @@ const nativeSections = [
   { id: "laptop", labelKey: "laptopSettings.title" },
   { id: "connection", labelKey: "settings.connection" },
   { id: "security", labelKey: "settings.security" },
+  { id: "updates", labelKey: "updates.title" },
   { id: "remote-access", labelKey: "settings.section.remoteAccess" },
 ] as const;
 
@@ -85,6 +86,7 @@ describe("settingsScopes", () => {
       "paired-computer",
       "connection",
       "security",
+      "updates",
       "keep-signed-in",
       "passkeys",
       "remote-access",

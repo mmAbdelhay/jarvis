@@ -39,4 +39,33 @@ describe("plan panel CSS", () => {
     expect(panel).toContain("max-width: 60%");
     expect(gutter).toContain("width: 40px");
   });
+
+  it("keeps the reviews dock a side panel like the plan panel, colours from tokens", () => {
+    const dock = css.match(/\.reviews-dock\s*\{([^}]*)\}/)?.[1] ?? "";
+    expect(dock).toContain("min-width: 280px");
+    expect(dock).toContain("max-width: 60%");
+    const handle = css.match(/\.reviews-dock-handle\s*\{([^}]*)\}/)?.[1] ?? "";
+    expect(handle).toContain("cursor: col-resize");
+    const rules = [...css.matchAll(/[^{}]*\.reviews-(?:dock|chip|toggle)[^{}]*\{([^}]*)\}/g)];
+    expect(rules.length).toBeGreaterThan(0);
+    for (const [, declarations] of rules) {
+      expect(declarations ?? "").not.toMatch(/#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(/);
+    }
+  });
+});
+
+describe("the Plan and Reviews switches", () => {
+  // Floated over the panes they covered the first block's action buttons.
+  it("get a band of their own above the panes", () => {
+    const band = css.match(
+      /\.terminal-split:has\(> \.plan-toggle, > \.reviews-toggle\) \{ padding-block-start: (\d+)px; \}/,
+    );
+    expect(Number(band?.[1])).toBeGreaterThanOrEqual(30);
+    for (const toggle of ["plan-toggle", "reviews-toggle"]) {
+      const rule = css.match(new RegExp(`\\.${toggle} \\{([^}]*)\\}`))?.[1] ?? "";
+      const top = Number(rule.match(/inset-block-start: (\d+)px/)?.[1]);
+      const height = Number(rule.match(/height: (\d+)px/)?.[1]);
+      expect(top + height, toggle).toBeLessThanOrEqual(Number(band?.[1]));
+    }
+  });
 });

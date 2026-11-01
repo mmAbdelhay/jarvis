@@ -7,11 +7,14 @@ import { type Language, t } from "./i18n";
 
 export type CapacityCard = {
   id: string;
+  vendor?: string;
   /** Which window the figure is: "5h" for Claude and Codex, "month" for
    *  Copilot's premium-request allowance. */
   window: "5h" | "month" | "window";
   /** Remaining, 0–100, floored — never more than is really left. */
   left: number;
+  /** Remaining in the optional weekly window, clamped and floored like left. */
+  weekLeft?: number;
   /** Epoch ms the window resets. */
   resetsAt: number;
 };
@@ -42,15 +45,41 @@ export function parseProviderCapacity(value: unknown): CapacityCard[] {
     if (typeof window.resetsAt !== "string") continue;
     const resetsAt = Date.parse(window.resetsAt);
     if (!Number.isFinite(resetsAt)) continue;
-    const vendor = typeof provider.vendor === "string" ? provider.vendor : "";
+    const vendor = typeof provider.vendor === "string" ? provider.vendor : undefined;
+    const secondary = known.secondary;
+    const usedPercent =
+      typeof secondary === "object" && secondary !== null
+        ? (secondary as Record<string, unknown>).usedPercent
+        : undefined;
+    const weekLeft =
+      typeof usedPercent === "number" && Number.isFinite(usedPercent)
+        ? Math.floor(Math.max(0, Math.min(100, 100 - usedPercent)))
+        : undefined;
     cards.push({
       id: provider.id,
-      window: WINDOW_BY_VENDOR[vendor] ?? "window",
+      ...(vendor === undefined ? {} : { vendor }),
+      window: (vendor === undefined ? undefined : WINDOW_BY_VENDOR[vendor]) ?? "window",
       left: Math.floor(Math.max(0, Math.min(100, 100 - window.usedPercent))),
+      ...(weekLeft === undefined ? {} : { weekLeft }),
       resetsAt,
     });
   }
   return cards;
+}
+
+/** Prefer the provider vendor, falling back to legacy cards without one. */
+export function capacityFor(
+  cards: readonly CapacityCard[],
+  vendor: "anthropic",
+): { sessionUsed?: number; weekUsed?: number } {
+  const card =
+    cards.find((card) => card.vendor === vendor) ??
+    cards.find((card) => card.vendor === undefined && /^claude(?:$|[-_ ])/i.test(card.id));
+  if (!card) return {};
+  return {
+    sessionUsed: 100 - card.left,
+    ...(card.weekLeft === undefined ? {} : { weekUsed: 100 - card.weekLeft }),
+  };
 }
 
 /** At most this many bars in a card's trend: enough to show a shape, few

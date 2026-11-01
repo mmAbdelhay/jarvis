@@ -8,6 +8,59 @@ version and the downloads. This file is the index.
 
 ## Unreleased
 
+## [0.1.12] — 2026-10-28
+
+- Phone: a Claude Code chat view for terminal panes running Claude — chat
+  turns and tool rows, permission and question prompts answered by tap, a
+  status strip (mode, model, session/weekly usage), Chat | Term tabs, and an
+  ⏎ Enter button that types the message into the terminal and runs it. The
+  phone never resizes the laptop's terminal.
+- Phone: attach photos, a camera shot or files to a Claude message; they are
+  saved on the laptop under `<project>/.jarvis/uploads/` (git-ignored) and
+  inserted as `@path`.
+- Phone: updates itself like the desktop — Settings → Updates checks GitHub
+  releases, downloads `jarvis-mobile-<version>.apk`, verifies it against
+  `SHA256SUMS` and opens Android's installer. The app version now follows the
+  desktop release.
+- Desktop: a Terminal tab takes the session's name when you resume a Claude
+  session (from Sessions or `claude --resume`); a `/rename` name wins over
+  Claude's automatic title.
+- Desktop: a Jarvis started with another `HOME` (development or test) gets
+  its own background service and can no longer restart the installed one.
+
+## [0.1.11] — 2026-10-27
+
+- Terminal: a font size setting (Settings → Terminal, or `terminal.fontSize`)
+  that applies to every open terminal on save, and ⌘+ / ⌘- / ⌘0
+  (Ctrl+Shift+= / - / 0 on Linux) to zoom for the session.
+- Terminal: when an agent opens a PR in a tab, the tab is renamed
+  "PR #N · title" and linked to that PR in Reviews (only for an open PR
+  created in the last 30 minutes; a manual Reviews link is never replaced).
+- Topbar: fits the window instead of clipping — the history button always
+  shows; lower-priority items hide one at a time as the window narrows.
+- Topbar: CPU/memory readouts turn amber and red as they climb; the battery
+  icon fills to the charge level and changes colour as it drains.
+- Terminal: the Plan and Reviews toggles get their own strip and no longer
+  cover a block's action buttons.
+
+## [0.1.10] — 2026-10-21
+
+- Reviews: Jarvis watches your open PRs through `gh` and pastes each new
+  comment from someone else into the Claude/Codex session already running
+  in the Terminal tab for that PR — only while the agent is idle at its
+  input box. The session fixes, pushes and replies itself; Jarvis never
+  pushes. Desktop Reviews page, Terminal-tab link chip, Settings section,
+  and phone list, thread view and dashboard section.
+- Plan panel: a send while the agent is busy is refused with a reason
+  instead of arriving half-pasted.
+- Terminal tabs follow the Claude session name, including `/rename`.
+- Keep awake: a topbar button and Settings section keep the screen and
+  machine awake — always, or only while an agent runs — with an optional
+  idle Shift press on macOS. Also on the phone.
+- Topbar: battery percentage, today's date, and a 12-hour clock.
+- Remote: a Settings save no longer swaps a `127.0.0.1` bind for the
+  Tailscale address.
+
 ## [0.1.9] — 2026-10-04
 
 - Desktop: Jarvis checks for a new version when it starts and once a day,

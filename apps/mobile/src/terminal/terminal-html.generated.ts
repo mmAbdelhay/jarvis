@@ -20,6 +20,6 @@ export const TERMINAL_SOURCE_SHA256: Readonly<
   "addon-fit.mjs": "2d87e1bddc73be9111de8beee5370c3bb7aac9c94e18e6f245f02ca741ef1769",
   "addon-unicode11.mjs": "37bb2d573c615661c875398be2a3497e02bd21d7202a5d1159f6ab70a8cfc2f2",
   "xterm.css": "854a7c0fb70e8b1a083c16797ab827299fb18744f5ad34f227b48337e33293c6",
-  "terminal-theme.ts": "3cfded9b5e559954cf4de9ea07c5eb97090bd79acb02ab15fc2f736fe16a67a0",
+  "terminal-theme.ts": "84124172d893f9bf67ce8f2a9241076a9dbc8ff5660749f2059800041dcbbe8a",
   "terminal-page.ts": "a3c108e9834acb23dd45f25615b26353bbb697712bcfbe78eaa061ba8dc19b77"
 };

@@ -4,7 +4,7 @@
 // release downloads are ever fetched, and the only redirects followed are to
 // GitHub's asset CDN, which is where those downloads actually live.
 
-import type { ReleaseAsset } from "./update-check.js";
+import { isReleaseDownloadUrl, type ReleaseAsset } from "@jarvis/wire";
 
 /** The checksum file every release carries (sha256sum format). */
 export const SUMS_NAME = "SHA256SUMS";
@@ -62,7 +62,7 @@ export function isAllowedDownloadUrl(url: string, opts: AllowOptions = {}): bool
 function isReleaseFile(url: string, version: string, name: string, opts: AllowOptions): boolean {
   if (!isAllowedDownloadUrl(url, opts)) return false;
   const parsed = parse(url) as URL;
-  return onTestOrigin(parsed, opts) || parsed.pathname === `${DOWNLOAD_PATH}v${version}/${name}`;
+  return onTestOrigin(parsed, opts) || isReleaseDownloadUrl(url, version, name);
 }
 
 export function isAllowedRedirect(url: string): boolean {

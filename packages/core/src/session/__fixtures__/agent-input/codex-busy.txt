@@ -1,0 +1,11 @@
+# synthetic — built from the Codex CLI TUI ("• Working (… • esc to interrupt)" status above the composer while a turn runs); launching codex makes network calls.
+› run the unit tests for the session package
+
+• Ran pnpm vitest run packages/core/src/session
+  └ (running)
+
+• Working (8s • esc to interrupt)
+
+› Ask Codex to do anything
+
+  98% context left · ? for shortcuts

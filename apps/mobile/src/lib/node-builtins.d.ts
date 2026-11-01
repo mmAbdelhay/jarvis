@@ -9,6 +9,15 @@
 // which would pull in ambient globals (`process`, `Buffer`, ...) this RN
 // app has no business seeing.
 
+// app-config.test.ts runs the real Expo CLI without Node TypeScript stripping.
+declare module "node:child_process" {
+  export function spawnSync(
+    command: string,
+    args: string[],
+    options: { cwd: string; encoding: "utf8" },
+  ): { status: number | null; stdout: string; stderr: string };
+}
+
 declare module "node:fs" {
   export function readdirSync(path: string): string[];
   export function readFileSync(path: string, encoding: string): string;

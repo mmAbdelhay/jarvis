@@ -1,0 +1,39 @@
+# rendered — Claude Code v2.1.302, captured from a real pane and rendered through @xterm/headless at 213x38; personal paths/accounts replaced.
+
+ ▐▛███▛█   Claude Code v2.1.302
+▝▜██████▀  Opus 5.5 · Claude Plan
+ ▝▝   ▝▝   /Users/dev/projects/scratch-repo
+
+
+❯ Use the Bash tool to run exactly: sleep 40 && echo slept. Then reply only with the word done.
+
+  Waiting 40 seconds then printing slept
+  ⎿  $ sleep 40 && echo slept
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+✶ Moseying… (6s · ↓ 235 tokens · thought for 1s)
+                                                                                                          You've used 93% of your session limit · resets 4:40am (Region/City) · /upgrade to keep using Claude Code
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  claude-acme  dev@example.com
+  [dev@host:/Users/dev/projects/scratch-repo]  [Opus 5.5  ctx:6% (56k/1000k)]
+  Session ███████░ 93% resets 04:40   │   Week ██░░░░░░ 26% resets Wed 23:00
+  ⏵⏵ auto mode on (shift+tab to cycle)

@@ -18,6 +18,7 @@ import {
   type SortDirection,
 } from "./session-filter.js";
 import { enhanceTerminal } from "./terminal-addons.js";
+import { setTerminalFontBase } from "./terminal-font.js";
 import { createPane, type TerminalPane } from "./terminal-pane.js";
 
 // The Session view: one agent process's real terminal.
@@ -83,6 +84,7 @@ try {
     .terminalSettings()
     .then((settings) => {
       terminalSettings = settings;
+      setTerminalFontBase(settings.fontSize);
     })
     .catch(() => {
       // Today's terminal. Nothing else about the session is affected.
@@ -886,12 +888,25 @@ function showTable(): void {
   setDetailVisible(false);
   const back = $("session-back");
   if (back !== null) back.hidden = true;
+  // Resume belongs to the session that was open; left up over the table it
+  // would resume that session from a screen that no longer shows it.
+  const resume = $("session-resume");
+  if (resume !== null) resume.hidden = true;
   const empty = $("session-empty");
   if (empty !== null) empty.hidden = true;
+  // The table and the open session's terminal/transcript share one column.
+  // Left up, that surface split the column with the table — a squeezed
+  // list, two scrollbars, and Back already hidden so nothing closed it.
+  setLogVisible(false);
   // Whatever session was open, its terminal is no longer what is on
   // screen — see `terminalVisible`'s own comment.
   terminalVisible = false;
   showView("session");
+}
+
+function setLogVisible(visible: boolean): void {
+  const log = $("session-log");
+  if (log !== null) log.hidden = !visible;
 }
 
 function setDetailVisible(visible: boolean): void {
@@ -907,6 +922,7 @@ function setDetailVisible(visible: boolean): void {
 function showTerminal(): void {
   const table = $("session-table");
   if (table !== null) table.hidden = true;
+  setLogVisible(true);
   setDetailVisible(true);
   const back = $("session-back");
   if (back !== null) {
@@ -1034,6 +1050,9 @@ export async function openSession(session: Session): Promise<void> {
  * nothing is actually attached to.
  */
 async function openExternalSession(session: Session): Promise<void> {
+  const table = $("session-table");
+  if (table !== null) table.hidden = true;
+  setLogVisible(true);
   setDetailVisible(true);
   const back = $("session-back");
   if (back !== null) {

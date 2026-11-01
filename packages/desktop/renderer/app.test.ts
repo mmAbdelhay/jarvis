@@ -45,7 +45,7 @@ async function loadApp(
   vi.resetModules();
   FakeTerminal.last = undefined;
   document.body.innerHTML = `
-    <div class="clock"><span id="clock-time"></span></div>
+    <div class="clock"><span id="clock-date"></span><span id="clock-time"></span></div>
     <input id="composer" />
     <button id="composer-send"></button>
     <span id="voice-state">placeholder</span>
@@ -1052,14 +1052,32 @@ describe("the Dashboard SYSTEM card and the topbar's danger dot", () => {
     expect(document.getElementById("header-net")?.textContent).toBe("↓0.3 ↑1.2 Mbps");
   });
 
-  it("marks only the header metric that is at or above 95% with the danger class", async () => {
+  it("colours each header metric by its own tier: good, warn, bad", async () => {
     const { onMetrics } = await loadApp();
 
-    onMetrics?.(metrics({ cpuPercent: 96 }));
+    onMetrics?.(
+      metrics({
+        cpuPercent: 40,
+        memoryUsedBytes: 90,
+        memoryTotalBytes: 100,
+        diskUsedBytes: 97,
+        diskTotalBytes: 100,
+      }),
+    );
 
-    expect(document.getElementById("header-cpu")?.className).toContain("metric--danger");
-    expect(document.getElementById("header-mem")?.className).not.toContain("metric--danger");
-    expect(document.getElementById("header-disk")?.className).not.toContain("metric--danger");
+    expect(document.getElementById("header-cpu")?.className).toBe("metric--good");
+    expect(document.getElementById("header-mem")?.className).toBe("metric--warn");
+    expect(document.getElementById("header-disk")?.className).toBe("metric--bad");
+  });
+
+  it("exposes metricTone's 85/95 boundaries", async () => {
+    await loadApp();
+    const { metricTone } = await import("./app.js");
+
+    expect(metricTone(84)).toBe("good");
+    expect(metricTone(85)).toBe("warn");
+    expect(metricTone(94)).toBe("warn");
+    expect(metricTone(95)).toBe("bad");
   });
 });
 
@@ -1071,11 +1089,11 @@ describe("the header clock", () => {
 
   afterEach(() => vi.useRealTimers());
 
-  it("renders HH:MM only and moves the full date to the clock title", async () => {
+  it("renders the time with AM/PM, the short date beside it, and the full date in the title", async () => {
     await loadApp();
-    expect(document.getElementById("clock-time")?.textContent).toBe("18:12");
+    expect(document.getElementById("clock-time")?.textContent).toMatch(/^6:12\sPM$/);
+    expect(document.getElementById("clock-date")?.textContent).toMatch(/^Sat 19 Sep/);
     expect(document.querySelector<HTMLElement>(".clock")?.title).toContain("19 Sept 2026");
-    expect(document.getElementById("clock-date")).toBeNull();
   });
 });
 

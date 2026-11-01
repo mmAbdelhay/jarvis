@@ -23,6 +23,7 @@ import {
   readFileSync,
   realpathSync,
   renameSync,
+  watch as watchFs,
   writeFileSync,
 } from "node:fs";
 import {
@@ -30,8 +31,10 @@ import {
   chmod,
   mkdir,
   mkdtemp,
+  lstat,
   readdir,
   readFile,
+  realpath,
   rename,
   rm,
   stat,
@@ -71,6 +74,17 @@ import { createWebManifestLoader, nodeWebExportFs } from "../web-export.js";
 import { disableRemoteOnDisk } from "../remote-idle.js";
 import { obtainCertificate, type TailscaleCertDeps } from "../tailscale-cert.js";
 import { createNotifier } from "../notify.js";
+import { createReviewService } from "../review-service.js";
+import {
+  createKeepAwake,
+  IDLE_TIME_COMMAND,
+  parseHidIdleSeconds,
+  PRESS_SHIFT_COMMAND,
+  type KeepAwake,
+} from "../keep-awake.js";
+import { createSessionTabNamer } from "../session-tab-name.js";
+import { createPrTabNamer } from "../pr-tab-namer.js";
+import { createChildTracker } from "../child-tracker.js";
 import { createDockerFollowers } from "../docker-followers.js";
 import { createSetupHandlers } from "../ipc.js";
 import {
@@ -83,6 +97,8 @@ import {
   SessionManager,
   greetingText,
   scanDirtyProjects,
+  createReviewPoller,
+  DEFAULT_REVIEWS_CONFIG,
 } from "@jarvis/core";
 import type { Session as CoreSession, TabKind, WorkspaceTab } from "@jarvis/core";
 import {
@@ -103,6 +119,8 @@ import {
   type DbGateManager,
   createFaviconStore,
   createFsImportDeps,
+  readFileTail,
+  CHAT_TAIL_BYTES,
   createGitProvider,
   createGitRemoteOps,
   createSqliteUsageStore,
@@ -127,6 +145,8 @@ import {
   shellCommand,
   createSessionImporter,
   listAgentProcesses,
+  createGhReviews,
+  createReviewStore,
   resolveProject,
   transcriptsForProcesses,
   createShellManager,
@@ -200,6 +220,7 @@ import {
   createFileReader,
 } from "../completion-source.js";
 import {
+  DEFAULT_AWAKE,
   DEFAULT_CONFIG_PATH,
   DEFAULT_TERMINAL,
   mergeConfigInPlace,
@@ -216,6 +237,10 @@ import { serialize } from "../serialize.js";
 import { writeSettingsFile } from "../settings-io.js";
 import { writeDaemonEnabled } from "../daemon/config-file.js";
 import { errorMessage, MESSAGES, PRIMARY_LANGUAGE } from "../messages.js";
+import { createPaneScreens } from "../pane-screen.js";
+import { createPaneClaudeLookup } from "../pane-claude-session.js";
+import { createPaneAttach, createPaneAttachCwd } from "../pane-attach.js";
+import { createClaudeViewHandlers, createClaudeViewNotifier } from "../claude-view.js";
 import { createRecorderDeps, Recorder } from "../recorder.js";
 import { capacityReport, startupReport } from "../startup.js";
 import { createTerminalFitOverrides } from "../terminal-fit-overrides.js";
@@ -946,6 +971,9 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     broadcast.send("terminal:data", { paneKey, chunk, offset }),
   );
   shells.onShellExit(({ paneKey, code }) => broadcast.send("terminal:exit", { paneKey, code }));
+  // Every pane's output rendered as its screen, for the Reviews idle reader
+  // (Claude Code's raw redraw stream is not readable as lines).
+  const paneScreens = createPaneScreens(shells);
 
   // The history file, and the parser that matches it.
   //
@@ -1234,6 +1262,173 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     () => terminal.paneStartDirs(),
   );
 
+  // Reviews (Task 9): PR review comments pasted into the agent session
+  // already running in a linked Terminal pane, only when it is idle. `gh`
+  // runs with the login-shell PATH (agentEnv) and never prompts.
+  // Every gh child is tracked: shutdown kills and awaits them, because on
+  // Windows a `gh repo view` still running in a project directory holds
+  // that directory open after the core has stopped.
+  const ghChildren = createChildTracker();
+  const runGh = (
+    args: string[],
+    cwd: string,
+    input?: string,
+  ): Promise<{ code: number; stdout: string; stderr: string }> =>
+    new Promise((resolvePromise, reject) => {
+      const child = spawn("gh", args, {
+        cwd,
+        env: { ...agentEnv, GH_PROMPT_DISABLED: "1" },
+        stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
+      });
+      if (!ghChildren.track(child)) {
+        reject(new Error("gh: core is shutting down"));
+        return;
+      }
+      let stdout = "";
+      let stderr = "";
+      const timer = setTimeout(() => {
+        child.kill();
+        reject(new Error("gh timed out"));
+      }, 60_000);
+      child.stdout?.setEncoding("utf8").on("data", (chunk: string) => {
+        stdout += chunk;
+      });
+      child.stderr?.setEncoding("utf8").on("data", (chunk: string) => {
+        stderr += chunk;
+      });
+      child.on("error", (error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+      child.on("close", (code) => {
+        clearTimeout(timer);
+        resolvePromise({ code: code ?? 1, stdout, stderr });
+      });
+      if (input !== undefined) child.stdin?.end(input);
+    });
+  const reviewStore = createReviewStore(join(homedir(), ".config/jarvis/reviews.json"));
+  const reviews = createReviewService({
+    shells,
+    screenText: (paneKey) => paneScreens.screenText(paneKey),
+    terminal,
+    branchOf: async (cwd) => {
+      const outcome = await git.changes(cwd);
+      return outcome.ok ? outcome.value.branch : undefined;
+    },
+    gh: createGhReviews({ gh: (args, cwd) => runGh(args, cwd), stdinGh: runGh }),
+    store: reviewStore,
+    // A fresh scan every time — never refreshSessions()'s cached result,
+    // which only refreshes when a window asks (spec §4.3 rule 2).
+    scanAgents: () =>
+      listAgentProcesses({
+        exec: (command, args) => runCommand(command, args),
+        platform,
+        agents: registry.list(),
+        ownedPids: () => sessions.ownedPids(),
+        jarvisPid: process.pid,
+        terminalShells: () => shells.shellPids(),
+        now: () => Date.now(),
+      }),
+    agents: () => registry.list(),
+    config: () => config.reviews ?? DEFAULT_REVIEWS_CONFIG,
+    projectDirs: () => Object.values(config.projects),
+    createPoller: (options) => createReviewPoller(options),
+    now: () => Date.now(),
+    schedule: (fn, ms) => {
+      const timer = setTimeout(fn, ms);
+      timer.unref();
+      return () => clearTimeout(timer);
+    },
+  });
+
+  // A PR an agent opens in a Terminal pane (its URL in the pane's output)
+  // names the tab "PR #N · title" and links the pane in Reviews. Ahead of
+  // the session namer below, which leaves such a tab alone.
+  const prTabNamer = createPrTabNamer({
+    shells,
+    tabs: workspace,
+    reviews,
+    prInfo: async (repo, number) => {
+      const out = await runGh(
+        ["pr", "view", String(number), "--repo", repo, "--json", "title,state,createdAt,url"],
+        homedir(),
+      );
+      if (out.code !== 0) return undefined;
+      const pr = JSON.parse(out.stdout) as {
+        title?: string;
+        state?: string;
+        createdAt?: string;
+        url?: string;
+      };
+      // GitHub's own casing for the repository, from its canonical URL.
+      const canonical = /github\.com\/([^/]+\/[^/]+)\/pull\//.exec(pr.url ?? "")?.[1];
+      const createdAt = Date.parse(pr.createdAt ?? "");
+      if (Number.isNaN(createdAt)) return undefined;
+      return {
+        repo: canonical ?? repo,
+        number,
+        title: pr.title ?? "",
+        state: pr.state ?? "",
+        createdAt,
+      };
+    },
+    hasManualLink: async (key) => {
+      const wanted = key.toLowerCase();
+      for (const linked of (await reviewStore.manualLinks()).keys()) {
+        if (linked.toLowerCase() === wanted) return true;
+      }
+      return false;
+    },
+    reviewsConfig: () => config.reviews ?? DEFAULT_REVIEWS_CONFIG,
+    now: () => Date.now(),
+  });
+  prTabNamer.start();
+
+  // Task 16: a Terminal tab follows the name of the Claude session in it
+  // (Claude's topic name or a /rename), read from Claude Code's own
+  // sessions/<pid>.json; the pane comes from the same fresh process scan.
+  const importFs = createFsImportDeps();
+  const sessionTabNamer = createSessionTabNamer({
+    shells,
+    tabs: workspace,
+    scanAgents: () =>
+      listAgentProcesses({
+        exec: (command, args) => runCommand(command, args),
+        platform,
+        agents: registry.list(),
+        ownedPids: () => sessions.ownedPids(),
+        jarvisPid: process.pid,
+        terminalShells: () => shells.shellPids(),
+        now: () => Date.now(),
+      }),
+    agents: () => registry.list(),
+    home: homedir(),
+    readFile: (path) => importFs.readHead(path),
+    listTranscripts: (dir) => importFs.listFiles(dir, "claude"),
+    readTail: (path) => readFileTail(path, 256 * 1024),
+    readHead: (path) => importFs.readHead(path),
+    now: () => Date.now(),
+    watch: (dir, onChange) => {
+      const watcher = watchFs(dir, () => onChange());
+      // A watch that fails later (directory removed) costs live updates only;
+      // the 10 s re-check still runs.
+      watcher.on("error", () => watcher.close());
+      return watcher;
+    },
+    schedule: (fn, ms) => {
+      const timer = setTimeout(fn, ms);
+      timer.unref();
+      return () => clearTimeout(timer);
+    },
+    interval: (fn, ms) => {
+      const timer = setInterval(fn, ms);
+      timer.unref();
+      return () => clearInterval(timer);
+    },
+    isPrNamedTab: (tabId) => prTabNamer.isPrNamedTab(tabId),
+  });
+  sessionTabNamer.start();
+
   // Sessions the process scan (process-scan.ts) found running outside
   // Jarvis, keyed by "ext-<pid>" — rebuilt wholesale on every
   // refreshSessions() call, never written to sessionStore (session-
@@ -1419,6 +1614,9 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
   // time it is always assigned — never referenced synchronously before
   // that.
   let remoteAccess: RemoteAccess;
+  // Keep awake: built below, once the shells and the broadcaster exist; a
+  // successful save re-applies it (Settings may have changed `awake:`).
+  let keepAwake: KeepAwake | undefined;
 
   // I2: a second, dedicated queue for the re-read-and-apply-to-the-bridge
   // that follows a successful save. Kept separate from the write queue
@@ -1491,6 +1689,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
           next as unknown as Record<string, unknown>,
         );
         registry.replace(next.registry);
+        keepAwake?.refresh();
         const nextAgents = registry.list();
         if (!providerAgentListsEqual(previousAgents, nextAgents)) {
           providers.replaceAgents(nextAgents);
@@ -1609,6 +1808,77 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     timers: nodeTimers,
     log: (line) => console.error(line),
   });
+
+  // Reviews (Task 10): the service's change notices reach the renderer and,
+  // via REMOTE_PUSH_POLICY's reliable "reviews:changed", a paired phone;
+  // its notify events go through the same notifier (focus, watching and
+  // coalescing rules, audit) every other push kind does. Both listeners
+  // are cleared by reviews.dispose() at shutdown.
+  reviews.onChanged((prKey) => broadcast.send("reviews:changed", prKey));
+  reviews.onNotify((event) => notifier.review(event));
+
+  // Keep awake (Task 18): the core decides when the machine must stay
+  // awake; the attached app holds the OS stay-awake (host.setStayAwake).
+  // The fallback's idle clock and its Shift press are macOS commands run
+  // with execFile semantics and a timeout — there is no electron here, so
+  // no powerMonitor.
+  const AWAKE_COMMAND_LIMITS = { timeoutMs: 5_000, maxOutputBytes: 256 * 1024 };
+  keepAwake = createKeepAwake({
+    config: () => config.awake ?? DEFAULT_AWAKE,
+    saveConfig: async (patch) => {
+      const result = await writeConfig((current) => ({
+        ...current,
+        awake: { ...(current.awake ?? DEFAULT_AWAKE), ...patch },
+      }));
+      if (!result.ok) throw new Error(`awake: save failed: ${result.detail}`);
+    },
+    setBlocker: (on) => host.setStayAwake(on),
+    platform,
+    shells,
+    scanAgents: () =>
+      listAgentProcesses({
+        exec: (command, args) => runCommand(command, args),
+        platform,
+        agents: registry.list(),
+        ownedPids: () => sessions.ownedPids(),
+        jarvisPid: process.pid,
+        terminalShells: () => shells.shellPids(),
+        now: () => Date.now(),
+      }),
+    idleSeconds: async () => {
+      const result = await runCommandWithLimits(
+        IDLE_TIME_COMMAND.file,
+        [...IDLE_TIME_COMMAND.args],
+        AWAKE_COMMAND_LIMITS,
+      );
+      const seconds = result.code === 0 ? parseHidIdleSeconds(result.stdout) : undefined;
+      if (seconds === undefined) throw new Error("awake: no idle time from ioreg");
+      return seconds;
+    },
+    pressShift: async () => {
+      const result = await runCommandWithLimits(
+        PRESS_SHIFT_COMMAND.file,
+        [...PRESS_SHIFT_COMMAND.args],
+        AWAKE_COMMAND_LIMITS,
+      );
+      if (result.timedOut || result.code !== 0) {
+        throw new Error(`osascript exited ${result.code}: ${result.stderr.trim().slice(0, 200)}`);
+      }
+    },
+    schedule: (fn, ms) => {
+      const timer = setTimeout(fn, ms);
+      timer.unref();
+      return () => clearTimeout(timer);
+    },
+    interval: (fn, ms) => {
+      const timer = setInterval(fn, ms);
+      timer.unref();
+      return () => clearInterval(timer);
+    },
+  });
+  const awake = keepAwake;
+  awake.onChanged((status) => broadcast.send("awake:changed", status));
+  awake.start();
 
   const settings = createSettingsHandlers({
     readConfig: () => loadConfig(DEFAULT_CONFIG_PATH),
@@ -1789,6 +2059,10 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
   };
   let uploadsStopped: Promise<void> = Promise.resolve();
   let shellsStopped: Promise<void> = Promise.resolve();
+  // The tab namer's in-flight check and the Reviews gh children, awaited
+  // (bounded) by shutdown() like the shells.
+  let tabNamesStopped: Promise<void> = Promise.resolve();
+  let ghStopped: Promise<void> = Promise.resolve();
   const releaseChildren = (): void => {
     if (released) return;
     released = true;
@@ -1846,6 +2120,9 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     safely("dbgate", () => dbgate.stopAll());
     // And each open Cluster tab is a live headlamp-server child process.
     safely("headlamp-server", () => headlamp.stopAll());
+    // Before the shells' last output and the Reviews service go: it renames
+    // tabs and links panes from that output.
+    safely("pr tab names", () => prTabNamer.stop());
     // And each open Terminal tab is a live shell.
     // shutdown() awaits their exits: a live shell holds its cwd.
     safely("shells", () => {
@@ -1853,6 +2130,22 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     });
     // And the importer holds an fs watch per transcript directory.
     safely("session importer", () => sessionImporter.stop());
+    // The review poller's timer and the delivery timers.
+    safely("reviews", () => reviews.dispose());
+    // Releases the stay-awake and the fallback's timers.
+    safely("keep awake", () => awake.dispose());
+    // Its gh children: after dispose, so nothing spawns another.
+    safely("gh", () => {
+      ghStopped = ghChildren.stopAll();
+    });
+    // The sessions-directory watches and the tab-name re-check timer.
+    safely("session tab names", () => {
+      tabNamesStopped = sessionTabNamer.stop();
+    });
+    // The chat view's transcript watches and its pending pushes.
+    safely("claude view", () => claudeViewNotifier.stop());
+    // One headless terminal per pane that printed.
+    safely("pane screens", () => paneScreens.dispose());
     // A recording started but never stopped holds ffmpeg — and the
     // microphone — open indefinitely.
     safely("recorder", () => recorder.abort());
@@ -2079,6 +2372,79 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
   // Every request handler, in one table (dispatch.ts). Each host registers
   // it on its own transport; the remote bridge calls the same table with a
   // different Origin.
+  // The phone's chat view of a Terminal pane running Claude Code
+  // (claude-view.ts), its "look again" push, and the attach of a staged
+  // upload into the pane's project (pane-attach.ts). Each call takes one
+  // fresh process scan — never refreshSessions()'s cached result.
+  const scanPaneAgents = () =>
+    listAgentProcesses({
+      exec: (command, args) => runCommand(command, args),
+      platform,
+      agents: registry.list(),
+      ownedPids: () => sessions.ownedPids(),
+      jarvisPid: process.pid,
+      terminalShells: () => shells.shellPids(),
+      now: () => Date.now(),
+    });
+  const claudeViewNotifier = createClaudeViewNotifier({
+    onOutput: (cb) => shells.onOutput(({ paneKey }) => cb(paneKey)),
+    onExit: (cb) =>
+      shells.onShellExit(({ paneKey }) => {
+        claudeView.forgetPane(paneKey);
+        cb(paneKey);
+      }),
+    watch: (dir, cb, onError) => {
+      const watcher = watchFs(dir, (_event, file) => cb(typeof file === "string" ? file : null));
+      // A watch that fails later (directory removed) is closed and dropped
+      // by the notifier; the next view call watches again.
+      watcher.on("error", () => onError());
+      return watcher;
+    },
+    schedule: (fn, ms) => {
+      const timer = setTimeout(fn, ms);
+      timer.unref();
+      return () => clearTimeout(timer);
+    },
+    emit: (paneKey) => broadcast.send("terminal:claudeViewChanged", { paneKey }),
+    log: (token) => console.warn(token),
+  });
+  const claudeView = createClaudeViewHandlers({
+    panes: () => shells.panes(),
+    scanAgents: scanPaneAgents,
+    lookup: createPaneClaudeLookup({
+      agents: () => registry.list(),
+      home: homedir(),
+      readFile: (path) => importFs.readHead(path),
+      listTranscripts: (dir) => importFs.listFiles(dir, "claude"),
+    }),
+    readTail: (path) => readFileTail(path, CHAT_TAIL_BYTES),
+    statFile: async (path) => {
+      const { size, mtimeMs } = await stat(path);
+      return { size, mtimeMs };
+    },
+    now: () => Date.now(),
+    notice: (paneKey) => claudeViewNotifier.notice(paneKey),
+    screenText: (paneKey) => paneScreens.screenText(paneKey),
+    write: (paneKey, data) => shells.write(paneKey, data),
+    log: (token) => console.warn(token),
+    follow: (paneKey, transcript) => claudeViewNotifier.follow(paneKey, transcript),
+    forget: (paneKey) => claudeViewNotifier.forget(paneKey),
+  });
+  const paneAttach = createPaneAttach({
+    uploads: uploadStore,
+    cwdFor: createPaneAttachCwd({
+      panes: () => shells.panes(),
+      scanAgents: scanPaneAgents,
+      agents: () => registry.list(),
+      paneStartDir: (paneKey) => terminal.paneStartDir(paneKey),
+    }),
+    fs: { mkdir, writeFile, realpath, lstat, chmod, rm },
+    language: PRIMARY_LANGUAGE,
+    now: Date.now,
+    randomHex: (n) => randomBytes(n).toString("hex"),
+    log: (token) => console.warn(token),
+  });
+
   const dispatch = createDispatchTable({
     setup,
     orchestrator,
@@ -2156,6 +2522,10 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     writeConfig,
     // Phase 1: remote:openWebClient's system browser (dispatch.ts).
     openExternal: (url) => host.openExternal(url),
+    reviews,
+    awake,
+    claudeView,
+    attachUpload: paneAttach,
     plans: {
       files: planFiles,
       comments: planComments,
@@ -2430,12 +2800,13 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
       await stopRemote();
       releaseChildren();
       await uploadsStopped;
-      // Bounded: a shell that ignores its kill must not hold the daemon's
-      // exit. Until they exit, their cwds stay open (on Windows, locked).
+      // Bounded: a shell (or gh child) that ignores its kill must not hold
+      // the daemon's exit. Until they exit, their cwds stay open (on
+      // Windows, locked); the tab namer's in-flight check is awaited too.
       await new Promise<void>((resolve) => {
         const timer = setTimeout(resolve, SHELL_EXIT_WAIT_MS);
         timer.unref();
-        void shellsStopped.then(() => {
+        void Promise.allSettled([shellsStopped, tabNamesStopped, ghStopped]).then(() => {
           clearTimeout(timer);
           resolve();
         });

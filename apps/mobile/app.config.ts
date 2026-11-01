@@ -2,12 +2,43 @@
 // ever evaluated by the Expo CLI's config loader (Node.js), never bundled
 // into the app itself (it lives outside `app/` and `src/`, so
 // no-node-imports.test.ts's scan doesn't reach it either).
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExpoConfig } from "expo/config";
+/** Build-time only: the desktop package is the release version's source of truth. */
+export function appVersion(desktopPackageJsonText: string): {
+  version: string;
+  versionCode: number;
+} {
+  const metadata: unknown = JSON.parse(desktopPackageJsonText);
+  const version =
+    typeof metadata === "object" && metadata !== null && "version" in metadata
+      ? metadata.version
+      : undefined;
+  if (typeof version !== "string" || !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version)) {
+    throw new Error("Desktop package version must be major.minor.patch");
+  }
+  const [major, minor, patch] = version.split(".").map(Number);
+  const versionCode = major * 10000 + minor * 100 + patch;
+  // Each lower component has two decimal places. Reject collisions and
+  // codes outside Android's positive, 2100000000 maximum range at build time.
+  if (
+    minor > 99 ||
+    patch > 99 ||
+    !Number.isSafeInteger(versionCode) ||
+    versionCode < 1 ||
+    versionCode > 2100000000
+  ) {
+    throw new Error("Desktop package version cannot be encoded as an Android versionCode");
+  }
+  return { version, versionCode };
+}
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+const { version, versionCode } = appVersion(
+  readFileSync(join(HERE, "../../packages/desktop/package.json"), "utf8"),
+);
 // Rule: `android.googleServicesFile` only if the file actually exists —
 // a checkout without Firebase credentials must still produce a valid
 // config instead of failing prebuild on a missing path.
@@ -18,7 +49,7 @@ const config: ExpoConfig = {
   name: "Jarvis",
   slug: "jarvis-mobile",
   scheme: "jarvis",
-  version: "0.0.0",
+  version,
   // "default" (not "portrait"): orientation is decided at the JS level
   // (`expo-screen-orientation`, src/lib/orientation-policy.ts via
   // app/_layout.tsx). A phone is locked portrait except while the terminal,
@@ -59,11 +90,12 @@ const config: ExpoConfig = {
   },
   android: {
     package: "dev.jarvis.mobile",
+    versionCode,
     adaptiveIcon: {
       foregroundImage: "./assets/adaptive-icon.png",
       backgroundColor: "#0B0D12",
     },
-    permissions: ["CAMERA", "RECORD_AUDIO"],
+    permissions: ["CAMERA", "RECORD_AUDIO", "REQUEST_INSTALL_PACKAGES"],
     ...(HAS_GOOGLE_SERVICES ? { googleServicesFile: GOOGLE_SERVICES_FILE } : {}),
   },
   // Browser client (Task 12): a single-page app (one index.html, client-side
@@ -87,6 +119,13 @@ const config: ExpoConfig = {
       },
     ],
     "expo-camera",
+    [
+      "expo-image-picker",
+      {
+        photosPermission: "Jarvis attaches the photos you pick to your message to Claude.",
+        cameraPermission: "Jarvis attaches the photo you take to your message to Claude.",
+      },
+    ],
     [
       "expo-audio",
       {

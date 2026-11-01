@@ -254,6 +254,12 @@ export class FakeTerminal {
   emitData(data: string): void {
     for (const listener of this.#dataListeners) listener(data);
   }
+  /** xterm's own resize: the grid changes, then onResize fires. */
+  resize(cols: number, rows: number): void {
+    this.cols = cols;
+    this.rows = rows;
+    this.emitResize(cols, rows);
+  }
   /** Simulates the emulator settling on a new cell grid. */
   emitResize(cols: number, rows: number): void {
     for (const listener of this.#resizeListeners) listener({ cols, rows });

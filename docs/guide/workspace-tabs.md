@@ -327,8 +327,10 @@ Scrollback survives switching tabs; closing the tab kills the shell.
 
 **Shift+Enter** sends ESC+CR rather than a bare carriage return, which is what
 makes it mean *newline* to Claude Code and every other agent UI. **⌘F** finds,
-**⌘C** copies the selection, **⌘V** pastes, **⌘K** clears. Ctrl chords are left
-alone — those are real control bytes a program may want.
+**⌘C** copies the selection, **⌘V** pastes, **⌘K** clears. **⌘+**, **⌘-** and
+**⌘0** make every terminal's font bigger, smaller, or back to the size in
+Settings → Terminal. Ctrl chords are left alone — those are real control
+bytes a program may want.
 
 ### Blocks
 

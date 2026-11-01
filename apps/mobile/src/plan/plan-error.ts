@@ -4,6 +4,9 @@ import type { PlanErrorCode } from "../lib/plans-store";
 const ERROR_KEYS: Record<PlanErrorCode, MessageKey> = {
   loadFailed: "plans.loadFailed",
   sendFailed: "plans.error.sendFailed",
+  busy: "plans.error.busy",
+  approval: "plans.error.approval",
+  noAgent: "plans.error.noAgent",
   saveFailed: "plans.error.saveFailed",
   conflict: "plans.error.conflict",
   tooLarge: "plans.error.tooLarge",

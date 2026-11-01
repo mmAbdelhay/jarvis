@@ -1,5 +1,6 @@
-import { hostPlatform, matchChord } from "./keys.js";
+import { hostPlatform, matchChord, type ChordAction } from "./keys.js";
 import type { BlockNav } from "./block-nav.js";
+import { resetTerminalFontZoom, zoomTerminalFont } from "./terminal-font.js";
 import type { Palette, PaletteAction } from "./terminal-palette.js";
 import { ClipboardAddon } from "./vendor/addon-clipboard.mjs";
 import { LigaturesAddon } from "./vendor/addon-ligatures.mjs";
@@ -157,6 +158,43 @@ export function handlePaletteKey(
   }
 
   return true;
+}
+
+/** Applies a font zoom chord, or reports that `action` is not one. */
+function applyFontChord(action: ChordAction | undefined): boolean {
+  if (action === "fontBigger") zoomTerminalFont(1);
+  else if (action === "fontSmaller") zoomTerminalFont(-1);
+  else if (action === "fontReset") resetTerminalFontZoom();
+  else return false;
+  return true;
+}
+
+/** Where the zoom keys work: anywhere focus can sit inside a terminal — the
+ *  xterm itself, the command editor, the find bar — and the Docker tab's
+ *  read-only log, which has no key handler of its own. */
+const FONT_KEY_SURFACES = ".terminal-pane, .workspace-docker-log";
+
+/**
+ * The font zoom chords — ⌘+/⌘-/⌘0 on macOS, Ctrl+Shift+=/-/0 elsewhere —
+ * taken once, at the window, in the capture phase: before xterm's handler or
+ * any field in the pane sees the key, so where focus is inside a terminal
+ * makes no difference. Every terminal changes at once (terminal-font.ts).
+ */
+export function initFontKeys(
+  target: Pick<Window, "addEventListener"> = window,
+  platform: NodeJS.Platform = hostPlatform(),
+): void {
+  target.addEventListener(
+    "keydown",
+    (event) => {
+      if (!(event.target instanceof Element)) return;
+      if (event.target.closest(FONT_KEY_SURFACES) === null) return;
+      if (!applyFontChord(matchChord(event, platform))) return;
+      event.preventDefault();
+      event.stopPropagation();
+    },
+    { capture: true },
+  );
 }
 
 /** ESC then CR. xterm encodes Shift+Enter as a bare CR, byte-identical to

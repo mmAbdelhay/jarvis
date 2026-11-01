@@ -1690,6 +1690,8 @@ function createTabChip(initialTab: WorkspaceTab, activeTabId: string | undefined
 
   const element = document.createElement("div");
   element.className = "workspace-tab";
+  // Reviews (Task 12): what reviews-dock.ts's applyTabPrBadge finds it by.
+  element.dataset["tabId"] = initialTab.id;
   element.draggable = true;
   // Right-click reaches the same rename the double-click below starts, plus
   // Reload and Close — discoverable without knowing double-click renames at

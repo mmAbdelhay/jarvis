@@ -12,6 +12,14 @@ import type { GitViewResult, RendererApi } from "../src/ipc.js";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 import { detectLanguage, formatAgo } from "./format.js";
 
+const AWAKE_STATUS = {
+  mode: "off" as const,
+  active: false,
+  reason: "off" as const,
+  simulateInput: false,
+  inputState: "idle" as const,
+};
+
 // Full RendererApi stub: every member defaults to a vi.fn() so a test that
 // only cares about one or two bridge calls never has to enumerate the rest,
 // while `openChangesWith` below can still override gitDiff/gitSetStaged/
@@ -113,6 +121,7 @@ function stubJarvis(overrides: Partial<RendererApi>): RendererApi {
       blocks: true,
       inputEditor: true,
       notifyAfterSeconds: 30,
+      fontSize: 12,
       home: "/home/x",
       scrollback: 5000,
     })),
@@ -170,6 +179,10 @@ function stubJarvis(overrides: Partial<RendererApi>): RendererApi {
     attachTerminal: vi.fn(async () => ""),
     terminalPanes: vi.fn(async () => []),
     terminalSnapshot: vi.fn(async () => ({ text: "", end: 0 })),
+    terminalClaudeView: vi.fn(async () => ({ kind: "none" as const })),
+    terminalAnswer: vi.fn(async () => ({ ok: false as const, reason: "gone" as const })),
+    terminalAttachUpload: vi.fn(async () => ({ ok: false as const, error: "" })),
+    onTerminalClaudeViewChanged: vi.fn(),
     sendTerminalInput: vi.fn(async () => {}),
     resizeTerminal: vi.fn(async () => {}),
     onTerminalData: vi.fn(),
@@ -247,6 +260,35 @@ function stubJarvis(overrides: Partial<RendererApi>): RendererApi {
     onPlansChanged: vi.fn(),
     onTabPlans: vi.fn(),
     plansOpenLink: vi.fn(async () => {}),
+    reviewsStatus: vi.fn(async () => ({
+      gh: null,
+      enabled: false,
+      repoErrors: {},
+      paused: [],
+      repos: [],
+    })),
+    reviewsList: vi.fn(async () => []),
+    reviewsThread: vi.fn(async () => undefined),
+    reviewsReply: vi.fn(async () => ({
+      id: "1",
+      kind: "issue" as const,
+      author: "",
+      isBot: false,
+      body: "not stubbed in this test",
+      createdAt: 0,
+    })),
+    reviewsLink: vi.fn(async () => {}),
+    reviewsPause: vi.fn(async () => {}),
+    reviewsDeliverNow: vi.fn(async () => ({ sent: true as const })),
+    reviewsSendReview: vi.fn(async () => ({ sent: true as const })),
+    reviewsPostSummary: vi.fn(async () => ({ sent: true as const })),
+    reviewsPollNow: vi.fn(async () => {}),
+    reviewsRequeue: vi.fn(async () => false),
+    reviewsOpenOnGithub: vi.fn(async () => {}),
+    onReviewsChanged: vi.fn(),
+    awakeStatus: vi.fn(async () => AWAKE_STATUS),
+    setAwake: vi.fn(async () => AWAKE_STATUS),
+    onAwakeChanged: vi.fn(),
     backgroundStatus: vi.fn(async () => ({
       enabled: false,
       inApp: true,

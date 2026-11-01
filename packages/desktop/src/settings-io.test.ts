@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse } from "yaml";
 import { describe, expect, it } from "vitest";
+import { DEFAULT_REVIEWS_CONFIG } from "@jarvis/core";
 import { parseConfig, type JarvisConfig } from "./config.js";
 import { toRawConfig, validateDraft, writeSettingsFile } from "./settings-io.js";
 
@@ -28,6 +29,7 @@ const draft: JarvisConfig = {
     completion: { enabled: true, historyPath: "/h", commandLogPath: "/l" },
     blocks: { enabled: true, inputEditor: true },
     notifyAfterSeconds: 30,
+    fontSize: 12,
   },
   voice: {
     engine: "say" as const,
@@ -81,6 +83,7 @@ const fullDraft: JarvisConfig = {
     completion: { enabled: false, historyPath: "/h", commandLogPath: "/l" },
     blocks: { enabled: false, inputEditor: false },
     notifyAfterSeconds: 90,
+    fontSize: 15,
   },
   performance: {
     suspendTabsAfterMinutes: 0,
@@ -100,6 +103,18 @@ const fullDraft: JarvisConfig = {
     idleDisableMinutes: 30,
   },
   daemon: { enabled: true },
+  reviews: {
+    enabled: true,
+    intervalSeconds: 120,
+    repos: { "acme/app": true },
+    authors: ["alice"],
+    requireText: "",
+    ignoreBots: false,
+    autoLink: true,
+    batchSeconds: 10,
+    notify: { comment: true, queued: false, requested: true },
+  },
+  awake: { mode: "agents", simulateInput: true, idleSeconds: 300 },
 };
 
 /**
@@ -135,6 +150,8 @@ const FILE_KEYS: Record<keyof JarvisConfig, readonly string[] | null> = {
   sessions: ["sessions"],
   remote: ["remote"],
   daemon: ["daemon"],
+  reviews: ["reviews"],
+  awake: ["awake"],
   // Computed by parseConfig from the config directory, never a source of
   // truth. See toRawConfig's own note.
   sessionsDbPath: null,
@@ -173,6 +190,21 @@ describe("toRawConfig covers every section", () => {
     expect(reparsed.remote).toEqual(fullDraft.remote);
     expect(reparsed.prayer).toEqual(fullDraft.prayer);
     expect(reparsed.daemon).toEqual(fullDraft.daemon);
+    expect(reparsed.reviews).toEqual(fullDraft.reviews);
+    expect(reparsed.awake).toEqual(fullDraft.awake);
+  });
+
+  it("omits awake from the file at its defaults", () => {
+    const raw = toRawConfig({
+      ...draft,
+      awake: { mode: "off", simulateInput: false, idleSeconds: 240 },
+    });
+    expect(raw).not.toHaveProperty("awake");
+  });
+
+  it("omits reviews from the file at its defaults", () => {
+    const raw = toRawConfig({ ...draft, reviews: { ...DEFAULT_REVIEWS_CONFIG } });
+    expect(raw).not.toHaveProperty("reviews");
   });
 
   it("round-trips prayer.notify, and omits it from the file when unset (defaults apply)", () => {
@@ -360,6 +392,7 @@ describe("writeSettingsFile", () => {
 
     const written = parse(await readFile(path, "utf8"));
     expect(written.terminal.notifyAfterSeconds).toBe(90);
+    expect(written.terminal.fontSize).toBe(15);
     expect(written.terminal.blocks).toEqual({ enabled: false, inputEditor: false });
     expect(written.workflows).toEqual(fullDraft.workflows);
     expect(written.sessions).toEqual({ importWindowDays: 90 });
