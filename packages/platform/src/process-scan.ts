@@ -293,6 +293,11 @@ export type ProcessScanDeps = {
    *  Jarvis's own tree is reported only when it runs under one of these;
    *  absent, nothing in that tree is. */
   terminalShells?: (() => ReadonlyMap<number, string>) | undefined;
+  /** Whether this agent's own records name this pid as one of its sessions
+   *  (Claude Code's `<configDir>/sessions/<pid>.json`). Tells apart several
+   *  accounts of one vendor whose wrappers all exec the same binary; absent,
+   *  such a binary is the vendor's default agent. */
+  claimsPid?: ((agentId: string, pid: number) => Promise<boolean>) | undefined;
   now: () => number;
 };
 
@@ -334,15 +339,29 @@ export async function listAgentProcesses(deps: ProcessScanDeps): Promise<Externa
 
   // A wrapper agent (`claude-mm`: an sh script that `exec`s claude) shows
   // in ps as the binary it ran, never as itself. Inside a Jarvis pane such
-  // a binary stands for the agent of its vendor — the default one, else the
-  // first. Never outside that tree: an unrelated `claude` elsewhere on the
-  // machine is not the user's wrapper agent.
-  const agentByBinary = new Map<string, AgentConfig>();
+  // a binary stands for an agent of its vendor: the one whose records claim
+  // that pid (claimsPid), else the default one, else the first. Never
+  // outside that tree: an unrelated `claude` elsewhere on the machine is not
+  // the user's wrapper agent.
+  const agentsByBinary = new Map<string, AgentConfig[]>();
   for (const [binary, vendor] of Object.entries(VENDOR_BY_BINARY)) {
     const ofVendor = deps.agents.filter((agent) => agent.vendor === vendor);
-    const chosen = ofVendor.find((agent) => agent.default === true) ?? ofVendor[0];
-    if (chosen !== undefined) agentByBinary.set(binary, chosen);
+    const ordered = [
+      ...ofVendor.filter((agent) => agent.default === true),
+      ...ofVendor.filter((agent) => agent.default !== true),
+    ];
+    if (ordered.length > 0) agentsByBinary.set(binary, ordered);
   }
+  const agentOfBinary = async (binary: string, pid: number): Promise<AgentConfig | undefined> => {
+    const ofVendor = agentsByBinary.get(binary);
+    if (ofVendor === undefined) return undefined;
+    if (ofVendor.length > 1 && deps.claimsPid !== undefined) {
+      for (const agent of ofVendor) {
+        if (await deps.claimsPid(agent.id, pid).catch(() => false)) return agent;
+      }
+    }
+    return ofVendor[0];
+  };
 
   const now = deps.now();
   const candidates: {
@@ -358,7 +377,7 @@ export async function listAgentProcesses(deps: ProcessScanDeps): Promise<Externa
     const basename = commandBasename(row.command);
     const agent =
       agentByCommand.get(basename) ??
-      (ownTree.has(row.pid) ? agentByBinary.get(basename) : undefined);
+      (ownTree.has(row.pid) ? await agentOfBinary(basename, row.pid) : undefined);
     if (agent === undefined) continue;
     if (isAgentServiceCommand(agent, row.command)) continue;
     const agentId = agent.id;
