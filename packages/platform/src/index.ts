@@ -24,6 +24,7 @@ export * from "./process-scan.js";
 export * from "./paths.js";
 export * from "./git.js";
 export * from "./code-server.js";
+export * from "./code-server-ports.js";
 export * from "./headlamp.js";
 export * from "./aws-session.js";
 export * from "./status-page.js";

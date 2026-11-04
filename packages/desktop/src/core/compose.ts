@@ -185,6 +185,8 @@ import {
   loginShellPath,
   randomPassword,
   findFreePort,
+  createCodeServerPortStore,
+  isPortFree,
   readStatusPage,
   resolveRealZdotdir,
   runCommand,
@@ -783,6 +785,13 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     waitUntilReady,
     userDataDir: join(codeServerRoot, "user-data"),
     extensionsDir: join(codeServerRoot, "extensions"),
+    // Each editor root goes back to the port it had, because code-server
+    // keeps workspace trust, layout and open tabs per browser origin, and
+    // the port is part of the origin. See CodeServerPortStore.
+    portMemory: {
+      store: createCodeServerPortStore(join(codeServerRoot, "ports.json")),
+      isPortFree,
+    },
   });
   const editor = createEditorHandlers({
     codeServer,

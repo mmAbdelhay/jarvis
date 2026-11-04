@@ -70,6 +70,21 @@ export type CodeServerManager = {
   stopAll(): void;
 };
 
+/**
+ * The port each (project, root) last ran code-server on, keyed by
+ * codeServerKey. It exists because code-server keeps workspace trust, the
+ * workbench layout and the open editors in the browser's IndexedDB, and
+ * IndexedDB is per *origin* — `http://127.0.0.1:<port>`. A new port is a new,
+ * empty origin: the "Do you trust the authors?" prompt, a default layout and
+ * no open tabs, on every start. Reusing the port reuses the origin.
+ */
+export type CodeServerPortStore = {
+  get(key: string): number | undefined;
+  set(key: string, port: number): void;
+  /** Every port remembered for any key. */
+  ports(): Set<number>;
+};
+
 export type CodeServerManagerDeps = {
   spawn: CodeServerSpawner;
   findFreePort: () => Promise<number>;
@@ -77,7 +92,19 @@ export type CodeServerManagerDeps = {
   waitUntilReady: (url: string) => Promise<boolean>;
   userDataDir: string;
   extensionsDir: string;
+  /** Keeps each root on the port it ran on before. Absent, every start
+   *  takes a fresh port. See CodeServerPortStore for why it matters. */
+  portMemory?: {
+    store: CodeServerPortStore;
+    isPortFree: (port: number) => Promise<boolean>;
+  };
 };
+
+/** How many fresh picks may land on a port another root remembers before
+ *  one is taken anyway. The OS hands out ephemeral ports from a range of
+ *  ~28k, so a repeat is rare; a bound keeps a pathological picker from
+ *  spinning, and the cost of giving up is only the other root's state. */
+const FRESH_PORT_ATTEMPTS = 5;
 
 /**
  * One code-server process per (project, root), started lazily on first use
@@ -102,11 +129,35 @@ export function createCodeServerManager(deps: CodeServerManagerDeps): CodeServer
   // beyond whatever is left of a start already under way.
   const starting = new Map<string, Promise<CodeServerResult>>();
 
+  /** The root's remembered port if nothing holds it now, otherwise a fresh
+   *  one that no other root has a claim on. Not `async` itself, so that
+   *  without port memory the spawn happens exactly as soon as it always did. */
+  function choosePort(key: string): Promise<number> {
+    const memory = deps.portMemory;
+    return memory === undefined ? deps.findFreePort() : chooseRememberedPort(key, memory);
+  }
+
+  async function chooseRememberedPort(
+    key: string,
+    memory: NonNullable<CodeServerManagerDeps["portMemory"]>,
+  ): Promise<number> {
+    const remembered = memory.store.get(key);
+    if (remembered !== undefined && (await memory.isPortFree(remembered))) return remembered;
+
+    const claimed = memory.store.ports();
+    let port = await deps.findFreePort();
+    for (let attempt = 1; attempt < FRESH_PORT_ATTEMPTS && claimed.has(port); attempt++) {
+      port = await deps.findFreePort();
+    }
+    return port;
+  }
+
   async function start(projectPath: string, folderPath: string): Promise<CodeServerResult> {
+    const key = codeServerKey(projectPath, folderPath);
     let port: number;
     let process: CodeServerProcess;
     try {
-      port = await deps.findFreePort();
+      port = await choosePort(key);
       process = deps.spawn({
         port,
         userDataDir: deps.userDataDir,
@@ -125,7 +176,9 @@ export function createCodeServerManager(deps: CodeServerManagerDeps): CodeServer
       return { ok: false, detail: "code-server did not become ready in time" };
     }
 
-    const key = codeServerKey(projectPath, folderPath);
+    // Only once it is up: a port code-server could not serve on is not one
+    // worth coming back to.
+    if (deps.portMemory?.store.get(key) !== port) deps.portMemory?.store.set(key, port);
     running.set(key, { url, process });
     process.onExit(() => running.delete(key));
     return { ok: true, url };
