@@ -18,6 +18,7 @@ import {
   type SortDirection,
 } from "./session-filter.js";
 import { enhanceTerminal } from "./terminal-addons.js";
+import { openTerminalLink } from "./terminal-links.js";
 import { setTerminalFontBase } from "./terminal-font.js";
 import { createPane, type TerminalPane } from "./terminal-pane.js";
 
@@ -227,11 +228,12 @@ function ensurePane(): TerminalPane | undefined {
   // real element to attach a context to.
   enhanceTerminal(view.terminal, view.element, {
     sendInput,
-    // A link clicked in an agent's output opens as a Workspace browser tab in
-    // that agent's own project, rather than being handed to the OS.
+    // A link clicked in an agent's output opens as a Workspace tab in that
+    // agent's own project, or in the system browser —
+    // `browser.openTerminalLinksInternally` decides (terminal-links.ts).
     openLink: (url) => {
       if (currentProject === undefined) return;
-      void window.jarvis.openTab(currentProject, url);
+      openTerminalLink(currentProject, url);
     },
     // Undefined with blocks switched off, which leaves ⌘↑/⌘↓/⌘⇧F behaving
     // exactly as they do today rather than claiming a key and doing

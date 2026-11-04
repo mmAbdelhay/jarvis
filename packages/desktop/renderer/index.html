@@ -949,6 +949,17 @@
             <span class="settings-switch-track" aria-hidden="true"></span>
           </span>
         </div>
+        <!-- Where a URL clicked in a terminal opens — a Workspace terminal tab
+             or an agent Session. On, as a Workspace tab in that terminal's
+             project; off, in the system's default browser. -->
+        <div class="settings-field">
+          <label for="settings-terminal-links-internal">open terminal links in Jarvis</label>
+          <span class="settings-switch">
+            <input id="settings-terminal-links-internal" type="checkbox" />
+            <span class="settings-switch-track" aria-hidden="true"></span>
+          </span>
+        </div>
+        <div class="settings-note">Off, a link clicked in a terminal opens in your system browser instead of a Workspace tab.</div>
         <div class="settings-field">
           <label for="settings-browser-homepage">default page</label>
           <input id="settings-browser-homepage" type="text" class="mono" autocomplete="off" placeholder="https://example.com" />

@@ -28,6 +28,7 @@ import {
   reportWorkspaceBounds,
   setBrowserSnapshot,
 } from "./workspace.js";
+import { setTerminalLinksInternal } from "./terminal-links.js";
 import { initSettings, openSettings, savePrayerSettings } from "./settings.js";
 import { initDaemonSettings, refreshDaemonSettings } from "./daemon-settings.js";
 import { initUpdateSettings } from "./update-settings.js";
@@ -496,6 +497,7 @@ function wireNav(): void {
         setPrayerSnapshot(settings.prayer);
         renderPrayer();
         setBrowserSnapshot(settings.browser);
+        setTerminalLinksInternal(settings.browser.openTerminalLinksInternally);
         setKnownAgents(Object.keys(settings.registry.agents));
         setKnownAgentIds(Object.keys(settings.registry.agents));
       })
@@ -511,6 +513,7 @@ function wireNav(): void {
           setPrayerSnapshot(settings.prayer);
           renderPrayer();
           setBrowserSnapshot(settings.browser);
+          setTerminalLinksInternal(settings.browser.openTerminalLinksInternally);
           setKnownAgents(Object.keys(settings.registry.agents));
           setKnownAgentIds(Object.keys(settings.registry.agents));
         })

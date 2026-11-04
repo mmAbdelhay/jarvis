@@ -82,7 +82,7 @@ function sample(): JarvisConfig {
       stopSidecarsAfterMinutes: 10,
       terminalScrollback: 5000,
     },
-    browser: { allowPopups: true },
+    browser: { allowPopups: true, openTerminalLinksInternally: true },
     sessions: { importWindowDays: 30 },
     remote: {
       enabled: false,
@@ -144,6 +144,7 @@ function harness(config: JarvisConfig = sample()): { calls: Recorded[]; config: 
     <textarea id="settings-greeting-ar"></textarea>
     <input id="settings-terminal-font-size" type="number" />
     <input id="settings-allow-popups" type="checkbox" />
+    <input id="settings-terminal-links-internal" type="checkbox" />
     <input id="settings-browser-homepage" />
     <input id="settings-whisper-binary" />
     <input id="settings-whisper-model" />
@@ -1129,6 +1130,24 @@ describe("voice section", () => {
 
     const saved = calls.find((entry) => entry.call === "saveSettings")?.args[0] as JarvisConfig;
     expect(saved.browser.allowPopups).toBe(false);
+  });
+
+  it("shows terminal links opening in Jarvis and saves them switched to the system browser", async () => {
+    const { calls } = harness();
+    initSettings();
+    await openSettings();
+    await settle();
+
+    const toggle = document.getElementById("settings-terminal-links-internal") as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
+    toggle.checked = false;
+    change(toggle);
+
+    document.getElementById("settings-save")?.click();
+    await Promise.resolve();
+
+    const saved = calls.find((entry) => entry.call === "saveSettings")?.args[0] as JarvisConfig;
+    expect(saved.browser.openTerminalLinksInternally).toBe(false);
   });
 
   it("saves a configured default page and clears it back to unset", async () => {
