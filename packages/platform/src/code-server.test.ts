@@ -7,6 +7,7 @@ import {
   codeServerKey,
   createCodeServerManager,
   createRealCodeServerSpawner,
+  type CodeServerPortStore,
   type CodeServerProcess,
   type CodeServerSpawner,
 } from "./code-server.js";
@@ -30,6 +31,7 @@ function manager(
     spawn?: CodeServerSpawner;
     findFreePort?: () => Promise<number>;
     waitUntilReady?: (url: string) => Promise<boolean>;
+    portMemory?: { store: CodeServerPortStore; isPortFree: (port: number) => Promise<boolean> };
   } = {},
 ) {
   const processes: FakeProcess[] = [];
@@ -48,6 +50,7 @@ function manager(
     waitUntilReady: overrides.waitUntilReady ?? (() => Promise.resolve(true)),
     userDataDir: "/jarvis/code-server/user-data",
     extensionsDir: "/jarvis/code-server/extensions",
+    ...(overrides.portMemory === undefined ? {} : { portMemory: overrides.portMemory }),
   });
   return { instance, processes, spawnArgs };
 }
@@ -311,6 +314,143 @@ describe("createCodeServerManager stopping one instance", () => {
     expect(result.ok).toBe(true);
     expect(processes).toHaveLength(2);
     expect(instance.runningKeys()).toEqual([codeServerKey("/p", "/p")]);
+  });
+});
+
+/** An in-memory CodeServerPortStore, so these tests touch no file. */
+function memoryStore(initial: Record<string, number> = {}): CodeServerPortStore & {
+  entries: Record<string, number>;
+} {
+  const entries = { ...initial };
+  return {
+    entries,
+    get: (key) => entries[key],
+    set: (key, port) => {
+      entries[key] = port;
+    },
+    ports: () => new Set(Object.values(entries)),
+  };
+}
+
+// code-server keeps workspace trust, the layout and the open editors in the
+// browser's IndexedDB, which is per *origin* — and the origin includes the
+// port. A fresh random port on every start meant a fresh, empty origin: the
+// trust prompt, a default layout and no open tabs after every restart (and
+// the sidecar reaper restarts an idle editor every ten minutes). Reusing a
+// root's port keeps the origin, and with it everything code-server saved.
+describe("createCodeServerManager remembering a root's port", () => {
+  const acme = codeServerKey("/p/acme", "/p/acme");
+
+  it("starts on the port it remembered for the root, without picking a new one", async () => {
+    let picked = 0;
+    const store = memoryStore({ [acme]: 40100 });
+    const { instance, spawnArgs } = manager({
+      findFreePort: () => {
+        picked++;
+        return Promise.resolve(51234);
+      },
+      portMemory: { store, isPortFree: () => Promise.resolve(true) },
+    });
+
+    const result = await instance.open("/p/acme");
+
+    expect(result).toEqual({ ok: true, url: "http://127.0.0.1:40100/?folder=%2Fp%2Facme" });
+    expect(spawnArgs).toMatchObject([{ port: 40100 }]);
+    expect(picked).toBe(0);
+  });
+
+  it("remembers the port a root was first started on", async () => {
+    const store = memoryStore();
+    const { instance } = manager({
+      findFreePort: () => Promise.resolve(51234),
+      portMemory: { store, isPortFree: () => Promise.resolve(true) },
+    });
+
+    await instance.open("/p/acme");
+
+    expect(store.entries).toEqual({ [acme]: 51234 });
+  });
+
+  it("uses the same port again after the instance was stopped", async () => {
+    let port = 51000;
+    const store = memoryStore();
+    const { instance, spawnArgs } = manager({
+      findFreePort: () => Promise.resolve(++port),
+      portMemory: { store, isPortFree: () => Promise.resolve(true) },
+    });
+
+    await instance.open("/p/acme");
+    instance.stop(acme);
+    await instance.open("/p/acme");
+
+    expect(spawnArgs).toMatchObject([{ port: 51001 }, { port: 51001 }]);
+  });
+
+  it("picks and remembers a new port when the remembered one is taken", async () => {
+    const store = memoryStore({ [acme]: 40100 });
+    const { instance, spawnArgs } = manager({
+      findFreePort: () => Promise.resolve(51234),
+      portMemory: { store, isPortFree: (port) => Promise.resolve(port !== 40100) },
+    });
+
+    const result = await instance.open("/p/acme");
+
+    expect(result.ok).toBe(true);
+    expect(spawnArgs).toMatchObject([{ port: 51234 }]);
+    expect(store.entries).toEqual({ [acme]: 51234 });
+  });
+
+  it("does not remember a port code-server never became ready on", async () => {
+    const store = memoryStore();
+    const { instance } = manager({
+      findFreePort: () => Promise.resolve(51234),
+      waitUntilReady: () => Promise.resolve(false),
+      portMemory: { store, isPortFree: () => Promise.resolve(true) },
+    });
+
+    await instance.open("/p/acme");
+
+    expect(store.entries).toEqual({});
+  });
+
+  // Handing root B a port root A remembers would take A's origin — and
+  // A's trust, layout and tabs — the next time A is opened while B runs.
+  it("does not hand a new root a port another root remembers", async () => {
+    const ports = [40100, 40100, 51234];
+    const store = memoryStore({ [codeServerKey("/p/other", "/p/other")]: 40100 });
+    const { instance, spawnArgs } = manager({
+      findFreePort: () => Promise.resolve(ports.shift() ?? 59999),
+      portMemory: { store, isPortFree: () => Promise.resolve(true) },
+    });
+
+    await instance.open("/p/acme");
+
+    expect(spawnArgs).toMatchObject([{ port: 51234 }]);
+  });
+
+  it("still starts if every pick collides with a remembered port", async () => {
+    const store = memoryStore({ [codeServerKey("/p/other", "/p/other")]: 40100 });
+    const { instance } = manager({
+      findFreePort: () => Promise.resolve(40100),
+      portMemory: { store, isPortFree: () => Promise.resolve(true) },
+    });
+
+    const result = await instance.open("/p/acme");
+
+    expect(result.ok).toBe(true);
+  });
+
+  it("keeps each root of a project on its own remembered port", async () => {
+    const api = codeServerKey("/p/acme", "/p/acme/api");
+    const store = memoryStore({ [acme]: 40100, [api]: 40200 });
+    const { instance, spawnArgs } = manager({
+      portMemory: { store, isPortFree: () => Promise.resolve(true) },
+    });
+
+    await instance.open("/p/acme");
+    await instance.open("/p/acme", "/p/acme/api");
+
+    expect(spawnArgs).toMatchObject([{ port: 40100 }, { port: 40200 }]);
   });
 });
 
