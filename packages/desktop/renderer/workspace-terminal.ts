@@ -2,6 +2,7 @@ import type { WorkspaceTab } from "@jarvis/core";
 import { LOGIN_TERMINAL_DETAIL } from "../src/login-terminal.js";
 import { MESSAGES, PRIMARY_LANGUAGE, type MessageKey } from "../src/messages.js";
 import { enhanceTerminal, handleSplitKey, type SplitKeys } from "./terminal-addons.js";
+import { openTerminalLink } from "./terminal-links.js";
 import { attachCompletion, type Completion } from "./terminal-completion.js";
 import { createTerminalExplorer, type TerminalExplorer } from "./terminal-explorer.js";
 import { setTerminalFontBase } from "./terminal-font.js";
@@ -1400,10 +1401,9 @@ function makePane(
   enhanceTerminal(terminal, element, {
     interceptKey,
     sendInput: (data) => void window.jarvis.sendTerminalInput(paneKey, data),
-    // A link opens as an ordinary browser tab in the same project, which is
-    // what puts it through normalizeInput and the app's navigation rules
-    // instead of handing an arbitrary string to the OS.
-    openLink: (url) => void window.jarvis.openTab(project, url),
+    // A Workspace tab in the same project, or the system browser —
+    // `browser.openTerminalLinksInternally` decides (terminal-links.ts).
+    openLink: (url) => openTerminalLink(project, url),
     // Undefined with blocks switched off — createPane leaves its own
     // blockNav undefined in that case, and the key handler's guards make
     // that mean "behave exactly as today" rather than claiming ⌘↑/⌘↓/⌘⇧F

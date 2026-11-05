@@ -48,7 +48,7 @@ export const NEW_TAB_URL = "https://duckduckgo.com";
 // mirrors PrayerConfig — set once at load and again after every Save
 // (app.ts), so a new tab opens the configured home page without a round
 // trip through main for something the renderer already has.
-let browserSnapshot: BrowserConfig = { allowPopups: true };
+let browserSnapshot: BrowserConfig = { allowPopups: true, openTerminalLinksInternally: true };
 export function setBrowserSnapshot(value: BrowserConfig): void {
   browserSnapshot = value;
 }

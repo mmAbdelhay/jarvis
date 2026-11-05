@@ -710,6 +710,23 @@ describe("voice", () => {
     );
   });
 
+  // Terminal links open as Workspace tabs unless the user turns that off,
+  // in which case they go to the system browser.
+  it("opens terminal links internally unless told not to", () => {
+    expect(parseConfig(base).browser.openTerminalLinksInternally).toBe(true);
+    expect(parseConfig({ ...base, browser: {} }).browser.openTerminalLinksInternally).toBe(true);
+    expect(
+      parseConfig({ ...base, browser: { openTerminalLinksInternally: false } }).browser
+        .openTerminalLinksInternally,
+    ).toBe(false);
+  });
+
+  it("refuses an openTerminalLinksInternally that is not a boolean", () => {
+    expect(() => parseConfig({ ...base, browser: { openTerminalLinksInternally: "no" } })).toThrow(
+      "Config `browser.openTerminalLinksInternally` must be a boolean",
+    );
+  });
+
   it("refuses an allowPopups that is not a boolean", () => {
     expect(() => parseConfig({ ...base, browser: { allowPopups: "yes" } })).toThrow(
       "Config `browser.allowPopups` must be a boolean",

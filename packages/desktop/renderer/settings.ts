@@ -211,6 +211,8 @@ function renderTerminal(): void {
 function renderBrowser(): void {
   if (draft === undefined) return;
   ($("settings-allow-popups") as HTMLInputElement).checked = draft.browser.allowPopups;
+  ($("settings-terminal-links-internal") as HTMLInputElement).checked =
+    draft.browser.openTerminalLinksInternally;
   ($("settings-browser-homepage") as HTMLInputElement).value = draft.browser.homePage ?? "";
 }
 
@@ -3062,6 +3064,13 @@ function wireStaticFields(): void {
   $("settings-allow-popups").addEventListener("change", () => {
     if (draft === undefined) return;
     draft.browser.allowPopups = ($("settings-allow-popups") as HTMLInputElement).checked;
+    clearSaveStatus();
+  });
+  $("settings-terminal-links-internal").addEventListener("change", () => {
+    if (draft === undefined) return;
+    draft.browser.openTerminalLinksInternally = (
+      $("settings-terminal-links-internal") as HTMLInputElement
+    ).checked;
     clearSaveStatus();
   });
   $("settings-browser-homepage").addEventListener("change", () => {

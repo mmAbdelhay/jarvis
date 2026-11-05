@@ -1621,7 +1621,7 @@ const sampleConfig: JarvisConfig = {
     stopSidecarsAfterMinutes: 10,
     terminalScrollback: 5000,
   },
-  browser: { allowPopups: true },
+  browser: { allowPopups: true, openTerminalLinksInternally: true },
   sessions: { importWindowDays: 30 },
   remote: {
     enabled: false,

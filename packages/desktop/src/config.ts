@@ -152,6 +152,12 @@ export type BrowserConfig = {
    *  that needs the popup to report back to its opener. Links with
    *  target=_blank open as tabs either way. */
   allowPopups: boolean;
+  /** Where a URL clicked in a terminal (a Workspace terminal tab or an agent
+   *  Session) opens. On, it opens as an ordinary Workspace tab in that
+   *  terminal's project — what Jarvis always did. Off, it is handed to the
+   *  system's default browser instead, through the same scheme and length
+   *  gate plan links use (http, https and mailto only). */
+  openTerminalLinksInternally: boolean;
   /** What a new Workspace tab opens instead of the built-in blank/search
    *  page, when set. http(s) only — a `jarvis:` or `file:` page (or
    *  anything else `new URL` cannot parse) is refused at parse time rather
@@ -728,6 +734,7 @@ function parseRouting(rawRouting: unknown): RoutingRule[] {
 /** The `browser:` section as it stands with nothing in jarvis.yaml. */
 export const DEFAULT_BROWSER: BrowserConfig = {
   allowPopups: true,
+  openTerminalLinksInternally: true,
 };
 
 function parseBrowser(rawBrowser: unknown): BrowserConfig {
@@ -739,6 +746,13 @@ function parseBrowser(rawBrowser: unknown): BrowserConfig {
   const allowPopups = section["allowPopups"];
   if (allowPopups !== undefined && typeof allowPopups !== "boolean") {
     throw new Error("Config `browser.allowPopups` must be a boolean");
+  }
+  const openTerminalLinksInternally = section["openTerminalLinksInternally"];
+  if (
+    openTerminalLinksInternally !== undefined &&
+    typeof openTerminalLinksInternally !== "boolean"
+  ) {
+    throw new Error("Config `browser.openTerminalLinksInternally` must be a boolean");
   }
   const rawHomePage = section["homePage"];
   if (
@@ -764,6 +778,8 @@ function parseBrowser(rawBrowser: unknown): BrowserConfig {
   }
   return {
     allowPopups: allowPopups ?? DEFAULT_BROWSER.allowPopups,
+    openTerminalLinksInternally:
+      openTerminalLinksInternally ?? DEFAULT_BROWSER.openTerminalLinksInternally,
     ...(rawHomePage === undefined ? {} : { homePage: rawHomePage }),
   };
 }

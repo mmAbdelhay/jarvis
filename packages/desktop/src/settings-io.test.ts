@@ -48,7 +48,7 @@ const draft: JarvisConfig = {
     stopSidecarsAfterMinutes: 10,
     terminalScrollback: 5000,
   },
-  browser: { allowPopups: true },
+  browser: { allowPopups: true, openTerminalLinksInternally: true },
   sessions: { importWindowDays: 30 },
   remote: {
     enabled: false,
@@ -90,7 +90,7 @@ const fullDraft: JarvisConfig = {
     stopSidecarsAfterMinutes: 45,
     terminalScrollback: 20000,
   },
-  browser: { allowPopups: false },
+  browser: { allowPopups: false, openTerminalLinksInternally: false },
   sessions: { importWindowDays: 90 },
   remote: {
     enabled: true,

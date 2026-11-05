@@ -761,7 +761,11 @@ describe("workspace chrome", () => {
   // NEW_TAB_URL, through the same openTab call "+" always used — no new
   // channel, just a different string.
   it("opens the configured home page instead of the built-in one, once set", () => {
-    setBrowserSnapshot({ allowPopups: true, homePage: "https://intranet.example.com/" });
+    setBrowserSnapshot({
+      allowPopups: true,
+      openTerminalLinksInternally: true,
+      homePage: "https://intranet.example.com/",
+    });
     renderWorkspace({ tabs: [], activeTabId: undefined });
 
     document.getElementById("workspace-new-tab")?.click();
@@ -773,7 +777,7 @@ describe("workspace chrome", () => {
   });
 
   it("falls back to the built-in new-tab page with no home page configured", () => {
-    setBrowserSnapshot({ allowPopups: true });
+    setBrowserSnapshot({ allowPopups: true, openTerminalLinksInternally: true });
     renderWorkspace({ tabs: [], activeTabId: undefined });
 
     document.getElementById("workspace-new-tab")?.click();
