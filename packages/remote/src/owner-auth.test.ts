@@ -569,3 +569,253 @@ describe("createOwnerAuth", () => {
     expect(h.auth.sessionAtHello(DEVICE)).toBeUndefined();
   });
 });
+
+describe("createOwnerAuth: password join", () => {
+  const JOIN_SOURCE = "100.64.0.9";
+  const NEW_DEVICE = "e".repeat(32);
+
+  function spyLoginLimits() {
+    return {
+      allow: vi.fn(() => true),
+      failed: vi.fn(),
+      succeeded: vi.fn(),
+      refused: vi.fn(),
+    };
+  }
+
+  /** Every verify waits for its own gate; each release answers false (a wrong password). */
+  function gatedWrong() {
+    const gates: Array<() => void> = [];
+    const verify = (_password: string) =>
+      new Promise<boolean>((resolve) => {
+        gates.push(() => resolve(false));
+      });
+    return { gates, verify };
+  }
+
+  async function failJoins(auth: ReturnType<typeof makeHarness>["auth"], count: number) {
+    for (let attempt = 0; attempt < count; attempt += 1) {
+      expect(await auth.checkJoinPassword("wrong", JOIN_SOURCE)).toBe("refused");
+    }
+  }
+
+  it("answers ok for the right password and refused for a wrong one", async () => {
+    const h = makeHarness();
+    expect(await h.auth.checkJoinPassword(PASSWORD, JOIN_SOURCE)).toBe("ok");
+    expect(await h.auth.checkJoinPassword("wrong", JOIN_SOURCE)).toBe("refused");
+    expect(h.events).toEqual([{ kind: "join-failed", source: JOIN_SOURCE }]);
+  });
+
+  it("5 wrong joins never touch the login limiter", async () => {
+    const limits = spyLoginLimits();
+    const h = makeHarness({ limits });
+
+    await failJoins(h.auth, 5);
+
+    expect(limits.allow).not.toHaveBeenCalled();
+    expect(limits.failed).not.toHaveBeenCalled();
+    expect(limits.succeeded).not.toHaveBeenCalled();
+    expect(limits.refused).not.toHaveBeenCalled();
+  });
+
+  it("5 wrong joins leave a paired device's real login limits untouched", async () => {
+    const clock = fakeClock(10_000);
+    const limits = createLoginLimits({
+      now: clock.now,
+      audit: { record: () => {} },
+      notifyDesktop: () => {},
+      deviceName: () => undefined,
+      log: () => {},
+    });
+    const h = makeHarness({ limits });
+
+    await failJoins(h.auth, 5);
+
+    expect(limits.allow(DEVICE.id, SOURCE)).toBe(true);
+    const answer = await h.auth.handle("auth:login", { password: PASSWORD }, ctx());
+    expect(answer.kind).toBe("value");
+  });
+
+  it("locks out after 5 failures: the right password is refused unchecked until the 60 s pass", async () => {
+    const h = makeHarness();
+    await failJoins(h.auth, 5);
+    h.verifyPassword.mockClear();
+
+    expect(await h.auth.checkJoinPassword(PASSWORD, JOIN_SOURCE)).toBe("refused");
+    expect(h.verifyPassword).not.toHaveBeenCalled();
+
+    h.clock.advance(60_000);
+    expect(await h.auth.checkJoinPassword(PASSWORD, JOIN_SOURCE)).toBe("ok");
+    expect(h.verifyPassword).toHaveBeenCalledTimes(1);
+  });
+
+  it("a lockout refusal is not counted as another failure", async () => {
+    const h = makeHarness();
+    await failJoins(h.auth, 5);
+    await failJoins(h.auth, 3);
+
+    expect(h.events.filter((event) => event.kind === "join-failed")).toHaveLength(5);
+    // Still the first 60 s lockout, not a doubled one.
+    h.clock.advance(60_000);
+    expect(await h.auth.checkJoinPassword(PASSWORD, JOIN_SOURCE)).toBe("ok");
+  });
+
+  it("8 concurrent wrong joins run only the allowed checks, in the order the slots grant", async () => {
+    const { gates, verify } = gatedWrong();
+    const h = makeHarness({ verify });
+    const answers = Array.from({ length: 8 }, (_, index) =>
+      h.auth.checkJoinPassword(`wrong-${index}`, JOIN_SOURCE),
+    );
+    await flush();
+    expect(h.verifyPassword).toHaveBeenCalledTimes(MAX_CONCURRENT_PASSWORD_CHECKS);
+
+    while (gates.length > 0) {
+      gates.shift()?.();
+      await flush();
+    }
+
+    expect(await Promise.all(answers)).toEqual(Array(8).fill("refused"));
+    // The fifth failure's lockout lands before its slot passes on, so only
+    // the one check already running beside it finishes after it.
+    const allowed = DEVICE_FAILURES_BEFORE_LOCKOUT + MAX_CONCURRENT_PASSWORD_CHECKS - 1;
+    expect(h.verifyPassword.mock.calls.map(([password]) => password)).toEqual(
+      Array.from({ length: allowed }, (_, index) => `wrong-${index}`),
+    );
+    expect(h.events.filter((event) => event.kind === "join-failed")).toHaveLength(allowed);
+  });
+
+  it("asks the join limiter once per attempt: 2 refused attempts count as 2 refusals", async () => {
+    const h = makeHarness();
+    await failJoins(h.auth, 5);
+    await failJoins(h.auth, 2);
+
+    h.clock.advance(60_000);
+    await h.auth.checkJoinPassword(PASSWORD, JOIN_SOURCE); // the first call after the window flushes
+
+    expect(h.events.filter((event) => event.kind === "join-refused")).toEqual([
+      { kind: "join-refused", source: JOIN_SOURCE, count: 2 },
+    ]);
+  });
+
+  it("a full queue refuses a join without a check or a counted failure", async () => {
+    const { gates, verify } = gatedWrong();
+    const h = makeHarness({ verify });
+    const running = Array.from(
+      { length: MAX_CONCURRENT_PASSWORD_CHECKS + MAX_QUEUED_PASSWORD_CHECKS },
+      () => h.auth.checkJoinPassword("wrong", JOIN_SOURCE),
+    );
+    await flush();
+
+    expect(await h.auth.checkJoinPassword("wrong", JOIN_SOURCE)).toBe("refused");
+    expect(h.events).toEqual([]);
+
+    while (gates.length > 0) {
+      gates.shift()?.();
+      await flush();
+    }
+    await Promise.all(running);
+  });
+
+  it("a check that throws refuses, counts no failure and logs no password", async () => {
+    const h = makeHarness({
+      verify: async (password) => {
+        throw new Error(password);
+      },
+    });
+
+    expect(await h.auth.checkJoinPassword(PASSWORD, JOIN_SOURCE)).toBe("refused");
+
+    expect(h.events).toEqual([]);
+    expect(JSON.stringify(h.log.mock.calls)).not.toContain(PASSWORD);
+  });
+
+  it("an invalidation during the check refuses it, even with the right password", async () => {
+    const { verify, gates } = gatedVerify();
+    const h = makeHarness({ verify });
+
+    const answer = h.auth.checkJoinPassword(PASSWORD, JOIN_SOURCE);
+    await flush();
+    h.auth.invalidate();
+    gates[0]?.release();
+
+    expect(await answer).toBe("refused");
+    expect(h.events).toEqual([]);
+  });
+
+  it("never records or logs the password", async () => {
+    const h = makeHarness();
+    await h.auth.checkJoinPassword(PASSWORD, JOIN_SOURCE);
+    await h.auth.checkJoinPassword("wrong-secret-guess", JOIN_SOURCE);
+
+    const lines = h.events.map((event) => formatAuditLine(0, event)).join("");
+    for (const text of [lines, JSON.stringify(h.log.mock.calls)]) {
+      expect(text).not.toContain(PASSWORD);
+      expect(text).not.toContain("wrong-secret-guess");
+    }
+  });
+
+  it("issueForJoin answers live tokens for the device, without the login limiter's succeeded", async () => {
+    const limits = spyLoginLimits();
+    const h = makeHarness({ limits });
+    const startedAt = h.auth.joinGeneration();
+
+    const tokens = await h.auth.issueForJoin(NEW_DEVICE, JOIN_SOURCE, startedAt);
+
+    expect(h.sessions.verifyAccess(NEW_DEVICE, tokens.accessToken)).toBeDefined();
+    expect(tokens.refreshToken).toEqual(expect.any(String));
+    expect(tokens.accessExpiresAt).toBe(10_000 + ACCESS_TTL_MS);
+    expect(limits.succeeded).not.toHaveBeenCalled();
+    expect(h.events).toEqual([]);
+  });
+
+  it("issueForJoin resets the join limiter", async () => {
+    const h = makeHarness();
+    await failJoins(h.auth, 4);
+
+    await h.auth.issueForJoin(NEW_DEVICE, JOIN_SOURCE, h.auth.joinGeneration());
+
+    await failJoins(h.auth, 4);
+    expect(await h.auth.checkJoinPassword(PASSWORD, JOIN_SOURCE)).toBe("ok");
+  });
+
+  it("an invalidation after the check refuses the issue and issues nothing live", async () => {
+    const h = makeHarness();
+    const revokeFamily = vi.spyOn(h.sessions, "revokeFamily");
+    const startedAt = h.auth.joinGeneration();
+    expect(await h.auth.checkJoinPassword(PASSWORD, JOIN_SOURCE)).toBe("ok");
+
+    h.auth.invalidate();
+
+    await expect(h.auth.issueForJoin(NEW_DEVICE, JOIN_SOURCE, startedAt)).rejects.toThrow();
+    expect(revokeFamily).toHaveBeenCalledTimes(1);
+  });
+
+  it("an invalidation during the issue refuses it and revokes the fresh family", async () => {
+    const h = makeHarness();
+    const revokeFamily = vi.spyOn(h.sessions, "revokeFamily");
+
+    const issuing = h.auth.issueForJoin(NEW_DEVICE, JOIN_SOURCE, h.auth.joinGeneration());
+    h.auth.invalidate();
+
+    await expect(issuing).rejects.toThrow();
+    expect(revokeFamily).toHaveBeenCalledTimes(1);
+  });
+
+  it("a family revoked during the issue refuses it", async () => {
+    const h = makeHarness();
+
+    const issuing = h.auth.issueForJoin(NEW_DEVICE, JOIN_SOURCE, h.auth.joinGeneration());
+    void h.sessions.revokeDevice(NEW_DEVICE);
+
+    await expect(issuing).rejects.toThrow();
+  });
+
+  it("a failed issue rejects", async () => {
+    const h = makeHarness();
+    vi.spyOn(h.sessions, "issue").mockRejectedValueOnce(new Error("disk full"));
+
+    await expect(
+      h.auth.issueForJoin(NEW_DEVICE, JOIN_SOURCE, h.auth.joinGeneration()),
+    ).rejects.toThrow();
+  });
+});

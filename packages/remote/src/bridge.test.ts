@@ -703,6 +703,127 @@ describe("createBridge: pairing a device end-to-end", () => {
   });
 });
 
+describe("createBridge: password join", () => {
+  function joinFrame(password: string): string {
+    return JSON.stringify({
+      t: "join",
+      v: PROTOCOL_VERSION,
+      password,
+      deviceName: "Other Mac",
+      client: "jarvis-desktop/1.0",
+    });
+  }
+
+  async function settled(socket: FakeSocket): Promise<void> {
+    for (let i = 0; i < 200 && socket.closed === undefined; i++) await flush();
+    if (socket.closed === undefined) throw new Error("the join never finished");
+  }
+
+  /** A bridge kept listening by one seeded device, with `tailnet` as given. */
+  async function listeningWithTailnet(tailnet?: { enabled: boolean; relay: boolean }) {
+    const h = makeHarness();
+    await seedDevices(h.fs, h.random, h.clock.now, ["Phone"]);
+    const bridge = await createBridge(h.deps);
+    await bridge.apply({ ...ON_127(), ...(tailnet !== undefined ? { tailnet } : {}) });
+    return { h, bridge };
+  }
+
+  it("tailnet on: the right password yields a device whose tokens unlock /rpc", async () => {
+    const { h, bridge } = await listeningWithTailnet({ enabled: true, relay: false });
+    const socket = new FakeSocket();
+
+    h.listenCalls[0]
+      ?.onSocket("pair", socket, "100.64.0.9")
+      ?.onText(joinFrame(OWNER_TEST_PASSWORD));
+    await settled(socket);
+
+    const frame = socket.sent.find((sent) => sent.t === "joined");
+    expect(socket.closed?.code).toBe(CLOSE.normal);
+    expect(bridge.status().devices).toHaveLength(2);
+
+    const rpc = new FakeSocket();
+    const handlers = h.listenCalls[0]?.onSocket("rpc", rpc, "100.64.0.9");
+    handlers?.onText(helloFrame(frame?.deviceId as string, frame?.token as string));
+    const tokens = frame?.tokens as { accessToken: string };
+    handlers?.onText(reqFrame(1, "auth:resume", [{ accessToken: tokens.accessToken }]));
+    await flush();
+    expect(rpc.sent.find((sent) => sent.id === 1)).toMatchObject({
+      t: "res",
+      v: { locked: false },
+    });
+    expect((await auditLines(h.fs)).join("\n")).not.toContain(OWNER_TEST_PASSWORD);
+  });
+
+  it("tailnet on: signing out everywhere during the join yields no device", async () => {
+    const { h, bridge } = await listeningWithTailnet({ enabled: true, relay: false });
+    const socket = new FakeSocket();
+
+    h.listenCalls[0]
+      ?.onSocket("pair", socket, "100.64.0.9")
+      ?.onText(joinFrame(OWNER_TEST_PASSWORD));
+    await bridge.signOutEverywhere();
+    await settled(socket);
+
+    expect(socket.closed).toEqual({ code: CLOSE.unauthorized, reason: "" });
+    expect(socket.sent).toEqual([]);
+    expect(bridge.status().devices).toHaveLength(1);
+  });
+
+  it("tailnet on: signing out everywhere after the check, while the device is written, yields no device", async () => {
+    const { h, bridge } = await listeningWithTailnet({ enabled: true, relay: false });
+    const socket = new FakeSocket();
+    const rename = h.fs.rename.bind(h.fs);
+    let signedOut = false;
+    h.fs.rename = async (from, to) => {
+      if (to === DEVICES_PATH && !signedOut) {
+        signedOut = true;
+        await bridge.signOutEverywhere();
+      }
+      return rename(from, to);
+    };
+
+    h.listenCalls[0]
+      ?.onSocket("pair", socket, "100.64.0.9")
+      ?.onText(joinFrame(OWNER_TEST_PASSWORD));
+    await settled(socket);
+
+    expect(signedOut).toBe(true);
+    expect(socket.closed).toEqual({ code: CLOSE.unauthorized, reason: "" });
+    expect(socket.sent).toEqual([]);
+    expect(bridge.status().devices).toHaveLength(1);
+  });
+
+  it("tailnet on: a wrong password closes 4401 and adds nothing", async () => {
+    const { h, bridge } = await listeningWithTailnet({ enabled: true, relay: false });
+    const socket = new FakeSocket();
+
+    h.listenCalls[0]?.onSocket("pair", socket, "100.64.0.9")?.onText(joinFrame("wrong"));
+    await settled(socket);
+
+    expect(socket.closed).toEqual({ code: CLOSE.unauthorized, reason: "" });
+    expect(bridge.status().devices).toHaveLength(1);
+    expect((await auditLines(h.fs)).some((line) => line.includes("join-failed"))).toBe(true);
+  });
+
+  it.each([
+    ["absent", undefined],
+    ["off", { enabled: false, relay: false }],
+  ])("tailnet %s: a join closes 4401 and the password is never checked", async (_name, tailnet) => {
+    const { h, bridge } = await listeningWithTailnet(tailnet);
+    const socket = new FakeSocket();
+
+    h.listenCalls[0]
+      ?.onSocket("pair", socket, "100.64.0.9")
+      ?.onText(joinFrame(OWNER_TEST_PASSWORD));
+
+    // Synchronous: no scrypt check ran.
+    expect(socket.closed).toEqual({ code: CLOSE.unauthorized, reason: "" });
+    await flush();
+    expect(bridge.status().devices).toHaveLength(1);
+    expect((await auditLines(h.fs)).some((line) => line.includes("join-failed"))).toBe(false);
+  });
+});
+
 describe("createBridge: push", () => {
   it("a push reaches a device only after its sub", async () => {
     const h = makeHarness();

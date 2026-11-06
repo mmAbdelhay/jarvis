@@ -40,6 +40,7 @@ import { describeError } from "./io.js";
 import type { Clock, RandomBytes, RemoteFs, SessionHandlers, SocketLike, Timers } from "./io.js";
 import type { ChannelPolicies } from "./policy.js";
 import { createPairSession } from "./pair-session.js";
+import type { PairJoinDeps } from "./pair-session.js";
 import { createPairing } from "./pairing.js";
 // Type-only: `proxy.ts` (node:http/node:net) never becomes reachable from
 // this file's *value* imports — only its shape is needed to type
@@ -529,6 +530,25 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
     }),
     notifyDesktop,
   });
+
+  function joinAllowed(): boolean {
+    return config?.tailnet?.enabled === true;
+  }
+
+  /** One `/pair` socket's password join, carrying its generation from check to issue. */
+  function passwordJoin(source: string): PairJoinDeps {
+    // Refused by `issueForJoin` until a password check has set it.
+    let startedAt = -1;
+    return {
+      allowed: joinAllowed,
+      checkPassword(password) {
+        startedAt = ownerAuth.joinGeneration();
+        return ownerAuth.checkJoinPassword(password, source);
+      },
+      issue: (deviceId) => ownerAuth.issueForJoin(deviceId, source, startedAt),
+      onJoined() {},
+    };
+  }
 
   // Owner-account changes (set/change password, passkey delete) run one at
   // a time: a change verifies the current password and then replaces it,
@@ -1033,6 +1053,7 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
             deps.log(`bridge: reconcile failed: ${describeError(error)}`),
           );
         },
+        ...(joinAllowed() ? { join: passwordJoin(source) } : {}),
       });
     },
   });
@@ -1164,6 +1185,9 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
         ...(newConfig.tls.certPath !== undefined ? { certPath: newConfig.tls.certPath } : {}),
         ...(newConfig.tls.keyPath !== undefined ? { keyPath: newConfig.tls.keyPath } : {}),
       },
+      ...(newConfig.tailnet !== undefined
+        ? { tailnet: { enabled: newConfig.tailnet.enabled, relay: newConfig.tailnet.relay } }
+        : {}),
     };
     if (!config.enabled) pairing.cancel();
     await reconcile();

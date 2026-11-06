@@ -21,6 +21,7 @@ import type { AuditEvent } from "./audit.js";
 import type { AuthenticatedDevice } from "./connection.js";
 import { sanitizeDeviceName } from "./devices.js";
 import type { Clock, RandomBytes } from "./io.js";
+import { createJoinLimits } from "./join-limits.js";
 import type { OwnerStore } from "./owner.js";
 import type {
   AuthArgs,
@@ -113,6 +114,20 @@ export type BridgeOwnerAuth = OwnerAuth & {
    * against the old credentials outlives the invalidation.
    */
   invalidate(): void;
+  /**
+   * The owner password for a password join, through the scrypt queue and the
+   * join limiter, never the login limiter. Every refusal is the same word,
+   * whatever the reason: wrong, locked out, queue full, or invalidated meanwhile.
+   */
+  checkJoinPassword(password: string, source: string): Promise<"ok" | "refused">;
+  /** What a join reads before its password check and hands to `issueForJoin`. */
+  joinGeneration(): number;
+  /**
+   * Tokens for a device a join just minted. Rejects, leaving nothing live, if
+   * an invalidation landed since `startedAt` or the family died meanwhile.
+   * A success resets the join limiter.
+   */
+  issueForJoin(deviceId: string, source: string, startedAt: number): Promise<AuthTokens>;
 };
 
 export type OwnerAuthDeps = {
@@ -173,6 +188,7 @@ const PUBLIC_KEY_PARAMS = [
 export function createOwnerAuth(deps: OwnerAuthDeps): BridgeOwnerAuth {
   const { owner, sessions, audit, log, lockFamily } = deps;
   const limits = deps.limits ?? NO_LOGIN_LIMITS;
+  const joinLimits = createJoinLimits({ now: deps.now, audit });
   const notifyDesktop = deps.notifyDesktop ?? (() => {});
   const challenges = createChallengeStore({ random: deps.random, now: deps.now });
   // The token family each connection's pending registration was begun
@@ -340,6 +356,29 @@ export function createOwnerAuth(deps: OwnerAuthDeps): BridgeOwnerAuth {
     return FORBIDDEN;
   }
 
+  /**
+   * Issues a token family for a credential verified since `startedAt`, or the
+   * refusal to answer: an invalidation or revoke that landed meanwhile wins.
+   */
+  async function issueLive(
+    deviceId: string,
+    startedAt: number,
+  ): Promise<{ issued: Awaited<ReturnType<typeof sessions.issue>> } | { refused: AuthOutcome }> {
+    let issued: Awaited<ReturnType<typeof sessions.issue>>;
+    try {
+      issued = await sessions.issue(deviceId);
+    } catch {
+      log("owner-auth: issuing a session failed");
+      return { refused: INTERNAL };
+    }
+    if (generation !== startedAt) {
+      await discardFamily(issued.familyId);
+      return { refused: FORBIDDEN };
+    }
+    if (!stillLive(deviceId, issued.access, issued.familyId)) return { refused: FORBIDDEN };
+    return { issued };
+  }
+
   /** Issues a token family for a login verified since `startedAt` and unlocks with it. */
   async function openSession(
     context: AuthContext,
@@ -347,18 +386,9 @@ export function createOwnerAuth(deps: OwnerAuthDeps): BridgeOwnerAuth {
     method?: "passkey",
   ): Promise<AuthOutcome> {
     const { device, source } = context;
-    let issued: Awaited<ReturnType<typeof sessions.issue>>;
-    try {
-      issued = await sessions.issue(device.id);
-    } catch {
-      log("owner-auth: issuing a session failed");
-      return INTERNAL;
-    }
-    if (generation !== startedAt) {
-      await discardFamily(issued.familyId);
-      return FORBIDDEN;
-    }
-    if (!stillLive(device.id, issued.access, issued.familyId)) return FORBIDDEN;
+    const result = await issueLive(device.id, startedAt);
+    if ("refused" in result) return result.refused;
+    const { issued } = result;
     limits.succeeded(device.id, source);
     record({
       kind: "login-succeeded",
@@ -680,6 +710,38 @@ export function createOwnerAuth(deps: OwnerAuthDeps): BridgeOwnerAuth {
 
     invalidate() {
       generation += 1;
+    },
+
+    async checkJoinPassword(password, source) {
+      const startedAt = generation;
+      // The limiter is asked once, in the slot, and hears a failure before
+      // the slot passes on: asked earlier, concurrent attempts would all pass
+      // before the first failure landed. Only the one check already running
+      // beside the failure that starts a lockout still finishes after it.
+      const checked = withPasswordSlot(async () => {
+        if (!joinLimits.allow(source)) return false;
+        const ok = await owner.verifyPassword(password);
+        if (!ok) joinLimits.failed(source);
+        return ok;
+      });
+      if (checked === undefined) return "refused";
+      let ok: boolean;
+      try {
+        ok = await checked;
+      } catch {
+        log("owner-auth: join password check failed");
+        return "refused";
+      }
+      return ok && generation === startedAt ? "ok" : "refused";
+    },
+
+    joinGeneration: () => generation,
+
+    async issueForJoin(deviceId, _source, startedAt) {
+      const result = await issueLive(deviceId, startedAt);
+      if ("refused" in result) throw new Error("join refused");
+      joinLimits.succeeded();
+      return tokensOf(result.issued);
     },
   };
 }

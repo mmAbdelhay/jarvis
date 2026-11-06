@@ -275,7 +275,12 @@ export type PairingLink = {
 };
 
 export function encodeMessage(
-  message: ClientMessage | ServerMessage | PairClientMessage | PairServerMessage,
+  message:
+    | ClientMessage
+    | ServerMessage
+    | PairClientMessage
+    | PairServerMessage
+    | PairJoinedMessage,
 ): string {
   return JSON.stringify(message);
 }
