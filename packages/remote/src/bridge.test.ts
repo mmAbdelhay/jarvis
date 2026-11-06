@@ -1241,14 +1241,58 @@ describe("createBridge: tailnet gate", () => {
       expect(h.listenCalls).toHaveLength(1);
     });
 
-    it("holds with the switch off, where status reads off", async () => {
+    it.each([
+      ["the switch", TAILNET_OFF],
+      ["config.enabled", { ...TAILNET_ON(), enabled: false }],
+    ])("a verdict with %s off is ignored: nothing closes and no latch is left", async (_l, off) => {
+      const { h, bridge } = await start({ devices: ["Phone"], config: off });
+      const listening = h.listeners.length;
+
+      await bridge.setTailnetBlock("funnel");
+
+      expect(h.listeners.filter((listener) => listener.closed)).toEqual([]);
+      expect(h.listeners).toHaveLength(listening);
+      expect(bridge.status().tailnet).toEqual({ kind: "off" });
+
+      await bridge.apply(TAILNET_ON());
+      expect(bridge.status().tailnet).toEqual({ kind: "on" });
+      expect(bridge.status().listening).toBeDefined();
+    });
+
+    it("a verdict with the switch off leaves an open pairing window open", async () => {
+      const { bridge } = await start({ devices: ["Phone"], config: TAILNET_OFF });
+      expect(await bridge.openPairing()).toBe("opened");
+
+      await bridge.setTailnetBlock("funnel");
+      await flush();
+
+      expect(bridge.status().pairing.kind).toBe("open");
+    });
+
+    it("turning the switch off clears the latch: a paired device can connect, as with the feature off", async () => {
       const { h, bridge } = await start({ devices: ["Phone"] });
       await bridge.setTailnetBlock("funnel");
+      expect(bridge.status().listening).toBeUndefined();
 
       await bridge.apply(TAILNET_OFF);
 
-      expect(h.listenCalls).toHaveLength(1);
+      expect(h.listenCalls).toHaveLength(2);
+      expect(bridge.status().listening).toBeDefined();
       expect(bridge.status().tailnet).toEqual({ kind: "off" });
+      expect(tryJoin(h).closed).toEqual({ code: CLOSE.unauthorized, reason: "" });
+    });
+
+    it("turning config.enabled off clears the latch too", async () => {
+      const { h, bridge } = await start({ devices: ["Phone"] });
+      await bridge.setTailnetBlock("funnel");
+
+      await bridge.apply({ ...TAILNET_ON(), enabled: false });
+      expect(bridge.status().listening).toBeUndefined();
+
+      await bridge.apply(TAILNET_ON());
+
+      expect(h.listenCalls).toHaveLength(2);
+      expect(bridge.status().tailnet).toEqual({ kind: "on" });
     });
 
     it("rearmTailnet is what reopens them, with paired devices or none", async () => {
@@ -1370,6 +1414,94 @@ describe("createBridge: tailnet gate", () => {
 
       expect(h.listeners[0]?.closed).toBe(true);
       expect(h.listenCalls).toHaveLength(1);
+      expect(bridge.status().tailnet).toEqual({ kind: "blocked", reason: "no-certificate" });
+    });
+
+    /** The next `loadCertificate` waits until the returned function is called with its answer. */
+    function holdNextLoad(h: ReturnType<typeof makeHarness>) {
+      let answer: (material: CertificateMaterial) => void = () => {};
+      h.loadCertificate.mockImplementationOnce(
+        () =>
+          new Promise<CertificateMaterial>((resolve) => {
+            answer = resolve;
+          }) as never,
+      );
+      return (material: CertificateMaterial) => answer(material);
+    }
+
+    const OLD = { ...CONFIGURED, cert: "OLD", key: "OLD-KEY" };
+    const NEW = { ...CONFIGURED, cert: "NEW", key: "NEW-KEY" };
+
+    it("landing during the gate's read, it serves the new material, never the old", async () => {
+      const h = makeHarness({ cert: NEW });
+      const bridge = await createBridge(h.deps);
+      const answer = holdNextLoad(h);
+
+      const applying = bridge.apply(TAILNET_ON());
+      await flush();
+      const reloading = bridge.reloadCertificate();
+      answer(OLD);
+      await Promise.all([applying, reloading]);
+
+      expect(h.listenCalls.map((call) => call.cert)).toEqual(["NEW"]);
+      expect(h.webListenCalls.at(-1)?.cert).toBe("NEW");
+      expect(bridge.status().tailnet).toEqual({ kind: "on" });
+    });
+
+    it("landing during the gate's read with a paired device, it still ends on the new material", async () => {
+      const h = makeHarness({ cert: NEW });
+      await seedDevices(h.fs, h.random, h.clock.now, ["Phone"]);
+      const bridge = await createBridge(h.deps);
+      const answer = holdNextLoad(h);
+
+      const applying = bridge.apply(TAILNET_ON());
+      await flush();
+      const reloading = bridge.reloadCertificate();
+      answer(OLD);
+      await Promise.all([applying, reloading]);
+
+      expect(h.listenCalls.at(-1)?.cert).toBe("NEW");
+      expect(h.listeners.filter((listener) => !listener.closed)).toHaveLength(1);
+    });
+
+    it("landing during the listen path's own load, it ends on the new material", async () => {
+      const h = makeHarness({ cert: NEW });
+      await seedDevices(h.fs, h.random, h.clock.now, ["Phone"]);
+      const bridge = await createBridge(h.deps);
+      const answer = holdNextLoad(h);
+
+      const applying = bridge.apply(TAILNET_OFF);
+      await flush();
+      const reloading = bridge.reloadCertificate();
+      answer(OLD);
+      await Promise.all([applying, reloading]);
+
+      expect(h.listenCalls.at(-1)?.cert).toBe("NEW");
+      expect(h.listeners.filter((listener) => !listener.closed)).toHaveLength(1);
+    });
+
+    it("landing during the listen, the gate judges the new certificate: no name closes it", async () => {
+      const h = makeHarness({ cert: CONFIGURED });
+      const bridge = await createBridge(h.deps);
+      const listen = h.deps.listen;
+      let release: () => void = () => {};
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      h.deps.listen = async (options) => {
+        await held;
+        return listen(options);
+      };
+
+      const applying = bridge.apply(TAILNET_ON());
+      await flush();
+      h.loadCertificate.mockResolvedValue(certWith("configured", []));
+      const reloading = bridge.reloadCertificate();
+      release();
+      await Promise.all([applying, reloading]);
+
+      expect(h.listeners.filter((listener) => !listener.closed)).toEqual([]);
+      expect(bridge.status().listening).toBeUndefined();
       expect(bridge.status().tailnet).toEqual({ kind: "blocked", reason: "no-certificate" });
     });
 

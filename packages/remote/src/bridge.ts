@@ -11,7 +11,7 @@
 // device is already paired, a pairing window (or its confirmation, or a
 // pair socket already in flight) is open, or Tailscale access is on with
 // every one of its own conditions met (`tailnetStatus`). A Funnel block
-// overrides all of that until the switch is turned on again. Every public method that can
+// overrides all of that until the switch is turned off or re-enabled. Every public method that can
 // change any of those inputs awaits `reconcile()`, the only place the gate
 // is ever evaluated. `reconcile()` is itself serialised on a promise queue
 // so two overlapping calls (a `revoke` racing an `apply`, say) never step on
@@ -151,8 +151,8 @@ export type RemoteWebStatus =
 /**
  * The Tailscale access gate. Joins are allowed only while `on`. `off` covers
  * the switch or `enabled` being off. `funnel` holds until the switch is turned
- * on again (`rearmTailnet`); every other reason ends as soon as it stops
- * being true.
+ * off or re-enabled (`rearmTailnet`); every other reason ends as soon as it
+ * stops being true.
  */
 export type RemoteTailnetStatus =
   | { kind: "off" }
@@ -385,7 +385,8 @@ export type Bridge = {
   deletePasskey(credentialId: string): Promise<boolean>;
   signOutEverywhere(): Promise<void>;
   /** The guard's verdict. `"funnel"` closes every listener and latches: from
-   *  then on only `rearmTailnet` or a restart reopens them. `undefined` clears
+   *  then on only `rearmTailnet`, turning the switch off or a restart reopens
+   *  them. With the switch off it is ignored. `undefined` clears
    *  `"relay-missing"`, never that latch. */
   setTailnetBlock(reason: "funnel" | "relay-missing" | undefined): Promise<void>;
   /** The user turned Tailscale access on again: drops the blocks, and the
@@ -433,11 +434,6 @@ function computeSidecarGate(
     return "needs-certificate";
   }
   return "on";
-}
-
-/** Key for "the same certificate pair", compared across the listener and the gate's own read. */
-function certificateKey(tls: BridgeConfig["tls"]): string {
-  return JSON.stringify([tls.certPath ?? null, tls.keyPath ?? null]);
 }
 
 /**
@@ -663,22 +659,33 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
 
   // In memory only, on purpose: after a restart the guard evaluates Funnel
   // afresh. Separate from `wanted`'s OR clause: while set, nothing listens.
+  // Only ever set with the switch on, and turning the switch off clears it, so
+  // it can never leave paired devices shut out with status reading "off".
   let funnelLatched = false;
   let relayMissing = false;
   // Bumped by `reloadCertificate`; part of the listener's key, so the same
-  // paths with new bytes on disk still restart it.
+  // paths with new bytes on disk still restart it, and of `certificateKey`.
   let certificateGeneration = 0;
-  // The pair the current listener was started from.
+  // What the current listener was started from.
   let listenerCertificateKey: string | undefined;
   // The gate needs to know a certificate's name with no listener up, which is
   // when `listening.certificate` has nothing to say, and a listener may only
   // open once it knows. So the gate reads the configured pair itself ahead of
   // the listen, which then reuses `material`. `certificate` absent: no usable
   // name, because there is no configured pair or it failed to load. Dropped
-  // on the next `apply` or reload, or once a listener has taken the material.
+  // on the next `apply`, or once a listener has taken the material.
   let gateRead:
     | { key: string; certificate?: ListeningInfo["certificate"]; material?: CertificateMaterial }
     | undefined;
+
+  /**
+   * "This pair, as of the last reload." Carrying the generation is what makes
+   * a reload safe to land during a running `step()`: a read or a listener from
+   * before the bump can finish and store its key, and it simply never matches.
+   */
+  function certificateKey(tls: BridgeConfig["tls"]): string {
+    return JSON.stringify([tls.certPath ?? null, tls.keyPath ?? null, certificateGeneration]);
+  }
 
   function emit(): void {
     try {
@@ -703,7 +710,7 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
    *  anyone on the network keep the port open forever. */
   function isIdleNow(): boolean {
     return (
-      !tailnetKeepsAwake() &&
+      !tailnetSwitchedOn() &&
       listening !== undefined &&
       hub.connectedDeviceIds().size === 0 &&
       pairing.status().kind === "closed"
@@ -711,7 +718,7 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
   }
 
   /** Reachable with nothing connected is the point of the switch, so idleness never ends it. */
-  function tailnetKeepsAwake(): boolean {
+  function tailnetSwitchedOn(): boolean {
     return config?.enabled === true && config.tailnet.enabled;
   }
 
@@ -732,7 +739,7 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
    */
   function armIdleTimer(): void {
     clearIdleTimer();
-    if (idleSince === undefined || effectiveIdleMinutes === 0 || tailnetKeepsAwake()) return;
+    if (idleSince === undefined || effectiveIdleMinutes === 0 || tailnetSwitchedOn()) return;
     const disableAt = idleSince + effectiveIdleMinutes * 60_000;
     idleDisableAt = disableAt;
     idleTimer = deps.timers.setTimeout(fireIdleDisable, Math.max(0, disableAt - deps.now()));
@@ -1368,6 +1375,7 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
       },
       tailnet: { enabled: newConfig.tailnet.enabled, relay: newConfig.tailnet.relay },
     };
+    if (!tailnetSwitchedOn()) funnelLatched = false;
     if (!config.enabled) pairing.cancel();
     await reconcile();
   }
@@ -1692,6 +1700,8 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
 
   async function setTailnetBlock(reason: "funnel" | "relay-missing" | undefined): Promise<void> {
     if (stopped) return;
+    // A late verdict, after the switch went off, must not close anything.
+    if (reason === "funnel" && !tailnetSwitchedOn()) return;
     relayMissing = reason === "relay-missing";
     if (reason === "funnel") {
       funnelLatched = true;
@@ -1714,11 +1724,10 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
     if (problem === "listen-failed" || problem === "certificate-failed") {
       problem = undefined;
     }
+    // Nothing else to reset: this retires every older read and listener by
+    // key, so the gate judges the new certificate, and a listener only the
+    // gate keeps up closes if the new one has no name.
     certificateGeneration += 1;
-    gateRead = undefined;
-    // The gate must judge the new certificate, not the one being replaced: a
-    // listener only the gate keeps up closes if the new one has no name.
-    listenerCertificateKey = undefined;
     await reconcile();
   }
 
