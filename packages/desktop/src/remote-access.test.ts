@@ -305,6 +305,41 @@ const REMOTE_CONFIG = {
   idleDisableMinutes: 0,
 };
 
+describe("createRemoteAccess: the Tailscale guard's calls", () => {
+  it("wait for start's own apply, so a verdict is never lost or overwritten", async () => {
+    const { remoteAccess, bridge } = harness();
+    const order: string[] = [];
+    vi.mocked(bridge.apply).mockImplementation(async () => {
+      order.push("apply");
+    });
+    vi.mocked(bridge.setTailnetBlock).mockImplementation(async () => {
+      order.push("block");
+    });
+    vi.mocked(bridge.reloadCertificate).mockImplementation(async () => {
+      order.push("reload");
+    });
+
+    const block = remoteAccess.setTailnetBlock("funnel");
+    const reload = remoteAccess.reloadCertificate();
+    await remoteAccess.start(REMOTE_CONFIG);
+    await Promise.all([block, reload]);
+
+    expect(order).toEqual(["apply", "block", "reload"]);
+    expect(bridge.setTailnetBlock).toHaveBeenCalledWith("funnel");
+  });
+
+  it("do nothing after stop, and a call waiting on start wakes", async () => {
+    const { remoteAccess, bridge } = harness();
+    const waiting = remoteAccess.setTailnetBlock("funnel");
+    await remoteAccess.stop();
+    await waiting;
+    await remoteAccess.setTailnetBlock("funnel");
+    await remoteAccess.reloadCertificate();
+    expect(bridge.setTailnetBlock).not.toHaveBeenCalled();
+    expect(bridge.reloadCertificate).not.toHaveBeenCalled();
+  });
+});
+
 describe("createRemoteAccess: desktop notifications (Phase 0)", () => {
   it("shows the bridge's security notices as bilingual OS notifications in the configured language", async () => {
     const showNotification = vi.fn<(title: string, body: string) => void>();

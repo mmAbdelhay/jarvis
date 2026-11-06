@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
+  certificateExpiry,
   defaultCertDir,
   findTailscaleCli,
   issueCertificate,
@@ -37,6 +38,37 @@ describe("defaultCertDir", () => {
     expect(defaultCertDir({ homedir: () => "/Users/x" })).toBe(
       join("/Users/x", ".config", "jarvis", "tls"),
     );
+  });
+});
+
+describe("certificateExpiry", () => {
+  // A throwaway self-signed certificate: its key was discarded at creation.
+  const PEM = [
+    "-----BEGIN CERTIFICATE-----",
+    "MIIBhjCCAS2gAwIBAgIUWt+B+fq2SdrcAyEspLmvENJf/ScwCgYIKoZIzj0EAwIw",
+    "GTEXMBUGA1UEAwwOZXhwaXJ5LWZpeHR1cmUwHhcNMjYxMTA2MjE0ODI1WhcNMzYx",
+    "MTAzMjE0ODI1WjAZMRcwFQYDVQQDDA5leHBpcnktZml4dHVyZTBZMBMGByqGSM49",
+    "AgEGCCqGSM49AwEHA0IABJMRerZ4iIyqsSVW55ah75K8Uu5mGCSfIwnCebgnG2q6",
+    "rNc6aIyIP1IV7E4B2qn/t6Oy1s8Tk60xkOAtccnTAeujUzBRMB0GA1UdDgQWBBRj",
+    "cjoAyC9c9MrSxru93Ui7z4sqfjAfBgNVHSMEGDAWgBRjcjoAyC9c9MrSxru93Ui7",
+    "z4sqfjAPBgNVHRMBAf8EBTADAQH/MAoGCCqGSM49BAMCA0cAMEQCIDi/BFaylLox",
+    "CTeyUjhhANp5WJchjBzlw6SMAebG8f+mAiBW3IozMrl05N1dgXST2S3I+ghPQCp3",
+    "IOAUo57+GHbBzQ==",
+    "-----END CERTIFICATE-----",
+    "",
+  ].join("\n");
+
+  it("reads notAfter from the file", async () => {
+    const readFile = vi.fn(async () => PEM);
+    expect(await certificateExpiry(readFile, "/tls/x.crt")).toBe(Date.UTC(2036, 10, 3, 21, 48, 25));
+    expect(readFile).toHaveBeenCalledWith("/tls/x.crt");
+  });
+
+  it("rejects for a missing or unparseable file", async () => {
+    await expect(
+      certificateExpiry(() => Promise.reject(new Error("ENOENT")), "/tls/x.crt"),
+    ).rejects.toThrow("ENOENT");
+    await expect(certificateExpiry(async () => "nonsense", "/tls/x.crt")).rejects.toThrow();
   });
 });
 

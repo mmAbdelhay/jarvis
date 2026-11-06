@@ -72,7 +72,8 @@ import {
 import { createRemoteAccess, type RemoteAccess } from "../remote-access.js";
 import { createWebManifestLoader, nodeWebExportFs } from "../web-export.js";
 import { disableRemoteOnDisk } from "../remote-idle.js";
-import { obtainCertificate, type TailscaleCertDeps } from "../tailscale-cert.js";
+import { certificateExpiry, obtainCertificate, type TailscaleCertDeps } from "../tailscale-cert.js";
+import { createTailnetGuard } from "../tailnet-guard.js";
 import { createNotifier } from "../notify.js";
 import { createReviewService } from "../review-service.js";
 import {
@@ -225,6 +226,7 @@ import {
   DEFAULT_AWAKE,
   DEFAULT_CONFIG_PATH,
   DEFAULT_TERMINAL,
+  effectiveWebPort,
   mergeConfigInPlace,
   providerAgentListsEqual,
   defaultSessionsScanPath,
@@ -2092,6 +2094,8 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
       }
     };
     safely("wiring", () => wiring.stop());
+    // Before the bridge it reports to.
+    safely("tailnet guard", () => tailnetGuard.stop());
     // The bridge's own listener and its sockets — stop() removes the push
     // sink too (remote-access.ts), so a relaunch never double-sends.
     //
@@ -2377,6 +2381,24 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     homedir,
     platform,
   };
+
+  // Tailscale access's guard (tailnet-guard.ts): idle until the switch is on.
+  // Each read goes to the live config, which a settings save merges in place.
+  const tailnetGuard = createTailnetGuard({
+    tailscale: tailscaleCertDeps,
+    enabled: () => config.remote.tailnet.enabled,
+    relay: () => config.remote.tailnet.relay,
+    ports: () => [config.remote.port, effectiveWebPort(config.remote)],
+    setTailnetBlock: (reason) => remoteAccess.setTailnetBlock(reason),
+    reloadCertificate: () => remoteAccess.reloadCertificate(),
+    connectedDevices: () =>
+      remoteAccess.status().devices.filter((device) => device.connected).length,
+    certificate: () => config.remote.tls,
+    certificateExpiry: (certPath) => certificateExpiry((path) => readFile(path, "utf8"), certPath),
+    timers: nodeTimers,
+    now: Date.now,
+    log: (line) => console.error(line),
+  });
 
   // The phone's Fit toggle (terminal-fit-overrides.ts): shared with
   // onDeviceDisconnected above, which runs only well after this is set.
@@ -2804,6 +2826,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
         .catch((error: unknown) =>
           console.error(`remote bridge: start failed: ${errorMessage(error)}`),
         );
+      tailnetGuard.start();
     },
     reapplyRemote: () => applyFromDisk(),
     setDaemonEnabled: async (enabled) => {
@@ -2812,6 +2835,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     announceStartup,
     stop: releaseChildren,
     async shutdown() {
+      tailnetGuard.stop();
       await stopRemote();
       releaseChildren();
       await uploadsStopped;

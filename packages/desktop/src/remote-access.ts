@@ -203,6 +203,10 @@ export type RemoteAccess = RemoteControls & {
    *  the bridge exists (nothing was queued if there is nowhere to queue
    *  it). */
   recordPushQueued(deviceId: string, pushKind: string): void;
+  /** The Tailscale guard's verdict and renewal. Both wait for `start`'s own
+   *  apply, like `apply` does: a verdict sent before it would be dropped. */
+  setTailnetBlock(reason: "funnel" | "relay-missing" | undefined): Promise<void>;
+  reloadCertificate(): Promise<void>;
 };
 
 function toBridgeConfig(config: RemoteConfig): BridgeConfig {
@@ -487,6 +491,14 @@ export function createRemoteAccess(deps: RemoteAccessDeps): RemoteAccess {
     async unregisterPush(deviceId: string): Promise<void> {
       if (bridge === undefined) return;
       await bridge.clearPushToken(deviceId, "unregistered");
+    },
+    async setTailnetBlock(reason): Promise<void> {
+      await started;
+      if (!stopped) await bridge?.setTailnetBlock(reason);
+    },
+    async reloadCertificate(): Promise<void> {
+      await started;
+      if (!stopped) await bridge?.reloadCertificate();
     },
     start,
     apply: applyConfig,

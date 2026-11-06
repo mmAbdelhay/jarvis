@@ -394,8 +394,9 @@ export type Bridge = {
    *  them. With the switch off it is ignored. `undefined` clears
    *  `"relay-missing"`, never that latch. */
   setTailnetBlock(reason: "funnel" | "relay-missing" | undefined): Promise<void>;
-  /** The user turned Tailscale access on again: drops the blocks, and the
-   *  guard evaluates Funnel afresh. */
+  /** The user turned Tailscale access on again: drops the Funnel latch, and
+   *  the guard evaluates Funnel afresh. `"relay-missing"` stays until the
+   *  guard has confirmed the forward. */
   rearmTailnet(): Promise<void>;
   /** Restarts the listeners on the certificate now on disk (a renewal). */
   reloadCertificate(): Promise<void>;
@@ -1727,7 +1728,6 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
   async function rearmTailnet(): Promise<void> {
     if (stopped) return;
     funnelLatched = false;
-    relayMissing = false;
     await reconcile();
   }
 

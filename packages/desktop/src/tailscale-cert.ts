@@ -7,6 +7,7 @@
 // tests below never spawn a real `tailscale` binary or touch a real
 // ~/.config/jarvis — see tailscale-cert.test.ts.
 import { join } from "node:path";
+import { notAfterOf } from "@jarvis/remote/listen";
 import { errorMessage } from "./messages.js";
 
 /** No shell, bounded — main.ts wires this to @jarvis/platform's
@@ -110,6 +111,17 @@ export async function tailnetName(
 /** `~/.config/jarvis/tls` — where a certificate this module issues lives. */
 export function defaultCertDir(deps: Pick<TailscaleCertDeps, "homedir">): string {
   return join(deps.homedir(), ".config/jarvis/tls");
+}
+
+/**
+ * When the certificate at `certPath` expires, in epoch milliseconds. Rejects
+ * when the file cannot be read or is not a certificate.
+ */
+export async function certificateExpiry(
+  readFile: (path: string) => Promise<string>,
+  certPath: string,
+): Promise<number> {
+  return notAfterOf(await readFile(certPath));
 }
 
 /** The text's own last non-empty line — never the whole output, which can

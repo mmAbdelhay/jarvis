@@ -1395,6 +1395,19 @@ describe("createBridge: tailnet gate", () => {
       expect(tryJoin(h).closed).toEqual({ code: CLOSE.unauthorized, reason: "" });
     });
 
+    it("rearmTailnet does not clear it: only the guard's confirmation does", async () => {
+      const { h, bridge } = await start({ devices: ["Phone"] });
+      await bridge.setTailnetBlock("relay-missing");
+
+      await bridge.rearmTailnet();
+
+      expect(bridge.status().tailnet).toEqual({ kind: "blocked", reason: "relay-missing" });
+      expect(tryJoin(h).closed).toEqual({ code: CLOSE.unauthorized, reason: "" });
+
+      await bridge.setTailnetBlock(undefined);
+      expect(bridge.status().tailnet).toEqual({ kind: "on" });
+    });
+
     it("clearing it restores on, and joins with it", async () => {
       const { h, bridge } = await start({ devices: ["Phone"] });
       await bridge.setTailnetBlock("relay-missing");
