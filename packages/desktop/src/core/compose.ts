@@ -79,7 +79,7 @@ import {
   type TailscaleCertDeps,
 } from "../tailscale-cert.js";
 import { disableRelay, enableRelay, readServeStatus, restoreForward } from "../tailnet-guard.js";
-import { applyRemoteThenCheck, createRemoteTailnetGuard } from "../tailnet-guard-wiring.js";
+import { applyRemoteFromFile, createRemoteTailnetGuard } from "../tailnet-guard-wiring.js";
 import { createNotifier } from "../notify.js";
 import { createReviewService } from "../review-service.js";
 import {
@@ -1652,7 +1652,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
   // first".
   const applyFromDisk = serialize(async () => {
     const next = await loadConfig(DEFAULT_CONFIG_PATH);
-    await applyRemoteThenCheck(remoteAccess, tailnetGuard, next.remote);
+    await applyRemoteFromFile(config.remote, remoteAccess, tailnetGuard, next.remote);
   });
 
   // After a successful write, the file on disk is the only source of

@@ -439,6 +439,7 @@ export function createNotifier(deps: NotifierDeps): Notifier {
   }
 
   function deviceJoined(): void {
+    if (disposed) return;
     emit({ kind: "device-joined" });
   }
 

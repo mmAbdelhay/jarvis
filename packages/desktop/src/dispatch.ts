@@ -1467,12 +1467,12 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
     "remote:tailnetEnable": async ([options], origin) => {
       const relay = (options as { relay?: unknown } | null | undefined)?.relay;
       if (origin.kind === "remote" || typeof relay !== "boolean") {
-        return invalidArgument(deps.language);
+        return { ...invalidArgument(deps.language), commands: [] };
       }
       return tailnetSwitch.enable(relay);
     },
     "remote:tailnetDisable": async (_args, origin) => {
-      if (origin.kind === "remote") return invalidArgument(deps.language);
+      if (origin.kind === "remote") return { ...invalidArgument(deps.language), commands: [] };
       return tailnetSwitch.disable();
     },
 

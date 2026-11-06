@@ -864,6 +864,35 @@ describe("createBridge: password join", () => {
     expect((await auditLines(h.fs)).some((line) => line.includes("join-failed"))).toBe(true);
   });
 
+  it("failed joins do not block a paired device on the same source", async () => {
+    const { h } = await listeningWithTailnet({ enabled: true, relay: false });
+    for (let i = 0; i < 12; i++) {
+      const socket = new FakeSocket();
+      h.listenCalls[0]?.onSocket("pair", socket, "100.64.0.9")?.onText(joinFrame("wrong"));
+      await settled(socket);
+      expect(socket.closed).toEqual({ code: CLOSE.unauthorized, reason: "" });
+    }
+
+    const rpc = new FakeSocket();
+    h.listenCalls[0]?.onSocket("rpc", rpc, "100.64.0.9");
+
+    expect(rpc.closed).toBeUndefined();
+  });
+
+  it("a refused pairing still counts against its source", async () => {
+    const { h } = await listeningWithTailnet({ enabled: true, relay: false });
+    for (let i = 0; i < 12; i++) {
+      const socket = new FakeSocket();
+      h.listenCalls[0]?.onSocket("pair", socket, "100.64.0.9")?.onText(pairFrame("bad", "Phone"));
+      await flush();
+    }
+
+    const rpc = new FakeSocket();
+    h.listenCalls[0]?.onSocket("rpc", rpc, "100.64.0.9");
+
+    expect(rpc.closed?.code).toBe(CLOSE.tooManyRequests);
+  });
+
   it("tailnet off: a join closes 4401 and the password is never checked", async () => {
     const { h, bridge } = await listeningWithTailnet({ enabled: false, relay: false });
     const socket = new FakeSocket();

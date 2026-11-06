@@ -20,9 +20,11 @@ import type { TailscaleCertResult } from "./tailscale-cert.js";
 const LOOPBACK = "127.0.0.1";
 
 /** `commands`: lines for the user to run by hand, for a forward Tailscale did
- *  not create or did not confirm removing. On success, the switch still took. */
+ *  not create or did not confirm removing. On success, the switch still took.
+ *  `restoring`: one of those lines puts back a forward the user had.
+ *  `warning`: written, but the running bridge did not take it. */
 export type TailnetSwitchResult =
-  | { ok: true; commands: string[] }
+  | { ok: true; commands: string[]; restoring?: true; warning?: string }
   | { ok: false; text: string; language: "ar" | "en"; commands: string[] };
 
 export type TailnetSwitch = {
@@ -67,6 +69,11 @@ const hasCertificate = ({ tls }: RemoteConfig): boolean =>
 /** A port this call changed, and the forward it replaced, if any. */
 type ChangedForward = { port: number; earlier: ExistingForward | undefined };
 
+/** A change Tailscale did not confirm undoing, and whether undoing it was a restore. */
+type UnconfirmedUndo = { command: string; restore: boolean };
+
+const commandsOf = (left: UnconfirmedUndo[]): string[] => left.map(({ command }) => command);
+
 export function createTailnetSwitch(deps: TailnetSwitchDeps): TailnetSwitch {
   const { language, controls } = deps;
 
@@ -100,8 +107,8 @@ export function createTailnetSwitch(deps: TailnetSwitchDeps): TailnetSwitch {
   /** Takes each port back to what it was: its earlier forward, or none. Tries
    *  them all. Returns the commands for those Tailscale did not confirm, which
    *  are logged and never fatal. */
-  async function undoForwards(changed: ChangedForward[]): Promise<string[]> {
-    const left: string[] = [];
+  async function undoForwards(changed: ChangedForward[]): Promise<UnconfirmedUndo[]> {
+    const left: UnconfirmedUndo[] = [];
     for (const { port, earlier } of changed) {
       const result =
         earlier === undefined
@@ -109,7 +116,7 @@ export function createTailnetSwitch(deps: TailnetSwitchDeps): TailnetSwitch {
           : await controls.restoreForward(port, earlier);
       if (!result.ok) {
         controls.log(`tailnet switch: forward not confirmed undone: ${result.command}`);
-        left.push(result.command);
+        left.push({ command: result.command, restore: earlier !== undefined });
       }
     }
     return left;
@@ -127,14 +134,19 @@ export function createTailnetSwitch(deps: TailnetSwitchDeps): TailnetSwitch {
   }
 
   /** After the write nothing is undone: a failed step is logged and the next
-   *  still runs, and what became of it shows in RemoteStatus. */
-  async function settled(step: string, run: () => Promise<void>): Promise<void> {
+   *  still runs, and what became of it shows in RemoteStatus. False if it failed. */
+  async function settled(step: string, run: () => Promise<void>): Promise<boolean> {
     try {
       await run();
+      return true;
     } catch (error) {
       controls.log(`tailnet switch: ${step} failed: ${errorMessage(error)}`);
+      return false;
     }
   }
+
+  const notApplied = (change: "on" | "off", applied: boolean): { warning?: string } =>
+    applied ? {} : { warning: MESSAGES.remoteTailnetNotApplied(change, language) };
 
   async function enable(relay: boolean): Promise<TailnetSwitchResult> {
     if (!deps.hasOwnerPassword()) {
@@ -184,7 +196,7 @@ export function createTailnetSwitch(deps: TailnetSwitchDeps): TailnetSwitch {
           const left = await undoForwards(changed);
           return refused(MESSAGES.remoteTailnetRefused("relay-failed", language), [
             forward.command,
-            ...left,
+            ...commandsOf(left),
           ]);
         }
         changed.push({ port, earlier });
@@ -229,14 +241,17 @@ export function createTailnetSwitch(deps: TailnetSwitchDeps): TailnetSwitch {
     });
     if (failure !== undefined) {
       const left = await undoForwards(changed);
-      return refused(MESSAGES.remoteTailnetRefused("write-failed", language, failure), left);
+      return refused(
+        MESSAGES.remoteTailnetRefused("write-failed", language, failure),
+        commandsOf(left),
+      );
     }
 
-    await settled("apply", () => controls.applied());
+    const applied = await settled("apply", () => controls.applied());
     await settled("rearm", () => controls.rearm());
     if (replacedInPlace) await settled("certificate reload", () => controls.reloadCertificate());
     await settled("check", () => controls.checkNow());
-    return { ok: true, commands: [] };
+    return { ok: true, commands: [], ...notApplied("on", applied) };
   }
 
   async function disable(): Promise<TailnetSwitchResult> {
@@ -267,8 +282,14 @@ export function createTailnetSwitch(deps: TailnetSwitchDeps): TailnetSwitch {
     }
     if (change === undefined) return { ok: true, commands: [] };
 
-    await settled("apply", () => controls.applied());
-    return { ok: true, commands: await undoForwards(change.forwards) };
+    const applied = await settled("apply", () => controls.applied());
+    const left = await undoForwards(change.forwards);
+    return {
+      ok: true,
+      commands: commandsOf(left),
+      ...(left.some(({ restore }) => restore) ? { restoring: true as const } : {}),
+      ...notApplied("off", applied),
+    };
   }
 
   // One at a time: an enable's checks would otherwise answer for a config a

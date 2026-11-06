@@ -15,7 +15,11 @@ import { DEFAULT_REMOTE, type RemoteConfig } from "./config.js";
 import type { DispatchTable } from "./dispatch.js";
 import type { BlobTable } from "./remote-blob.js";
 import { createRemoteAccess } from "./remote-access.js";
-import { applyRemoteThenCheck, createRemoteTailnetGuard } from "./tailnet-guard-wiring.js";
+import {
+  applyRemoteFromFile,
+  applyRemoteThenCheck,
+  createRemoteTailnetGuard,
+} from "./tailnet-guard-wiring.js";
 
 const HOST = "machine.tailnet.ts.net";
 const FUNNEL = {
@@ -452,10 +456,24 @@ describe("the guard and the bridge", () => {
     expect(h.openListeners()).toBe(0);
   });
 
+  it("the file reaches the guard's view with the bridge's: a re-apply cannot leave it idle", async () => {
+    const live = structuredClone(REMOTE_OFF);
+    const h = await setup(live);
+    h.guard.start();
+    await h.settle();
+    expect(h.state.serveReads).toBe(0);
+
+    await applyRemoteFromFile(live, h.access, h.guard, structuredClone(ON));
+
+    expect(live.enabled).toBe(true);
+    expect(h.state.serveReads).toBe(1);
+    expect(h.tailnet()).toEqual({ kind: "blocked", reason: "funnel" });
+  });
+
   it("compose.ts applies through the same helper, with the guard it starts", () => {
     const compose = readFileSync(new URL("./core/compose.ts", import.meta.url), "utf8");
     expect(compose).toContain(
-      "await applyRemoteThenCheck(remoteAccess, tailnetGuard, next.remote)",
+      "await applyRemoteFromFile(config.remote, remoteAccess, tailnetGuard, next.remote)",
     );
     expect(compose).toContain("createRemoteTailnetGuard({");
   });

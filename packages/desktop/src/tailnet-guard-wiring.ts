@@ -1,7 +1,7 @@
 // How the core connects the Tailscale guard to the bridge. Apart from
 // compose.ts, which cannot be built in a test, so that
 // tailnet-guard-wiring.test.ts drives this exact wiring over a real bridge.
-import { effectiveWebPort, type RemoteConfig } from "./config.js";
+import { effectiveWebPort, mergeConfigInPlace, type RemoteConfig } from "./config.js";
 import type { RemoteAccess } from "./remote-access.js";
 import { createTailnetGuard, type TailnetGuard, type TailnetGuardDeps } from "./tailnet-guard.js";
 
@@ -53,4 +53,20 @@ export async function applyRemoteThenCheck(
 ): Promise<void> {
   await access.apply(next);
   await guard.checkNow();
+}
+
+/** The section just read from the file, into the live one first: the guard's
+ *  switch reads memory, and a bridge opened from the file with the guard still
+ *  idle would never hear about Funnel. */
+export async function applyRemoteFromFile(
+  live: RemoteConfig,
+  access: Pick<RemoteAccess, "apply">,
+  guard: Pick<TailnetGuard, "checkNow">,
+  next: RemoteConfig,
+): Promise<void> {
+  mergeConfigInPlace(
+    live as unknown as Record<string, unknown>,
+    next as unknown as Record<string, unknown>,
+  );
+  await applyRemoteThenCheck(access, guard, next);
 }

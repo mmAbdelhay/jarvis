@@ -150,6 +150,31 @@ describe("device-joined push", () => {
     expect(audit).toHaveBeenCalledWith([{ deviceId: "d1", kind: "device-joined" }]);
     expect(log).toHaveBeenCalledWith("notify: device-joined targets=1 suppressed=none");
   });
+
+  it("sends nothing after dispose", () => {
+    const send = vi.fn();
+    const notifier = createNotifier({
+      sessions: {
+        onChange: () => () => {},
+        onOutput: () => () => {},
+        get: () => undefined,
+        log: () => "",
+        list: () => [],
+      },
+      onTurn: () => () => {},
+      context: () => makeContext({ targets: [d1] }),
+      send,
+      audit: vi.fn(),
+      now: () => 0,
+      timers: { setTimeout: () => 0, clearTimeout: () => {} },
+      log: vi.fn(),
+    });
+
+    notifier.dispose();
+    notifier.deviceJoined();
+
+    expect(send).not.toHaveBeenCalled();
+  });
 });
 
 // ---------------------------------------------------------------------------

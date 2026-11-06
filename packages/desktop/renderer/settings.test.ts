@@ -3657,6 +3657,14 @@ describe("Tailscale access", () => {
       );
     });
 
+    it.each(["ar", "en"] as const)(
+      "the background note names General as Settings does, in %s",
+      (language) => {
+        const words = MESSAGES.remoteTailnetBackgroundOff(language).split(/[\s.،]+/);
+        expect(words).toContain(MESSAGES.daemonGeneral(language));
+      },
+    );
+
     it.each(["ar", "en"] as const)("every state has its own text in %s", (language) => {
       const texts = STATES.map((state) => MESSAGES.remoteTailnetState(state, language));
       expect(texts.every((text) => text.length > 0)).toBe(true);
@@ -4095,6 +4103,45 @@ describe("Tailscale access", () => {
 
       expect(calls.filter((c) => c.call === "tailnetDisable")).toHaveLength(1);
       expect(el("settings-remote-tailnet-confirm").hidden).toBe(true);
+    });
+
+    it("a restore that was not confirmed has its own text, not the one about removing", async () => {
+      await open(ON());
+      jarvis()["getSettings"] = () =>
+        Promise.resolve(configWith({ tailnet: { enabled: false, relay: true } }));
+      jarvis()["tailnetDisable"] = () =>
+        Promise.resolve({
+          ok: true,
+          commands: ["tailscale serve --bg --tcp=7717 tcp://127.0.0.1:7717"],
+          restoring: true,
+        });
+
+      flip(false);
+      await flush();
+      await flush();
+
+      const text = MESSAGES.remoteTailnetRestoreLeft(PRIMARY_LANGUAGE);
+      expect(el("settings-remote-tailnet-result").textContent).toBe(text);
+      expect(text).not.toBe(MESSAGES.remoteTailnetForwardLeft(PRIMARY_LANGUAGE));
+      expect(MESSAGES.remoteTailnetRestoreLeft("ar")).not.toBe(
+        MESSAGES.remoteTailnetRestoreLeft("en"),
+      );
+      expect(el("settings-remote-tailnet-command").textContent).toContain("--tcp=7717");
+    });
+
+    it("shows the warning when the running bridge did not take the change", async () => {
+      await open(ON());
+      const warning = MESSAGES.remoteTailnetNotApplied("off", PRIMARY_LANGUAGE);
+      jarvis()["getSettings"] = () =>
+        Promise.resolve(configWith({ tailnet: { enabled: false, relay: true } }));
+      jarvis()["tailnetDisable"] = () => Promise.resolve({ ok: true, commands: [], warning });
+
+      flip(false);
+      await flush();
+      await flush();
+
+      expect(el("settings-remote-tailnet-result").hidden).toBe(false);
+      expect(el("settings-remote-tailnet-result").textContent).toBe(warning);
     });
 
     it("shows the exact command for a forward Tailscale did not confirm removing", async () => {

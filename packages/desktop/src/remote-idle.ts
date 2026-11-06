@@ -39,19 +39,27 @@ function errorDetail(error: unknown): string {
  * If `current.remote.enabled` is already false — someone beat the timer to
  * it, or the bridge was never enabled there in the first place — `update`
  * returns `current` unchanged, so nothing is written, and this still
- * resolves true after logging that nothing changed.
+ * resolves true after logging that nothing changed. The same once Tailscale
+ * access is on: the bridge never idles then, so a write still queued from
+ * before an Enable must not land after it.
  */
 export async function disableRemoteOnDisk(deps: DisableRemoteOnDiskDeps): Promise<boolean> {
   let wasEnabled = true;
+  let tailnetOn = false;
   try {
     const result = await deps.writeConfig((current) => {
       wasEnabled = current.remote.enabled;
-      if (!wasEnabled) return current;
+      tailnetOn = current.remote.tailnet.enabled;
+      if (!wasEnabled || tailnetOn) return current;
       return { ...current, remote: { ...current.remote, enabled: false } };
     });
 
     if (!wasEnabled) {
       deps.log("remote: idle auto-disable — already off on disk");
+      return true;
+    }
+    if (tailnetOn) {
+      deps.log("remote: idle auto-disable — Tailscale access is on, kept");
       return true;
     }
     if (result.ok) {

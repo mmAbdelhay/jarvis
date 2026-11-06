@@ -1901,7 +1901,7 @@ describe("dispatch table: the Tailscale access switch", () => {
 
         const result = await callAs(table, REMOTE_ORIGIN, channel, { relay: false });
 
-        expect(result).toEqual(invalidArgument("en"));
+        expect(result).toEqual({ ...invalidArgument("en"), commands: [] });
         expect(steps).toEqual([]);
         expect(writeConfig).not.toHaveBeenCalled();
       },
@@ -1911,7 +1911,10 @@ describe("dispatch table: the Tailscale access switch", () => {
       "enable refuses the argument %j",
       async (argument) => {
         const { table, steps } = harness({});
-        expect(await call(table, "remote:tailnetEnable", argument)).toEqual(invalidArgument("en"));
+        expect(await call(table, "remote:tailnetEnable", argument)).toEqual({
+          ...invalidArgument("en"),
+          commands: [],
+        });
         expect(steps).toEqual([]);
       },
     );
@@ -2378,7 +2381,11 @@ describe("dispatch table: the Tailscale access switch", () => {
         tailnet: { applied: vi.fn(async () => Promise.reject(new Error("apply broke"))) },
       });
 
-      expect(await enable(table, false)).toEqual({ ok: true, commands: [] });
+      expect(await enable(table, false)).toEqual({
+        ok: true,
+        commands: [],
+        warning: MESSAGES.remoteTailnetNotApplied("on", "en"),
+      });
 
       expect(tailnet.log).toHaveBeenCalledWith(expect.stringContaining("apply broke"));
       expect(tailnet.rearm).toHaveBeenCalledTimes(1);
@@ -2609,7 +2616,11 @@ describe("dispatch table: the Tailscale access switch", () => {
           },
         );
 
-        expect(await run()).toEqual({ ok: true, commands: ["restore bridge"] });
+        expect(await run()).toEqual({
+          ok: true,
+          commands: ["restore bridge"],
+          restoring: true,
+        });
 
         expect(tailnet.restoreForward).toHaveBeenCalledTimes(2);
         expect(tailnet.log).toHaveBeenCalledWith(expect.stringContaining("restore bridge"));
@@ -2711,7 +2722,10 @@ describe("dispatch table: the Tailscale access switch", () => {
         tailnet: { applied: vi.fn(async () => Promise.reject(new Error("apply broke"))) },
       });
 
-      expect(await disable(table)).toEqual({ ok: true, commands: [] });
+      const warning = MESSAGES.remoteTailnetNotApplied("off", "en");
+      expect(await disable(table)).toEqual({ ok: true, commands: [], warning });
+      expect(warning).toContain("may still accept joins");
+      expect(warning).not.toBe(MESSAGES.remoteTailnetNotApplied("off", "ar"));
 
       expect(tailnet.disableRelay).toHaveBeenCalledTimes(2);
     });

@@ -2335,7 +2335,7 @@ export const MESSAGES = {
       : "For a machine whose firewall blocks the Tailscale address: Jarvis listens on this machine only and Tailscale forwards to it. Chosen before turning access on. With it on, any direct connection to this machine's loopback address is dropped, including a USB phone using adb reverse.",
   remoteTailnetBackgroundOff: (language: "ar" | "en"): string =>
     language === "ar"
-      ? "خدمة الخلفية متوقفة، فيتوقف الوصول عبر Tailscale عند إغلاق جارفيس. شغّلها من الإعدادات العامة ليبقى هذا الجهاز متاحًا."
+      ? "خدمة الخلفية متوقفة، فيتوقف الوصول عبر Tailscale عند إغلاق جارفيس. شغّلها من قسم عام ليبقى هذا الجهاز متاحًا."
       : "The background service is off, so Tailscale access stops when Jarvis quits. Turn it on under General to keep this machine reachable.",
   remoteTailnetPairAgain: (language: "ar" | "en"): string =>
     language === "ar"
@@ -2395,6 +2395,25 @@ export const MESSAGES = {
     language === "ar"
       ? "الوصول متوقف. لم يؤكد Tailscale إزالة التوجيه؛ إن كان ما زال موجودًا فنفّذ:"
       : "Access is off. Tailscale did not confirm removing the forward; if it is still there, run:",
+  // The commands then include one that puts a forward back, so "removing" would
+  // be wrong, and a failed restore does mean the forward is not back.
+  remoteTailnetRestoreLeft: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "الوصول متوقف. لم يؤكد Tailscale إعادة توجيهك السابق. لإعادة الأمور كما كانت، نفّذ:"
+      : "Access is off. Tailscale did not confirm putting your earlier forward back. To put things as they were, run:",
+  remoteTailnetNotApplied: (change: "on" | "off", language: "ar" | "en"): string => {
+    const text = {
+      on: {
+        ar: "حُفظ التغيير، لكن تعذّر على جارفيس تطبيقه الآن. إن بقيت الحالة أعلاه غير صحيحة فأعد تشغيل جارفيس.",
+        en: "Saved, but Jarvis could not apply the change just now. Restart Jarvis if the state above stays wrong.",
+      },
+      off: {
+        ar: "حُفظ الإيقاف، لكن تعذّر على جارفيس تطبيقه الآن، فقد يظل هذا الجهاز يقبل الانضمام. أعد تشغيل جارفيس للتأكد.",
+        en: "Saved as off, but Jarvis could not apply the change just now, so this machine may still accept joins. Restart Jarvis to be sure.",
+      },
+    } as const;
+    return text[change][language];
+  },
   remoteTailnetFailed: (language: "ar" | "en"): string =>
     language === "ar" ? "تعذّر إتمام التغيير." : "The change could not be made.",
   remoteTailnetNotRefreshed: (language: "ar" | "en"): string =>

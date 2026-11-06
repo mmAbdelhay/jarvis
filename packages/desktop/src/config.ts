@@ -1152,12 +1152,27 @@ function parseReplacedForwards(raw: unknown): Record<string, ReplacedForward> | 
   return entries.length === 0 ? undefined : Object.fromEntries(entries);
 }
 
+/** A hostname, an IPv4 or a bracketed IPv6, with a port in 1-65535. Strict, as
+ *  a target is shown as a command for the user to run, and comes from a file. */
+function isForwardTarget(target: string): boolean {
+  const match = /^(\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9.-]+):(\d{1,5})$/.exec(target);
+  if (match === null) return false;
+  const host = match[1] as string;
+  const port = Number(match[2]);
+  if (port < 1 || port > 65535) return false;
+  if (host.startsWith("[")) return isIP(host.slice(1, -1)) === 6;
+  if (/^[\d.]+$/.test(host)) return isIP(host) === 4;
+  return /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*$/.test(
+    host,
+  );
+}
+
 function parseReplacedForward(port: string, raw: unknown): ReplacedForward | undefined {
   const number = /^\d+$/.test(port) ? Number(port) : 0;
   if (number < 1 || number > 65535) return undefined;
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return undefined;
   const { target, proxyProtocol, terminateTls } = raw as Record<string, unknown>;
-  if (typeof target !== "string" || !/^\S+:\d+$/.test(target)) return undefined;
+  if (typeof target !== "string" || !isForwardTarget(target)) return undefined;
   if (proxyProtocol !== undefined) {
     if (typeof proxyProtocol !== "number" || !Number.isInteger(proxyProtocol)) return undefined;
     if (proxyProtocol < 1) return undefined;

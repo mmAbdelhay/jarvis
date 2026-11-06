@@ -1718,12 +1718,36 @@ describe("remote", () => {
         ["a target of the wrong type", { "7717": { target: 7717 } }],
         ["a target with no port", { "7717": { target: "127.0.0.1" } }],
         ["a target with a space", { "7717": { target: "a b:1" } }],
+        ["a target with a semicolon", { "7717": { target: "a;rm:1" } }],
+        ["a target with a substitution", { "7717": { target: "$(id):1" } }],
+        ["a target with a backtick", { "7717": { target: "`id`:1" } }],
+        ["a target with a pipe", { "7717": { target: "a|b:1" } }],
+        ["a target with a scheme", { "7717": { target: "tcp://a:1" } }],
+        ["a target with an option's dash", { "7717": { target: "--help:1" } }],
+        ["a host with an underscore", { "7717": { target: "a_b:1" } }],
+        ["an IPv4 that is no address", { "7717": { target: "999.1.1.1:1" } }],
+        ["an IPv6 with no brackets", { "7717": { target: "::1:7717" } }],
+        ["brackets round a non-address", { "7717": { target: "[localhost]:1" } }],
+        ["brackets with a shell zone", { "7717": { target: "[fe80::1%a;b]:1" } }],
+        ["target port 0", { "7717": { target: "a:0" } }],
+        ["target port 65536", { "7717": { target: "a:65536" } }],
         ["a PROXY version in words", { "7717": { target: "a:1", proxyProtocol: "1" } }],
         ["a PROXY version of zero", { "7717": { target: "a:1", proxyProtocol: 0 } }],
         ["a fractional PROXY version", { "7717": { target: "a:1", proxyProtocol: 1.5 } }],
         ["a TLS flag in words", { "7717": { target: "a:1", terminateTls: "yes" } }],
       ])("%s parses as absent, and never throws", (_name, value) => {
         expect(recorded(value)).toBeUndefined();
+      });
+
+      it.each([
+        "127.0.0.1:7717",
+        "localhost:1",
+        "machine.tailnet.ts.net:65535",
+        "my-host:80",
+        "[::1]:7719",
+        "[fd7a:115c:a1e0::1]:443",
+      ])("keeps the target %s", (target) => {
+        expect(recorded({ "7717": { target } })).toEqual({ "7717": { target } });
       });
 
       it("a malformed entry does not take a good one with it", () => {

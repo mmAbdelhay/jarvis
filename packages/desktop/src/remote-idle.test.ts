@@ -88,6 +88,22 @@ function fakeWriteConfig(
 }
 
 describe("disableRemoteOnDisk", () => {
+  it("writes nothing once Tailscale access is on: a queued idle write cannot land after Enable", async () => {
+    const drafts: JarvisConfig[] = [];
+    const onDisk: JarvisConfig = {
+      ...CONFIG,
+      remote: { ...CONFIG.remote, tailnet: { enabled: true, relay: false } },
+    };
+    const writeConfig = fakeWriteConfig(async () => onDisk, drafts);
+    const log = vi.fn();
+
+    const ok = await disableRemoteOnDisk({ writeConfig, log });
+
+    expect(ok).toBe(true);
+    expect(drafts).toEqual([]);
+    expect(log).toHaveBeenCalledWith("remote: idle auto-disable — Tailscale access is on, kept");
+  });
+
   it("writes back the read config with only remote.enabled flipped, and nothing else changed", async () => {
     const drafts: JarvisConfig[] = [];
     const writeConfig = fakeWriteConfig(async () => CONFIG, drafts);

@@ -1298,7 +1298,11 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
         timers: deps.timers,
         source,
         log: deps.log,
-        onFailure: (_reason) => onFailure(),
+        // A failed join has its own limits (join-limits), and the design is
+        // that it does not lock a paired device on the same address out of /rpc.
+        onFailure: (reason) => {
+          if (reason !== "join-refused") onFailure();
+        },
         onSettled() {
           pairSessions -= 1;
           reconcile().catch((error: unknown) =>

@@ -2026,7 +2026,14 @@ async function changeTailnet(
     return;
   }
   const notes: string[] = [];
-  if (result.commands.length > 0) notes.push(MESSAGES.remoteTailnetForwardLeft(PRIMARY_LANGUAGE));
+  if (result.warning !== undefined) notes.push(result.warning);
+  if (result.commands.length > 0) {
+    notes.push(
+      result.restoring === true
+        ? MESSAGES.remoteTailnetRestoreLeft(PRIMARY_LANGUAGE)
+        : MESSAGES.remoteTailnetForwardLeft(PRIMARY_LANGUAGE),
+    );
+  }
   try {
     const fresh = await window.jarvis.getSettings();
     tailnetDraftStale = false;
