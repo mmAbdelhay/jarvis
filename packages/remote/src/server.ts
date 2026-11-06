@@ -18,6 +18,7 @@ import {
   listenProxyFront,
   PROXY_HEADER_TIMEOUT_MS,
   type ProxyFront,
+  recordedSourceOf,
   sourceOf,
 } from "./proxy-front.js";
 import { parseProxyPath } from "./proxy-rewrite.js";
@@ -136,6 +137,14 @@ export const listenTls: Listen = (options: ListenOptions): Promise<Listener> => 
     });
 
     httpsServer.on("upgrade", (request: IncomingMessage, socket: Duplex, head: Buffer) => {
+      // The front records a source before every hand-off, so a miss means the
+      // internal behind the lookup changed. Falling back would report the
+      // relay's loopback: every peer on one backoff key, and in every audit line.
+      if (options.proxyProtocol === true && recordedSourceOf(request.socket) === undefined) {
+        options.log("remote server: refused a relay connection with no recorded source");
+        socket.destroy();
+        return;
+      }
       const url = request.url;
       const kind = url === "/rpc" ? "rpc" : url === "/pair" ? "pair" : undefined;
       if (kind === undefined) {

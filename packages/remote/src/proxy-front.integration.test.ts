@@ -9,7 +9,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { connect as tlsConnect, type TLSSocket } from "node:tls";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { mintSelfSigned } from "./certificate.js";
-import { listenProxyFront, sourceOf } from "./proxy-front.js";
+import { listenProxyFront, recordedSourceOf, sourceOf } from "./proxy-front.js";
 import { listenTls } from "./server.js";
 import { buildWebManifest, listenWeb } from "./web-server.js";
 
@@ -165,6 +165,12 @@ describe("listenProxyFront", () => {
     expect(raws).toHaveLength(1);
     expect(sourceOf(raws[0] as Socket)).toBe(SOURCE_TEXT);
     expect(sourceOf(handed)).toBe(SOURCE_TEXT);
+    expect(recordedSourceOf(raws[0] as Socket)).toBe(SOURCE_TEXT);
+    expect(recordedSourceOf(handed)).toBe(SOURCE_TEXT);
+  });
+
+  it("recordedSourceOf answers undefined with no record, whatever remoteAddress says", () => {
+    expect(recordedSourceOf({ remoteAddress: "127.0.0.1" })).toBeUndefined();
   });
 
   it("still reports the source after the socket has gone", async () => {

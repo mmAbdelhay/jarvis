@@ -30,16 +30,20 @@ const sources = new WeakMap<object, string>();
 type SourceSocket = { remoteAddress?: string | undefined };
 
 /**
- * The address a connection came from: the PROXY header's where one was read,
- * otherwise `remoteAddress`. Handlers hold the `TLSSocket`, whose `_parent` is
- * the raw socket. Node exposes that link no other way, and
- * proxy-front.integration.test.ts fails if it ever stops working.
+ * The PROXY header's address for this socket, or `undefined` if none was
+ * recorded. Handlers hold the `TLSSocket`, whose `_parent` is the raw socket:
+ * an undocumented internal, and Node exposes that link no other way. The
+ * integration test covers it only on the Node the tests run on, not the one
+ * that ships, so relay mode treats a miss here as a refusal (server.ts).
  */
-export function sourceOf(socket: SourceSocket): string {
+export function recordedSourceOf(socket: object): string | undefined {
   const { _parent: parent } = socket as { _parent?: object | null };
-  return (
-    sources.get(socket) ?? (parent ? sources.get(parent) : undefined) ?? socket.remoteAddress ?? ""
-  );
+  return sources.get(socket) ?? (parent ? sources.get(parent) : undefined);
+}
+
+/** The recorded source if any, otherwise `remoteAddress`, which behind a front is only the relay. */
+export function sourceOf(socket: SourceSocket): string {
+  return recordedSourceOf(socket) ?? socket.remoteAddress ?? "";
 }
 
 function readHeader(socket: Socket, target: ProxyFrontOptions["target"], timeoutMs: number): void {
@@ -76,7 +80,9 @@ function readHeader(socket: Socket, target: ProxyFrontOptions["target"], timeout
 
 export function listenProxyFront(options: ProxyFrontOptions): Promise<ProxyFront> {
   return new Promise((resolve, reject) => {
-    // Believing a header is only safe where just the relay can connect.
+    // Loopback keeps forged headers off the network, and no further: any local
+    // process can connect to this port and claim any source address. Relay mode
+    // trusts every process on this machine that far.
     if (!isLoopback(options.host)) {
       reject(new Error("the PROXY front binds loopback only"));
       return;
