@@ -274,6 +274,9 @@ export const INVOKE_CHANNELS = {
   // keyPath and turns remote.sidecarProxy on, through the same serialized
   // writeConfig queue Settings' own save uses. See tailscale-cert.ts.
   tailscaleCert: "remote:tailscaleCert",
+  // Desktop-only: the Settings "Tailscale access" switch (tailnet-switch.ts).
+  tailnetEnable: "remote:tailnetEnable",
+  tailnetDisable: "remote:tailnetDisable",
   // Task 5 (plan panel): main's own read/write/comment surface for a plan
   // file — reachable from a paired phone exactly like every other
   // remote-legal channel (remote-policy.ts).

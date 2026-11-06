@@ -73,6 +73,7 @@ import { createRemoteAccess, type RemoteAccess } from "../remote-access.js";
 import { createWebManifestLoader, nodeWebExportFs } from "../web-export.js";
 import { disableRemoteOnDisk } from "../remote-idle.js";
 import { certificateExpiry, obtainCertificate, type TailscaleCertDeps } from "../tailscale-cert.js";
+import { disableRelay, enableRelay, readServeStatus } from "../tailnet-guard.js";
 import { applyRemoteThenCheck, createRemoteTailnetGuard } from "../tailnet-guard-wiring.js";
 import { createNotifier } from "../notify.js";
 import { createReviewService } from "../review-service.js";
@@ -230,6 +231,7 @@ import {
   providerAgentListsEqual,
   defaultSessionsScanPath,
   defaultWorkflowsDir,
+  effectiveWebPort,
   ensureConfigFile,
   loadConfig,
   type JarvisConfig,
@@ -1793,6 +1795,9 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     fetch: (url, init) => fetch(url, init),
     // Phase 0: a global login lockout or a reused refresh token.
     showNotification: (title, body) => host.showNotification(title, body),
+    // A join comes from the bridge's listener, which starts after the
+    // notifier below exists.
+    onDeviceJoined: () => notifier.deviceJoined(),
   });
 
   // M10 Task 4: built right after remoteAccess and before wiring.start(),
@@ -2550,6 +2555,20 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     notifier,
     tailscaleCert: { obtain: () => obtainCertificate(tailscaleCertDeps) },
     writeConfig,
+    tailnet: {
+      config: () => config.remote,
+      ports: (remote) => [remote.port, effectiveWebPort(remote)],
+      readServeStatus: () => readServeStatus(tailscaleCertDeps),
+      enableRelay: (ports) => enableRelay(tailscaleCertDeps, ports),
+      disableRelay: (ports) => disableRelay(tailscaleCertDeps, ports),
+      // Queued behind the apply the write itself started, so this resolves
+      // only after the written file has reached the bridge.
+      applied: () => applyFromDisk(),
+      rearm: () => remoteAccess.rearmTailnet(),
+      reloadCertificate: () => remoteAccess.reloadCertificate(),
+      checkNow: () => tailnetGuard.checkNow(),
+      log: (line) => console.error(line),
+    },
     // Phase 1: remote:openWebClient's system browser (dispatch.ts).
     openExternal: (url) => host.openExternal(url),
     reviews,

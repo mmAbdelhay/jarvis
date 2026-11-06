@@ -46,6 +46,9 @@ describe("remote policy", () => {
     "settings:testAgent",
     "api:saveSettings",
     "remote:tailscaleCert",
+    // Tailscale access: the switch itself is the owner's, on the machine.
+    "remote:tailnetEnable",
+    "remote:tailnetDisable",
     // Bug 5: an outbound IP-geolocation request the laptop makes for
     // itself only after navigator.geolocation has already failed there.
     "prayer:locateIp",

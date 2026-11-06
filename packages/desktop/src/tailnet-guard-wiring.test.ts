@@ -87,6 +87,7 @@ async function setup(initial: RemoteConfig) {
     onDeviceRevoked: vi.fn(),
     onIdleDisabled: vi.fn(),
     showNotification: vi.fn(),
+    onDeviceJoined: vi.fn(),
     fetch: vi.fn(),
   });
 

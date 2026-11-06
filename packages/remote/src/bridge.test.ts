@@ -766,6 +766,50 @@ describe("createBridge: password join", () => {
     expect((await auditLines(h.fs)).join("\n")).not.toContain(OWNER_TEST_PASSWORD);
   });
 
+  it("tailnet on: a join raises the desktop alert with the device's name", async () => {
+    const notifyDesktop = vi.fn();
+    const h = makeHarness({ cert: certWith("configured", ["laptop.tailnet.ts.net"]) });
+    h.deps.notifyDesktop = notifyDesktop;
+    await seedDevices(h.fs, h.random, h.clock.now, ["Phone"]);
+    const bridge = await createBridge(h.deps);
+    await bridge.apply({
+      ...ON_127(),
+      bindAddress: "100.64.0.1",
+      tls: { certPath: "/tls/cert.pem", keyPath: "/tls/key.pem" },
+      tailnet: { enabled: true, relay: false },
+    });
+    const socket = new FakeSocket();
+
+    h.listenCalls[0]
+      ?.onSocket("pair", socket, "100.64.0.9")
+      ?.onText(joinFrame(OWNER_TEST_PASSWORD));
+    await settled(socket);
+
+    expect(notifyDesktop.mock.calls).toEqual([["device-joined", "Other Mac"]]);
+  });
+
+  it("tailnet on: a wrong password raises no join alert", async () => {
+    const notifyDesktop = vi.fn();
+    const h = makeHarness({ cert: certWith("configured", ["laptop.tailnet.ts.net"]) });
+    h.deps.notifyDesktop = notifyDesktop;
+    await seedDevices(h.fs, h.random, h.clock.now, ["Phone"]);
+    const bridge = await createBridge(h.deps);
+    await bridge.apply({
+      ...ON_127(),
+      bindAddress: "100.64.0.1",
+      tls: { certPath: "/tls/cert.pem", keyPath: "/tls/key.pem" },
+      tailnet: { enabled: true, relay: false },
+    });
+    const socket = new FakeSocket();
+
+    h.listenCalls[0]
+      ?.onSocket("pair", socket, "100.64.0.9")
+      ?.onText(joinFrame("not the owner password"));
+    await settled(socket);
+
+    expect(notifyDesktop).not.toHaveBeenCalledWith("device-joined", expect.anything());
+  });
+
   it("tailnet on: signing out everywhere during the join yields no device", async () => {
     const { h, bridge } = await listeningWithTailnet({ enabled: true, relay: false });
     const socket = new FakeSocket();

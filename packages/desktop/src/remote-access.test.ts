@@ -2,6 +2,9 @@ import type { AuthenticatedDevice, Bridge, BridgeDeps, RemoteStatus } from "@jar
 import { VOICE_UPLOAD_CHANNEL, type PushRegistration } from "@jarvis/wire";
 import { describe, expect, it, vi } from "vitest";
 import { createBroadcaster } from "./broadcast.js";
+import { createHostLink, type DesktopHost } from "./core/host-link.js";
+import { createDaemonHost } from "./daemon/daemon-host.js";
+import { DAEMON_PUSHES } from "./daemon/protocol.js";
 import { createDispatchTable, type DispatchTable } from "./dispatch.js";
 import { MESSAGES } from "./messages.js";
 import { fakeDeps } from "./dispatch.test.js";
@@ -254,6 +257,7 @@ function harness(overrides: Partial<RemoteAccessDeps> = {}) {
     onDeviceRevoked: vi.fn(),
     onIdleDisabled: vi.fn(),
     showNotification: vi.fn(),
+    onDeviceJoined: vi.fn(),
     fetch: vi.fn(async () => ({ status: 200, json: async () => ({ data: [] }) })),
     ...overrides,
   };
@@ -360,6 +364,117 @@ describe("createRemoteAccess: desktop notifications (Phase 0)", () => {
       [reuse.title, reuse.body],
       [device.title, device.body],
     ]);
+  });
+
+  describe("a device joining", () => {
+    async function joinNotice(deps: Partial<RemoteAccessDeps>) {
+      const { remoteAccess, createBridge } = harness(deps);
+      await remoteAccess.start(REMOTE_CONFIG);
+      return createBridge.mock.calls[0]?.[0].notifyDesktop;
+    }
+
+    it("alerts on the desktop with the device's name, and sends the push", async () => {
+      const showNotification = vi.fn<(title: string, body: string) => void>();
+      const onDeviceJoined = vi.fn();
+      const notifyDesktop = await joinNotice({ showNotification, onDeviceJoined });
+
+      notifyDesktop?.("device-joined", "Other Mac");
+
+      const notice = MESSAGES.remoteSecurityNotice("device-joined", "en", "Other Mac");
+      expect(notice.body).toContain("Other Mac");
+      // The daemon logs the title of a queued alert, and never the body.
+      expect(notice.title).not.toContain("Other Mac");
+      expect(showNotification.mock.calls).toEqual([[notice.title, notice.body]]);
+      expect(onDeviceJoined).toHaveBeenCalledTimes(1);
+    });
+
+    it("no other notice sends the push", async () => {
+      const onDeviceJoined = vi.fn();
+      const notifyDesktop = await joinNotice({ onDeviceJoined });
+
+      notifyDesktop?.("locked-out-global");
+      notifyDesktop?.("refresh-reuse");
+      notifyDesktop?.("locked-out-device", "Pixel 8");
+
+      expect(onDeviceJoined).not.toHaveBeenCalled();
+    });
+
+    it("a desktop notification that throws does not lose the push", async () => {
+      const onDeviceJoined = vi.fn();
+      const notifyDesktop = await joinNotice({
+        onDeviceJoined,
+        showNotification: () => {
+          throw new Error("no window");
+        },
+      });
+
+      expect(() => notifyDesktop?.("device-joined", "Other Mac")).toThrow("no window");
+      expect(onDeviceJoined).toHaveBeenCalledTimes(1);
+    });
+
+    it("with no app attached the daemon queues it, and the next app to attach gets it", async () => {
+      const push = vi.fn();
+      const daemonHost = createDaemonHost({
+        push,
+        pushTo: vi.fn(),
+        initiator: () => undefined,
+        log: vi.fn(),
+        now: () => 5,
+      });
+      const link = createHostLink();
+      link.attach(daemonHost.host);
+      const notifyDesktop = await joinNotice({
+        showNotification: (title, body) => link.host.showNotification(title, body),
+      });
+
+      notifyDesktop?.("device-joined", "Other Mac");
+
+      const notice = MESSAGES.remoteSecurityNotice("device-joined", "en", "Other Mac");
+      const alert = { title: notice.title, body: notice.body, at: 5 };
+      expect(daemonHost.queuedAlerts()).toEqual([alert]);
+      expect(push).not.toHaveBeenCalled();
+
+      daemonHost.attach(1, { focused: false, awake: true });
+
+      expect(push).toHaveBeenCalledWith(DAEMON_PUSHES.alert, alert);
+      expect(daemonHost.queuedAlerts()).toEqual([]);
+    });
+
+    it("in-process, the attached app shows it at once", async () => {
+      const showNotification = vi.fn();
+      const link = createHostLink();
+      link.attach({ showNotification } as unknown as DesktopHost);
+      const notifyDesktop = await joinNotice({
+        showNotification: (title, body) => link.host.showNotification(title, body),
+      });
+
+      notifyDesktop?.("device-joined", "Other Mac");
+
+      const notice = MESSAGES.remoteSecurityNotice("device-joined", "en", "Other Mac");
+      expect(showNotification).toHaveBeenCalledWith(notice.title, notice.body);
+    });
+  });
+});
+
+describe("createRemoteAccess: rearmTailnet", () => {
+  it("waits for start's own apply, and does nothing after stop", async () => {
+    const { remoteAccess, bridge } = harness();
+    const order: string[] = [];
+    vi.mocked(bridge.apply).mockImplementation(async () => {
+      order.push("apply");
+    });
+    vi.mocked(bridge.rearmTailnet).mockImplementation(async () => {
+      order.push("rearm");
+    });
+
+    const rearm = remoteAccess.rearmTailnet();
+    await remoteAccess.start(REMOTE_CONFIG);
+    await rearm;
+    expect(order).toEqual(["apply", "rearm"]);
+
+    await remoteAccess.stop();
+    await remoteAccess.rearmTailnet();
+    expect(order).toEqual(["apply", "rearm"]);
   });
 });
 

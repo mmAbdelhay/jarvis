@@ -89,6 +89,7 @@ import type { Notifier } from "./notify.js";
 import { historyPage, parseHistoryPageRequest } from "./history-page.js";
 import { remoteWebUrl } from "./remote-web.js";
 import type { SettingsWriteResult } from "./settings-io.js";
+import { createTailnetSwitch, type TailnetSwitchControls } from "./tailnet-switch.js";
 import type { TailscaleCertResult } from "./tailscale-cert.js";
 import { createTerminalFitOverrides, type TerminalFitOverrides } from "./terminal-fit-overrides.js";
 
@@ -380,6 +381,8 @@ export type DispatchDeps = {
   // write is pinned to whatever `current.remote` already holds on disk,
   // the same discipline disableRemoteOnDisk follows.
   writeConfig(update: (current: JarvisConfig) => JarvisConfig): Promise<SettingsWriteResult>;
+  // The "Tailscale access" switch's reach beyond this table, from compose.ts.
+  tailnet: TailnetSwitchControls;
   // Task 5 (plan panel): the one PlanFiles and one PlanCommentStore
   // instance for the whole app — Tasks 3 and 4's own factories, built once
   // in main.ts and handed in here, the same "exactly one instance" rule
@@ -561,6 +564,15 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
     if (pane === undefined || pane.exited) throw new Error(`${channel}: invalid paneKey`);
     return pane.paneKey;
   }
+
+  const tailnetSwitch = createTailnetSwitch({
+    language: deps.language,
+    hasOwnerPassword: () => deps.remote.ownerStatus().hasPassword,
+    networkInterfaces: deps.networkInterfaces,
+    obtainCertificate: () => deps.tailscaleCert.obtain(),
+    writeConfig: deps.writeConfig,
+    controls: deps.tailnet,
+  });
 
   const {
     setup,
@@ -1451,6 +1463,18 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
         return { ok: false as const, kind: "failed" as const, detail: write.detail };
       }
       return result;
+    },
+    // Desktop-only (remote-policy.ts), refused here again, belt and braces.
+    "remote:tailnetEnable": async ([options], origin) => {
+      const relay = (options as { relay?: unknown } | null | undefined)?.relay;
+      if (origin.kind === "remote" || typeof relay !== "boolean") {
+        return invalidArgument(deps.language);
+      }
+      return tailnetSwitch.enable(relay);
+    },
+    "remote:tailnetDisable": async (_args, origin) => {
+      if (origin.kind === "remote") return invalidArgument(deps.language);
+      return tailnetSwitch.disable();
     },
 
     // Task 5 (plan panel): main's own read/write/comment surface for a

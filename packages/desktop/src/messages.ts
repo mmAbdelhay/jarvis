@@ -21,7 +21,13 @@
 // detected utterance — an Arabic sentence still gets an Arabic reply, and
 // Arabic session/project text still renders RTL via detectLanguage().
 import type { PrerequisiteId } from "@jarvis/platform";
-import type { BindKind, DesktopNoticeKind, RemoteErrorCode, RemoteProblem } from "@jarvis/remote";
+import type {
+  BindKind,
+  DesktopNoticeKind,
+  RemoteErrorCode,
+  RemoteProblem,
+  RemoteStatus,
+} from "@jarvis/remote";
 import type { AuthChannel, PushKind } from "@jarvis/wire";
 import type { RemoteWebState } from "./remote-web.js";
 import type { RunningCounts, UpdateError } from "./updater.js";
@@ -1912,6 +1918,18 @@ export const MESSAGES = {
           body: "A sign-in session that had already been renewed was presented again, so that session was ended. Sign in again on your device.",
         },
       },
+      // The title stays free of the name: the daemon logs the title of an
+      // alert it queues.
+      "device-joined": {
+        ar: {
+          title: "انضم جهاز عبر Tailscale",
+          body: `انضم ${device.ar} بكلمة مرور المالك. إن لم يكن هذا أنت، ألغِ اقترانه من الإعدادات وغيّر كلمة المرور.`,
+        },
+        en: {
+          title: "A device joined over Tailscale",
+          body: `${device.en} joined with the owner password. If this was not you, revoke it in Settings and change the password.`,
+        },
+      },
     };
     return text[kind][language];
   },
@@ -2266,6 +2284,111 @@ export const MESSAGES = {
       ? "يحتاج المحرر وقاعدة البيانات والعنقود على الهاتف إلى شهادة — احصل على واحدة من Tailscale."
       : "The phone's Editor, Database and Cluster need a certificate — get one from Tailscale.",
 
+  // The "Tailscale access" switch (settings.ts, tailnet-switch.ts). The state
+  // line comes only from RemoteStatus.tailnet.
+  remoteTailnetLabel: (language: "ar" | "en"): string =>
+    language === "ar" ? "الوصول عبر Tailscale" : "Tailscale access",
+  remoteTailnetNote: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "يستطيع أي جهاز على شبكة Tailscale الخاصة بك أن يجرّب كلمة مرور المالك للانضمام إلى هذا الجهاز. المحاولات محدودة، وكل انضمام يطلق تنبيهًا."
+      : "Any device on your Tailscale network can try the owner password to join this machine. Attempts are limited, and each join raises an alert.",
+  remoteTailnetState: (tailnet: RemoteStatus["tailnet"], language: "ar" | "en"): string => {
+    const key = tailnet.kind === "blocked" ? tailnet.reason : tailnet.kind;
+    const text: Record<typeof key, Record<"ar" | "en", string>> = {
+      off: { ar: "متوقف.", en: "Off." },
+      on: {
+        ar: "يعمل. تستطيع أجهزة شبكة Tailscale الانضمام بكلمة مرور المالك.",
+        en: "On. Devices on your Tailscale network can join with the owner password.",
+      },
+      "no-owner-password": {
+        ar: "محجوب: عيّن كلمة مرور للمالك أولًا.",
+        en: "Blocked: set an owner password first.",
+      },
+      "no-certificate": {
+        ar: "محجوب: لا توجد شهادة Tailscale صالحة على هذا الجهاز.",
+        en: "Blocked: this machine has no usable Tailscale certificate.",
+      },
+      "bad-bind": {
+        ar: "محجوب: عنوان الاستماع ليس عنوان Tailscale. أوقف هذا المفتاح ثم شغّله من جديد.",
+        en: "Blocked: the listening address is not a Tailscale address. Turn this switch off and on again.",
+      },
+      funnel: {
+        ar: "متوقف للحماية: تكشف ميزة Funnel في Tailscale أحد منافذ جارفيس على الإنترنت العام، فأُغلق كل استماع. أوقف Funnel، ثم أوقف هذا المفتاح وشغّله من جديد.",
+        en: "Stopped for safety: Tailscale Funnel puts a Jarvis port on the public internet, so every listener is closed. Turn Funnel off, then turn this switch off and on again.",
+      },
+      "relay-missing": {
+        ar: "محجوب: توجيه Tailscale إلى جارفيس غير موجود، فلا يمكن لأي جهاز الانضمام. أوقف هذا المفتاح ثم شغّله لإعادة إنشائه.",
+        en: "Blocked: the Tailscale forward to Jarvis is missing, so no device can join. Turn this switch off and on again to set it up.",
+      },
+    };
+    return text[key][language];
+  },
+  remoteTailnetRelayLabel: (language: "ar" | "en"): string =>
+    language === "ar" ? "التوجيه عبر Tailscale (relay)" : "Forward through Tailscale (relay)",
+  remoteTailnetRelayNote: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "لجهاز يحجب جداره الناري عنوان Tailscale: يستمع جارفيس على هذا الجهاز فقط ويوجّه Tailscale الاتصالات إليه. يُختار قبل التشغيل. ومع تفعيله يُرفض أي اتصال مباشر بعنوان هذا الجهاز المحلي، ويشمل ذلك الهاتف الموصول بـ USB عبر adb reverse."
+      : "For a machine whose firewall blocks the Tailscale address: Jarvis listens on this machine only and Tailscale forwards to it. Chosen before turning access on. With it on, any direct connection to this machine's loopback address is dropped, including a USB phone using adb reverse.",
+  remoteTailnetBackgroundOff: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "خدمة الخلفية متوقفة، فيتوقف الوصول عبر Tailscale عند إغلاق جارفيس. شغّلها من الإعدادات العامة ليبقى هذا الجهاز متاحًا."
+      : "The background service is off, so Tailscale access stops when Jarvis quits. Turn it on under General to keep this machine reachable.",
+  remoteTailnetPairAgain: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "سيحتاج جهاز مقترن إلى الاقتران من جديد: تشغيل هذا المفتاح يغيّر الشهادة أو العنوان الذي يعرفه ذلك الجهاز."
+      : "A paired device will need to pair again: turning this on changes the certificate or the address it knows.",
+  remoteTailnetConfirm: (language: "ar" | "en"): string =>
+    language === "ar" ? "شغّله رغم ذلك" : "Turn on anyway",
+  remoteTailnetCancel: (language: "ar" | "en"): string => (language === "ar" ? "إلغاء" : "Cancel"),
+  remoteTailnetRefused: (
+    reason:
+      | "no-owner-password"
+      | "funnel"
+      | "funnel-unread"
+      | "no-address"
+      | "relay-failed"
+      | "write-failed",
+    language: "ar" | "en",
+    detail?: string,
+  ): string => {
+    const text = {
+      "no-owner-password": {
+        ar: "عيّن كلمة مرور للمالك قبل تشغيل الوصول عبر Tailscale.",
+        en: "Set an owner password before turning on Tailscale access.",
+      },
+      funnel: {
+        ar: "لم يُشغَّل: تكشف ميزة Funnel في Tailscale أحد منافذ جارفيس على الإنترنت العام. أوقف Funnel ثم حاول من جديد.",
+        en: "Not turned on: Tailscale Funnel puts a Jarvis port on the public internet. Turn Funnel off, then try again.",
+      },
+      "funnel-unread": {
+        ar: "لم يُشغَّل: تعذّرت قراءة إعدادات Tailscale للتأكد من أن Funnel لا يكشف جارفيس. تأكد من أن Tailscale مثبّت ويعمل.",
+        en: "Not turned on: could not read Tailscale's settings to confirm Funnel does not expose Jarvis. Check that Tailscale is installed and running.",
+      },
+      "no-address": {
+        ar: "لم يُشغَّل: ليس لهذا الجهاز عنوان Tailscale. اتصل بـ Tailscale أولًا.",
+        en: "Not turned on: this machine has no Tailscale address. Connect Tailscale first.",
+      },
+      "relay-failed": {
+        ar: "لم يُشغَّل: رفض Tailscale إنشاء التوجيه. جرّب الأمر أدناه لمعرفة السبب.",
+        en: "Not turned on: Tailscale refused to create the forward. Try the command below to see why.",
+      },
+      "write-failed": {
+        ar: "تعذّر حفظ الإعدادات.",
+        en: "Could not save the settings.",
+      },
+    } as const;
+    const line = text[reason][language];
+    return detail === undefined ? line : `${line} ${detail}`;
+  },
+  // A failed `off` may only mean there was no forward on that port, so this
+  // does not call it a failure.
+  remoteTailnetForwardLeft: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "الوصول متوقف. لم يؤكد Tailscale إزالة التوجيه؛ إن كان ما زال موجودًا فنفّذ:"
+      : "Access is off. Tailscale did not confirm removing the forward; if it is still there, run:",
+  remoteTailnetFailed: (language: "ar" | "en"): string =>
+    language === "ar" ? "تعذّر إتمام التغيير." : "The change could not be made.",
+
   // M10 Task 3: the push notification catalogue — the only text a
   // notification's title/body carry, built in the *device's* registered
   // language (never the app's own PRIMARY_LANGUAGE unless that's the
@@ -2347,6 +2470,10 @@ export const MESSAGES = {
         return language === "ar"
           ? `طُلبت مراجعتك على ${prLabel}.`
           : `Your review was requested on ${prLabel}.`;
+      case "device-joined":
+        return language === "ar"
+          ? "انضم جهاز جديد إلى جارفيس بكلمة مرور المالك."
+          : "A new device joined Jarvis with the owner password.";
     }
   },
   // ── Reviews page (renderer/reviews-view.ts, Task 11) ──────────────────

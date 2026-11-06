@@ -1,7 +1,8 @@
 import type { Session, SessionOutput, Turn } from "@jarvis/core";
 import type { ExpoPushMessage } from "@jarvis/remote";
 import { MAX_PUSH_PROJECT_CHARS } from "@jarvis/wire";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { MESSAGES } from "./messages.js";
 import {
   buildPushMessage,
   createNotifier,
@@ -89,8 +90,65 @@ describe("relevantChannels", () => {
     [{ kind: "review-comment", pr: "acme/web#18" }, [{ channel: "reviews:changed" }]],
     [{ kind: "review-queued", pr: "acme/web#18" }, [{ channel: "reviews:changed" }]],
     [{ kind: "review-requested", pr: "acme/web#18" }, [{ channel: "reviews:changed" }]],
+    // A join alert is news to whoever is looking at any screen.
+    [{ kind: "device-joined" }, []],
   ])("maps %j to %j", (event, expected) => {
     expect(relevantChannels(event)).toEqual(expected);
+  });
+});
+
+describe("device-joined push", () => {
+  const joined: NotifyEvent = { kind: "device-joined" };
+
+  it("follows remote.push.enabled", () => {
+    const result = shouldNotify(INITIAL_NOTIFY_STATE, makeContext({ enabled: false }), joined, 0);
+    expect(result.targets).toEqual([]);
+  });
+
+  it("is not held back by focus, like the login lockout alert it sits beside", () => {
+    const result = shouldNotify(INITIAL_NOTIFY_STATE, makeContext({ focused: true }), joined, 0);
+    expect(result.targets).toEqual([d1, d2]);
+  });
+
+  it("is not coalesced: a second join is a second event", () => {
+    const first = shouldNotify(INITIAL_NOTIFY_STATE, makeContext(), joined, 0);
+    const second = shouldNotify(first.state, makeContext(), joined, 1);
+    expect(second.targets).toEqual([d1, d2]);
+  });
+
+  it.each(["en", "ar"] as const)("carries no device name, only its kind (%s)", (language) => {
+    const message = buildPushMessage({ ...d1, language }, joined, true);
+    expect(message.data).toEqual({ kind: "device-joined" });
+    expect(message.body).toBe(MESSAGES.pushBody("device-joined", undefined, language));
+    expect(JSON.stringify(message)).not.toContain("Other Mac");
+  });
+
+  it("the notifier sends and audits it, and logs no focus suppression", () => {
+    const send = vi.fn();
+    const audit = vi.fn();
+    const log = vi.fn();
+    const notifier = createNotifier({
+      sessions: {
+        onChange: () => () => {},
+        onOutput: () => () => {},
+        get: () => undefined,
+        log: () => "",
+        list: () => [],
+      },
+      onTurn: () => () => {},
+      context: () => makeContext({ focused: true, targets: [d1] }),
+      send,
+      audit,
+      now: () => 0,
+      timers: { setTimeout: () => 0, clearTimeout: () => {} },
+      log,
+    });
+
+    notifier.deviceJoined();
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(audit).toHaveBeenCalledWith([{ deviceId: "d1", kind: "device-joined" }]);
+    expect(log).toHaveBeenCalledWith("notify: device-joined targets=1 suppressed=none");
   });
 });
 

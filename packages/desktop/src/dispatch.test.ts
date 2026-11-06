@@ -4,7 +4,13 @@ import type { RemoteStatus } from "@jarvis/remote";
 import { describe, expect, it, vi } from "vitest";
 import { INVOKE_CHANNELS } from "./channels.js";
 import { ELECTRON_BOUND_CHANNELS } from "./desktop-only.js";
-import { parseConfig, type JarvisConfig } from "./config.js";
+import {
+  DEFAULT_REMOTE,
+  effectiveWebPort,
+  parseConfig,
+  type JarvisConfig,
+  type RemoteConfig,
+} from "./config.js";
 import {
   createDispatchTable,
   DESKTOP_ORIGIN,
@@ -220,6 +226,18 @@ export function fakeDeps(overrides: Partial<DispatchDeps> = {}): DispatchDeps {
       })),
     },
     writeConfig: vi.fn(async () => ({ ok: true as const })),
+    tailnet: {
+      config: vi.fn(() => DEFAULT_REMOTE),
+      ports: vi.fn((remote: RemoteConfig) => [remote.port, effectiveWebPort(remote)]),
+      readServeStatus: vi.fn(async () => ({})),
+      enableRelay: vi.fn(async () => ({ ok: true as const })),
+      disableRelay: vi.fn(async () => ({ ok: true as const })),
+      applied: vi.fn(async () => {}),
+      rearm: vi.fn(async () => {}),
+      reloadCertificate: vi.fn(async () => {}),
+      checkNow: vi.fn(async () => {}),
+      log: vi.fn(),
+    },
     plans: {
       files: {
         list: vi.fn(async () => ({ session: undefined, planMode: [], repo: [] })),
@@ -1789,6 +1807,515 @@ describe("dispatch table: remote:tailscaleCert", () => {
     const result = await call(table, "remote:tailscaleCert");
 
     expect(result).toEqual({ ok: false, kind: "failed", detail: "validation failed" });
+  });
+});
+
+describe("dispatch table: the Tailscale access switch", () => {
+  const CERT = { certPath: "/cfg/tls/m.crt", keyPath: "/cfg/tls/m.key" };
+  const MESH = { tailscale0: [{ address: "100.84.17.203" }], en0: [{ address: "192.168.1.5" }] };
+  const BRIDGE_PORT = 7717;
+  const WEB_PORT = 7718;
+  const PASSWORD_SET = { hasPassword: true, passkeys: [] };
+
+  /** A fake jarvis.yaml behind writeConfig, and every outside step in order. */
+  function harness(options: {
+    remote?: Partial<RemoteConfig>;
+    fileRemote?: Partial<RemoteConfig>;
+    deps?: Partial<DispatchDeps>;
+    tailnet?: Partial<DispatchDeps["tailnet"]>;
+    writeFails?: boolean;
+    interfaces?: Record<string, { address: string }[]>;
+  }) {
+    const live: RemoteConfig = {
+      ...DEFAULT_REMOTE,
+      port: BRIDGE_PORT,
+      bindAddress: "192.168.1.5",
+      ...options.remote,
+    };
+    const file = { remote: { ...live, ...options.fileRemote } };
+    const steps: string[] = [];
+    const step = <T>(name: string, value: T) =>
+      vi.fn(async (...args: unknown[]) => {
+        steps.push(args.length === 0 ? name : `${name} ${JSON.stringify(args[0])}`);
+        return value;
+      });
+    const writeConfig = vi.fn(async (update: (current: JarvisConfig) => JarvisConfig) => {
+      if (options.writeFails) {
+        steps.push("write failed");
+        return { ok: false as const, detail: "disk full" };
+      }
+      file.remote = update(file as unknown as JarvisConfig).remote;
+      steps.push("write");
+      return { ok: true as const };
+    });
+    const obtain = vi.fn(async () => {
+      steps.push("certificate");
+      return { ok: true as const, ...CERT, name: "m.tailnet.ts.net" };
+    });
+    const tailnet = {
+      config: vi.fn(() => live),
+      ports: (remote: RemoteConfig) => [remote.port, effectiveWebPort(remote)],
+      readServeStatus: vi.fn(async (): Promise<object | undefined> => {
+        steps.push("read serve");
+        return {};
+      }),
+      enableRelay: step("forward", { ok: true as const }),
+      disableRelay: step("unforward", { ok: true as const }),
+      applied: step("apply", undefined),
+      rearm: step("rearm", undefined),
+      reloadCertificate: step("reload", undefined),
+      checkNow: step("check", undefined),
+      log: vi.fn(),
+      ...options.tailnet,
+    } as DispatchDeps["tailnet"];
+    const deps = fakeDeps({
+      writeConfig: writeConfig as DispatchDeps["writeConfig"],
+      tailscaleCert: { obtain },
+      networkInterfaces: vi.fn(() => options.interfaces ?? MESH),
+      tailnet,
+      ...options.deps,
+    });
+    vi.mocked(deps.remote.ownerStatus).mockReturnValue(PASSWORD_SET);
+    return { deps, table: createDispatchTable(deps), file, steps, writeConfig, obtain, tailnet };
+  }
+
+  const enable = (table: ReturnType<typeof createDispatchTable>, relay: boolean) =>
+    call(table, "remote:tailnetEnable", { relay }) as Promise<{
+      ok: boolean;
+      text?: string;
+      commands: string[];
+    }>;
+  const disable = (table: ReturnType<typeof createDispatchTable>) =>
+    call(table, "remote:tailnetDisable") as Promise<{ ok: boolean; commands: string[] }>;
+
+  describe("policy", () => {
+    it.each(["remote:tailnetEnable", "remote:tailnetDisable"])(
+      "%s is desktop-only, and its handler refuses a remote origin anyway",
+      async (channel) => {
+        expect(CHANNEL_POLICY[channel as keyof typeof CHANNEL_POLICY]).toBe("desktop-only");
+        expect(isRemoteAllowed(channel)).toBe(false);
+        const { table, steps, writeConfig } = harness({
+          remote: { tailnet: { enabled: true, relay: true } },
+        });
+
+        const result = await callAs(table, REMOTE_ORIGIN, channel, { relay: false });
+
+        expect(result).toEqual(invalidArgument("en"));
+        expect(steps).toEqual([]);
+        expect(writeConfig).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([[undefined], ["true"], [{}], [{ relay: "yes" }], [null]])(
+      "enable refuses the argument %j",
+      async (argument) => {
+        const { table, steps } = harness({});
+        expect(await call(table, "remote:tailnetEnable", argument)).toEqual(invalidArgument("en"));
+        expect(steps).toEqual([]);
+      },
+    );
+
+    it("a remote settings:save cannot change remote.tailnet", async () => {
+      const { deps, table, steps, writeConfig } = harness({});
+      const saved = vi.mocked(deps.settings.saveSessions);
+
+      await callAs(table, REMOTE_ORIGIN, "settings:save", {
+        sessions: { importWindowDays: 7 },
+        remote: { enabled: true, tailnet: { enabled: true, relay: true } },
+      });
+
+      expect(saved).toHaveBeenCalledTimes(1);
+      expect(JSON.stringify(saved.mock.calls[0])).not.toContain("tailnet");
+      expect(deps.settings.save).not.toHaveBeenCalled();
+      expect(writeConfig).not.toHaveBeenCalled();
+      expect(steps).toEqual([]);
+    });
+  });
+
+  describe("enable", () => {
+    it("with no owner password returns the error and touches nothing", async () => {
+      const { deps, table, file, steps, writeConfig } = harness({});
+      vi.mocked(deps.remote.ownerStatus).mockReturnValue({ hasPassword: false, passkeys: [] });
+
+      const result = await enable(table, false);
+
+      expect(result).toMatchObject({
+        ok: false,
+        text: MESSAGES.remoteTailnetRefused("no-owner-password", "en"),
+      });
+      expect(steps).toEqual([]);
+      expect(writeConfig).not.toHaveBeenCalled();
+      expect(file.remote.tailnet.enabled).toBe(false);
+    });
+
+    it("with Funnel exposing a port refuses and writes nothing", async () => {
+      const funnel = {
+        AllowFunnel: { "m.tailnet.ts.net:443": true },
+        Web: {
+          "m.tailnet.ts.net:443": {
+            Handlers: { "/": { Proxy: `http://127.0.0.1:${WEB_PORT}` } },
+          },
+        },
+      };
+      const { table, steps, writeConfig, obtain } = harness({
+        tailnet: { readServeStatus: vi.fn(async () => funnel) },
+      });
+
+      const result = await enable(table, true);
+
+      expect(result).toMatchObject({
+        ok: false,
+        text: MESSAGES.remoteTailnetRefused("funnel", "en"),
+      });
+      expect(obtain).not.toHaveBeenCalled();
+      expect(steps).toEqual([]);
+      expect(writeConfig).not.toHaveBeenCalled();
+    });
+
+    it("when Tailscale's serve state cannot be read refuses with its own message", async () => {
+      const { table, writeConfig, obtain } = harness({
+        tailnet: { readServeStatus: vi.fn(async () => undefined) },
+      });
+
+      const result = await enable(table, false);
+
+      const text = MESSAGES.remoteTailnetRefused("funnel-unread", "en");
+      expect(result).toMatchObject({ ok: false, text });
+      expect(text).not.toBe(MESSAGES.remoteTailnetRefused("funnel", "en"));
+      expect(obtain).not.toHaveBeenCalled();
+      expect(writeConfig).not.toHaveBeenCalled();
+    });
+
+    it("obtains a certificate when none exists, and turns the bridge and the web client on", async () => {
+      const { table, file, steps, obtain } = harness({});
+
+      const result = await enable(table, false);
+
+      expect(result).toEqual({ ok: true, commands: [] });
+      expect(obtain).toHaveBeenCalledTimes(1);
+      expect(file.remote).toMatchObject({
+        enabled: true,
+        web: { enabled: true },
+        bindAddress: "100.84.17.203",
+        tailnet: { enabled: true, relay: false },
+        tls: CERT,
+      });
+      expect(steps).toEqual(["read serve", "certificate", "write", "apply", "rearm", "check"]);
+    });
+
+    it("keeps a configured certificate, and does not reload it", async () => {
+      const { table, file, obtain, tailnet } = harness({
+        remote: { tls: { certPath: "/own.crt", keyPath: "/own.key" } },
+      });
+
+      await enable(table, false);
+
+      expect(obtain).not.toHaveBeenCalled();
+      expect(file.remote.tls).toEqual({ certPath: "/own.crt", keyPath: "/own.key" });
+      expect(tailnet.reloadCertificate).not.toHaveBeenCalled();
+    });
+
+    it("reloads when the new files landed at the paths already on disk", async () => {
+      const { table, steps } = harness({ fileRemote: { tls: CERT } });
+
+      await enable(table, false);
+
+      expect(steps).toEqual([
+        "read serve",
+        "certificate",
+        "write",
+        "apply",
+        "rearm",
+        "reload",
+        "check",
+      ]);
+    });
+
+    it("refuses when the certificate cannot be had, with nothing written", async () => {
+      const { table, writeConfig, tailnet } = harness({
+        remote: { tailnet: { enabled: false, relay: false } },
+        deps: {
+          tailscaleCert: {
+            obtain: vi.fn(async () => ({
+              ok: false as const,
+              kind: "not-connected" as const,
+              detail: "stopped",
+            })),
+          },
+        },
+      });
+
+      const result = await enable(table, true);
+
+      expect(result).toMatchObject({ ok: false, text: MESSAGES.remoteCertNotConnected("en") });
+      expect(tailnet.enableRelay).not.toHaveBeenCalled();
+      expect(writeConfig).not.toHaveBeenCalled();
+    });
+
+    it("without relay and with no Tailscale address refuses before anything is issued", async () => {
+      const { table, writeConfig, obtain } = harness({
+        interfaces: { en0: [{ address: "10.0.0.2" }] },
+      });
+
+      const result = await enable(table, false);
+
+      expect(result).toMatchObject({
+        ok: false,
+        text: MESSAGES.remoteTailnetRefused("no-address", "en"),
+      });
+      expect(obtain).not.toHaveBeenCalled();
+      expect(writeConfig).not.toHaveBeenCalled();
+    });
+
+    it("with relay forwards both ports before writing, and binds loopback", async () => {
+      const { table, file, steps } = harness({
+        remote: { tls: CERT },
+        interfaces: { en0: [{ address: "10.0.0.2" }] },
+      });
+
+      const result = await enable(table, true);
+
+      expect(result).toEqual({ ok: true, commands: [] });
+      expect(file.remote).toMatchObject({
+        bindAddress: "127.0.0.1",
+        tailnet: { enabled: true, relay: true },
+      });
+      expect(steps).toEqual([
+        "read serve",
+        `forward [${BRIDGE_PORT}]`,
+        `forward [${WEB_PORT}]`,
+        "write",
+        "apply",
+        "rearm",
+        "check",
+      ]);
+    });
+
+    it("when the second forward fails removes the first, and writes nothing", async () => {
+      const removed = vi.fn(async (_ports: number[]) => ({ ok: true as const }));
+      const { table, writeConfig } = harness({
+        remote: { tls: CERT },
+        tailnet: {
+          enableRelay: vi.fn(async ([port]: number[]) =>
+            port === WEB_PORT
+              ? { ok: false as const, command: `tailscale serve --tcp=${WEB_PORT}` }
+              : { ok: true as const },
+          ),
+          disableRelay: removed,
+        },
+      });
+
+      const result = await enable(table, true);
+
+      expect(result).toMatchObject({
+        ok: false,
+        text: MESSAGES.remoteTailnetRefused("relay-failed", "en"),
+        commands: [`tailscale serve --tcp=${WEB_PORT}`],
+      });
+      expect(removed.mock.calls).toEqual([[[BRIDGE_PORT]]]);
+      expect(writeConfig).not.toHaveBeenCalled();
+    });
+
+    it("rolls back only what it added: a forward already there stays", async () => {
+      const removed = vi.fn(async (_ports: number[]) => ({ ok: true as const }));
+      const { table } = harness({
+        remote: { tls: CERT },
+        tailnet: {
+          readServeStatus: vi.fn(async () => ({
+            TCP: {
+              [BRIDGE_PORT]: { TCPForward: `127.0.0.1:${BRIDGE_PORT}`, ProxyProtocol: 2 },
+            },
+          })),
+          enableRelay: vi.fn(async () => ({ ok: false as const, command: "tailscale serve" })),
+          disableRelay: removed,
+        },
+      });
+
+      await enable(table, true);
+
+      expect(removed).not.toHaveBeenCalled();
+    });
+
+    it("names the command for a forward its rollback could not remove", async () => {
+      const { table } = harness({
+        remote: { tls: CERT },
+        tailnet: {
+          enableRelay: vi.fn(async ([port]: number[]) =>
+            port === WEB_PORT
+              ? { ok: false as const, command: "serve web" }
+              : { ok: true as const },
+          ),
+          disableRelay: vi.fn(async () => ({ ok: false as const, command: "off bridge" })),
+        },
+      });
+
+      expect((await enable(table, true)).commands).toEqual(["serve web", "off bridge"]);
+    });
+
+    it("when the write fails removes the forwards it added, and never applies", async () => {
+      const { table, steps, file } = harness({ remote: { tls: CERT }, writeFails: true });
+
+      const result = await enable(table, true);
+
+      expect(result).toMatchObject({
+        ok: false,
+        text: MESSAGES.remoteTailnetRefused("write-failed", "en", "disk full"),
+      });
+      expect(steps).toEqual([
+        "read serve",
+        `forward [${BRIDGE_PORT}]`,
+        `forward [${WEB_PORT}]`,
+        "write failed",
+        `unforward [${BRIDGE_PORT}]`,
+        `unforward [${WEB_PORT}]`,
+      ]);
+      expect(file.remote.tailnet.enabled).toBe(false);
+    });
+
+    it("rolls back when the write itself rejects", async () => {
+      const { table, tailnet } = harness({
+        remote: { tls: CERT },
+        deps: { writeConfig: vi.fn(async () => Promise.reject(new Error("boom"))) },
+      });
+
+      const result = await enable(table, true);
+
+      expect(result).toMatchObject({ ok: false, text: expect.stringContaining("boom") });
+      expect(tailnet.disableRelay).toHaveBeenCalledTimes(2);
+    });
+
+    it("a failed step after the write is logged, and the steps after it still run", async () => {
+      const { table, tailnet } = harness({
+        tailnet: { applied: vi.fn(async () => Promise.reject(new Error("apply broke"))) },
+      });
+
+      expect(await enable(table, false)).toEqual({ ok: true, commands: [] });
+
+      expect(tailnet.log).toHaveBeenCalledWith(expect.stringContaining("apply broke"));
+      expect(tailnet.rearm).toHaveBeenCalledTimes(1);
+      expect(tailnet.checkNow).toHaveBeenCalledTimes(1);
+    });
+
+    it("runs one change at a time", async () => {
+      const releases: (() => void)[] = [];
+      const applied = vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            releases.push(resolve);
+          }),
+      );
+      const { table, writeConfig } = harness({ remote: { tls: CERT }, tailnet: { applied } });
+
+      const first = enable(table, false);
+      const second = disable(table);
+      await vi.waitFor(() => expect(applied).toHaveBeenCalledTimes(1));
+      // The disable has not started while the enable is still applying.
+      expect(writeConfig).toHaveBeenCalledTimes(1);
+
+      releases[0]?.();
+      await first;
+      await vi.waitFor(() => expect(applied).toHaveBeenCalledTimes(2));
+      expect(writeConfig).toHaveBeenCalledTimes(2);
+      releases[1]?.();
+      await second;
+    });
+  });
+
+  describe("disable", () => {
+    const ON = { enabled: true, web: { enabled: true }, tailnet: { enabled: true, relay: true } };
+
+    it("leaves remote.enabled, remote.web.enabled and relay as they are", async () => {
+      const { table, file } = harness({ remote: ON });
+
+      await disable(table);
+
+      expect(file.remote).toMatchObject({
+        enabled: true,
+        web: { enabled: true },
+        bindAddress: "192.168.1.5",
+        tailnet: { enabled: false, relay: true },
+      });
+    });
+
+    it("with relay removes the forwards, after the apply", async () => {
+      const { table, steps } = harness({ remote: ON });
+
+      expect(await disable(table)).toEqual({ ok: true, commands: [] });
+
+      expect(steps).toEqual([
+        "write",
+        "apply",
+        `unforward [${BRIDGE_PORT}]`,
+        `unforward [${WEB_PORT}]`,
+      ]);
+    });
+
+    it("without relay touches no forward", async () => {
+      const { table, tailnet } = harness({
+        remote: { ...ON, tailnet: { enabled: true, relay: false } },
+      });
+
+      await disable(table);
+
+      expect(tailnet.disableRelay).not.toHaveBeenCalled();
+    });
+
+    it("a removal that fails is logged and reported, and the disable stands", async () => {
+      const { table, file, tailnet } = harness({
+        remote: ON,
+        tailnet: {
+          disableRelay: vi.fn(async ([port]: number[]) => ({
+            ok: false as const,
+            command: `tailscale serve --tcp=${port} off`,
+          })),
+        },
+      });
+
+      const result = await disable(table);
+
+      expect(result).toEqual({
+        ok: true,
+        commands: [
+          `tailscale serve --tcp=${BRIDGE_PORT} off`,
+          `tailscale serve --tcp=${WEB_PORT} off`,
+        ],
+      });
+      expect(file.remote.tailnet.enabled).toBe(false);
+      expect(tailnet.log).toHaveBeenCalledWith(
+        expect.stringContaining(`tailscale serve --tcp=${WEB_PORT} off`),
+      );
+    });
+
+    it("when the write fails keeps the forwards", async () => {
+      const { table, tailnet } = harness({ remote: ON, writeFails: true });
+
+      expect(await disable(table)).toMatchObject({ ok: false });
+
+      expect(tailnet.applied).not.toHaveBeenCalled();
+      expect(tailnet.disableRelay).not.toHaveBeenCalled();
+    });
+
+    it("a failed apply still removes the forwards", async () => {
+      const { table, tailnet } = harness({
+        remote: ON,
+        tailnet: { applied: vi.fn(async () => Promise.reject(new Error("apply broke"))) },
+      });
+
+      expect(await disable(table)).toEqual({ ok: true, commands: [] });
+
+      expect(tailnet.disableRelay).toHaveBeenCalledTimes(2);
+    });
+
+    it("with the switch already off does nothing", async () => {
+      const { table, steps, tailnet } = harness({
+        remote: { ...ON, tailnet: { enabled: false, relay: true } },
+      });
+
+      expect(await disable(table)).toEqual({ ok: true, commands: [] });
+
+      expect(tailnet.disableRelay).not.toHaveBeenCalled();
+      expect(steps).toEqual(["write"]);
+    });
   });
 });
 

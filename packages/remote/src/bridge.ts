@@ -324,8 +324,9 @@ export type BridgeDeps = {
    */
   onIdleDisabled?(): void;
   /** Phase 0: a desktop OS notification — a login lockout (global, or one
-   *  device's, with that device's name), or a refresh token presented
-   *  again. Optional; defaults to a no-op. */
+   *  device's, with that device's name), a refresh token presented again, or
+   *  a device joining with the owner password (with its name). Optional;
+   *  defaults to a no-op. */
   notifyDesktop?(kind: DesktopNoticeKind, deviceName?: string): void;
   /**
    * Phase 1: starts the static web listener (listen.ts's `listenWeb`).
@@ -617,7 +618,9 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
         return ownerAuth.checkJoinPassword(password, source);
       },
       issue: (deviceId) => ownerAuth.issueForJoin(deviceId, source, startedAt),
-      onJoined() {},
+      onJoined(deviceName) {
+        notifyDesktop("device-joined", deviceName);
+      },
     };
   }
 

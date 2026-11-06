@@ -79,7 +79,12 @@ export type LoginLimits = {
 
 /** What the desktop shows an OS notification for (main.ts, bilingual).
  *  `locked-out-device` carries the device's name beside it. */
-export type DesktopNoticeKind = "locked-out-global" | "locked-out-device" | "refresh-reuse";
+export type DesktopNoticeKind =
+  | "locked-out-global"
+  | "locked-out-device"
+  | "refresh-reuse"
+  /** A device joined over Tailscale with the owner password. */
+  | "device-joined";
 
 export const NO_LOGIN_LIMITS: LoginLimits = {
   allow: () => true,

@@ -176,7 +176,7 @@ export type TailnetGuard = {
 /** Reads `serve status --json` (Funnel settings are in the same document).
  *  `undefined` is a failed read. No config at all is a successful read of an
  *  empty one, which Tailscale's JSON can spell `null`. */
-async function readServeStatus(deps: TailscaleCertDeps): Promise<object | undefined> {
+export async function readServeStatus(deps: TailscaleCertDeps): Promise<object | undefined> {
   const cli = await findTailscaleCli(deps);
   if (cli === undefined) return undefined;
   try {

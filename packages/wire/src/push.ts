@@ -23,6 +23,9 @@ export const PUSH_KINDS = [
   "review-comment",
   "review-queued",
   "review-requested",
+  // A device joined over Tailscale with the owner password. Generic: never
+  // the device's name.
+  "device-joined",
 ] as const;
 export type PushKind = (typeof PUSH_KINDS)[number];
 

@@ -243,6 +243,8 @@ function stubJarvis(overrides: Partial<RendererApi>): RendererApi {
       kind: "failed" as const,
       detail: "not stubbed in this test",
     })),
+    tailnetEnable: vi.fn(async () => ({ ok: true as const, commands: [] })),
+    tailnetDisable: vi.fn(async () => ({ ok: true as const, commands: [] })),
     plansList: vi.fn(async () => ({ session: undefined, planMode: [], repo: [] })),
     plansRead: vi.fn(async () => ({ ok: false as const, reason: "not-found" as const })),
     plansWriteBlock: vi.fn(async () => ({ ok: false as const, reason: "not-found" as const })),
