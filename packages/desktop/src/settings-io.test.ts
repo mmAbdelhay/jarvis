@@ -463,6 +463,46 @@ describe("writeSettingsFile", () => {
       expect(await inFile(path)).toEqual(whole);
     });
 
+    it("a save keeps the bind recorded before the enable, whatever the draft says", async () => {
+      const path = join(await tempDir(), "jarvis.yaml");
+      await writeFile(
+        path,
+        [
+          "remote:",
+          "  tailnet:",
+          "    enabled: true",
+          "    bindBeforeEnable: 192.168.1.5",
+          "",
+        ].join("\n"),
+      );
+      const whole = { enabled: true, relay: false, bindBeforeEnable: "192.168.1.5" };
+
+      await writeSettingsFile(path, withTailnet(true));
+      expect(await inFile(path)).toEqual(whole);
+
+      await writeSettingsFile(path, {
+        ...draft,
+        remote: {
+          ...draft.remote,
+          tailnet: { enabled: true, relay: false, bindBeforeEnable: "10.0.0.1" },
+        },
+      });
+      expect(await inFile(path)).toEqual(whole);
+    });
+
+    it("the switch's write of the bind record survives the file", async () => {
+      const path = join(await tempDir(), "jarvis.yaml");
+      const tailnet = { enabled: true, relay: true, bindBeforeEnable: "100.84.17.203" };
+
+      await writeSettingsFile(
+        path,
+        { ...draft, remote: { ...draft.remote, tailnet } },
+        { writesTailnet: true },
+      );
+
+      expect(await inFile(path)).toEqual(tailnet);
+    });
+
     it("the switch's write of the record survives the file", async () => {
       const path = join(await tempDir(), "jarvis.yaml");
       const tailnet = {

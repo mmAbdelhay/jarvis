@@ -2349,6 +2349,7 @@ export const MESSAGES = {
       | "no-owner-password"
       | "funnel"
       | "funnel-unread"
+      | "forward-present"
       | "no-address"
       | "relay-failed"
       | "write-failed",
@@ -2367,6 +2368,10 @@ export const MESSAGES = {
       "funnel-unread": {
         ar: "لم يُشغَّل: تعذّرت قراءة إعدادات Tailscale للتأكد من أن Funnel لا يكشف جارفيس. تأكد من أن Tailscale مثبّت ويعمل.",
         en: "Not turned on: could not read Tailscale's settings to confirm Funnel does not expose Jarvis. Check that Tailscale is installed and running.",
+      },
+      "forward-present": {
+        ar: "لم يُشغَّل: لدى Tailscale توجيه على أحد منافذ جارفيس، وسيتوقف عن العمل لو استمع جارفيس على عنوان Tailscale. اختر التوجيه عبر Tailscale (relay) ثم حاول من جديد.",
+        en: "Not turned on: Tailscale already has a forward on a Jarvis port, and it would stop working if Jarvis listened on the Tailscale address. Choose Forward through Tailscale (relay), then try again.",
       },
       "no-address": {
         ar: "لم يُشغَّل: ليس لهذا الجهاز عنوان Tailscale. اتصل بـ Tailscale أولًا.",

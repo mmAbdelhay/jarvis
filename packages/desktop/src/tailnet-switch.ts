@@ -151,6 +151,13 @@ export function createTailnetSwitch(deps: TailnetSwitchDeps): TailnetSwitch {
       return refused(MESSAGES.remoteTailnetRefused("funnel", language));
     }
 
+    // Without the relay Jarvis binds the Tailscale address itself, and a plain
+    // forward on these ports would be left pointing at a loopback port nothing
+    // listens on. Only the relay replaces a forward and puts it back.
+    if (!relay && ports.some((port) => existingForward(serve, port) !== undefined)) {
+      return refused(MESSAGES.remoteTailnetRefused("forward-present", language));
+    }
+
     // Before the certificate, the first step that leaves anything on disk.
     const bindAddress = relay ? LOOPBACK : tailscaleAddress();
     if (bindAddress === undefined) {
@@ -199,6 +206,10 @@ export function createTailnetSwitch(deps: TailnetSwitchDeps): TailnetSwitch {
       for (const { port, earlier } of changed) {
         if (earlier !== undefined) replacedForwards[port] = earlier;
       }
+      // The same: what the first enable overwrote, never its own address.
+      const bindBeforeEnable = tailnet.enabled
+        ? tailnet.bindBeforeEnable
+        : current.remote.bindAddress;
       return {
         ...current,
         remote: {
@@ -210,6 +221,7 @@ export function createTailnetSwitch(deps: TailnetSwitchDeps): TailnetSwitch {
             enabled: true,
             relay,
             ...(Object.keys(replacedForwards).length === 0 ? {} : { replacedForwards }),
+            ...(bindBeforeEnable === undefined ? {} : { bindBeforeEnable }),
           },
           ...(issued === undefined ? {} : { tls: issued }),
         },
@@ -230,7 +242,7 @@ export function createTailnetSwitch(deps: TailnetSwitchDeps): TailnetSwitch {
   async function disable(): Promise<TailnetSwitchResult> {
     let change: { forwards: ChangedForward[] } | undefined;
     const failure = await write((current) => {
-      const { enabled, relay, replacedForwards = {} } = current.remote.tailnet;
+      const { enabled, relay, replacedForwards = {}, bindBeforeEnable } = current.remote.tailnet;
       if (!enabled) return current;
       // Only what Jarvis added is removed: a recorded port goes back to the
       // user's own forward, even if the config has moved off it since.
@@ -243,7 +255,11 @@ export function createTailnetSwitch(deps: TailnetSwitchDeps): TailnetSwitch {
       };
       return {
         ...current,
-        remote: { ...current.remote, tailnet: { enabled: false, relay } },
+        remote: {
+          ...current.remote,
+          bindAddress: bindBeforeEnable ?? current.remote.bindAddress,
+          tailnet: { enabled: false, relay },
+        },
       };
     });
     if (failure !== undefined) {

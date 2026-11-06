@@ -219,11 +219,13 @@ export type RemoteConfig = {
   web: { enabled: boolean; port?: number };
   /** Controlling other Jarvis machines over Tailscale, off by default.
    *  `replacedForwards`, by port: what an enable replaced, for the disable to
-   *  put back. Written only by the switch (tailnet-switch.ts). */
+   *  put back. `bindBeforeEnable`: `bindAddress` before the first enable, the
+   *  same. Written only by the switch (tailnet-switch.ts). */
   tailnet: {
     enabled: boolean;
     relay: boolean;
     replacedForwards?: Record<string, ReplacedForward>;
+    bindBeforeEnable?: string;
   };
   /** 0 = never; otherwise the bridge turns itself off after this long idle. */
   idleDisableMinutes: number;
@@ -1125,10 +1127,16 @@ export function parseRemoteTailnet(rawTailnet: unknown): RemoteConfig["tailnet"]
     return value;
   };
   const replacedForwards = parseReplacedForwards(tailnet["replacedForwards"]);
+  // The switch's own bookkeeping, like `replacedForwards`: a damaged record
+  // reads as none, so a disable leaves the bind alone.
+  const bindBeforeEnable = tailnet["bindBeforeEnable"];
   return {
     enabled: flag("enabled"),
     relay: flag("relay"),
     ...(replacedForwards === undefined ? {} : { replacedForwards }),
+    ...(typeof bindBeforeEnable === "string" && isIP(bindBeforeEnable) !== 0
+      ? { bindBeforeEnable }
+      : {}),
   };
 }
 

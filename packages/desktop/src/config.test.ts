@@ -1654,6 +1654,33 @@ describe("remote", () => {
       expect(tailnet({})).not.toBe(DEFAULT_REMOTE.tailnet);
     });
 
+    describe("bindBeforeEnable", () => {
+      const recorded = (bindBeforeEnable: unknown) =>
+        tailnet({ tailnet: { enabled: true, bindBeforeEnable } }).bindBeforeEnable;
+
+      it.each(["192.168.1.5", "100.84.17.203", "127.0.0.1", "0.0.0.0", "::1"])(
+        "reads %s",
+        (bind) => {
+          expect(recorded(bind)).toBe(bind);
+        },
+      );
+
+      it.each([
+        ["absent", undefined],
+        ["null", null],
+        ["a number", 7717],
+        ["an object", { address: "127.0.0.1" }],
+        ["a hostname", "machine.local"],
+        ["empty", ""],
+        ["shell text", "127.0.0.1; rm -rf /"],
+      ])("%s parses as absent, and never throws", (_name, value) => {
+        expect(recorded(value)).toBeUndefined();
+        expect(tailnet({ tailnet: { enabled: true, bindBeforeEnable: value } })).not.toHaveProperty(
+          "bindBeforeEnable",
+        );
+      });
+    });
+
     describe("replacedForwards", () => {
       const recorded = (replacedForwards: unknown) =>
         tailnet({ tailnet: { enabled: true, relay: true, replacedForwards } }).replacedForwards;

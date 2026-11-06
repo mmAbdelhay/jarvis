@@ -2069,6 +2069,48 @@ describe("dispatch table: the Tailscale access switch", () => {
       expect(writeConfig).not.toHaveBeenCalled();
     });
 
+    it.each([
+      ["the bridge's", BRIDGE_PORT],
+      ["the web client's", WEB_PORT],
+    ])(
+      "without relay and with a forward on %s port refuses and changes nothing",
+      async (_l, port) => {
+        const { table, file, writeConfig, obtain, tailnet } = harness({
+          tailnet: {
+            readServeStatus: vi.fn(async () => ({
+              TCP: { [port]: { TCPForward: `127.0.0.1:${port}` } },
+            })),
+          },
+        });
+        const before = structuredClone(file.remote);
+
+        const result = await enable(table, false);
+
+        const text = MESSAGES.remoteTailnetRefused("forward-present", "en");
+        expect(result).toEqual({ ok: false, text, language: "en", commands: [] });
+        expect(text).toContain("relay");
+        expect(MESSAGES.remoteTailnetRefused("forward-present", "ar")).not.toBe(text);
+        expect(obtain).not.toHaveBeenCalled();
+        expect(writeConfig).not.toHaveBeenCalled();
+        expect(tailnet.enableRelay).not.toHaveBeenCalled();
+        expect(tailnet.applied).not.toHaveBeenCalled();
+        expect(file.remote).toEqual(before);
+      },
+    );
+
+    it("with relay and a forward already there goes ahead", async () => {
+      const { table } = harness({
+        remote: { tls: CERT },
+        tailnet: {
+          readServeStatus: vi.fn(async () => ({
+            TCP: { [BRIDGE_PORT]: { TCPForward: `127.0.0.1:${BRIDGE_PORT}` } },
+          })),
+        },
+      });
+
+      expect(await enable(table, true)).toEqual({ ok: true, commands: [] });
+    });
+
     it("with relay forwards both ports before writing, and binds loopback", async () => {
       const { table, file, steps } = harness({
         remote: { tls: CERT },
@@ -2367,6 +2409,67 @@ describe("dispatch table: the Tailscale access switch", () => {
       expect(tailnet.disableRelay).not.toHaveBeenCalled();
     });
 
+    describe("the bind address", () => {
+      const TAILSCALE_IP = "100.84.17.203";
+
+      it.each([
+        ["relay", true, "127.0.0.1"],
+        ["no relay", false, TAILSCALE_IP],
+      ])("with %s, on then off puts back the bind from before", async (_label, relay, bindOn) => {
+        const { table, file } = harness({ remote: { tls: CERT, bindAddress: "192.168.1.5" } });
+
+        await enable(table, relay);
+        expect(file.remote.bindAddress).toBe(bindOn);
+        expect(file.remote.tailnet.bindBeforeEnable).toBe("192.168.1.5");
+
+        await disable(table);
+        expect(file.remote.bindAddress).toBe("192.168.1.5");
+        expect(file.remote.tailnet).toEqual({ enabled: false, relay });
+      });
+
+      it("a machine already on its Tailscale address gets it back after relay", async () => {
+        const { table, file } = harness({ remote: { tls: CERT, bindAddress: TAILSCALE_IP } });
+
+        await enable(table, true);
+        expect(file.remote.bindAddress).toBe("127.0.0.1");
+        await disable(table);
+
+        expect(file.remote.bindAddress).toBe(TAILSCALE_IP);
+      });
+
+      it("a second enable keeps the first record", async () => {
+        const { table, file } = harness({ remote: { tls: CERT, bindAddress: "192.168.1.5" } });
+
+        await enable(table, true);
+        await enable(table, true);
+
+        expect(file.remote.tailnet.bindBeforeEnable).toBe("192.168.1.5");
+        await disable(table);
+        expect(file.remote.bindAddress).toBe("192.168.1.5");
+      });
+
+      it("a later enable records afresh", async () => {
+        const { table, file } = harness({ remote: { tls: CERT, bindAddress: "192.168.1.5" } });
+        await enable(table, true);
+        await disable(table);
+        file.remote.bindAddress = "10.0.0.2";
+
+        await enable(table, true);
+
+        expect(file.remote.tailnet.bindBeforeEnable).toBe("10.0.0.2");
+      });
+
+      it("no record leaves the bind alone", async () => {
+        const { table, file } = harness({
+          remote: { ...ON, bindAddress: "127.0.0.1" },
+        });
+
+        await disable(table);
+
+        expect(file.remote.bindAddress).toBe("127.0.0.1");
+      });
+    });
+
     describe("on, then off", () => {
       const plain = (port: number) => ({ TCPForward: `127.0.0.1:${port}` });
       const onThenOff = (status: object, tailnet: Partial<DispatchDeps["tailnet"]> = {}) => {
@@ -2425,6 +2528,7 @@ describe("dispatch table: the Tailscale access switch", () => {
         expect(file.remote.tailnet).toEqual({
           enabled: true,
           relay: true,
+          bindBeforeEnable: "192.168.1.5",
           replacedForwards: {
             [BRIDGE_PORT]: { target: `127.0.0.1:${BRIDGE_PORT}` },
             [WEB_PORT]: { target: "localhost:9000", proxyProtocol: 1, terminateTls: true },
