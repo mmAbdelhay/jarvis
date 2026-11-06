@@ -98,6 +98,24 @@ export function relayConfirmed(serveStatus: unknown, ports: number[]): boolean {
 
 export type RelayResult = { ok: true } | { ok: false; command: string };
 
+/** A TCP forward as Tailscale holds it, enough to put it back. */
+export type ExistingForward = { target: string; proxyProtocol?: number; terminateTls?: boolean };
+
+/** The top-level forward on `port`, in whatever form the user set it up. Top
+ *  level only, as in `relayConfirmed`. */
+export function existingForward(serveStatus: unknown, port: number): ExistingForward | undefined {
+  const entry = asRecord(asRecord(asRecord(serveStatus)?.["TCP"])?.[String(port)]);
+  const target = entry?.["TCPForward"];
+  if (typeof target !== "string" || target === "") return undefined;
+  const proxyProtocol = entry?.["ProxyProtocol"];
+  const terminateTls = entry?.["TerminateTLS"];
+  return {
+    target,
+    ...(typeof proxyProtocol === "number" && proxyProtocol > 0 ? { proxyProtocol } : {}),
+    ...(typeof terminateTls === "string" && terminateTls !== "" ? { terminateTls: true } : {}),
+  };
+}
+
 const enableArgs = (port: number): string[] => [
   "serve",
   "--bg",
@@ -138,6 +156,25 @@ export async function disableRelay(deps: TailscaleCertDeps, ports: number[]): Pr
     if (cli === undefined || !(await ran(deps, cli, args))) failed ??= byHand(args);
   }
   return failed === undefined ? { ok: true } : { ok: false, command: failed };
+}
+
+/** Puts a forward back as it was before an enable replaced it. */
+export async function restoreForward(
+  deps: TailscaleCertDeps,
+  port: number,
+  forward: ExistingForward,
+): Promise<RelayResult> {
+  const args = [
+    "serve",
+    "--bg",
+    `--${forward.terminateTls === true ? "tls-terminated-tcp" : "tcp"}=${port}`,
+    ...(forward.proxyProtocol === undefined ? [] : [`--proxy-protocol=${forward.proxyProtocol}`]),
+    `tcp://${forward.target}`,
+  ];
+  const cli = await findTailscaleCli(deps);
+  return cli !== undefined && (await ran(deps, cli, args))
+    ? { ok: true }
+    : { ok: false, command: byHand(args) };
 }
 
 type Verdict = "funnel" | "relay-missing" | undefined;

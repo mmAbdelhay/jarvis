@@ -1931,6 +1931,9 @@ let tailnetBusy = false;
  *  the Enable switch: not on without an owner password, but always off. The
  *  relay is settled before enabling: while on it is not a live choice. */
 function renderTailnetSwitch(): void {
+  // The draft's `remote` is out of date until the change answers, and Save
+  // would write its address and certificate over the ones the change wrote.
+  ($("settings-save") as HTMLButtonElement).disabled = tailnetBusy;
   if (draft === undefined) return;
   const on = draft.remote.tailnet.enabled;
   const toggle = $("settings-remote-tailnet") as HTMLInputElement;
@@ -1991,42 +1994,55 @@ function tailnetEnableReplacesPairing(remote: JarvisConfig["remote"]): boolean {
 
 /** Runs one enable or disable. The channel wrote the file, so `remote` is
  *  read back from it; the rest of the draft may hold unsaved edits and stays.
- *  A refusal changed nothing, and the switch redraws from the draft. */
+ *  A refusal changed nothing, and the switch redraws from the draft. A failed
+ *  read-back changed nothing either, of what the channel already did: the
+ *  switch then shows `outcome`, the part of the file this call knows. */
 async function changeTailnet(
   run: () => ReturnType<typeof window.jarvis.tailnetDisable>,
+  outcome: Partial<JarvisConfig["remote"]["tailnet"]>,
 ): Promise<void> {
   tailnetBusy = true;
   $("settings-remote-tailnet-confirm").hidden = true;
   showTailnetResult(undefined, []);
   renderTailnetSwitch();
+  let result: Awaited<ReturnType<typeof run>>;
   try {
-    const result = await run();
-    if (!result.ok) {
-      tailnetBusy = false;
-      showTailnetResult(result.text, result.commands);
-      renderTailnetSwitch();
-      return;
-    }
-    const fresh = await window.jarvis.getSettings();
-    tailnetBusy = false;
-    if (draft !== undefined) draft.remote = fresh.remote;
-    if (savedBaseline !== undefined) savedBaseline.remote = structuredClone(fresh.remote);
-    renderRemote();
-    if (result.commands.length > 0) {
-      showTailnetResult(MESSAGES.remoteTailnetForwardLeft(PRIMARY_LANGUAGE), result.commands);
-    }
+    result = await run();
   } catch (error) {
     console.error(`settings: Tailscale access change failed: ${String(error)}`);
     tailnetBusy = false;
     showTailnetResult(MESSAGES.remoteTailnetFailed(PRIMARY_LANGUAGE), []);
     renderTailnetSwitch();
+    return;
   }
+  if (!result.ok) {
+    tailnetBusy = false;
+    showTailnetResult(result.text, result.commands);
+    renderTailnetSwitch();
+    return;
+  }
+  const notes: string[] = [];
+  if (result.commands.length > 0) notes.push(MESSAGES.remoteTailnetForwardLeft(PRIMARY_LANGUAGE));
+  try {
+    const fresh = await window.jarvis.getSettings();
+    if (draft !== undefined) draft.remote = fresh.remote;
+    if (savedBaseline !== undefined) savedBaseline.remote = structuredClone(fresh.remote);
+  } catch (error) {
+    console.error(`settings: re-read after a Tailscale access change failed: ${String(error)}`);
+    notes.push(MESSAGES.remoteTailnetNotRefreshed(PRIMARY_LANGUAGE));
+    for (const known of [draft, savedBaseline]) {
+      if (known !== undefined) known.remote.tailnet = { ...known.remote.tailnet, ...outcome };
+    }
+  }
+  tailnetBusy = false;
+  renderRemote();
+  if (notes.length > 0) showTailnetResult(notes.join(" "), result.commands);
 }
 
 function wireTailnetSwitch(): void {
   const enable = (): void => {
     const relay = tailnetRelayChoice;
-    void changeTailnet(() => window.jarvis.tailnetEnable({ relay }));
+    void changeTailnet(() => window.jarvis.tailnetEnable({ relay }), { enabled: true, relay });
   };
   $("settings-remote-tailnet").addEventListener("change", () => {
     if (draft === undefined || tailnetBusy) return;
@@ -2034,7 +2050,7 @@ function wireTailnetSwitch(): void {
     // Drawn from the answer, not the click: a refusal or a Cancel leaves it.
     renderTailnetSwitch();
     if (!wanted) {
-      void changeTailnet(() => window.jarvis.tailnetDisable());
+      void changeTailnet(() => window.jarvis.tailnetDisable(), { enabled: false });
     } else if (tailnetEnableReplacesPairing(draft.remote)) {
       showTailnetResult(undefined, []);
       $("settings-remote-tailnet-confirm").hidden = false;
@@ -3083,7 +3099,7 @@ function ipv4ToHextets(dotted: string): [string, string] | undefined {
 // --------------------------------------------------------- Save / restart
 
 export async function saveSettings(): Promise<void> {
-  if (draft === undefined) return;
+  if (draft === undefined || tailnetBusy) return;
   // These services are constructed at startup. Their running instances cannot
   // safely be swapped by mutating the config object, so keep the restart
   // affordance only when one of their inputs actually changed.

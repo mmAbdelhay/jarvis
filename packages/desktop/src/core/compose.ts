@@ -73,7 +73,7 @@ import { createRemoteAccess, type RemoteAccess } from "../remote-access.js";
 import { createWebManifestLoader, nodeWebExportFs } from "../web-export.js";
 import { disableRemoteOnDisk } from "../remote-idle.js";
 import { certificateExpiry, obtainCertificate, type TailscaleCertDeps } from "../tailscale-cert.js";
-import { disableRelay, enableRelay, readServeStatus } from "../tailnet-guard.js";
+import { disableRelay, enableRelay, readServeStatus, restoreForward } from "../tailnet-guard.js";
 import { applyRemoteThenCheck, createRemoteTailnetGuard } from "../tailnet-guard-wiring.js";
 import { createNotifier } from "../notify.js";
 import { createReviewService } from "../review-service.js";
@@ -1693,7 +1693,11 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
       } else {
         draft = input;
       }
-      const result = await writeSettingsFile(DEFAULT_CONFIG_PATH, draft);
+      // An updater started from the file just above, so whatever it says of
+      // `remote.tailnet` is not stale. A draft is whatever Settings last read.
+      const result = await writeSettingsFile(DEFAULT_CONFIG_PATH, draft, {
+        writesTailnet: typeof input === "function",
+      });
       if (result.ok) {
         // Keep the same object identities held by already-running handlers.
         // Reads on their next operation see the saved values immediately.
@@ -2561,6 +2565,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
       readServeStatus: () => readServeStatus(tailscaleCertDeps),
       enableRelay: (ports) => enableRelay(tailscaleCertDeps, ports),
       disableRelay: (ports) => disableRelay(tailscaleCertDeps, ports),
+      restoreForward: (port, forward) => restoreForward(tailscaleCertDeps, port, forward),
       // Queued behind the apply the write itself started, so this resolves
       // only after the written file has reached the bridge.
       applied: () => applyFromDisk(),

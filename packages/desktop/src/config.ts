@@ -1101,7 +1101,7 @@ function parseRemotePush(rawPush: unknown): RemoteConfig["push"] {
   return { enabled: flag("enabled"), includeProjectNames: flag("includeProjectNames") };
 }
 
-function parseRemoteTailnet(rawTailnet: unknown): RemoteConfig["tailnet"] {
+export function parseRemoteTailnet(rawTailnet: unknown): RemoteConfig["tailnet"] {
   if (rawTailnet === undefined || rawTailnet === null) return { ...DEFAULT_REMOTE.tailnet };
   if (typeof rawTailnet !== "object" || Array.isArray(rawTailnet)) {
     throw new Error("Config `remote.tailnet` must be an object");

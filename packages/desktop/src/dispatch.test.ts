@@ -232,6 +232,7 @@ export function fakeDeps(overrides: Partial<DispatchDeps> = {}): DispatchDeps {
       readServeStatus: vi.fn(async () => ({})),
       enableRelay: vi.fn(async () => ({ ok: true as const })),
       disableRelay: vi.fn(async () => ({ ok: true as const })),
+      restoreForward: vi.fn(async () => ({ ok: true as const })),
       applied: vi.fn(async () => {}),
       rearm: vi.fn(async () => {}),
       reloadCertificate: vi.fn(async () => {}),
@@ -1861,6 +1862,7 @@ describe("dispatch table: the Tailscale access switch", () => {
       }),
       enableRelay: step("forward", { ok: true as const }),
       disableRelay: step("unforward", { ok: true as const }),
+      restoreForward: step("restore", { ok: true as const }),
       applied: step("apply", undefined),
       rearm: step("rearm", undefined),
       reloadCertificate: step("reload", undefined),
@@ -2134,6 +2136,111 @@ describe("dispatch table: the Tailscale access switch", () => {
       await enable(table, true);
 
       expect(removed).not.toHaveBeenCalled();
+    });
+
+    describe("over forwards the user already had", () => {
+      const PLAIN = {
+        TCP: {
+          [BRIDGE_PORT]: { TCPForward: `127.0.0.1:${BRIDGE_PORT}` },
+          [WEB_PORT]: { TCPForward: `127.0.0.1:${WEB_PORT}` },
+        },
+      };
+      const restored = () =>
+        vi.fn(async (_port: number, _forward: unknown) => ({ ok: true as const }));
+      const secondFails = () =>
+        vi.fn(async ([port]: number[]) =>
+          port === WEB_PORT ? { ok: false as const, command: "serve web" } : { ok: true as const },
+        );
+
+      it("a failing second forward restores the first, and deletes nothing", async () => {
+        const removed = vi.fn(async () => ({ ok: true as const }));
+        const restoreForward = restored();
+        const { table, writeConfig } = harness({
+          remote: { tls: CERT },
+          tailnet: {
+            readServeStatus: vi.fn(async () => PLAIN),
+            enableRelay: secondFails(),
+            disableRelay: removed,
+            restoreForward,
+          },
+        });
+
+        const result = await enable(table, true);
+
+        expect(result).toMatchObject({ ok: false, commands: ["serve web"] });
+        expect(restoreForward.mock.calls).toEqual([
+          [BRIDGE_PORT, { target: `127.0.0.1:${BRIDGE_PORT}` }],
+        ]);
+        expect(removed).not.toHaveBeenCalled();
+        expect(writeConfig).not.toHaveBeenCalled();
+      });
+
+      it("a failed write restores both, each in its earlier form", async () => {
+        const removed = vi.fn(async () => ({ ok: true as const }));
+        const restoreForward = restored();
+        const { table } = harness({
+          remote: { tls: CERT },
+          writeFails: true,
+          tailnet: {
+            readServeStatus: vi.fn(async () => ({
+              TCP: {
+                [BRIDGE_PORT]: { TCPForward: `127.0.0.1:${BRIDGE_PORT}` },
+                [WEB_PORT]: { TCPForward: `127.0.0.1:${WEB_PORT}`, ProxyProtocol: 1 },
+              },
+            })),
+            disableRelay: removed,
+            restoreForward,
+          },
+        });
+
+        await enable(table, true);
+
+        expect(restoreForward.mock.calls).toEqual([
+          [BRIDGE_PORT, { target: `127.0.0.1:${BRIDGE_PORT}` }],
+          [WEB_PORT, { target: `127.0.0.1:${WEB_PORT}`, proxyProtocol: 1 }],
+        ]);
+        expect(removed).not.toHaveBeenCalled();
+      });
+
+      it("removes a forward that was not there, and restores one that was", async () => {
+        const removed = vi.fn(async (_ports: number[]) => ({ ok: true as const }));
+        const restoreForward = restored();
+        const { table } = harness({
+          remote: { tls: CERT },
+          writeFails: true,
+          tailnet: {
+            readServeStatus: vi.fn(async () => ({
+              TCP: { [WEB_PORT]: { TCPForward: `127.0.0.1:${WEB_PORT}` } },
+            })),
+            disableRelay: removed,
+            restoreForward,
+          },
+        });
+
+        await enable(table, true);
+
+        expect(removed.mock.calls).toEqual([[[BRIDGE_PORT]]]);
+        expect(restoreForward.mock.calls).toEqual([
+          [WEB_PORT, { target: `127.0.0.1:${WEB_PORT}` }],
+        ]);
+      });
+
+      it("names the exact command when a restore fails", async () => {
+        const { table, tailnet } = harness({
+          remote: { tls: CERT },
+          tailnet: {
+            readServeStatus: vi.fn(async () => PLAIN),
+            enableRelay: secondFails(),
+            restoreForward: vi.fn(async () => ({
+              ok: false as const,
+              command: "restore bridge",
+            })),
+          },
+        });
+
+        expect((await enable(table, true)).commands).toEqual(["serve web", "restore bridge"]);
+        expect(tailnet.log).toHaveBeenCalledWith(expect.stringContaining("restore bridge"));
+      });
     });
 
     it("names the command for a forward its rollback could not remove", async () => {

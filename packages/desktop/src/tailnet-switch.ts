@@ -9,7 +9,13 @@ import type { JarvisConfig, RemoteConfig } from "./config.js";
 import { errorMessage, MESSAGES } from "./messages.js";
 import { serialize } from "./serialize.js";
 import type { SettingsWriteResult } from "./settings-io.js";
-import { funnelExposes, relayConfirmed, type RelayResult } from "./tailnet-guard.js";
+import {
+  existingForward,
+  funnelExposes,
+  relayConfirmed,
+  type ExistingForward,
+  type RelayResult,
+} from "./tailnet-guard.js";
 import type { TailscaleCertResult } from "./tailscale-cert.js";
 
 const LOOPBACK = "127.0.0.1";
@@ -36,6 +42,7 @@ export type TailnetSwitchControls = {
   readServeStatus(): Promise<object | undefined>;
   enableRelay(ports: number[]): Promise<RelayResult>;
   disableRelay(ports: number[]): Promise<RelayResult>;
+  restoreForward(port: number, forward: ExistingForward): Promise<RelayResult>;
   /** Resolves once the file as written has reached the bridge. A write only
    *  queues that, and a verdict sent before it lands would be dropped. */
   applied(): Promise<void>;
@@ -56,6 +63,9 @@ export type TailnetSwitchDeps = {
 
 const hasCertificate = ({ tls }: RemoteConfig): boolean =>
   tls.certPath !== undefined && tls.keyPath !== undefined;
+
+/** A port this call changed, and the forward it replaced, if any. */
+type ChangedForward = { port: number; earlier: ExistingForward | undefined };
 
 export function createTailnetSwitch(deps: TailnetSwitchDeps): TailnetSwitch {
   const { language, controls } = deps;
@@ -87,14 +97,18 @@ export function createTailnetSwitch(deps: TailnetSwitchDeps): TailnetSwitch {
     )?.address;
   }
 
-  /** Removes each port's forward, trying them all. Returns the commands for
-   *  those Tailscale did not confirm, which are logged and never fatal. */
-  async function removeForwards(ports: number[]): Promise<string[]> {
+  /** Takes each port back to what it was: its earlier forward, or none. Tries
+   *  them all. Returns the commands for those Tailscale did not confirm, which
+   *  are logged and never fatal. */
+  async function undoForwards(changed: ChangedForward[]): Promise<string[]> {
     const left: string[] = [];
-    for (const port of ports) {
-      const result = await controls.disableRelay([port]);
+    for (const { port, earlier } of changed) {
+      const result =
+        earlier === undefined
+          ? await controls.disableRelay([port])
+          : await controls.restoreForward(port, earlier);
       if (!result.ok) {
-        controls.log(`tailnet switch: forward not confirmed removed: ${result.command}`);
+        controls.log(`tailnet switch: forward not confirmed undone: ${result.command}`);
         left.push(result.command);
       }
     }
@@ -150,21 +164,23 @@ export function createTailnetSwitch(deps: TailnetSwitchDeps): TailnetSwitch {
       issued = { certPath: certificate.certPath, keyPath: certificate.keyPath };
     }
 
-    // A forward already in place (an earlier `off` that did not take) is not
-    // this call's to take back.
-    const added: number[] = [];
+    // A relay forward already in place (an earlier `off` that did not take)
+    // is left alone. Any other forward on the port is replaced, so a rollback
+    // puts that one back rather than deleting what the user had.
+    const changed: ChangedForward[] = [];
     if (relay) {
       for (const port of ports) {
         if (relayConfirmed(serve, [port])) continue;
+        const earlier = existingForward(serve, port);
         const forward = await controls.enableRelay([port]);
         if (!forward.ok) {
-          const left = await removeForwards(added);
+          const left = await undoForwards(changed);
           return refused(MESSAGES.remoteTailnetRefused("relay-failed", language), [
             forward.command,
             ...left,
           ]);
         }
-        added.push(port);
+        changed.push({ port, earlier });
       }
     }
 
@@ -188,7 +204,7 @@ export function createTailnetSwitch(deps: TailnetSwitchDeps): TailnetSwitch {
       };
     });
     if (failure !== undefined) {
-      const left = await removeForwards(added);
+      const left = await undoForwards(changed);
       return refused(MESSAGES.remoteTailnetRefused("write-failed", language, failure), left);
     }
 
@@ -218,7 +234,10 @@ export function createTailnetSwitch(deps: TailnetSwitchDeps): TailnetSwitch {
     if (change === undefined) return { ok: true, commands: [] };
 
     await settled("apply", () => controls.applied());
-    return { ok: true, commands: await removeForwards(change.forwards) };
+    return {
+      ok: true,
+      commands: await undoForwards(change.forwards.map((port) => ({ port, earlier: undefined }))),
+    };
   }
 
   // One at a time: an enable's checks would otherwise answer for a config a

@@ -4,7 +4,7 @@ import { parseConfig, type JarvisConfig } from "../src/config.js";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 import { PERSONAL_PROJECT } from "../src/personal.js";
 import type { BindChoice, RemoteStatus } from "@jarvis/remote";
-import { initSettings, openSettings, savePrayerSettings } from "./settings.js";
+import { initSettings, openSettings, savePrayerSettings, saveSettings } from "./settings.js";
 import { initKeepAwake } from "./keep-awake.js";
 import { setTerminalFontBase, terminalFontSize } from "./terminal-font.js";
 import { encodeQr, qrToCanvas } from "./vendor/qr.js";
@@ -3920,6 +3920,113 @@ describe("Tailscale access", () => {
       expect(saved.remote.tailnet).toEqual({ enabled: true, relay: false });
       expect(saved.remote.bindAddress).toBe("100.84.17.203");
       expect(saved.brain.systemPrompt).toBe("typed, not saved");
+    });
+  });
+
+  describe("Save, while a change is in flight", () => {
+    const save = () => el<HTMLButtonElement>("settings-save");
+
+    it.each([
+      ["disable", "tailnetDisable", true],
+      ["enable", "tailnetEnable", false],
+    ] as const)("during a %s, sends nothing", async (_name, channel, on) => {
+      const calls = await open(configWith({ tailnet: { enabled: on, relay: false } }));
+      let finish: (value: unknown) => void = () => {};
+      jarvis()[channel] = () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        });
+
+      flip(!on);
+
+      expect(save().disabled).toBe(true);
+      // Not only the button: any other route to the same function.
+      await saveSettings();
+      expect(calls.some((c) => c.call === "saveSettings")).toBe(false);
+
+      finish({ ok: true, commands: [] });
+      await flush();
+      await flush();
+      expect(save().disabled).toBe(false);
+    });
+
+    it("stays disabled until the re-read has answered", async () => {
+      await open(configWith({ tailnet: { enabled: true, relay: false } }));
+      let answer: (value: JarvisConfig) => void = () => {};
+      jarvis()["getSettings"] = () =>
+        new Promise((resolve) => {
+          answer = resolve;
+        });
+
+      flip(false);
+      await flush();
+
+      expect(save().disabled).toBe(true);
+      answer(configWith({ tailnet: { enabled: false, relay: false } }));
+      await flush();
+      expect(save().disabled).toBe(false);
+    });
+
+    it("comes back after a refusal", async () => {
+      await open();
+      jarvis()["tailnetEnable"] = () =>
+        Promise.resolve({ ok: false, text: "No", language: "en", commands: [] });
+
+      flip(true);
+      await flush();
+
+      expect(save().disabled).toBe(false);
+    });
+  });
+
+  describe("a change that took, whose re-read failed", () => {
+    function rereadFails(): void {
+      vi.spyOn(console, "error").mockImplementationOnce(() => {});
+      jarvis()["getSettings"] = () => Promise.reject(new Error("socket gone"));
+    }
+
+    it("a disable does not claim failure, shows the commands, and Save says off", async () => {
+      const calls = await open(configWith({ tailnet: { enabled: true, relay: true } }));
+      rereadFails();
+      jarvis()["tailnetDisable"] = () =>
+        Promise.resolve({ ok: true, commands: ["tailscale serve --tcp=7717 off"] });
+
+      flip(false);
+      await flush();
+      await flush();
+
+      expect(toggle().checked).toBe(false);
+      expect(toggle().disabled).toBe(false);
+      const result = el("settings-remote-tailnet-result").textContent;
+      expect(result).toContain(MESSAGES.remoteTailnetForwardLeft(PRIMARY_LANGUAGE));
+      expect(result).toContain(MESSAGES.remoteTailnetNotRefreshed(PRIMARY_LANGUAGE));
+      expect(result).not.toContain(MESSAGES.remoteTailnetFailed(PRIMARY_LANGUAGE));
+      expect(el("settings-remote-tailnet-command").textContent).toBe(
+        "tailscale serve --tcp=7717 off",
+      );
+
+      el("settings-save").click();
+      await flush();
+      const saved = savedConfig(calls.find((c) => c.call === "saveSettings"));
+      expect(saved.remote.tailnet).toEqual({ enabled: false, relay: true });
+    });
+
+    it("an enable shows on, with the relay it asked for", async () => {
+      await open();
+      rereadFails();
+      relay().checked = true;
+      change(relay());
+
+      flip(true);
+      await flush();
+      await flush();
+
+      expect(toggle().checked).toBe(true);
+      expect(relay().checked).toBe(true);
+      expect(el("settings-remote-tailnet-result").textContent).toBe(
+        MESSAGES.remoteTailnetNotRefreshed(PRIMARY_LANGUAGE),
+      );
+      expect(el("settings-remote-tailnet-command").hidden).toBe(true);
     });
   });
 

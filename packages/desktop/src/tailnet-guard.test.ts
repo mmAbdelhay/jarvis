@@ -5,8 +5,10 @@ import {
   createTailnetGuard,
   disableRelay,
   enableRelay,
+  existingForward,
   funnelExposes,
   relayConfirmed,
+  restoreForward,
   type TailnetGuardDeps,
 } from "./tailnet-guard.js";
 import type { TailscaleCertDeps } from "./tailscale-cert.js";
@@ -266,6 +268,72 @@ function cliDeps(
 
 const refused = { code: 1, stdout: "", stderr: "Access denied" };
 const fine = { code: 0, stdout: "", stderr: "" };
+
+describe("existingForward", () => {
+  it("reads a real machine's plain forward", () => {
+    expect(existingForward(REAL, 7717)).toEqual({ target: "127.0.0.1:7717" });
+    expect(existingForward(REAL, 7718)).toEqual({ target: "127.0.0.1:7718" });
+  });
+
+  it("keeps a forward's PROXY version and its TLS termination", () => {
+    const status = {
+      TCP: {
+        "7717": { TCPForward: "127.0.0.1:7717", ProxyProtocol: 1 },
+        "7718": { TCPForward: "localhost:9000", TerminateTLS: "m.ts.net" },
+      },
+    };
+    expect(existingForward(status, 7717)).toEqual({
+      target: "127.0.0.1:7717",
+      proxyProtocol: 1,
+    });
+    expect(existingForward(status, 7718)).toEqual({
+      target: "localhost:9000",
+      terminateTls: true,
+    });
+  });
+
+  it.each([
+    ["no status", undefined],
+    ["no TCP", {}],
+    ["another port", { TCP: { "443": { TCPForward: "127.0.0.1:443" } } }],
+    ["a web entry", { TCP: { "7717": { HTTPS: true } } }],
+    ["a foreground forward", { Foreground: { a: { TCP: { "7717": { TCPForward: "x:1" } } } } }],
+  ])("%s is no forward", (_name, status) => {
+    expect(existingForward(status, 7717)).toBeUndefined();
+  });
+});
+
+describe("restoreForward", () => {
+  it.each([
+    [
+      "plain",
+      { target: "127.0.0.1:7717" },
+      ["serve", "--bg", "--tcp=7717", "tcp://127.0.0.1:7717"],
+    ],
+    [
+      "with its PROXY version",
+      { target: "127.0.0.1:7717", proxyProtocol: 1 },
+      ["serve", "--bg", "--tcp=7717", "--proxy-protocol=1", "tcp://127.0.0.1:7717"],
+    ],
+    [
+      "terminating TLS",
+      { target: "localhost:9000", terminateTls: true },
+      ["serve", "--bg", "--tls-terminated-tcp=7717", "tcp://localhost:9000"],
+    ],
+  ])("runs the exact command: %s", async (_name, forward, args) => {
+    const { deps, serveCalls } = cliDeps();
+    expect(await restoreForward(deps, 7717, forward)).toEqual({ ok: true });
+    expect(serveCalls()).toEqual([args]);
+  });
+
+  it("a refusal returns the exact command", async () => {
+    const { deps } = cliDeps(() => refused);
+    expect(await restoreForward(deps, 7717, { target: "127.0.0.1:7717" })).toEqual({
+      ok: false,
+      command: "tailscale serve --bg --tcp=7717 tcp://127.0.0.1:7717",
+    });
+  });
+});
 
 describe("enableRelay", () => {
   it("runs the exact command for each port", async () => {
