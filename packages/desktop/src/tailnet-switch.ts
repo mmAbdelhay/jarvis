@@ -188,9 +188,17 @@ export function createTailnetSwitch(deps: TailnetSwitchDeps): TailnetSwitch {
     // same paths mean no new key for the bridge to notice the change by.
     let replacedInPlace = false;
     const failure = await write((current) => {
-      const { tls } = current.remote;
+      const { tls, tailnet } = current.remote;
       replacedInPlace =
         issued !== undefined && tls.certPath === issued.certPath && tls.keyPath === issued.keyPath;
+      // For the disable. An enable while already on replaces nothing new, and
+      // must not forget what the first one replaced.
+      const replacedForwards: Record<string, ExistingForward> = {
+        ...(tailnet.enabled ? tailnet.replacedForwards : {}),
+      };
+      for (const { port, earlier } of changed) {
+        if (earlier !== undefined) replacedForwards[port] = earlier;
+      }
       return {
         ...current,
         remote: {
@@ -198,7 +206,11 @@ export function createTailnetSwitch(deps: TailnetSwitchDeps): TailnetSwitch {
           enabled: true,
           bindAddress,
           web: { ...current.remote.web, enabled: true },
-          tailnet: { enabled: true, relay },
+          tailnet: {
+            enabled: true,
+            relay,
+            ...(Object.keys(replacedForwards).length === 0 ? {} : { replacedForwards }),
+          },
           ...(issued === undefined ? {} : { tls: issued }),
         },
       };
@@ -216,16 +228,22 @@ export function createTailnetSwitch(deps: TailnetSwitchDeps): TailnetSwitch {
   }
 
   async function disable(): Promise<TailnetSwitchResult> {
-    let change: { forwards: number[] } | undefined;
+    let change: { forwards: ChangedForward[] } | undefined;
     const failure = await write((current) => {
-      if (!current.remote.tailnet.enabled) return current;
-      change = { forwards: current.remote.tailnet.relay ? controls.ports(current.remote) : [] };
+      const { enabled, relay, replacedForwards = {} } = current.remote.tailnet;
+      if (!enabled) return current;
+      // Only what Jarvis added is removed: a recorded port goes back to the
+      // user's own forward, even if the config has moved off it since.
+      const ports = new Set([
+        ...(relay ? controls.ports(current.remote) : []),
+        ...Object.keys(replacedForwards).map(Number),
+      ]);
+      change = {
+        forwards: [...ports].map((port) => ({ port, earlier: replacedForwards[port] })),
+      };
       return {
         ...current,
-        remote: {
-          ...current.remote,
-          tailnet: { ...current.remote.tailnet, enabled: false },
-        },
+        remote: { ...current.remote, tailnet: { enabled: false, relay } },
       };
     });
     if (failure !== undefined) {
@@ -234,10 +252,7 @@ export function createTailnetSwitch(deps: TailnetSwitchDeps): TailnetSwitch {
     if (change === undefined) return { ok: true, commands: [] };
 
     await settled("apply", () => controls.applied());
-    return {
-      ok: true,
-      commands: await undoForwards(change.forwards.map((port) => ({ port, earlier: undefined }))),
-    };
+    return { ok: true, commands: await undoForwards(change.forwards) };
   }
 
   // One at a time: an enable's checks would otherwise answer for a config a

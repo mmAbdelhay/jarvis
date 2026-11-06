@@ -3985,8 +3985,8 @@ describe("Tailscale access", () => {
       jarvis()["getSettings"] = () => Promise.reject(new Error("socket gone"));
     }
 
-    it("a disable does not claim failure, shows the commands, and Save says off", async () => {
-      const calls = await open(configWith({ tailnet: { enabled: true, relay: true } }));
+    it("a disable does not claim failure, and shows the commands", async () => {
+      await open(configWith({ tailnet: { enabled: true, relay: true } }));
       rereadFails();
       jarvis()["tailnetDisable"] = () =>
         Promise.resolve({ ok: true, commands: ["tailscale serve --tcp=7717 off"] });
@@ -4004,11 +4004,64 @@ describe("Tailscale access", () => {
       expect(el("settings-remote-tailnet-command").textContent).toBe(
         "tailscale serve --tcp=7717 off",
       );
+    });
 
-      el("settings-save").click();
+    it("Save stays off until a re-read succeeds: the draft's address and certificate are old", async () => {
+      const calls = await open();
+      rereadFails();
+
+      flip(true);
+      await flush();
+      await flush();
+
+      const save = el<HTMLButtonElement>("settings-save");
+      expect(save.disabled).toBe(true);
+      await saveSettings();
+      expect(calls.some((c) => c.call === "saveSettings")).toBe(false);
+
+      const after = configWith({ bindAddress: "100.84.17.203", tls: CERT });
+      jarvis()["getSettings"] = () => Promise.resolve(after);
+      await openSettings();
+      await flush();
+
+      expect(save.disabled).toBe(false);
+      save.click();
       await flush();
       const saved = savedConfig(calls.find((c) => c.call === "saveSettings"));
-      expect(saved.remote.tailnet).toEqual({ enabled: false, relay: true });
+      expect(saved.remote.bindAddress).toBe("100.84.17.203");
+    });
+
+    it("a later change whose re-read succeeds gives Save back too", async () => {
+      await open();
+      rereadFails();
+      flip(true);
+      await flush();
+      await flush();
+
+      jarvis()["getSettings"] = () =>
+        Promise.resolve(configWith({ tailnet: { enabled: false, relay: false } }));
+      flip(false);
+      await flush();
+      await flush();
+
+      expect(el<HTMLButtonElement>("settings-save").disabled).toBe(false);
+    });
+
+    it("a reopen whose read fails too keeps Save off", async () => {
+      await open();
+      rereadFails();
+      flip(true);
+      await flush();
+      await flush();
+
+      await openSettings().catch(() => {});
+      await flush();
+
+      expect(el<HTMLButtonElement>("settings-save").disabled).toBe(true);
+
+      jarvis()["getSettings"] = () => Promise.resolve(configWith({}));
+      await openSettings();
+      await flush();
     });
 
     it("an enable shows on, with the relay it asked for", async () => {

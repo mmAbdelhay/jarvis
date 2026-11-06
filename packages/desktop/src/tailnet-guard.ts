@@ -5,6 +5,7 @@
 // injected `TailscaleExec`, so no test runs the real CLI.
 import { join } from "node:path";
 import type { Timers } from "@jarvis/remote";
+import type { ReplacedForward } from "./config.js";
 import { errorMessage } from "./messages.js";
 import { serialize } from "./serialize.js";
 import {
@@ -99,7 +100,7 @@ export function relayConfirmed(serveStatus: unknown, ports: number[]): boolean {
 export type RelayResult = { ok: true } | { ok: false; command: string };
 
 /** A TCP forward as Tailscale holds it, enough to put it back. */
-export type ExistingForward = { target: string; proxyProtocol?: number; terminateTls?: boolean };
+export type ExistingForward = ReplacedForward;
 
 /** The top-level forward on `port`, in whatever form the user set it up. Top
  *  level only, as in `relayConfirmed`. */

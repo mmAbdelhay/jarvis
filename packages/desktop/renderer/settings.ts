@@ -160,6 +160,7 @@ export async function openSettings(): Promise<void> {
   // area and device list do not wait on a fresh round trip to draw.
   remoteStatusCache = latestRemoteStatus();
   draft = await window.jarvis.getSettings();
+  tailnetDraftStale = false;
   savedBaseline = structuredClone(draft);
   ownerFormOpen = false;
   ownerBusy = false;
@@ -1926,6 +1927,9 @@ function renderEnableGate(): void {
 let tailnetRelayChoice = false;
 /** True while an enable or disable round trip is in flight. */
 let tailnetBusy = false;
+/** True when a change took but its re-read failed: the draft's `remote` is old
+ *  in ways that call cannot know, until a read succeeds. */
+let tailnetDraftStale = false;
 
 /** The switch and the relay choice, from the config. Under the same gate as
  *  the Enable switch: not on without an owner password, but always off. The
@@ -1933,7 +1937,7 @@ let tailnetBusy = false;
 function renderTailnetSwitch(): void {
   // The draft's `remote` is out of date until the change answers, and Save
   // would write its address and certificate over the ones the change wrote.
-  ($("settings-save") as HTMLButtonElement).disabled = tailnetBusy;
+  ($("settings-save") as HTMLButtonElement).disabled = tailnetBusy || tailnetDraftStale;
   if (draft === undefined) return;
   const on = draft.remote.tailnet.enabled;
   const toggle = $("settings-remote-tailnet") as HTMLInputElement;
@@ -2025,10 +2029,12 @@ async function changeTailnet(
   if (result.commands.length > 0) notes.push(MESSAGES.remoteTailnetForwardLeft(PRIMARY_LANGUAGE));
   try {
     const fresh = await window.jarvis.getSettings();
+    tailnetDraftStale = false;
     if (draft !== undefined) draft.remote = fresh.remote;
     if (savedBaseline !== undefined) savedBaseline.remote = structuredClone(fresh.remote);
   } catch (error) {
     console.error(`settings: re-read after a Tailscale access change failed: ${String(error)}`);
+    tailnetDraftStale = true;
     notes.push(MESSAGES.remoteTailnetNotRefreshed(PRIMARY_LANGUAGE));
     for (const known of [draft, savedBaseline]) {
       if (known !== undefined) known.remote.tailnet = { ...known.remote.tailnet, ...outcome };
@@ -3099,7 +3105,7 @@ function ipv4ToHextets(dotted: string): [string, string] | undefined {
 // --------------------------------------------------------- Save / restart
 
 export async function saveSettings(): Promise<void> {
-  if (draft === undefined || tailnetBusy) return;
+  if (draft === undefined || tailnetBusy || tailnetDraftStale) return;
   // These services are constructed at startup. Their running instances cannot
   // safely be swapped by mutating the config object, so keep the restart
   // affordance only when one of their inputs actually changed.

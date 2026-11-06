@@ -196,6 +196,9 @@ export type DaemonConfig = { enabled: boolean };
  *
  * Milestone 3 only parses and edits this. Nothing listens yet.
  */
+/** A Tailscale TCP forward's form: `target` is its `host:port`. */
+export type ReplacedForward = { target: string; proxyProtocol?: number; terminateTls?: boolean };
+
 export type RemoteConfig = {
   enabled: boolean;
   /** An IP literal, never a hostname: a hostname is a DNS lookup in a
@@ -214,8 +217,14 @@ export type RemoteConfig = {
   /** Phase 1: the browser client's own listener, off by default. `port`
    *  absent means the bridge port + 1 — see `effectiveWebPort`. */
   web: { enabled: boolean; port?: number };
-  /** Controlling other Jarvis machines over Tailscale, off by default. */
-  tailnet: { enabled: boolean; relay: boolean };
+  /** Controlling other Jarvis machines over Tailscale, off by default.
+   *  `replacedForwards`, by port: what an enable replaced, for the disable to
+   *  put back. Written only by the switch (tailnet-switch.ts). */
+  tailnet: {
+    enabled: boolean;
+    relay: boolean;
+    replacedForwards?: Record<string, ReplacedForward>;
+  };
   /** 0 = never; otherwise the bridge turns itself off after this long idle. */
   idleDisableMinutes: number;
 };
@@ -1115,7 +1124,42 @@ export function parseRemoteTailnet(rawTailnet: unknown): RemoteConfig["tailnet"]
     }
     return value;
   };
-  return { enabled: flag("enabled"), relay: flag("relay") };
+  const replacedForwards = parseReplacedForwards(tailnet["replacedForwards"]);
+  return {
+    enabled: flag("enabled"),
+    relay: flag("relay"),
+    ...(replacedForwards === undefined ? {} : { replacedForwards }),
+  };
+}
+
+/** Never throws, unlike the rest of this section: it is the switch's own
+ *  bookkeeping, and a damaged record must not stop Jarvis loading. A port whose
+ *  entry cannot be read has no record, so a disable removes its forward. */
+function parseReplacedForwards(raw: unknown): Record<string, ReplacedForward> | undefined {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return undefined;
+  const entries = Object.entries(raw).flatMap(([port, value]) => {
+    const forward = parseReplacedForward(port, value);
+    return forward === undefined ? [] : [[port, forward] as const];
+  });
+  return entries.length === 0 ? undefined : Object.fromEntries(entries);
+}
+
+function parseReplacedForward(port: string, raw: unknown): ReplacedForward | undefined {
+  const number = /^\d+$/.test(port) ? Number(port) : 0;
+  if (number < 1 || number > 65535) return undefined;
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return undefined;
+  const { target, proxyProtocol, terminateTls } = raw as Record<string, unknown>;
+  if (typeof target !== "string" || !/^\S+:\d+$/.test(target)) return undefined;
+  if (proxyProtocol !== undefined) {
+    if (typeof proxyProtocol !== "number" || !Number.isInteger(proxyProtocol)) return undefined;
+    if (proxyProtocol < 1) return undefined;
+  }
+  if (terminateTls !== undefined && typeof terminateTls !== "boolean") return undefined;
+  return {
+    target,
+    ...(proxyProtocol === undefined ? {} : { proxyProtocol }),
+    ...(terminateTls === true ? { terminateTls } : {}),
+  };
 }
 
 /**

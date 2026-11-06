@@ -1653,6 +1653,58 @@ describe("remote", () => {
       expect(parseConfig(base).remote.tailnet).not.toBe(DEFAULT_REMOTE.tailnet);
       expect(tailnet({})).not.toBe(DEFAULT_REMOTE.tailnet);
     });
+
+    describe("replacedForwards", () => {
+      const recorded = (replacedForwards: unknown) =>
+        tailnet({ tailnet: { enabled: true, relay: true, replacedForwards } }).replacedForwards;
+
+      it("reads each form an enable records", () => {
+        const record = {
+          "7717": { target: "127.0.0.1:7717" },
+          "7718": { target: "localhost:9000", proxyProtocol: 1, terminateTls: true },
+          "7719": { target: "[::1]:7719" },
+        };
+        expect(recorded(record)).toEqual(record);
+      });
+
+      it.each([
+        ["absent", undefined],
+        ["null", null],
+        ["a string", "7717"],
+        ["a number", 7717],
+        ["an array", [{ target: "127.0.0.1:7717" }]],
+        ["empty", {}],
+      ])("%s parses as absent", (_name, value) => {
+        expect(recorded(value)).toBeUndefined();
+        expect(tailnet({ tailnet: { enabled: true, replacedForwards: value } })).not.toHaveProperty(
+          "replacedForwards",
+        );
+      });
+
+      it.each([
+        ["a port that is no number", { abc: { target: "127.0.0.1:1" } }],
+        ["port 0", { "0": { target: "127.0.0.1:1" } }],
+        ["a port too high", { "65536": { target: "127.0.0.1:1" } }],
+        ["a null entry", { "7717": null }],
+        ["a string entry", { "7717": "127.0.0.1:7717" }],
+        ["no target", { "7717": {} }],
+        ["a target of the wrong type", { "7717": { target: 7717 } }],
+        ["a target with no port", { "7717": { target: "127.0.0.1" } }],
+        ["a target with a space", { "7717": { target: "a b:1" } }],
+        ["a PROXY version in words", { "7717": { target: "a:1", proxyProtocol: "1" } }],
+        ["a PROXY version of zero", { "7717": { target: "a:1", proxyProtocol: 0 } }],
+        ["a fractional PROXY version", { "7717": { target: "a:1", proxyProtocol: 1.5 } }],
+        ["a TLS flag in words", { "7717": { target: "a:1", terminateTls: "yes" } }],
+      ])("%s parses as absent, and never throws", (_name, value) => {
+        expect(recorded(value)).toBeUndefined();
+      });
+
+      it("a malformed entry does not take a good one with it", () => {
+        expect(recorded({ "7717": { target: "127.0.0.1:7717" }, "7718": { target: 1 } })).toEqual({
+          "7717": { target: "127.0.0.1:7717" },
+        });
+      });
+    });
   });
 
   it("accepts idleDisableMinutes at its floor (0) and its ceiling (10080)", () => {

@@ -424,6 +424,65 @@ describe("writeSettingsFile", () => {
       expect(saved.tailnet.enabled).toBe(true);
     });
 
+    it("a save keeps the record of replaced forwards, whatever the draft says", async () => {
+      const path = join(await tempDir(), "jarvis.yaml");
+      await writeFile(
+        path,
+        [
+          "remote:",
+          "  tailnet:",
+          "    enabled: true",
+          "    relay: true",
+          "    replacedForwards:",
+          "      7717:",
+          "        target: 127.0.0.1:7717",
+          "        proxyProtocol: 1",
+          "",
+        ].join("\n"),
+      );
+      const whole = {
+        enabled: true,
+        relay: true,
+        replacedForwards: { "7717": { target: "127.0.0.1:7717", proxyProtocol: 1 } },
+      };
+
+      await writeSettingsFile(path, withTailnet(true, true));
+      expect(await inFile(path)).toEqual(whole);
+
+      await writeSettingsFile(path, {
+        ...draft,
+        remote: {
+          ...draft.remote,
+          tailnet: {
+            enabled: true,
+            relay: true,
+            replacedForwards: { "7718": { target: "127.0.0.1:7718" } },
+          },
+        },
+      });
+      expect(await inFile(path)).toEqual(whole);
+    });
+
+    it("the switch's write of the record survives the file", async () => {
+      const path = join(await tempDir(), "jarvis.yaml");
+      const tailnet = {
+        enabled: true,
+        relay: true,
+        replacedForwards: {
+          "7717": { target: "127.0.0.1:7717" },
+          "7718": { target: "localhost:9000", terminateTls: true },
+        },
+      };
+
+      await writeSettingsFile(
+        path,
+        { ...draft, remote: { ...draft.remote, tailnet } },
+        { writesTailnet: true },
+      );
+
+      expect(await inFile(path)).toEqual(tailnet);
+    });
+
     it("a write that read the file itself may change it", async () => {
       const path = join(await tempDir(), "jarvis.yaml");
       await writeFile(path, "remote:\n  tailnet:\n    enabled: true\n");

@@ -2367,6 +2367,165 @@ describe("dispatch table: the Tailscale access switch", () => {
       expect(tailnet.disableRelay).not.toHaveBeenCalled();
     });
 
+    describe("on, then off", () => {
+      const plain = (port: number) => ({ TCPForward: `127.0.0.1:${port}` });
+      const onThenOff = (status: object, tailnet: Partial<DispatchDeps["tailnet"]> = {}) => {
+        const context = harness({
+          remote: { tls: CERT },
+          tailnet: { readServeStatus: vi.fn(async () => status), ...tailnet },
+        });
+        return {
+          ...context,
+          run: async () => {
+            expect(await enable(context.table, true)).toMatchObject({ ok: true });
+            return disable(context.table);
+          },
+        };
+      };
+
+      it("restores both plain forwards the enable replaced, and removes neither", async () => {
+        const { run, file, tailnet } = onThenOff({
+          TCP: { [BRIDGE_PORT]: plain(BRIDGE_PORT), [WEB_PORT]: plain(WEB_PORT) },
+        });
+
+        expect(await run()).toEqual({ ok: true, commands: [] });
+
+        expect(vi.mocked(tailnet.restoreForward).mock.calls).toEqual([
+          [BRIDGE_PORT, { target: `127.0.0.1:${BRIDGE_PORT}` }],
+          [WEB_PORT, { target: `127.0.0.1:${WEB_PORT}` }],
+        ]);
+        expect(tailnet.disableRelay).not.toHaveBeenCalled();
+        expect(file.remote.tailnet).toEqual({ enabled: false, relay: true });
+      });
+
+      it("restores after the apply", async () => {
+        const { run, steps } = onThenOff({
+          TCP: { [BRIDGE_PORT]: plain(BRIDGE_PORT), [WEB_PORT]: plain(WEB_PORT) },
+        });
+
+        await run();
+
+        expect(steps.slice(-3, -1)).toEqual(["apply", `restore ${BRIDGE_PORT}`]);
+      });
+
+      it("the enable records each earlier form, in its write", async () => {
+        const { table, file } = onThenOff({
+          TCP: {
+            [BRIDGE_PORT]: plain(BRIDGE_PORT),
+            [WEB_PORT]: {
+              TCPForward: "localhost:9000",
+              ProxyProtocol: 1,
+              TerminateTLS: "m.ts.net",
+            },
+          },
+        });
+
+        await enable(table, true);
+
+        expect(file.remote.tailnet).toEqual({
+          enabled: true,
+          relay: true,
+          replacedForwards: {
+            [BRIDGE_PORT]: { target: `127.0.0.1:${BRIDGE_PORT}` },
+            [WEB_PORT]: { target: "localhost:9000", proxyProtocol: 1, terminateTls: true },
+          },
+        });
+      });
+
+      it("removes both when nothing was there before", async () => {
+        const { run, file, tailnet } = onThenOff({});
+
+        expect(await run()).toEqual({ ok: true, commands: [] });
+
+        expect(tailnet.restoreForward).not.toHaveBeenCalled();
+        expect(tailnet.disableRelay).toHaveBeenCalledTimes(2);
+        expect(file.remote.tailnet).toEqual({ enabled: false, relay: true });
+      });
+
+      it("restores the one it replaced and removes the one it added", async () => {
+        const { run, tailnet } = onThenOff({ TCP: { [WEB_PORT]: plain(WEB_PORT) } });
+
+        await run();
+
+        expect(vi.mocked(tailnet.disableRelay).mock.calls).toEqual([[[BRIDGE_PORT]]]);
+        expect(vi.mocked(tailnet.restoreForward).mock.calls).toEqual([
+          [WEB_PORT, { target: `127.0.0.1:${WEB_PORT}` }],
+        ]);
+      });
+
+      it("a restore that fails is logged and reported, tries the rest, and the disable stands", async () => {
+        const { run, file, tailnet } = onThenOff(
+          { TCP: { [BRIDGE_PORT]: plain(BRIDGE_PORT), [WEB_PORT]: plain(WEB_PORT) } },
+          {
+            restoreForward: vi.fn(async (port: number) =>
+              port === BRIDGE_PORT
+                ? { ok: false as const, command: "restore bridge" }
+                : { ok: true as const },
+            ),
+          },
+        );
+
+        expect(await run()).toEqual({ ok: true, commands: ["restore bridge"] });
+
+        expect(tailnet.restoreForward).toHaveBeenCalledTimes(2);
+        expect(tailnet.log).toHaveBeenCalledWith(expect.stringContaining("restore bridge"));
+        expect(file.remote.tailnet).toEqual({ enabled: false, relay: true });
+      });
+
+      it("a second enable while on keeps the record it already holds", async () => {
+        const status = vi.fn(
+          async (): Promise<object> => ({
+            TCP: { [BRIDGE_PORT]: plain(BRIDGE_PORT), [WEB_PORT]: plain(WEB_PORT) },
+          }),
+        );
+        const { table, file } = harness({
+          remote: { tls: CERT },
+          tailnet: { readServeStatus: status },
+        });
+        await enable(table, true);
+        const record = file.remote.tailnet.replacedForwards;
+        status.mockResolvedValue({
+          TCP: {
+            [BRIDGE_PORT]: { ...plain(BRIDGE_PORT), ProxyProtocol: 2 },
+            [WEB_PORT]: { ...plain(WEB_PORT), ProxyProtocol: 2 },
+          },
+        });
+
+        await enable(table, true);
+
+        expect(file.remote.tailnet.replacedForwards).toEqual(record);
+      });
+    });
+
+    it("a machine already on relay with no record has its forwards removed", async () => {
+      const { table, tailnet } = harness({ remote: ON });
+
+      await disable(table);
+
+      expect(tailnet.restoreForward).not.toHaveBeenCalled();
+      expect(tailnet.disableRelay).toHaveBeenCalledTimes(2);
+    });
+
+    it("restores a recorded port the config has since moved off", async () => {
+      const { table, tailnet } = harness({
+        remote: {
+          ...ON,
+          tailnet: {
+            enabled: true,
+            relay: true,
+            replacedForwards: { "7000": { target: "127.0.0.1:7000" } },
+          },
+        },
+      });
+
+      await disable(table);
+
+      expect(vi.mocked(tailnet.restoreForward).mock.calls).toEqual([
+        [7000, { target: "127.0.0.1:7000" }],
+      ]);
+      expect(vi.mocked(tailnet.disableRelay).mock.calls).toEqual([[[BRIDGE_PORT]], [[WEB_PORT]]]);
+    });
+
     it("a removal that fails is logged and reported, and the disable stands", async () => {
       const { table, file, tailnet } = harness({
         remote: ON,

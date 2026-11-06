@@ -2390,8 +2390,8 @@ export const MESSAGES = {
     language === "ar" ? "تعذّر إتمام التغيير." : "The change could not be made.",
   remoteTailnetNotRefreshed: (language: "ar" | "en"): string =>
     language === "ar"
-      ? "تم التغيير، لكن تعذّر تحديث هذه الصفحة. أعد فتح الإعدادات قبل الحفظ."
-      : "The change was made, but this page could not refresh. Reopen Settings before saving.",
+      ? "تم التغيير، لكن تعذّر تحديث هذه الصفحة. أعد فتح الإعدادات لتتمكن من الحفظ."
+      : "The change was made, but this page could not refresh. Reopen Settings to save.",
 
   // M10 Task 3: the push notification catalogue — the only text a
   // notification's title/body carry, built in the *device's* registered
