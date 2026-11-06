@@ -72,7 +72,12 @@ import {
 import { createRemoteAccess, type RemoteAccess } from "../remote-access.js";
 import { createWebManifestLoader, nodeWebExportFs } from "../web-export.js";
 import { disableRemoteOnDisk } from "../remote-idle.js";
-import { certificateExpiry, obtainCertificate, type TailscaleCertDeps } from "../tailscale-cert.js";
+import {
+  certificateExpiry,
+  obtainCertificate,
+  readTailscaleIps,
+  type TailscaleCertDeps,
+} from "../tailscale-cert.js";
 import { disableRelay, enableRelay, readServeStatus, restoreForward } from "../tailnet-guard.js";
 import { applyRemoteThenCheck, createRemoteTailnetGuard } from "../tailnet-guard-wiring.js";
 import { createNotifier } from "../notify.js";
@@ -2563,6 +2568,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
       config: () => config.remote,
       ports: (remote) => [remote.port, effectiveWebPort(remote)],
       readServeStatus: () => readServeStatus(tailscaleCertDeps),
+      readTailscaleIps: () => readTailscaleIps(tailscaleCertDeps),
       enableRelay: (ports) => enableRelay(tailscaleCertDeps, ports),
       disableRelay: (ports) => disableRelay(tailscaleCertDeps, ports),
       restoreForward: (port, forward) => restoreForward(tailscaleCertDeps, port, forward),

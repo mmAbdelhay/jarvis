@@ -1813,7 +1813,7 @@ describe("dispatch table: remote:tailscaleCert", () => {
 
 describe("dispatch table: the Tailscale access switch", () => {
   const CERT = { certPath: "/cfg/tls/m.crt", keyPath: "/cfg/tls/m.key" };
-  const MESH = { tailscale0: [{ address: "100.84.17.203" }], en0: [{ address: "192.168.1.5" }] };
+  const TAILSCALE_IPS = ["100.84.17.203", "fd7a:115c:a1e0::1"];
   const BRIDGE_PORT = 7717;
   const WEB_PORT = 7718;
   const PASSWORD_SET = { hasPassword: true, passkeys: [] };
@@ -1825,7 +1825,6 @@ describe("dispatch table: the Tailscale access switch", () => {
     deps?: Partial<DispatchDeps>;
     tailnet?: Partial<DispatchDeps["tailnet"]>;
     writeFails?: boolean;
-    interfaces?: Record<string, { address: string }[]>;
   }) {
     const live: RemoteConfig = {
       ...DEFAULT_REMOTE,
@@ -1860,6 +1859,7 @@ describe("dispatch table: the Tailscale access switch", () => {
         steps.push("read serve");
         return {};
       }),
+      readTailscaleIps: vi.fn(async (): Promise<string[] | undefined> => TAILSCALE_IPS),
       enableRelay: step("forward", { ok: true as const }),
       disableRelay: step("unforward", { ok: true as const }),
       restoreForward: step("restore", { ok: true as const }),
@@ -1873,7 +1873,6 @@ describe("dispatch table: the Tailscale access switch", () => {
     const deps = fakeDeps({
       writeConfig: writeConfig as DispatchDeps["writeConfig"],
       tailscaleCert: { obtain },
-      networkInterfaces: vi.fn(() => options.interfaces ?? MESH),
       tailnet,
       ...options.deps,
     });
@@ -2054,9 +2053,13 @@ describe("dispatch table: the Tailscale access switch", () => {
       expect(writeConfig).not.toHaveBeenCalled();
     });
 
-    it("without relay and with no Tailscale address refuses before anything is issued", async () => {
+    it.each([
+      ["no Tailscale address", []],
+      ["only an IPv6 one", ["fd7a:115c:a1e0::1"]],
+      ["a failed read", undefined],
+    ])("without relay and with %s refuses before anything is issued", async (_label, ips) => {
       const { table, writeConfig, obtain } = harness({
-        interfaces: { en0: [{ address: "10.0.0.2" }] },
+        tailnet: { readTailscaleIps: vi.fn(async () => ips) },
       });
 
       const result = await enable(table, false);
@@ -2067,6 +2070,44 @@ describe("dispatch table: the Tailscale access switch", () => {
       });
       expect(obtain).not.toHaveBeenCalled();
       expect(writeConfig).not.toHaveBeenCalled();
+    });
+
+    it("binds what Tailscale says is its own: first IPv4, never the first in its range", async () => {
+      const { deps, table, file } = harness({
+        deps: {
+          // A carrier's shared network, listed first, in the same range.
+          networkInterfaces: vi.fn(() => ({
+            wwan0: [{ address: "100.64.0.9" }],
+            tailscale0: [{ address: "100.84.17.203" }],
+          })),
+        },
+        tailnet: {
+          readTailscaleIps: vi.fn(async () => ["fd7a:115c:a1e0::1", "100.84.17.203"]),
+        },
+      });
+
+      await enable(table, false);
+
+      expect(file.remote.bindAddress).toBe("100.84.17.203");
+      expect(deps.networkInterfaces).not.toHaveBeenCalled();
+    });
+
+    it("a mesh-range address on an interface, with none from Tailscale, is never chosen", async () => {
+      const { table, writeConfig } = harness({
+        deps: { networkInterfaces: vi.fn(() => ({ wwan0: [{ address: "100.64.0.9" }] })) },
+        tailnet: { readTailscaleIps: vi.fn(async () => []) },
+      });
+
+      expect(await enable(table, false)).toMatchObject({ ok: false });
+      expect(writeConfig).not.toHaveBeenCalled();
+    });
+
+    it("with relay does not ask Tailscale for an address", async () => {
+      const { table, tailnet } = harness({ remote: { tls: CERT } });
+
+      await enable(table, true);
+
+      expect(tailnet.readTailscaleIps).not.toHaveBeenCalled();
     });
 
     it.each([
@@ -2114,7 +2155,6 @@ describe("dispatch table: the Tailscale access switch", () => {
     it("with relay forwards both ports before writing, and binds loopback", async () => {
       const { table, file, steps } = harness({
         remote: { tls: CERT },
-        interfaces: { en0: [{ address: "10.0.0.2" }] },
       });
 
       const result = await enable(table, true);

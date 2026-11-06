@@ -4,7 +4,7 @@
 // Also keeps the certificate renewed. Every `tailscale` call goes through the
 // injected `TailscaleExec`, so no test runs the real CLI.
 import { join } from "node:path";
-import type { Timers } from "@jarvis/remote";
+import { canonicalAddress, type Timers } from "@jarvis/remote";
 import type { ReplacedForward } from "./config.js";
 import { errorMessage } from "./messages.js";
 import { serialize } from "./serialize.js";
@@ -12,6 +12,7 @@ import {
   defaultCertDir,
   findTailscaleCli,
   issueCertificate,
+  readTailscaleIps,
   tailnetName,
   type TailscaleCertDeps,
 } from "./tailscale-cert.js";
@@ -178,7 +179,7 @@ export async function restoreForward(
     : { ok: false, command: byHand(args) };
 }
 
-type Verdict = "funnel" | "relay-missing" | undefined;
+type Verdict = "funnel" | "relay-missing" | "bad-bind" | undefined;
 
 export type TailnetGuardDeps = {
   tailscale: TailscaleCertDeps;
@@ -187,6 +188,8 @@ export type TailnetGuardDeps = {
   enabled(): boolean;
   /** `remote.tailnet.relay`. */
   relay(): boolean;
+  /** `remote.bindAddress`. */
+  bindAddress(): string;
   /** The bridge's and the web client's ports. */
   ports(): number[];
   /** False when the bridge dropped the verdict; it is sent again next poll. */
@@ -236,11 +239,20 @@ export async function readServeStatus(deps: TailscaleCertDeps): Promise<object |
   }
 }
 
+/** By address, not spelling: Tailscale and a config can write an IPv6 one differently. */
+function listsBind(ips: string[], bindAddress: string): boolean {
+  const bind = canonicalAddress(bindAddress);
+  return bind !== undefined && ips.some((ip) => canonicalAddress(ip) === bind);
+}
+
 export function createTailnetGuard(deps: TailnetGuardDeps): TailnetGuard {
   // No verdict the bridge can be assumed to hold, so the next one is sent.
   const UNSENT = Symbol("unsent");
   let lastSent: Verdict | typeof UNSENT = UNSENT;
   let readFailureLogged = false;
+  // What the last successful read of `Self.TailscaleIPs` said of the bind, so
+  // a failed one decides nothing even when `checkNow` has to send a verdict.
+  let bindUnlisted = false;
 
   let started = false;
   let stopped = false;
@@ -263,6 +275,7 @@ export function createTailnetGuard(deps: TailnetGuardDeps): TailnetGuard {
     if (stopped) return;
     if (!deps.enabled()) {
       lastSent = UNSENT;
+      bindUnlisted = false;
       return;
     }
     const status = await readServeStatus(deps.tailscale);
@@ -278,11 +291,18 @@ export function createTailnetGuard(deps: TailnetGuardDeps): TailnetGuard {
     readFailureLogged = false;
 
     const ports = deps.ports();
-    const verdict: Verdict = funnelExposes(status, ports)
-      ? "funnel"
-      : deps.relay() && !relayConfirmed(status, ports)
-        ? "relay-missing"
-        : undefined;
+    let verdict: Verdict;
+    if (funnelExposes(status, ports)) {
+      verdict = "funnel";
+    } else if (deps.relay()) {
+      bindUnlisted = false;
+      verdict = relayConfirmed(status, ports) ? undefined : "relay-missing";
+    } else {
+      const ips = await readTailscaleIps(deps.tailscale);
+      if (stopped || !deps.enabled()) return;
+      if (ips !== undefined) bindUnlisted = !listsBind(ips, deps.bindAddress());
+      verdict = bindUnlisted ? "bad-bind" : undefined;
+    }
     if (verdict === lastSent && !deps.unverified()) return;
     try {
       lastSent = (await deps.setTailnetBlock(verdict)) ? verdict : UNSENT;

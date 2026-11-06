@@ -397,10 +397,11 @@ export type Bridge = {
   /** The guard's verdict. `"funnel"` closes every listener and latches: from
    *  then on only `rearmTailnet`, turning the switch off or a restart reopens
    *  them. With the switch off it is ignored. `undefined` clears
-   *  `"relay-missing"`, never that latch. Any verdict ends `unverified`: only
-   *  a successful read sends one. False when the verdict was dropped (the
-   *  switch off, or the bridge stopped), so it has to be sent again. */
-  setTailnetBlock(reason: "funnel" | "relay-missing" | undefined): Promise<boolean>;
+   *  `"relay-missing"` and `"bad-bind"`, never that latch. Any verdict ends
+   *  `unverified`: only a successful read sends one. False when the verdict
+   *  was dropped (the switch off, or the bridge stopped), so it has to be sent
+   *  again. */
+  setTailnetBlock(reason: "funnel" | "relay-missing" | "bad-bind" | undefined): Promise<boolean>;
   /** A read of Tailscale failed. It decides nothing, but it was the read a
    *  paired device was waiting on, so that device stops waiting. */
   tailnetReadFailed(): Promise<void>;
@@ -692,6 +693,9 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
   // it can never leave paired devices shut out with status reading "off".
   let funnelLatched = false;
   let relayMissing = false;
+  // The guard's: Tailscale does not list the bind as its own. The range check
+  // in `tailnetBindAllowed` is the second gate behind it, not a replacement.
+  let bindUnlisted = false;
   // Fail closed: from the switch coming on until a read of Tailscale has
   // succeeded, nothing is known of Funnel or the relay, so joins are refused
   // and the tailnet term opens nothing. `tailnetFirstReadTimer` is the wait
@@ -864,7 +868,9 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
     if (tailnetUnverified) return "unverified";
     if (relayMissing) return "relay-missing";
     if (!owner.hasPassword()) return "no-owner-password";
-    if (!tailnetBindAllowed(current.bindAddress, current.tailnet.relay)) return "bad-bind";
+    if (bindUnlisted || !tailnetBindAllowed(current.bindAddress, current.tailnet.relay)) {
+      return "bad-bind";
+    }
     return undefined;
   }
 
@@ -1765,11 +1771,14 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
     invalidateOwnerSessions("signed-out-everywhere");
   }
 
-  async function setTailnetBlock(reason: "funnel" | "relay-missing" | undefined): Promise<boolean> {
+  async function setTailnetBlock(
+    reason: "funnel" | "relay-missing" | "bad-bind" | undefined,
+  ): Promise<boolean> {
     if (stopped) return false;
     // A late verdict, after the switch went off, must not close anything.
     if (reason === "funnel" && !tailnetSwitchedOn()) return false;
     relayMissing = reason === "relay-missing";
+    bindUnlisted = reason === "bad-bind";
     tailnetUnverified = false;
     endTailnetFirstReadWait();
     if (reason === "funnel") {

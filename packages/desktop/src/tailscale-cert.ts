@@ -77,15 +77,11 @@ export async function findTailscaleCli(deps: TailscaleCertDeps): Promise<string 
   }
 }
 
-/**
- * This machine's own MagicDNS name, with the trailing dot `status --json`
- * always reports stripped — or `undefined` when Tailscale is not running,
- * not logged in, or its status cannot be read/parsed at all.
- */
-export async function tailnetName(
+/** `Self` from `status --json`, or `undefined` when it cannot be read or parsed at all. */
+async function readSelf(
   deps: TailscaleCertDeps,
   cli: string,
-): Promise<string | undefined> {
+): Promise<Record<string, unknown> | undefined> {
   let result: { code: number; stdout: string };
   try {
     result = await deps.exec(cli, ["status", "--json"], STATUS_LIMITS);
@@ -103,9 +99,36 @@ export async function tailnetName(
   if (typeof parsed !== "object" || parsed === null) return undefined;
   const self = (parsed as Record<string, unknown>)["Self"];
   if (typeof self !== "object" || self === null) return undefined;
-  const dnsName = (self as Record<string, unknown>)["DNSName"];
+  return self as Record<string, unknown>;
+}
+
+/**
+ * This machine's own MagicDNS name, with the trailing dot `status --json`
+ * always reports stripped — or `undefined` when Tailscale is not running,
+ * not logged in, or its status cannot be read/parsed at all.
+ */
+export async function tailnetName(
+  deps: TailscaleCertDeps,
+  cli: string,
+): Promise<string | undefined> {
+  const dnsName = (await readSelf(deps, cli))?.["DNSName"];
   if (typeof dnsName !== "string" || dnsName === "") return undefined;
   return dnsName.endsWith(".") ? dnsName.slice(0, -1) : dnsName;
+}
+
+/**
+ * The addresses Tailscale itself says are this machine's, `Self.TailscaleIPs`:
+ * an address range alone cannot tell, since carrier CGNAT and some VPNs use
+ * the same one. `undefined` is a failed read. Tailscale with no address yet
+ * (logged out, starting) is a successful read of none.
+ */
+export async function readTailscaleIps(deps: TailscaleCertDeps): Promise<string[] | undefined> {
+  const cli = await findTailscaleCli(deps);
+  if (cli === undefined) return undefined;
+  const self = await readSelf(deps, cli);
+  if (self === undefined) return undefined;
+  const ips = self["TailscaleIPs"];
+  return Array.isArray(ips) ? ips.filter((ip) => typeof ip === "string") : [];
 }
 
 /** `~/.config/jarvis/tls` — where a certificate this module issues lives. */

@@ -208,7 +208,7 @@ export type RemoteAccess = RemoteControls & {
   recordPushQueued(deviceId: string, pushKind: string): void;
   /** The Tailscale guard's verdict and renewal. Both wait for `start`'s own
    *  apply, like `apply` does: a verdict sent before it would be dropped. */
-  setTailnetBlock(reason: "funnel" | "relay-missing" | undefined): Promise<boolean>;
+  setTailnetBlock(reason: "funnel" | "relay-missing" | "bad-bind" | undefined): Promise<boolean>;
   tailnetReadFailed(): Promise<void>;
   retryListener(): Promise<void>;
   reloadCertificate(): Promise<void>;

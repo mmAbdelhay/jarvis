@@ -568,7 +568,6 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
   const tailnetSwitch = createTailnetSwitch({
     language: deps.language,
     hasOwnerPassword: () => deps.remote.ownerStatus().hasPassword,
-    networkInterfaces: deps.networkInterfaces,
     obtainCertificate: () => deps.tailscaleCert.obtain(),
     writeConfig: deps.writeConfig,
     controls: deps.tailnet,

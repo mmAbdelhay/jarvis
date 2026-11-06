@@ -25,6 +25,7 @@ export function createRemoteTailnetGuard(deps: RemoteTailnetGuardDeps): TailnetG
     // when either one is off.
     enabled: () => remote().enabled && remote().tailnet.enabled,
     relay: () => remote().tailnet.relay,
+    bindAddress: () => remote().bindAddress,
     ports: () => [remote().port, effectiveWebPort(remote())],
     setTailnetBlock: (reason) => access.setTailnetBlock(reason),
     unverified: () => {

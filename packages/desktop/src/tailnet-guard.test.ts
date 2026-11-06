@@ -30,6 +30,7 @@ const FOREGROUND: unknown = JSON.parse(
 
 const PORTS = [7717, 7718];
 const HOST = "machine.tailnet.ts.net";
+const BIND = "100.84.17.203";
 const DAY = 24 * 60 * 60 * 1000;
 const NOW = Date.UTC(2026, 10, 6);
 const CERT_DIR = join("/Users/x", ".config", "jarvis", "tls");
@@ -410,6 +411,8 @@ function harness(initial: Partial<HarnessState> = {}) {
     now: NOW,
     enabled: true,
     relay: false,
+    bindAddress: BIND,
+    tailscaleIps: [BIND, "fd7a:115c:a1e0::1"],
     unverified: false,
     connected: 0,
     notAfter: NOW + 60 * DAY,
@@ -429,7 +432,14 @@ function harness(initial: Partial<HarnessState> = {}) {
         if (state.serve instanceof Error) throw state.serve;
         return state.serve;
       case "status":
-        return { code: 0, stdout: JSON.stringify({ Self: { DNSName: `${HOST}.` } }), stderr: "" };
+        if (state.tailscaleIps === undefined) return refused;
+        return {
+          code: 0,
+          stdout: JSON.stringify({
+            Self: { DNSName: `${HOST}.`, TailscaleIPs: state.tailscaleIps },
+          }),
+          stderr: "",
+        };
       case "cert":
         if (state.certCode === 0) state.notAfter = state.renewedNotAfter;
         return { code: state.certCode, stdout: "", stderr: state.certCode === 0 ? "" : "no" };
@@ -460,6 +470,7 @@ function harness(initial: Partial<HarnessState> = {}) {
     },
     enabled: () => state.enabled,
     relay: () => state.relay,
+    bindAddress: () => state.bindAddress,
     ports: () => PORTS,
     setTailnetBlock,
     unverified: () => state.unverified,
@@ -523,6 +534,9 @@ type HarnessState = {
   now: number;
   enabled: boolean;
   relay: boolean;
+  bindAddress: string;
+  /** `Self.TailscaleIPs`; undefined makes that read fail. */
+  tailscaleIps: string[] | undefined;
   /** What the bridge reports: no verdict it trusts. */
   unverified: boolean;
   connected: number;
@@ -687,6 +701,84 @@ describe("createTailnetGuard: while the bridge is unverified", () => {
     const h = harness({ enabled: false, serve: refused });
     await h.start();
     expect(h.readFailed).not.toHaveBeenCalled();
+  });
+});
+
+describe("createTailnetGuard: the bind address", () => {
+  it("a bind Tailscale does not list blocks, and a later poll with it listed clears", async () => {
+    const h = harness({ tailscaleIps: [] });
+    await h.start();
+    expect(h.setTailnetBlock).toHaveBeenLastCalledWith("bad-bind");
+
+    h.state.tailscaleIps = [BIND];
+    await h.poll();
+    expect(h.setTailnetBlock).toHaveBeenLastCalledWith(undefined);
+  });
+
+  it("a range-only address, not Tailscale's own, blocks", async () => {
+    const h = harness({ bindAddress: "100.64.0.9" });
+    await h.start();
+    expect(h.setTailnetBlock).toHaveBeenLastCalledWith("bad-bind");
+  });
+
+  it("compares addresses, not spellings", async () => {
+    const h = harness({ bindAddress: "FD7A:115C:A1E0:0::1" });
+    await h.start();
+    expect(h.setTailnetBlock).toHaveBeenLastCalledWith(undefined);
+  });
+
+  it("a failed read clears nothing that is set, on a poll or a checkNow", async () => {
+    const h = harness({ tailscaleIps: [] });
+    await h.start();
+    expect(h.setTailnetBlock).toHaveBeenLastCalledWith("bad-bind");
+
+    h.state.tailscaleIps = undefined;
+    await h.poll();
+    expect(h.setTailnetBlock).toHaveBeenCalledTimes(1);
+
+    await h.guard.checkNow();
+    expect(h.setTailnetBlock).toHaveBeenCalledTimes(2);
+    expect(h.setTailnetBlock).toHaveBeenLastCalledWith("bad-bind");
+  });
+
+  it("a failed read sets nothing either", async () => {
+    const h = harness({ tailscaleIps: undefined });
+    await h.start();
+    expect(h.setTailnetBlock).toHaveBeenLastCalledWith(undefined);
+  });
+
+  it("relay mode skips it: loopback is no Tailscale address, and it is not asked", async () => {
+    const h = harness({
+      relay: true,
+      bindAddress: "127.0.0.1",
+      tailscaleIps: [],
+      serve: serving(RELAYED),
+    });
+    await h.start();
+    expect(h.setTailnetBlock).toHaveBeenLastCalledWith(undefined);
+    expect(h.calls("status")).toEqual([]);
+  });
+
+  it("Funnel wins, without asking", async () => {
+    const h = harness({ tailscaleIps: [], serve: serving(FUNNEL_TCP) });
+    await h.start();
+    expect(h.setTailnetBlock).toHaveBeenLastCalledWith("funnel");
+    expect(h.calls("status")).toEqual([]);
+  });
+
+  it("the switch going off during the read sends nothing", async () => {
+    const h = harness({ tailscaleIps: [] });
+    h.exec.mockImplementationOnce(async () => fine);
+    h.exec.mockImplementationOnce(async () => {
+      return { code: 0, stdout: "{}", stderr: "" };
+    });
+    h.exec.mockImplementationOnce(async () => fine);
+    h.exec.mockImplementationOnce(async () => {
+      h.state.enabled = false;
+      return { code: 0, stdout: JSON.stringify({ Self: { TailscaleIPs: [] } }), stderr: "" };
+    });
+    await h.start();
+    expect(h.setTailnetBlock).not.toHaveBeenCalled();
   });
 });
 

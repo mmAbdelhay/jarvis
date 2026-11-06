@@ -6,6 +6,7 @@ import {
   findTailscaleCli,
   issueCertificate,
   obtainCertificate,
+  readTailscaleIps,
   tailnetName,
   type TailscaleCertDeps,
   type TailscaleExec,
@@ -156,6 +157,50 @@ describe("tailnetName", () => {
     }));
     const deps = fakeDeps({ exec });
     await expect(tailnetName(deps, "tailscale")).resolves.toBeUndefined();
+  });
+});
+
+describe("readTailscaleIps", () => {
+  const answering = (stdout: string, code = 0) =>
+    fakeDeps({ exec: vi.fn(async () => ({ code, stdout, stderr: "" })) });
+
+  it("reads Self.TailscaleIPs, in order", async () => {
+    const stdout = JSON.stringify({ Self: { TailscaleIPs: ["100.84.17.203", "fd7a:115c::1"] } });
+    await expect(readTailscaleIps(answering(stdout))).resolves.toEqual([
+      "100.84.17.203",
+      "fd7a:115c::1",
+    ]);
+  });
+
+  it.each([
+    ["null, as logged out prints it", { Self: { TailscaleIPs: null } }],
+    ["absent", { Self: {} }],
+    ["no strings", { Self: { TailscaleIPs: [1, null] } }],
+  ])("a list that is %s is a successful read of none", async (_label, status) => {
+    await expect(readTailscaleIps(answering(JSON.stringify(status)))).resolves.toEqual([]);
+  });
+
+  it.each([
+    ["a failed command", answering("{}", 1)],
+    ["output that is not JSON", answering("not json")],
+    ["no Self", answering("{}")],
+    ["a Self that is no object", answering(JSON.stringify({ Self: "me" }))],
+    ["a null document", answering("null")],
+    ["an exec that rejects", fakeDeps({ exec: vi.fn(async () => Promise.reject(new Error("x"))) })],
+  ])("%s is a failed read", async (_label, deps) => {
+    await expect(readTailscaleIps(deps)).resolves.toBeUndefined();
+  });
+
+  it("no CLI is a failed read", async () => {
+    const deps = fakeDeps({
+      platform: "darwin",
+      fs: {
+        access: vi.fn(async () => Promise.reject(new Error("ENOENT"))),
+        mkdir: vi.fn(async () => undefined),
+        chmod: vi.fn(async () => undefined),
+      },
+    });
+    await expect(readTailscaleIps(deps)).resolves.toBeUndefined();
   });
 });
 

@@ -4,7 +4,6 @@
 // check, a certificate, Tailscale's forwards) to be true before the file says
 // so. Each step that can fail runs before the write, so a refusal leaves the
 // config as it was and takes back any forward it added.
-import { bindChoices, type InterfaceMap } from "@jarvis/remote";
 import type { JarvisConfig, RemoteConfig } from "./config.js";
 import { errorMessage, MESSAGES } from "./messages.js";
 import { serialize } from "./serialize.js";
@@ -40,6 +39,8 @@ export type TailnetSwitchControls = {
   ports(remote: RemoteConfig): number[];
   /** `tailnet-guard.ts`'s read: `undefined` is a failed one. */
   readServeStatus(): Promise<object | undefined>;
+  /** `Self.TailscaleIPs`: `undefined` is a failed read. */
+  readTailscaleIps(): Promise<string[] | undefined>;
   enableRelay(ports: number[]): Promise<RelayResult>;
   disableRelay(ports: number[]): Promise<RelayResult>;
   restoreForward(port: number, forward: ExistingForward): Promise<RelayResult>;
@@ -55,7 +56,6 @@ export type TailnetSwitchControls = {
 export type TailnetSwitchDeps = {
   language: "ar" | "en";
   hasOwnerPassword(): boolean;
-  networkInterfaces(): InterfaceMap;
   obtainCertificate(): Promise<TailscaleCertResult>;
   writeConfig(update: (current: JarvisConfig) => JarvisConfig): Promise<SettingsWriteResult>;
   controls: TailnetSwitchControls;
@@ -90,11 +90,11 @@ export function createTailnetSwitch(deps: TailnetSwitchDeps): TailnetSwitch {
     }
   }
 
-  /** Same address Settings' picker offers: the first IPv4 Tailscale one. */
-  function tailscaleAddress(): string | undefined {
-    return bindChoices(deps.networkInterfaces()).find(
-      (choice) => choice.kind === "mesh" && !choice.address.includes(":"),
-    )?.address;
+  /** The first IPv4 Tailscale says is its own. Never by address range: a
+   *  carrier's interface in the same range would get password joins offered to
+   *  its whole shared network. */
+  async function tailscaleAddress(): Promise<string | undefined> {
+    return (await controls.readTailscaleIps())?.find((ip) => !ip.includes(":"));
   }
 
   /** Takes each port back to what it was: its earlier forward, or none. Tries
@@ -159,7 +159,7 @@ export function createTailnetSwitch(deps: TailnetSwitchDeps): TailnetSwitch {
     }
 
     // Before the certificate, the first step that leaves anything on disk.
-    const bindAddress = relay ? LOOPBACK : tailscaleAddress();
+    const bindAddress = relay ? LOOPBACK : await tailscaleAddress();
     if (bindAddress === undefined) {
       return refused(MESSAGES.remoteTailnetRefused("no-address", language));
     }

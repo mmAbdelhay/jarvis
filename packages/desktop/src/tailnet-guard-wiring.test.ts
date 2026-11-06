@@ -60,7 +60,13 @@ async function setup(
     }));
     await writeFile(join(dir, "devices.json"), JSON.stringify({ version: 1, devices }));
   }
-  const state = { config: initial, serve: FUNNEL as unknown, serveReads: 0, failListens: 0 };
+  const state = {
+    config: initial,
+    serve: FUNNEL as unknown,
+    serveReads: 0,
+    failListens: 0,
+    selfIps: undefined as string[] | undefined,
+  };
   let heldRead: Promise<ExecResult> | undefined;
   const listeners: { closed: boolean }[] = [];
   const makeAccess = () =>
@@ -127,6 +133,10 @@ async function setup(
     access,
     tailscale: {
       exec: async (_command, args) => {
+        if (args[0] === "status" && state.selfIps !== undefined) {
+          const Self = { TailscaleIPs: state.selfIps };
+          return { code: 0, stdout: JSON.stringify({ Self }), stderr: "" };
+        }
         if (args[0] !== "serve") return { code: 0, stdout: "", stderr: "" };
         state.serveReads += 1;
         if (heldRead !== undefined) {
@@ -360,6 +370,22 @@ describe("the guard and the bridge", () => {
     read.answer({ code: 0, stdout: "{}", stderr: "" });
     await saving;
     expect(h.tailnet()).toEqual({ kind: "on" });
+  });
+
+  it("a boot before Tailscale has its address recovers on its own", async () => {
+    const h = await setup(ON);
+    h.state.serve = {};
+    h.state.selfIps = [];
+    h.guard.start();
+    await h.settle();
+    expect(h.tailnet()).toEqual({ kind: "blocked", reason: "bad-bind" });
+    expect(h.openListeners()).toBe(0);
+
+    h.state.selfIps = [ON.bindAddress];
+    await h.poll();
+
+    expect(h.tailnet()).toEqual({ kind: "on" });
+    expect(h.openListeners()).toBe(1);
   });
 
   it("a listen that failed at boot comes up on a later poll", async () => {

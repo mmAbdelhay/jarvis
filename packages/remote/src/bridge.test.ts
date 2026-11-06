@@ -1508,6 +1508,48 @@ describe("createBridge: tailnet gate", () => {
     });
   });
 
+  describe("a bind Tailscale does not list", () => {
+    it("blocks with bad-bind, refuses joins, and clearing it restores on", async () => {
+      const { h, bridge } = await start({ devices: ["Phone"] });
+
+      expect(await bridge.setTailnetBlock("bad-bind")).toBe(true);
+
+      expect(bridge.status().tailnet).toEqual({ kind: "blocked", reason: "bad-bind" });
+      expect(tryJoin(h).closed).toEqual({ code: CLOSE.unauthorized, reason: "" });
+      expect(h.listeners[0]?.closed).toBe(false);
+
+      await bridge.setTailnetBlock(undefined);
+      expect(bridge.status().tailnet).toEqual({ kind: "on" });
+    });
+
+    it("with zero devices closes the listener, and clearing it brings it back", async () => {
+      const { h, bridge } = await start();
+
+      await bridge.setTailnetBlock("bad-bind");
+      expect(h.listeners[0]?.closed).toBe(true);
+
+      await bridge.setTailnetBlock(undefined);
+      expect(h.listenCalls).toHaveLength(2);
+    });
+
+    it("as the first verdict opens nothing", async () => {
+      const { h, bridge } = await start({ verdict: false });
+
+      await bridge.setTailnetBlock("bad-bind");
+
+      expect(h.listenCalls).toHaveLength(0);
+      expect(bridge.status().tailnet).toEqual({ kind: "blocked", reason: "bad-bind" });
+    });
+
+    it("clearing it does not pass the bridge's own range check", async () => {
+      const { bridge } = await start({ config: TAILNET_ON({ bindAddress: "192.168.1.20" }) });
+
+      await bridge.setTailnetBlock(undefined);
+
+      expect(bridge.status().tailnet).toEqual({ kind: "blocked", reason: "bad-bind" });
+    });
+  });
+
   describe("retryListener", () => {
     /** First listen rejects, later ones work: tailscaled not up at boot. */
     function failFirstListen(h: ReturnType<typeof makeHarness>): void {
