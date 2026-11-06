@@ -21,6 +21,7 @@ function closedStatus(): RemoteStatus {
     problem: undefined,
     // M11 Task 2 minimal compile fix (Task 4 owns the real desktop wiring).
     sidecarProxy: "off",
+    tailnet: { kind: "off" },
   };
 }
 

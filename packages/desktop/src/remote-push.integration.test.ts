@@ -219,11 +219,15 @@ function createFakePushBridge(): {
       devices: [],
       problem: undefined,
       sidecarProxy: "off",
+      tailnet: { kind: "off" },
     }),
     ownerStatus: () => ({ hasPassword: true, passkeys: [] }),
     setOwnerPassword: async () => ({ ok: true as const }),
     deletePasskey: async () => true,
     signOutEverywhere: async () => {},
+    setTailnetBlock: async () => {},
+    rearmTailnet: async () => {},
+    reloadCertificate: async () => {},
     stop: async () => {},
   };
 
@@ -334,6 +338,7 @@ describe("remote-push.integration: laptop, everything real but the socket, the E
         }),
         createProxy: () => undefined,
         enforceFileModes: false,
+        hostname: () => "test-host",
         log: (line: string) => ioLogLines.push(line),
       },
       streams,

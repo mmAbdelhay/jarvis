@@ -41,7 +41,7 @@ import {
   symlink,
   writeFile,
 } from "node:fs/promises";
-import { homedir, networkInterfaces, tmpdir } from "node:os";
+import { homedir, hostname, networkInterfaces, tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import { createBroadcaster, type Broadcaster, type PushSink } from "../broadcast.js";
 import { createHostLink, type DesktopHost } from "./host-link.js";
@@ -1746,6 +1746,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
         build: buildWebManifest,
       }),
       enforceFileModes: remoteEnforceFileModes,
+      hostname: () => hostname(),
       log: (line) => console.error(line),
     },
     // Backs remoteKeyAuthorizer's pane/session checks. `followers` is

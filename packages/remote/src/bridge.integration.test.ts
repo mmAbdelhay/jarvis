@@ -181,6 +181,7 @@ describe("bridge.integration", () => {
       errorText: (code) => ({ text: `err:${code}`, language: "en" }),
       auditPolicy: () => "never",
       enforceFileModes: ENFORCE_FILE_MODES,
+      hostname: () => "test-host",
       log: (line) => {
         logLines.push(line);
       },
@@ -202,6 +203,7 @@ describe("bridge.integration", () => {
       sidecarProxy: false,
       tls: {},
       web: { enabled: false, port: 7718 },
+      tailnet: { enabled: false, relay: false },
     });
   });
 
@@ -524,6 +526,7 @@ describe("bridge.integration: the web origin drives the real Origin check", () =
     sidecarProxy: false,
     tls: {},
     web: { enabled: webEnabled, port: 0 },
+    tailnet: { enabled: false, relay: false },
   });
 
   /** A well-formed `/pair` upgrade carrying `origin`; resolves with the first reply bytes ("" when the socket just closes). */
@@ -583,6 +586,7 @@ describe("bridge.integration: the web origin drives the real Origin check", () =
       errorText: (code) => ({ text: `err:${code}`, language: "en" }),
       auditPolicy: () => "never",
       enforceFileModes: ENFORCE_FILE_MODES,
+      hostname: () => "test-host",
       log: () => {},
       onDeviceDisconnected: () => {},
       onStatus: () => {},

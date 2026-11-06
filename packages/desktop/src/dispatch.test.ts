@@ -1522,6 +1522,7 @@ describe("dispatch table: remote controls", () => {
       devices: [],
       problem: undefined,
       sidecarProxy: "off" as const,
+      tailnet: { kind: "off" as const },
     };
     const deps = fakeDeps({ remote: { ...fakeDeps().remote, status: vi.fn(() => status) } });
     const table = createDispatchTable(deps);
@@ -1678,6 +1679,7 @@ describe("dispatch table: remote:openWebClient (Phase 1)", () => {
     devices: [],
     problem: undefined,
     sidecarProxy: "off",
+    tailnet: { kind: "off" },
     web: { kind: "on", port: 7718, origin: ORIGIN },
   });
 

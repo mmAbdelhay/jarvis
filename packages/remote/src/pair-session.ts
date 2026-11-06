@@ -32,7 +32,7 @@ export type PairRefusal = AuditedRefusal | "join-refused";
 
 /** Password joins; present only while the tailnet feature is active. */
 export type PairJoinDeps = {
-  /** Read when the frame arrives and again after the check. */
+  /** Read when the frame arrives, again after the check, and once more just before `joined`. */
   allowed(): boolean;
   checkPassword(password: string): Promise<"ok" | "refused">;
   /** Logged-in tokens for the device just minted; rejects when none can be given. */
@@ -295,6 +295,7 @@ export function createPairSession(socket: SocketLike, deps: PairSessionDeps): Se
   async function abandonJoin(deviceId: string, deviceName: string): Promise<void> {
     await revokeMinted(deviceId);
     audit.record({ kind: "pairing-denied", source, deviceName, reason: "abandoned" });
+    if (!socketGone) socket.close(CLOSE.unauthorized, "");
     phase = "done";
     settle();
   }
@@ -345,7 +346,9 @@ export function createPairSession(socket: SocketLike, deps: PairSessionDeps): Se
       refuseJoin();
       return;
     }
-    if (socketGone) {
+    // The gate can have closed during the two awaits above (a Funnel block,
+    // the switch going off): a device minted across that is not kept.
+    if (socketGone || !joining.allowed()) {
       await abandonJoin(minted.deviceId, deviceName);
       return;
     }

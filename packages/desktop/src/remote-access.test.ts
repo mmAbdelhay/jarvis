@@ -25,6 +25,7 @@ const CLOSED_STATUS: RemoteStatus = {
   problem: undefined,
   // M11 Task 2 minimal compile fix (Task 4 owns the real desktop wiring).
   sidecarProxy: "off",
+  tailnet: { kind: "off" },
 };
 
 describe("remoteRequestHandler", () => {
@@ -201,6 +202,9 @@ function fakeBridge(): { bridge: Bridge; push: ReturnType<typeof vi.fn> } {
     setOwnerPassword: vi.fn(async () => ({ ok: true as const })),
     deletePasskey: vi.fn(async () => true),
     signOutEverywhere: vi.fn(async () => {}),
+    setTailnetBlock: vi.fn(async () => {}),
+    rearmTailnet: vi.fn(async () => {}),
+    reloadCertificate: vi.fn(async () => {}),
     stop: vi.fn(async () => {}),
   };
   return { bridge, push };
@@ -238,6 +242,7 @@ function harness(overrides: Partial<RemoteAccessDeps> = {}) {
       // M11 Task 2 minimal compile fix (Task 4 owns the real desktop wiring).
       createProxy: () => undefined,
       enforceFileModes: false,
+      hostname: () => "test-host",
       log: vi.fn(),
     },
     streams: {
@@ -334,7 +339,16 @@ describe("createRemoteAccess: bridge creation", () => {
       idleDisableMinutes: 0,
       web: { enabled: false, port: 1 },
       tls: {},
+      tailnet: { enabled: false, relay: false },
     });
+  });
+
+  it("passes remote.tailnet through", async () => {
+    const { remoteAccess, bridge } = harness();
+    await remoteAccess.start({ ...REMOTE_CONFIG, tailnet: { enabled: true, relay: true } });
+    expect(bridge.apply).toHaveBeenCalledWith(
+      expect.objectContaining({ tailnet: { enabled: true, relay: true } }),
+    );
   });
 
   it("passes remote.web through: the flag, and the explicit port or the bridge port + 1", async () => {
@@ -390,6 +404,7 @@ describe("createRemoteAccess: bridge creation", () => {
       idleDisableMinutes: 0,
       web: { enabled: false, port: 4201 },
       tls: {},
+      tailnet: { enabled: false, relay: false },
     });
   });
 });
@@ -1055,6 +1070,7 @@ describe("createRemoteAccess: sendPush", () => {
         }),
         createProxy: () => undefined,
         enforceFileModes: false,
+        hostname: () => "test-host",
         log: vi.fn(),
       },
     });
@@ -1091,6 +1107,7 @@ describe("createRemoteAccess: sendPush", () => {
         }),
         createProxy: () => undefined,
         enforceFileModes: false,
+        hostname: () => "test-host",
         log: vi.fn(),
       },
     });
@@ -1135,6 +1152,7 @@ describe("createRemoteAccess: sendPush", () => {
         }),
         createProxy: () => undefined,
         enforceFileModes: false,
+        hostname: () => "test-host",
         log,
       },
     });
@@ -1179,6 +1197,7 @@ describe("createRemoteAccess: sendPush", () => {
         }),
         createProxy: () => undefined,
         enforceFileModes: false,
+        hostname: () => "test-host",
         log: vi.fn(),
       },
     });

@@ -441,6 +441,51 @@ describe("createPairSession: join", () => {
     expect(onSettled).toHaveBeenCalledTimes(1);
   });
 
+  it("allowed turning false during the issue revokes the device and closes 4401, sending nothing", async () => {
+    const h = makeHarness();
+    const allowed = vi.fn(() => true);
+    const issue = deferred<typeof JOIN_TOKENS>();
+    const join = joinDeps({ allowed, issue: vi.fn(() => issue.promise) });
+    const { socket, session, onSettled } = h.makeSession(join);
+
+    session.onText(joinFrame());
+    await flush();
+    expect(h.devices.count()).toBe(1);
+    allowed.mockReturnValue(false);
+    issue.resolve(JOIN_TOKENS);
+    await flush();
+
+    expect(h.devices.count()).toBe(0);
+    expect(socket.sent).toEqual([]);
+    expect(socket.closed).toEqual({ code: 4401, reason: "" });
+    expect(join.onJoined).not.toHaveBeenCalled();
+    expect(onSettled).toHaveBeenCalledTimes(1);
+    const lines = await h.auditLines();
+    expect(lines.join("\n")).not.toContain("joined-by-password");
+    expect(lines.join("\n")).toContain('reason="abandoned"');
+  });
+
+  it("allowed turning false during the device add also ends at the same check", async () => {
+    const h = makeHarness();
+    const allowed = vi.fn(() => true);
+    const join = joinDeps({
+      allowed,
+      issue: vi.fn(async () => {
+        allowed.mockReturnValue(false);
+        return JOIN_TOKENS;
+      }),
+    });
+    const { socket, session, onSettled } = h.makeSession(join);
+
+    session.onText(joinFrame());
+    await flush();
+
+    expect(h.devices.count()).toBe(0);
+    expect(socket.sent).toEqual([]);
+    expect(socket.closed).toEqual({ code: 4401, reason: "" });
+    expect(onSettled).toHaveBeenCalledTimes(1);
+  });
+
   it("an issue that fails after the device is added revokes it and closes 4401", async () => {
     const h = makeHarness();
     const join = joinDeps({ issue: vi.fn(async () => Promise.reject(new Error("no session"))) });

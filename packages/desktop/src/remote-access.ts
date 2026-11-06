@@ -62,6 +62,7 @@ const CLOSED_STATUS: RemoteStatus = {
   // M11 Task 2 minimal compile fix: the real gate value is Task 4's to
   // wire; "off" is the correct closed-bridge default regardless.
   sidecarProxy: "off",
+  tailnet: { kind: "off" },
 };
 
 /**
@@ -218,6 +219,7 @@ function toBridgeConfig(config: RemoteConfig): BridgeConfig {
       ...(config.tls.certPath !== undefined ? { certPath: config.tls.certPath } : {}),
       ...(config.tls.keyPath !== undefined ? { keyPath: config.tls.keyPath } : {}),
     },
+    tailnet: { enabled: config.tailnet.enabled, relay: config.tailnet.relay },
   };
 }
 

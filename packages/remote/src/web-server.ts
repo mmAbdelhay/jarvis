@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
 import type { Duplex } from "node:stream";
+import type { PeerInfo } from "@jarvis/wire";
 
 const HANDSHAKE_TIMEOUT_MS = 5_000;
 const REQUEST_TIMEOUT_MS = 5_000;
@@ -9,6 +10,7 @@ const HEADERS_TIMEOUT_MS = 5_000;
 const MAX_CONNECTIONS = 64;
 const ETAG_PREFIX_LENGTH = 16;
 const TERMINAL_PATH = "/terminal.html";
+const PEER_PATH = "/jarvis-peer.json";
 
 export type WebAsset = { bytes: Buffer; type: string; etag: string };
 export type WebManifest = ReadonlyMap<string, WebAsset>;
@@ -47,6 +49,22 @@ export function buildWebManifest(files: Iterable<{ path: string; bytes: Buffer }
   return manifest;
 }
 
+function securityHeaders(options: {
+  name: string;
+  bridgePort: number;
+  path: string;
+}): Record<string, string> {
+  // The app renders its terminal in a sandboxed <iframe src="/terminal.html">,
+  // so that one exact path may be framed by the app's own origin. Every other
+  // response, index.html included, still refuses to be framed at all.
+  const frameAncestors = options.path === TERMINAL_PATH ? "'self'" : "'none'";
+  return {
+    "Content-Security-Policy": `default-src 'self'; script-src 'self'; connect-src wss://${options.name}:${options.bridgePort}; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; frame-src 'self'; frame-ancestors ${frameAncestors}; base-uri 'none'; form-action 'none'`,
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+  };
+}
+
 export function webHeaders(options: {
   name: string;
   bridgePort: number;
@@ -56,14 +74,8 @@ export function webHeaders(options: {
   const cacheControl = options.path.startsWith("/_expo/static/")
     ? "public, max-age=31536000, immutable"
     : "no-cache";
-  // The app renders its terminal in a sandboxed <iframe src="/terminal.html">,
-  // so that one exact path may be framed by the app's own origin. Every other
-  // response, index.html included, still refuses to be framed at all.
-  const frameAncestors = options.path === TERMINAL_PATH ? "'self'" : "'none'";
   return {
-    "Content-Security-Policy": `default-src 'self'; script-src 'self'; connect-src wss://${options.name}:${options.bridgePort}; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; frame-src 'self'; frame-ancestors ${frameAncestors}; base-uri 'none'; form-action 'none'`,
-    "X-Content-Type-Options": "nosniff",
-    "Referrer-Policy": "no-referrer",
+    ...securityHeaders(options),
     "Content-Type": options.asset.type,
     ETag: options.asset.etag,
     "Cache-Control": cacheControl,
@@ -75,6 +87,9 @@ type RequestHandlerOptions = {
   port: number;
   bridgePort: number;
   manifest: WebManifest;
+  /** What `/jarvis-peer.json` answers, read per request. Absent, `undefined`
+   *  or a throw: the socket is destroyed, as for a path that does not exist. */
+  peer?: () => PeerInfo | undefined;
 };
 
 /**
@@ -109,6 +124,32 @@ export function createWebRequestHandler(
   options: RequestHandlerOptions,
 ): (request: IncomingMessage, response: ServerResponse) => void {
   const expectedHost = options.port === 443 ? options.name : `${options.name}:${options.port}`;
+
+  function servePeer(request: IncomingMessage, response: ServerResponse): void {
+    let body: Buffer;
+    try {
+      const peer = options.peer?.();
+      if (peer === undefined) {
+        request.socket.destroy();
+        return;
+      }
+      body = Buffer.from(JSON.stringify(peer));
+    } catch {
+      request.socket.destroy();
+      return;
+    }
+    for (const [name, value] of Object.entries(
+      securityHeaders({ name: options.name, bridgePort: options.bridgePort, path: PEER_PATH }),
+    )) {
+      response.setHeader(name, value);
+    }
+    response.setHeader("Content-Type", "application/json; charset=utf-8");
+    response.setHeader("Cache-Control", "no-store");
+    response.setHeader("Content-Length", String(body.length));
+    response.statusCode = 200;
+    response.end(request.method === "HEAD" ? undefined : body);
+  }
+
   return (request, response) => {
     // Any Upgrade header is refused here too: Node only raises 'upgrade'
     // when Connection also says upgrade, so this closes the other half.
@@ -125,6 +166,11 @@ export function createWebRequestHandler(
     const requestedPath = safePath(request.url ?? "");
     if (requestedPath === undefined) {
       request.socket.destroy();
+      return;
+    }
+
+    if (requestedPath === PEER_PATH) {
+      servePeer(request, response);
       return;
     }
 

@@ -9,14 +9,16 @@
 // enabled, not stopped, its devices and owner files are readable, an owner
 // password exists (Phase 0), its configured address is a real IP literal, and — the "off by default" rule — either a
 // device is already paired, a pairing window (or its confirmation, or a
-// pair socket already in flight) is open. Every public method that can
+// pair socket already in flight) is open, or Tailscale access is on with
+// every one of its own conditions met (`tailnetStatus`). A Funnel block
+// overrides all of that until the switch is turned on again. Every public method that can
 // change any of those inputs awaits `reconcile()`, the only place the gate
 // is ever evaluated. `reconcile()` is itself serialised on a promise queue
 // so two overlapping calls (a `revoke` racing an `apply`, say) never step on
 // each other opening or closing the listener.
 
 import { join } from "node:path";
-import { isHostname, type PairingLink, webPairingUrl } from "@jarvis/wire";
+import { isHostname, type PairingLink, type PeerInfo, webPairingUrl } from "@jarvis/wire";
 import { canonicalAddress } from "./address.js";
 import { createAuditLog } from "./audit.js";
 import type { CertificateConfig, CertificateMaterial } from "./certificate.js";
@@ -30,6 +32,7 @@ import type {
 import type { DevicePush, DeviceStore } from "./devices.js";
 import { createDeviceStore } from "./devices.js";
 import { createHub } from "./hub.js";
+import { bindKindOf } from "./interfaces.js";
 import type { OriginClass } from "./origin.js";
 import type { OwnerHashParams } from "./owner.js";
 import { createOwnerStore } from "./owner.js";
@@ -48,7 +51,7 @@ import { createPairing } from "./pairing.js";
 // constructs a `SidecarProxy` itself; `deps.createProxy` (injected, like
 // `listen`) is the only thing that ever does.
 import type { SidecarProxy } from "./proxy.js";
-import { CLOSE, formatPairingUri } from "./protocol.js";
+import { CLOSE, formatPairingUri, PROTOCOL_VERSION } from "./protocol.js";
 import { createSidecarRegistry } from "./sidecar-registry.js";
 import type { SidecarRegistry, SidecarTarget } from "./sidecar-registry.js";
 // Type-only, like proxy.ts above: web-server.ts (node:https) stays
@@ -74,8 +77,8 @@ export type BridgeConfig = {
    * `port`). The listener runs only while the web gate is "on".
    */
   web: { enabled: boolean; port: number };
-  /** Controlling other Jarvis machines over Tailscale. Absent means off. */
-  tailnet?: { enabled: boolean; relay: boolean };
+  /** Controlling this machine from other Jarvis devices over Tailscale. */
+  tailnet: { enabled: boolean; relay: boolean };
 };
 
 /**
@@ -129,6 +132,8 @@ export type WebListenOptions = {
   manifest: WebManifest;
   /** The bridge's bound port, for the CSP's `connect-src`. */
   bridgePort: number;
+  /** What `/jarvis-peer.json` answers, read per request: `undefined` unless Tailscale access is on. */
+  peer: () => PeerInfo | undefined;
 };
 
 export type ListenWeb = (options: WebListenOptions) => Promise<Listener>;
@@ -142,6 +147,24 @@ export type RemoteWebStatus =
   | { kind: "off"; reason?: "port-conflict" | "listen-failed" }
   | { kind: "needs-certificate" | "needs-owner-password" | "not-built" }
   | { kind: "on"; port: number; origin: string };
+
+/**
+ * The Tailscale access gate. Joins are allowed only while `on`. `off` covers
+ * the switch or `enabled` being off. `funnel` holds until the switch is turned
+ * on again (`rearmTailnet`); every other reason ends as soon as it stops
+ * being true.
+ */
+export type RemoteTailnetStatus =
+  | { kind: "off" }
+  | { kind: "on" }
+  | { kind: "blocked"; reason: TailnetBlockReason };
+
+type TailnetBlockReason =
+  | "no-owner-password"
+  | "no-certificate"
+  | "bad-bind"
+  | "funnel"
+  | "relay-missing";
 
 export type RemoteProblem =
   | "bad-address"
@@ -254,6 +277,7 @@ export type RemoteStatus = {
    * `status()` always sets it.
    */
   web?: RemoteWebStatus;
+  tailnet: RemoteTailnetStatus;
 };
 
 /** The non-`undefined` half of `RemoteStatus.listening` — the shape this module's own `listening` variable holds. */
@@ -281,6 +305,8 @@ export type BridgeDeps = {
   enforceFileModes: boolean;
   /** Test-only: a lower scrypt cost for owner.json. Production omits it. */
   ownerHashParams?: OwnerHashParams;
+  /** The OS hostname: the peer file's `label`. */
+  hostname(): string;
   log(line: string): void;
   onStatus(status: RemoteStatus): void;
   onDeviceDisconnected(deviceId: string): void;
@@ -358,6 +384,15 @@ export type Bridge = {
    *  memory either way once it existed). */
   deletePasskey(credentialId: string): Promise<boolean>;
   signOutEverywhere(): Promise<void>;
+  /** The guard's verdict. `"funnel"` closes every listener and latches: from
+   *  then on only `rearmTailnet` or a restart reopens them. `undefined` clears
+   *  `"relay-missing"`, never that latch. */
+  setTailnetBlock(reason: "funnel" | "relay-missing" | undefined): Promise<void>;
+  /** The user turned Tailscale access on again: drops the blocks, and the
+   *  guard evaluates Funnel afresh. */
+  rearmTailnet(): Promise<void>;
+  /** Restarts the listeners on the certificate now on disk (a renewal). */
+  reloadCertificate(): Promise<void>;
   stop(): Promise<void>;
 };
 
@@ -398,6 +433,34 @@ function computeSidecarGate(
     return "needs-certificate";
   }
   return "on";
+}
+
+/** Key for "the same certificate pair", compared across the listener and the gate's own read. */
+function certificateKey(tls: BridgeConfig["tls"]): string {
+  return JSON.stringify([tls.certPath ?? null, tls.keyPath ?? null]);
+}
+
+/**
+ * Final review, I2: the first *plain* hostname, not the first SAN — a wildcard
+ * (`*.example.com`) or single-label (`localhost`) first entry is not something
+ * `parsePairingUri` (@jarvis/wire) can parse back out of a pairing link's
+ * `name`, so using it unfiltered would make the gate say "on" and Settings say
+ * "real certificate" for a link the phone can't actually parse.
+ */
+function certificateInfoOf(material: CertificateMaterial): ListeningInfo["certificate"] {
+  return { source: material.source, hostname: material.dnsNames.find(isHostname) };
+}
+
+/**
+ * A Tailscale address, or loopback when the relay forwards the tailnet to it.
+ * Anything else — a LAN address, a wildcard — would offer the password join
+ * beyond the tailnet.
+ */
+function tailnetBindAllowed(bindAddress: string, relay: boolean): boolean {
+  const host = canonicalAddress(bindAddress);
+  if (host === undefined) return false;
+  const kind = bindKindOf(host);
+  return kind === "mesh" || (kind === "loopback" && relay);
 }
 
 /** A browser's Origin for `https://name:port` leaves out the default port. */
@@ -532,7 +595,7 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
   });
 
   function joinAllowed(): boolean {
-    return config?.tailnet?.enabled === true;
+    return tailnetStatus().kind === "on";
   }
 
   /** One `/pair` socket's password join, carrying its generation from check to issue. */
@@ -598,6 +661,25 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
   let idleDisabledRecord: { at: number; afterMinutes: number } | undefined;
   let effectiveIdleMinutes = 0;
 
+  // In memory only, on purpose: after a restart the guard evaluates Funnel
+  // afresh. Separate from `wanted`'s OR clause: while set, nothing listens.
+  let funnelLatched = false;
+  let relayMissing = false;
+  // Bumped by `reloadCertificate`; part of the listener's key, so the same
+  // paths with new bytes on disk still restart it.
+  let certificateGeneration = 0;
+  // The pair the current listener was started from.
+  let listenerCertificateKey: string | undefined;
+  // The gate needs to know a certificate's name with no listener up, which is
+  // when `listening.certificate` has nothing to say, and a listener may only
+  // open once it knows. So the gate reads the configured pair itself ahead of
+  // the listen, which then reuses `material`. `certificate` absent: no usable
+  // name, because there is no configured pair or it failed to load. Dropped
+  // on the next `apply` or reload, or once a listener has taken the material.
+  let gateRead:
+    | { key: string; certificate?: ListeningInfo["certificate"]; material?: CertificateMaterial }
+    | undefined;
+
   function emit(): void {
     try {
       deps.onStatus(status());
@@ -621,10 +703,16 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
    *  anyone on the network keep the port open forever. */
   function isIdleNow(): boolean {
     return (
+      !tailnetKeepsAwake() &&
       listening !== undefined &&
       hub.connectedDeviceIds().size === 0 &&
       pairing.status().kind === "closed"
     );
+  }
+
+  /** Reachable with nothing connected is the point of the switch, so idleness never ends it. */
+  function tailnetKeepsAwake(): boolean {
+    return config?.enabled === true && config.tailnet.enabled;
   }
 
   /** Rule 3: never more than one live handle. */
@@ -644,7 +732,7 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
    */
   function armIdleTimer(): void {
     clearIdleTimer();
-    if (idleSince === undefined || effectiveIdleMinutes === 0) return;
+    if (idleSince === undefined || effectiveIdleMinutes === 0 || tailnetKeepsAwake()) return;
     const disableAt = idleSince + effectiveIdleMinutes * 60_000;
     idleDisableAt = disableAt;
     idleTimer = deps.timers.setTimeout(fireIdleDisable, Math.max(0, disableAt - deps.now()));
@@ -707,6 +795,72 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
       });
   }
 
+  /** Everything the Tailscale gate can refuse on before a certificate is worth reading. */
+  function tailnetRefusal(
+    current: BridgeConfig,
+  ): Exclude<TailnetBlockReason, "no-certificate"> | undefined {
+    if (funnelLatched) return "funnel";
+    if (relayMissing) return "relay-missing";
+    if (!owner.hasPassword()) return "no-owner-password";
+    if (!tailnetBindAllowed(current.bindAddress, current.tailnet.relay)) return "bad-bind";
+    return undefined;
+  }
+
+  /** The served certificate while the listener is up on this pair, else the gate's own read. */
+  function gateCertificate(current: BridgeConfig): ListeningInfo["certificate"] | undefined {
+    const key = certificateKey(current.tls);
+    if (listening !== undefined && listenerCertificateKey === key) return listening.certificate;
+    return gateRead?.key === key ? gateRead.certificate : undefined;
+  }
+
+  function tailnetStatus(): RemoteTailnetStatus {
+    if (config === undefined || stopped || !config.enabled || !config.tailnet.enabled) {
+      return { kind: "off" };
+    }
+    const refusal = tailnetRefusal(config);
+    if (refusal !== undefined) return { kind: "blocked", reason: refusal };
+    const certificate = gateCertificate(config);
+    return certificate !== undefined && computeSidecarGate(true, certificate) === "on"
+      ? { kind: "on" }
+      : { kind: "blocked", reason: "no-certificate" };
+  }
+
+  /**
+   * Fills `gateRead` when the gate needs a certificate no listener can answer
+   * for. With no configured pair nothing is read: `loadCertificate` would mint
+   * a self-signed one on disk just to learn it has no name.
+   */
+  async function readGateCertificate(): Promise<void> {
+    if (
+      config === undefined ||
+      stopped ||
+      !config.enabled ||
+      !config.tailnet.enabled ||
+      tailnetRefusal(config) !== undefined
+    ) {
+      gateRead = undefined;
+      return;
+    }
+    const key = certificateKey(config.tls);
+    if (gateRead?.key === key) return;
+    if (listening !== undefined && listenerCertificateKey === key) return;
+    const { certPath, keyPath } = config.tls;
+    if (certPath === undefined || keyPath === undefined) {
+      gateRead = { key };
+      return;
+    }
+    try {
+      const material = await deps.loadCertificate({ certPath, keyPath });
+      gateRead = { key, material, certificate: certificateInfoOf(material) };
+    } catch (error) {
+      gateRead = { key };
+      // `??=`: unlike the listen path below, this runs with an unreadable
+      // devices file too, and must not replace that sticky problem.
+      problem ??= "certificate-failed";
+      deps.log(`bridge: loadCertificate failed: ${describeError(error)}`);
+    }
+  }
+
   /**
    * The only place the gate (rule 3) is evaluated. Serialised via `queue`
    * (`reconcile`, above) so a listener never gets opened and closed out of
@@ -731,17 +885,23 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
             : undefined;
     }
 
+    await readGateCertificate();
+
     const wanted =
       config !== undefined &&
       !stopped &&
       config.enabled &&
       !idleDisabled &&
+      !funnelLatched &&
       devicesReadable &&
       ownerReadable &&
       sessionsReadable &&
       owner.hasPassword() &&
       host !== undefined &&
-      (devices.count() > 0 || pairing.status().kind !== "closed" || pairSessions > 0);
+      (devices.count() > 0 ||
+        pairing.status().kind !== "closed" ||
+        pairSessions > 0 ||
+        tailnetStatus().kind === "on");
 
     const desiredKey =
       wanted && config !== undefined && host !== undefined
@@ -751,6 +911,7 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
             config.tls.certPath ?? null,
             config.tls.keyPath ?? null,
             config.sidecarProxy,
+            certificateGeneration,
           ])
         : undefined;
 
@@ -763,6 +924,7 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
       listener = undefined;
       listening = undefined;
       listenerKey = undefined;
+      listenerCertificateKey = undefined;
       listenerMaterial = undefined;
       currentProxy = undefined;
       if (oldListener !== undefined) {
@@ -787,12 +949,15 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
       }
 
       if (wanted && config !== undefined && host !== undefined) {
+        const certificateKeyAtListen = certificateKey(config.tls);
         let material: CertificateMaterial;
         try {
-          material = await deps.loadCertificate({
-            certPath: config.tls.certPath,
-            keyPath: config.tls.keyPath,
-          });
+          material =
+            (gateRead?.key === certificateKeyAtListen ? gateRead.material : undefined) ??
+            (await deps.loadCertificate({
+              certPath: config.tls.certPath,
+              keyPath: config.tls.keyPath,
+            }));
         } catch (error) {
           problem = "certificate-failed";
           deps.log(`bridge: loadCertificate failed: ${describeError(error)}`);
@@ -802,16 +967,7 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
           return;
         }
 
-        // Final review, I2: the first *plain* hostname, not the first SAN —
-        // a wildcard (`*.example.com`) or single-label (`localhost`) first
-        // entry is not something `parsePairingUri` (@jarvis/wire) can parse
-        // back out of a pairing link's `name`, so using it unfiltered here
-        // would make the gate say "on" and Settings say "real certificate"
-        // for a link the phone can't actually parse.
-        const certificateInfo = {
-          source: material.source,
-          hostname: material.dnsNames.find(isHostname),
-        };
+        const certificateInfo = certificateInfoOf(material);
         // Rule 5's last sentence: `createProxy` is only ever called when the
         // gate would be "on" for *this* material/config — never "to be safe".
         const proxy =
@@ -842,6 +998,8 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
 
         listener = newListener;
         listenerKey = desiredKey;
+        listenerCertificateKey = certificateKeyAtListen;
+        gateRead = undefined;
         listenerMaterial = { cert: material.cert, key: material.key };
         currentProxy = proxy;
         listening = {
@@ -952,6 +1110,7 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
         name: hostname,
         manifest,
         bridgePort: listening.port,
+        peer: peerInfo,
       });
       webListener = started;
       webListening = { port: started.port, origin: webOriginFor(hostname, started.port) };
@@ -961,6 +1120,26 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
       deps.log(`bridge: web listen failed: ${describeError(error)}`);
       auditLog.record({ kind: "error", detail: `web listen failed: ${describeError(error)}` });
     }
+  }
+
+  /** The peer file: read per request, since the gate can close under a web listener that stays up. */
+  function peerInfo(): PeerInfo | undefined {
+    const name = webHostname();
+    if (
+      tailnetStatus().kind !== "on" ||
+      name === undefined ||
+      listening === undefined ||
+      webListening === undefined
+    ) {
+      return undefined;
+    }
+    return {
+      name,
+      label: deps.hostname(),
+      v: PROTOCOL_VERSION,
+      bridgePort: listening.port,
+      webPort: webListening.port,
+    };
   }
 
   function webStatus(): RemoteWebStatus {
@@ -1151,6 +1330,7 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
       idle: idleStatusValue(),
       ownerVersion,
       web: webStatus(),
+      tailnet: tailnetStatus(),
     };
   }
 
@@ -1173,6 +1353,7 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
     // on every apply (the export may have been built since, the port
     // freed); a running web listener is left alone.
     if (webListener === undefined) webKey = undefined;
+    gateRead = undefined;
     effectiveIdleMinutes = resolveIdleDisableMinutes(newConfig.idleDisableMinutes, deps.log);
     if (newConfig.enabled) idleDisabledRecord = undefined;
     config = {
@@ -1185,9 +1366,7 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
         ...(newConfig.tls.certPath !== undefined ? { certPath: newConfig.tls.certPath } : {}),
         ...(newConfig.tls.keyPath !== undefined ? { keyPath: newConfig.tls.keyPath } : {}),
       },
-      ...(newConfig.tailnet !== undefined
-        ? { tailnet: { enabled: newConfig.tailnet.enabled, relay: newConfig.tailnet.relay } }
-        : {}),
+      tailnet: { enabled: newConfig.tailnet.enabled, relay: newConfig.tailnet.relay },
     };
     if (!config.enabled) pairing.cancel();
     await reconcile();
@@ -1511,6 +1690,38 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
     invalidateOwnerSessions("signed-out-everywhere");
   }
 
+  async function setTailnetBlock(reason: "funnel" | "relay-missing" | undefined): Promise<void> {
+    if (stopped) return;
+    relayMissing = reason === "relay-missing";
+    if (reason === "funnel") {
+      funnelLatched = true;
+      deps.log("bridge: Funnel exposes a bridge port; listeners closed until access is re-enabled");
+      pairing.cancel();
+    }
+    await reconcile();
+  }
+
+  async function rearmTailnet(): Promise<void> {
+    if (stopped) return;
+    funnelLatched = false;
+    relayMissing = false;
+    await reconcile();
+  }
+
+  async function reloadCertificate(): Promise<void> {
+    if (stopped) return;
+    // As in `apply`: a fresh attempt starts clean.
+    if (problem === "listen-failed" || problem === "certificate-failed") {
+      problem = undefined;
+    }
+    certificateGeneration += 1;
+    gateRead = undefined;
+    // The gate must judge the new certificate, not the one being replaced: a
+    // listener only the gate keeps up closes if the new one has no name.
+    listenerCertificateKey = undefined;
+    await reconcile();
+  }
+
   async function stop(): Promise<void> {
     stopped = true;
     // Rule 7: the timer is cleared before the listener closes — never left
@@ -1564,6 +1775,9 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
     setOwnerPassword,
     deletePasskey,
     signOutEverywhere,
+    setTailnetBlock,
+    rearmTailnet,
+    reloadCertificate,
     stop,
   };
 }

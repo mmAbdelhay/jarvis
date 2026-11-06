@@ -223,6 +223,7 @@ function stubJarvis(overrides: Partial<RendererApi>): RendererApi {
       problem: undefined,
       // M11 Task 2 minimal compile fix (Task 4 owns the real desktop wiring).
       sidecarProxy: "off" as const,
+      tailnet: { kind: "off" as const },
     })),
     openRemotePairing: vi.fn(async () => ({ ok: true as const, value: undefined })),
     cancelRemotePairing: vi.fn(async () => {}),

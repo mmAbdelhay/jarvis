@@ -131,6 +131,7 @@ describe("web export served by the bridge's web listener", () => {
       errorText: (code) => ({ text: `err:${code}`, language: "en" }),
       auditPolicy: () => "never",
       enforceFileModes: ENFORCE_FILE_MODES,
+      hostname: () => "test-host",
       log: (line) => logLines.push(line),
       onDeviceDisconnected: () => {},
       onStatus: () => {},
@@ -142,6 +143,7 @@ describe("web export served by the bridge's web listener", () => {
       sidecarProxy: false,
       tls: {},
       web: { enabled: true, port: 0 },
+      tailnet: { enabled: false, relay: false },
     });
     // With no paired device the bridge only listens while pairing is open.
     expect(await bridge.openPairing()).toBe("opened");

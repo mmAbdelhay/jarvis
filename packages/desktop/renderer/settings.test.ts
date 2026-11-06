@@ -2023,6 +2023,7 @@ describe("remote access section", () => {
       devices: patch.devices ?? [],
       problem: patch.problem,
       sidecarProxy: patch.sidecarProxy ?? ("off" as const),
+      tailnet: { kind: "off" as const },
       idle: patch.idle,
       ...(patch.web !== undefined ? { web: patch.web } : {}),
     };
@@ -3233,6 +3234,7 @@ describe("Settings: owner account (Phase 0)", () => {
       devices: [],
       problem: undefined,
       sidecarProxy: "off",
+      tailnet: { kind: "off" },
       ownerVersion,
     });
     push?.(status(101));
