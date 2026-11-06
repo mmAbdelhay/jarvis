@@ -17,6 +17,14 @@ import type { TailscaleCertDeps } from "./tailscale-cert.js";
 const REAL: unknown = JSON.parse(
   readFileSync(new URL("./tailnet-guard.fixture.json", import.meta.url), "utf8"),
 );
+// Hand-built, not captured: the shape upstream's `ipn/serve.go` stores for a
+// plain `tailscale funnel 7717`, whose config lives under `Foreground`.
+const FOREGROUND: unknown = JSON.parse(
+  readFileSync(
+    new URL("./tailnet-guard.foreground.hand-built.fixture.json", import.meta.url),
+    "utf8",
+  ),
+);
 
 const PORTS = [7717, 7718];
 const HOST = "machine.tailnet.ts.net";
@@ -134,8 +142,65 @@ describe("funnelExposes", () => {
         Web: { [`${HOST}:443`]: { Handlers: { "/": 1 } } },
       },
     ],
+    [{ Foreground: 3 }],
+    [{ Foreground: [] }],
+    [{ Foreground: { s: 1, t: null, u: { AllowFunnel: 2, TCP: 3, Web: 4 } } }],
   ])("an unknown shape is not exposed and never throws: %j", (status) => {
     expect(funnelExposes(status, PORTS)).toBe(false);
+  });
+
+  describe("foreground config", () => {
+    const allow = { [`${HOST}:443`]: true };
+    const web = { [`${HOST}:443`]: { Handlers: { "/": { Proxy: "7717" } } } };
+    const tcp = { "443": { TCPForward: "127.0.0.1:7717" } };
+
+    it("plain `tailscale funnel 7717` is exposed", () => {
+      expect(funnelExposes(FOREGROUND, PORTS)).toBe(true);
+    });
+
+    it("a foreground Funnel to another port is not exposed", () => {
+      expect(funnelExposes(FOREGROUND, [8765])).toBe(false);
+    });
+
+    it("any session counts", () => {
+      const status = {
+        Foreground: { a: {}, b: { AllowFunnel: allow, TCP: tcp } },
+      };
+      expect(funnelExposes(status, PORTS)).toBe(true);
+    });
+
+    it("allowed at the top, handler in a session, is exposed", () => {
+      expect(funnelExposes({ AllowFunnel: allow, Foreground: { s: { Web: web } } }, PORTS)).toBe(
+        true,
+      );
+      expect(funnelExposes({ AllowFunnel: allow, Foreground: { s: { TCP: tcp } } }, PORTS)).toBe(
+        true,
+      );
+    });
+
+    it("allowed in a session, handler at the top, is exposed", () => {
+      expect(funnelExposes({ Web: web, Foreground: { s: { AllowFunnel: allow } } }, PORTS)).toBe(
+        true,
+      );
+      expect(funnelExposes({ TCP: tcp, Foreground: { s: { AllowFunnel: allow } } }, PORTS)).toBe(
+        true,
+      );
+    });
+
+    it("allowed in one session, handler in another, is exposed", () => {
+      const status = { Foreground: { a: { AllowFunnel: allow }, b: { Web: web } } };
+      expect(funnelExposes(status, PORTS)).toBe(true);
+    });
+
+    it("a foreground handler that no level allows is not exposed", () => {
+      expect(funnelExposes({ Foreground: { s: { Web: web, TCP: tcp } } }, PORTS)).toBe(false);
+      expect(
+        funnelExposes(
+          { Foreground: { s: { Web: web, AllowFunnel: { [`${HOST}:443`]: false } } } },
+          PORTS,
+        ),
+      ).toBe(false);
+    });
   });
 });
 
@@ -147,6 +212,10 @@ describe("relayConfirmed", () => {
 
   it("a forward without PROXY is not confirmed, so a manual rule gets replaced", () => {
     expect(relayConfirmed(REAL, PORTS)).toBe(false);
+  });
+
+  it("a forward that ends with a CLI session is not confirmed", () => {
+    expect(relayConfirmed({ Foreground: { s: RELAYED } }, PORTS)).toBe(false);
   });
 
   it("every port has to be confirmed", () => {
@@ -278,6 +347,7 @@ function harness(initial: Partial<HarnessState> = {}) {
     serve: { code: 0, stdout: "{}", stderr: "" },
     cli: true,
     certCode: 0,
+    renewedNotAfter: NOW + 90 * DAY,
     certPath: CERT_PATH,
     keyPath: KEY_PATH,
     ...initial,
@@ -292,13 +362,14 @@ function harness(initial: Partial<HarnessState> = {}) {
       case "status":
         return { code: 0, stdout: JSON.stringify({ Self: { DNSName: `${HOST}.` } }), stderr: "" };
       case "cert":
+        if (state.certCode === 0) state.notAfter = state.renewedNotAfter;
         return { code: state.certCode, stdout: "", stderr: state.certCode === 0 ? "" : "no" };
       default:
         throw new Error(`unexpected command ${args.join(" ")}`);
     }
   });
   const armed: { callback: () => void; ms: number }[] = [];
-  const setTailnetBlock = vi.fn(async () => {});
+  const setTailnetBlock = vi.fn(async (_reason: unknown) => true);
   const reloadCertificate = vi.fn(async () => {});
   const log = vi.fn();
   const certificateExpiry = vi.fn(async () => state.notAfter);
@@ -378,6 +449,8 @@ type HarnessState = {
   serve: { code: number; stdout: string; stderr: string } | Error;
   cli: boolean;
   certCode: number;
+  /** What the file's expiry becomes when `cert` exits 0. */
+  renewedNotAfter: number;
   certPath: string | undefined;
   keyPath: string | undefined;
 };
@@ -525,6 +598,16 @@ describe("createTailnetGuard: the switch", () => {
     });
     await h.start();
     expect(h.setTailnetBlock).not.toHaveBeenCalled();
+  });
+
+  it("a verdict the bridge drops is not recorded as sent", async () => {
+    const h = harness({ serve: serving(FUNNEL_TCP) });
+    h.setTailnetBlock.mockResolvedValueOnce(false);
+    await h.start();
+    await h.poll();
+    await h.poll();
+    expect(h.setTailnetBlock.mock.calls).toEqual([["funnel"], ["funnel"]]);
+    expect(h.log).not.toHaveBeenCalled();
   });
 
   it("a poll that saw the switch off sends the verdict again once it is on", async () => {
@@ -747,14 +830,14 @@ describe("createTailnetGuard: renewal", () => {
   it("a pending reload survives later days without renewing again", async () => {
     const h = harness({ notAfter: NOW + 29 * DAY, connected: 2 });
     await h.start();
-    // The file on disk is fresh now, whatever the served one says.
-    h.state.notAfter = NOW + 90 * DAY;
+    // Before and after the renewal; nothing more while the reload waits.
+    expect(h.certificateExpiry).toHaveBeenCalledTimes(2);
     for (let day = 1; day <= 3; day++) {
       h.state.now = NOW + day * DAY;
       await h.poll();
     }
     expect(h.calls("cert")).toHaveLength(1);
-    expect(h.certificateExpiry).toHaveBeenCalledTimes(1);
+    expect(h.certificateExpiry).toHaveBeenCalledTimes(2);
     expect(h.reloadCertificate).not.toHaveBeenCalled();
 
     h.state.connected = 0;
@@ -765,7 +848,6 @@ describe("createTailnetGuard: renewal", () => {
   it("a pending reload is forced once the served certificate reaches 7 days left", async () => {
     const h = harness({ notAfter: NOW + 29 * DAY, connected: 2 });
     await h.start();
-    h.state.notAfter = NOW + 90 * DAY;
 
     h.state.now = NOW + 22 * DAY - 1;
     await h.poll();
@@ -779,6 +861,72 @@ describe("createTailnetGuard: renewal", () => {
   it("at 6 days reloads regardless", async () => {
     const h = harness({ notAfter: NOW + 6 * DAY, connected: 3 });
     await h.start();
+    expect(h.calls("cert")).toHaveLength(1);
+    expect(h.reloadCertificate).toHaveBeenCalledTimes(1);
+  });
+
+  it("`cert` exiting 0 with the expiry unchanged is not a renewal", async () => {
+    // What upstream does on the first run once renewal is due: it renews in
+    // the background and writes the cached certificate back.
+    const notAfter = NOW + 29 * DAY;
+    const h = harness({ notAfter, renewedNotAfter: notAfter, connected: 2 });
+    await h.start();
+    expect(h.calls("cert")).toHaveLength(1);
+    expect(h.log).toHaveBeenCalledTimes(1);
+
+    // Nothing pending: not reloaded when the devices leave, not forced later,
+    // and not run again until the next daily check.
+    h.state.connected = 0;
+    await h.poll();
+    expect(h.reloadCertificate).not.toHaveBeenCalled();
+    expect(h.calls("cert")).toHaveLength(1);
+
+    h.state.now = NOW + DAY;
+    h.state.renewedNotAfter = NOW + 90 * DAY;
+    h.state.connected = 2;
+    await h.poll();
+    expect(h.calls("cert")).toHaveLength(2);
+    expect(h.reloadCertificate).not.toHaveBeenCalled();
+
+    h.state.connected = 0;
+    await h.poll();
+    expect(h.reloadCertificate).toHaveBeenCalledTimes(1);
+  });
+
+  it("an unchanged certificate at 6 days does not force a reload", async () => {
+    const notAfter = NOW + 6 * DAY;
+    const h = harness({ notAfter, renewedNotAfter: notAfter, connected: 3 });
+    await h.start();
+    expect(h.calls("cert")).toHaveLength(1);
+    expect(h.reloadCertificate).not.toHaveBeenCalled();
+  });
+
+  it("an unreadable file after `cert` is not a renewal, and retries next day", async () => {
+    const h = harness({ notAfter: NOW + 29 * DAY });
+    h.certificateExpiry.mockResolvedValueOnce(NOW + 29 * DAY);
+    h.certificateExpiry.mockRejectedValueOnce(new Error("ENOENT"));
+    await h.start();
+    expect(h.log).toHaveBeenCalledTimes(1);
+    expect(h.reloadCertificate).not.toHaveBeenCalled();
+
+    h.state.now = NOW + DAY;
+    await h.poll();
+    expect(h.calls("cert")).toHaveLength(1);
+    expect(h.reloadCertificate).toHaveBeenCalledTimes(1);
+  });
+
+  it("files replaced by a renewal that reported failure are still reloaded", async () => {
+    const h = harness({ notAfter: NOW + 29 * DAY });
+    // `cert` wrote both files; tightening them afterwards fails.
+    vi.mocked(h.deps.tailscale.fs.chmod)
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("EPERM"));
+    await h.start();
+    expect(h.log).toHaveBeenCalledTimes(1);
+    expect(h.reloadCertificate).not.toHaveBeenCalled();
+
+    h.state.now = NOW + DAY;
+    await h.poll();
     expect(h.calls("cert")).toHaveLength(1);
     expect(h.reloadCertificate).toHaveBeenCalledTimes(1);
   });

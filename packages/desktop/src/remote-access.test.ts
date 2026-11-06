@@ -202,7 +202,7 @@ function fakeBridge(): { bridge: Bridge; push: ReturnType<typeof vi.fn> } {
     setOwnerPassword: vi.fn(async () => ({ ok: true as const })),
     deletePasskey: vi.fn(async () => true),
     signOutEverywhere: vi.fn(async () => {}),
-    setTailnetBlock: vi.fn(async () => {}),
+    setTailnetBlock: vi.fn(async () => true),
     rearmTailnet: vi.fn(async () => {}),
     reloadCertificate: vi.fn(async () => {}),
     stop: vi.fn(async () => {}),
@@ -314,6 +314,7 @@ describe("createRemoteAccess: the Tailscale guard's calls", () => {
     });
     vi.mocked(bridge.setTailnetBlock).mockImplementation(async () => {
       order.push("block");
+      return false;
     });
     vi.mocked(bridge.reloadCertificate).mockImplementation(async () => {
       order.push("reload");
@@ -324,6 +325,7 @@ describe("createRemoteAccess: the Tailscale guard's calls", () => {
     await remoteAccess.start(REMOTE_CONFIG);
     await Promise.all([block, reload]);
 
+    expect(await block).toBe(false);
     expect(order).toEqual(["apply", "block", "reload"]);
     expect(bridge.setTailnetBlock).toHaveBeenCalledWith("funnel");
   });
@@ -332,8 +334,8 @@ describe("createRemoteAccess: the Tailscale guard's calls", () => {
     const { remoteAccess, bridge } = harness();
     const waiting = remoteAccess.setTailnetBlock("funnel");
     await remoteAccess.stop();
-    await waiting;
-    await remoteAccess.setTailnetBlock("funnel");
+    expect(await waiting).toBe(false);
+    expect(await remoteAccess.setTailnetBlock("funnel")).toBe(false);
     await remoteAccess.reloadCertificate();
     expect(bridge.setTailnetBlock).not.toHaveBeenCalled();
     expect(bridge.reloadCertificate).not.toHaveBeenCalled();

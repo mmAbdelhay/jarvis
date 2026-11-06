@@ -392,8 +392,9 @@ export type Bridge = {
   /** The guard's verdict. `"funnel"` closes every listener and latches: from
    *  then on only `rearmTailnet`, turning the switch off or a restart reopens
    *  them. With the switch off it is ignored. `undefined` clears
-   *  `"relay-missing"`, never that latch. */
-  setTailnetBlock(reason: "funnel" | "relay-missing" | undefined): Promise<void>;
+   *  `"relay-missing"`, never that latch. False when the verdict was dropped
+   *  (the switch off, or the bridge stopped), so it has to be sent again. */
+  setTailnetBlock(reason: "funnel" | "relay-missing" | undefined): Promise<boolean>;
   /** The user turned Tailscale access on again: drops the Funnel latch, and
    *  the guard evaluates Funnel afresh. `"relay-missing"` stays until the
    *  guard has confirmed the forward. */
@@ -1712,10 +1713,10 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
     invalidateOwnerSessions("signed-out-everywhere");
   }
 
-  async function setTailnetBlock(reason: "funnel" | "relay-missing" | undefined): Promise<void> {
-    if (stopped) return;
+  async function setTailnetBlock(reason: "funnel" | "relay-missing" | undefined): Promise<boolean> {
+    if (stopped) return false;
     // A late verdict, after the switch went off, must not close anything.
-    if (reason === "funnel" && !tailnetSwitchedOn()) return;
+    if (reason === "funnel" && !tailnetSwitchedOn()) return false;
     relayMissing = reason === "relay-missing";
     if (reason === "funnel") {
       funnelLatched = true;
@@ -1723,6 +1724,7 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
       pairing.cancel();
     }
     await reconcile();
+    return true;
   }
 
   async function rearmTailnet(): Promise<void> {

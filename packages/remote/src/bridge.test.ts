@@ -1349,6 +1349,24 @@ describe("createBridge: tailnet gate", () => {
       expect(bridge.status().tailnet).toEqual({ kind: "on" });
     });
 
+    it("answers whether the verdict was taken, so a dropped one can be sent again", async () => {
+      const { bridge } = await start({ config: TAILNET_OFF });
+      expect(await bridge.setTailnetBlock("funnel")).toBe(false);
+
+      await bridge.apply(TAILNET_ON({ enabled: false }));
+      expect(await bridge.setTailnetBlock("funnel")).toBe(false);
+
+      await bridge.apply(TAILNET_ON());
+      expect(await bridge.setTailnetBlock("funnel")).toBe(true);
+      expect(bridge.status().tailnet).toEqual({ kind: "blocked", reason: "funnel" });
+      expect(await bridge.setTailnetBlock(undefined)).toBe(true);
+      expect(await bridge.setTailnetBlock("relay-missing")).toBe(true);
+
+      await bridge.stop();
+      expect(await bridge.setTailnetBlock("funnel")).toBe(false);
+      expect(await bridge.setTailnetBlock(undefined)).toBe(false);
+    });
+
     it("rearmTailnet is what reopens them, with paired devices or none", async () => {
       for (const devices of [["Phone"], []]) {
         const { h, bridge } = await start({ devices });

@@ -205,7 +205,7 @@ export type RemoteAccess = RemoteControls & {
   recordPushQueued(deviceId: string, pushKind: string): void;
   /** The Tailscale guard's verdict and renewal. Both wait for `start`'s own
    *  apply, like `apply` does: a verdict sent before it would be dropped. */
-  setTailnetBlock(reason: "funnel" | "relay-missing" | undefined): Promise<void>;
+  setTailnetBlock(reason: "funnel" | "relay-missing" | undefined): Promise<boolean>;
   reloadCertificate(): Promise<void>;
 };
 
@@ -492,9 +492,10 @@ export function createRemoteAccess(deps: RemoteAccessDeps): RemoteAccess {
       if (bridge === undefined) return;
       await bridge.clearPushToken(deviceId, "unregistered");
     },
-    async setTailnetBlock(reason): Promise<void> {
+    async setTailnetBlock(reason): Promise<boolean> {
       await started;
-      if (!stopped) await bridge?.setTailnetBlock(reason);
+      if (stopped || bridge === undefined) return false;
+      return bridge.setTailnetBlock(reason);
     },
     async reloadCertificate(): Promise<void> {
       await started;

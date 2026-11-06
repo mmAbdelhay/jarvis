@@ -225,7 +225,7 @@ function createFakePushBridge(): {
     setOwnerPassword: async () => ({ ok: true as const }),
     deletePasskey: async () => true,
     signOutEverywhere: async () => {},
-    setTailnetBlock: async () => {},
+    setTailnetBlock: async () => true,
     rearmTailnet: async () => {},
     reloadCertificate: async () => {},
     stop: async () => {},

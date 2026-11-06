@@ -73,7 +73,7 @@ import { createRemoteAccess, type RemoteAccess } from "../remote-access.js";
 import { createWebManifestLoader, nodeWebExportFs } from "../web-export.js";
 import { disableRemoteOnDisk } from "../remote-idle.js";
 import { certificateExpiry, obtainCertificate, type TailscaleCertDeps } from "../tailscale-cert.js";
-import { createTailnetGuard } from "../tailnet-guard.js";
+import { applyRemoteThenCheck, createRemoteTailnetGuard } from "../tailnet-guard-wiring.js";
 import { createNotifier } from "../notify.js";
 import { createReviewService } from "../review-service.js";
 import {
@@ -226,7 +226,6 @@ import {
   DEFAULT_AWAKE,
   DEFAULT_CONFIG_PATH,
   DEFAULT_TERMINAL,
-  effectiveWebPort,
   mergeConfigInPlace,
   providerAgentListsEqual,
   defaultSessionsScanPath,
@@ -1646,7 +1645,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
   // first".
   const applyFromDisk = serialize(async () => {
     const next = await loadConfig(DEFAULT_CONFIG_PATH);
-    await remoteAccess.apply(next.remote);
+    await applyRemoteThenCheck(remoteAccess, tailnetGuard, next.remote);
   });
 
   // After a successful write, the file on disk is the only source of
@@ -2384,16 +2383,10 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
 
   // Tailscale access's guard (tailnet-guard.ts): idle until the switch is on.
   // Each read goes to the live config, which a settings save merges in place.
-  const tailnetGuard = createTailnetGuard({
+  const tailnetGuard = createRemoteTailnetGuard({
+    remote: () => config.remote,
+    access: remoteAccess,
     tailscale: tailscaleCertDeps,
-    enabled: () => config.remote.tailnet.enabled,
-    relay: () => config.remote.tailnet.relay,
-    ports: () => [config.remote.port, effectiveWebPort(config.remote)],
-    setTailnetBlock: (reason) => remoteAccess.setTailnetBlock(reason),
-    reloadCertificate: () => remoteAccess.reloadCertificate(),
-    connectedDevices: () =>
-      remoteAccess.status().devices.filter((device) => device.connected).length,
-    certificate: () => config.remote.tls,
     certificateExpiry: (certPath) => certificateExpiry((path) => readFile(path, "utf8"), certPath),
     timers: nodeTimers,
     now: Date.now,

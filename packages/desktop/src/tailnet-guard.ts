@@ -50,34 +50,44 @@ function targetPort(target: unknown): number | undefined {
 /**
  * Whether Funnel carries a port in `ports`: for each `AllowFunnel` key
  * `host:port`, its `TCP[port].TCPForward` and every `Web[host:port]` handler's
- * `Proxy`. An unknown shape is false, never a throw.
+ * `Proxy`. A non-`--bg` `serve` or `funnel`, the default, keeps its config in
+ * `Foreground[session]`, and Tailscale treats a target allowed at either level
+ * as Funnel-enabled, so both the keys and the targets are read across the top
+ * level and every session. An unknown shape is false, never a throw.
  */
 export function funnelExposes(serveStatus: unknown, ports: number[]): boolean {
   const status = asRecord(serveStatus);
-  const allowed = asRecord(status?.["AllowFunnel"]);
-  if (status === undefined || allowed === undefined) return false;
-  const tcp = asRecord(status["TCP"]);
-  const web = asRecord(status["Web"]);
+  if (status === undefined) return false;
+  const configs = [status, ...Object.values(asRecord(status["Foreground"]) ?? {})]
+    .map(asRecord)
+    .filter((config) => config !== undefined);
   const carried = (target: unknown): boolean => {
     const port = targetPort(target);
     return port !== undefined && ports.includes(port);
   };
+  const allowedKeys = configs.flatMap((config) =>
+    Object.entries(asRecord(config["AllowFunnel"]) ?? {})
+      .filter(([, allow]) => allow === true)
+      .map(([hostPort]) => hostPort),
+  );
 
-  for (const [hostPort, allow] of Object.entries(allowed)) {
-    if (allow !== true) continue;
+  for (const hostPort of allowedKeys) {
     const funnelPort = /:(\d+)$/.exec(hostPort)?.[1];
-    if (funnelPort !== undefined && carried(asRecord(tcp?.[funnelPort])?.["TCPForward"])) {
-      return true;
-    }
-    const handlers = asRecord(asRecord(web?.[hostPort])?.["Handlers"]);
-    for (const handler of Object.values(handlers ?? {})) {
-      if (carried(asRecord(handler)?.["Proxy"])) return true;
+    for (const config of configs) {
+      const forward =
+        funnelPort === undefined ? undefined : asRecord(asRecord(config["TCP"])?.[funnelPort]);
+      if (carried(forward?.["TCPForward"])) return true;
+      const handlers = asRecord(asRecord(asRecord(config["Web"])?.[hostPort])?.["Handlers"]);
+      for (const handler of Object.values(handlers ?? {})) {
+        if (carried(asRecord(handler)?.["Proxy"])) return true;
+      }
     }
   }
   return false;
 }
 
-/** Whether each port forwards to itself on loopback, with PROXY v2 on. */
+/** Whether each port forwards to itself on loopback, with PROXY v2 on. Top
+ *  level only: a forward in `Foreground` ends with its CLI session. */
 export function relayConfirmed(serveStatus: unknown, ports: number[]): boolean {
   const tcp = asRecord(asRecord(serveStatus)?.["TCP"]);
   return ports.every((port) => {
@@ -134,13 +144,15 @@ type Verdict = "funnel" | "relay-missing" | undefined;
 
 export type TailnetGuardDeps = {
   tailscale: TailscaleCertDeps;
-  /** `remote.tailnet.enabled`. While false the guard does nothing at all. */
+  /** The same switch the bridge uses: `remote.enabled && remote.tailnet.enabled`.
+   *  While false the guard does nothing at all. */
   enabled(): boolean;
   /** `remote.tailnet.relay`. */
   relay(): boolean;
   /** The bridge's and the web client's ports. */
   ports(): number[];
-  setTailnetBlock(reason: Verdict): Promise<void>;
+  /** False when the bridge dropped the verdict; it is sent again next poll. */
+  setTailnetBlock(reason: Verdict): Promise<boolean>;
   reloadCertificate(): Promise<void>;
   connectedDevices(): number;
   certificate(): { certPath?: string; keyPath?: string };
@@ -192,6 +204,10 @@ export function createTailnetGuard(deps: TailnetGuardDeps): TailnetGuard {
   // Holds the expiry of the certificate still being served: the one on disk
   // is fresh by then, so it cannot say when the reload stops being optional.
   let pendingReload: { servedNotAfter: number } | undefined;
+  // The served expiry, from the first attempt on. An attempt that reported
+  // failure can still have replaced the files, and the next check would then
+  // read a fresh file, see nothing to renew and never reload.
+  let renewalTriedFrom: number | undefined;
 
   // One read and verdict at a time, so a checkNow during a poll reads afresh
   // after it, and that poll's older answer cannot land last.
@@ -221,8 +237,7 @@ export function createTailnetGuard(deps: TailnetGuardDeps): TailnetGuard {
         : undefined;
     if (verdict === lastSent) return;
     try {
-      await deps.setTailnetBlock(verdict);
-      lastSent = verdict;
+      lastSent = (await deps.setTailnetBlock(verdict)) ? verdict : UNSENT;
     } catch (error) {
       lastSent = UNSENT;
       deps.log(`tailnet guard: could not apply the verdict: ${errorMessage(error)}`);
@@ -241,7 +256,7 @@ export function createTailnetGuard(deps: TailnetGuardDeps): TailnetGuard {
     }
     const dir = defaultCertDir(tailscale);
     if (join(dir, `${name}.crt`) !== certPath || join(dir, `${name}.key`) !== keyPath) {
-      deps.log("tailnet guard: not renewing a certificate Jarvis did not issue");
+      deps.log("tailnet guard: not renewing: this certificate pair is not managed by Jarvis");
       return false;
     }
     const result = await issueCertificate(tailscale, cli, { name, dir });
@@ -256,15 +271,39 @@ export function createTailnetGuard(deps: TailnetGuardDeps): TailnetGuard {
     nextRenewalCheckAt = now + DAY_MS;
     const { certPath, keyPath } = deps.certificate();
     if (certPath === undefined || keyPath === undefined) return;
-    let servedNotAfter: number;
+    let onDisk: number;
     try {
-      servedNotAfter = await deps.certificateExpiry(certPath);
+      onDisk = await deps.certificateExpiry(certPath);
     } catch (error) {
       deps.log(`tailnet guard: cannot read the certificate's expiry: ${errorMessage(error)}`);
       return;
     }
+    const servedNotAfter = renewalTriedFrom ?? onDisk;
+    if (onDisk > servedNotAfter) {
+      scheduleReload(servedNotAfter);
+      return;
+    }
     if (stopped || !deps.enabled() || servedNotAfter - now >= RENEW_UNDER_MS) return;
-    if (await renew(certPath, keyPath)) pendingReload = { servedNotAfter };
+    renewalTriedFrom = servedNotAfter;
+    if (!(await renew(certPath, keyPath))) return;
+    // Exit 0 does not mean a new certificate: `tailscale cert` with no
+    // --min-validity renews in the background and writes the cached one back.
+    try {
+      onDisk = await deps.certificateExpiry(certPath);
+    } catch (error) {
+      deps.log(`tailnet guard: cannot read the renewed certificate: ${errorMessage(error)}`);
+      return;
+    }
+    if (onDisk > servedNotAfter) {
+      scheduleReload(servedNotAfter);
+    } else {
+      deps.log("tailnet guard: Tailscale has no newer certificate yet; checking again tomorrow");
+    }
+  }
+
+  function scheduleReload(servedNotAfter: number): void {
+    pendingReload = { servedNotAfter };
+    renewalTriedFrom = undefined;
   }
 
   async function reloadIfDue(): Promise<void> {
