@@ -1417,6 +1417,7 @@ describe("remote", () => {
     tls: {},
     push: { enabled: false, includeProjectNames: false },
     web: { enabled: false },
+    tailnet: { enabled: false, relay: false },
     idleDisableMinutes: 0,
   };
 
@@ -1440,6 +1441,7 @@ describe("remote", () => {
       tls: { certPath: "/certs/m.crt", keyPath: "/certs/m.key" },
       push: { enabled: true, includeProjectNames: true },
       web: { enabled: true, port: 8443 },
+      tailnet: { enabled: true, relay: true },
       idleDisableMinutes: 30,
     };
     expect(parseConfig({ ...base, remote }).remote).toEqual(remote);
@@ -1527,6 +1529,13 @@ describe("remote", () => {
       { remote: { push: { includeProjectNames: "no" } } },
       "Config `remote.push.includeProjectNames` must be true or false",
     ],
+    [{ remote: { tailnet: true } }, "Config `remote.tailnet` must be an object"],
+    [{ remote: { tailnet: [] } }, "Config `remote.tailnet` must be an object"],
+    [
+      { remote: { tailnet: { enabled: "yes" } } },
+      "Config `remote.tailnet.enabled` must be true or false",
+    ],
+    [{ remote: { tailnet: { relay: 1 } } }, "Config `remote.tailnet.relay` must be true or false"],
     [{ remote: { web: true } }, "Config `remote.web` must be an object"],
     [{ remote: { web: [] } }, "Config `remote.web` must be an object"],
     [{ remote: { web: { enabled: "yes" } } }, "Config `remote.web.enabled` must be true or false"],
@@ -1620,6 +1629,29 @@ describe("remote", () => {
         enabled: true,
         port: 8443,
       });
+    });
+  });
+
+  describe("tailnet", () => {
+    const tailnet = (remote: Record<string, unknown>) =>
+      parseConfig({ ...base, remote }).remote.tailnet;
+
+    it("is off when absent, null or empty", () => {
+      const off = { enabled: false, relay: false };
+      expect(parseConfig(base).remote.tailnet).toEqual(off);
+      expect(tailnet({})).toEqual(off);
+      expect(tailnet({ tailnet: null })).toEqual(off);
+      expect(tailnet({ tailnet: {} })).toEqual(off);
+    });
+
+    it("defaults each flag on its own", () => {
+      expect(tailnet({ tailnet: { enabled: true } })).toEqual({ enabled: true, relay: false });
+      expect(tailnet({ tailnet: { relay: true } })).toEqual({ enabled: false, relay: true });
+    });
+
+    it("never hands out DEFAULT_REMOTE's own object", () => {
+      expect(parseConfig(base).remote.tailnet).not.toBe(DEFAULT_REMOTE.tailnet);
+      expect(tailnet({})).not.toBe(DEFAULT_REMOTE.tailnet);
     });
   });
 

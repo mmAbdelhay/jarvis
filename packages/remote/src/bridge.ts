@@ -73,6 +73,8 @@ export type BridgeConfig = {
    * `port`). The listener runs only while the web gate is "on".
    */
   web: { enabled: boolean; port: number };
+  /** Controlling other Jarvis machines over Tailscale. Absent means off. */
+  tailnet?: { enabled: boolean; relay: boolean };
 };
 
 /**

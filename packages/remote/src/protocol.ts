@@ -48,7 +48,10 @@ export type {
   ClientMessage,
   PairClientMessage,
   PairingLink,
+  PairJoinedMessage,
+  PairJoinMessage,
   PairServerMessage,
+  PeerInfo,
   RemoteErrorCode,
   ServerMessage,
   SubTarget,
@@ -69,6 +72,7 @@ import type {
   AuthChannel,
   ClientMessage,
   PairClientMessage,
+  PairJoinMessage,
   SubTarget,
 } from "@jarvis/wire";
 
@@ -207,8 +211,8 @@ export function parseClientMessage(text: string): ClientMessage | InvalidFrame {
   return obj.t === "blob" ? { t: "invalid", id, malformedBlob: true } : { t: "invalid", id };
 }
 
-/** Parses a pre-auth pairing frame. Never throws; anything invalid is `undefined`. */
-export function parsePairMessage(text: string): PairClientMessage | undefined {
+/** The size limit and JSON shape every pre-auth frame shares. */
+function parsePreAuthObject(text: string): Record<string, unknown> | undefined {
   if (Buffer.byteLength(text, "utf8") > MAX_PAIR_FRAME_BYTES) return undefined;
   let raw: unknown;
   try {
@@ -217,23 +221,60 @@ export function parsePairMessage(text: string): PairClientMessage | undefined {
     return undefined;
   }
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return undefined;
-  const obj = raw as Record<string, unknown>;
-  if (obj.t !== "pair") return undefined;
+  return raw as Record<string, unknown>;
+}
 
+function isDeviceName(value: unknown): value is string {
+  return typeof value === "string" && value.length >= 1 && value.length <= 256;
+}
+
+function isPairClient(value: unknown): value is string {
+  return typeof value === "string" && value.length <= MAX_CLIENT_LENGTH;
+}
+
+function toPairMessage(obj: Record<string, unknown>): PairClientMessage | undefined {
+  if (obj.t !== "pair") return undefined;
   const { v, secret, deviceName, client } = obj;
   if (
     isSafeNonNegativeInt(v) &&
     typeof secret === "string" &&
     SECRET_PATTERN.test(secret) &&
-    typeof deviceName === "string" &&
-    deviceName.length >= 1 &&
-    deviceName.length <= 256 &&
-    typeof client === "string" &&
-    client.length <= MAX_CLIENT_LENGTH
+    isDeviceName(deviceName) &&
+    isPairClient(client)
   ) {
     return { t: "pair", v, secret, deviceName, client };
   }
   return undefined;
+}
+
+function toJoinMessage(obj: Record<string, unknown>): PairJoinMessage | undefined {
+  if (obj.t !== "join") return undefined;
+  const { v, password, deviceName, client } = obj;
+  if (
+    isSafeNonNegativeInt(v) &&
+    isPassword(password) &&
+    isDeviceName(deviceName) &&
+    isPairClient(client)
+  ) {
+    return { t: "join", v, password, deviceName, client };
+  }
+  return undefined;
+}
+
+/** Parses a pre-auth pairing frame. Never throws; anything invalid is `undefined`. */
+export function parsePairMessage(text: string): PairClientMessage | undefined {
+  const obj = parsePreAuthObject(text);
+  return obj === undefined ? undefined : toPairMessage(obj);
+}
+
+/**
+ * Parses a pre-auth frame that may be a pairing or a join. Never throws;
+ * anything invalid is `undefined`, with no detail that could carry a password.
+ */
+export function parsePairFrame(text: string): PairClientMessage | PairJoinMessage | undefined {
+  const obj = parsePreAuthObject(text);
+  if (obj === undefined) return undefined;
+  return toPairMessage(obj) ?? toJoinMessage(obj);
 }
 
 // Unpadded base64url, as WebAuthn's JSON encoding produces it.

@@ -54,6 +54,7 @@ const CONFIG: JarvisConfig = {
     tls: { certPath: "/certs/m.crt", keyPath: "/certs/m.key" },
     push: { enabled: true, includeProjectNames: true },
     web: { enabled: false },
+    tailnet: { enabled: false, relay: false },
     idleDisableMinutes: 30,
   },
   daemon: { enabled: false },

@@ -92,6 +92,7 @@ function sample(): JarvisConfig {
       tls: {},
       push: { enabled: false, includeProjectNames: false },
       web: { enabled: false },
+      tailnet: { enabled: false, relay: false },
       idleDisableMinutes: 0,
     },
     daemon: { enabled: false },

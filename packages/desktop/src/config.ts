@@ -214,6 +214,8 @@ export type RemoteConfig = {
   /** Phase 1: the browser client's own listener, off by default. `port`
    *  absent means the bridge port + 1 — see `effectiveWebPort`. */
   web: { enabled: boolean; port?: number };
+  /** Controlling other Jarvis machines over Tailscale, off by default. */
+  tailnet: { enabled: boolean; relay: boolean };
   /** 0 = never; otherwise the bridge turns itself off after this long idle. */
   idleDisableMinutes: number;
 };
@@ -795,6 +797,7 @@ export const DEFAULT_REMOTE: RemoteConfig = {
   tls: {},
   push: { enabled: false, includeProjectNames: false },
   web: { enabled: false },
+  tailnet: { enabled: false, relay: false },
   idleDisableMinutes: 0,
 };
 
@@ -817,6 +820,7 @@ function parseRemote(rawRemote: unknown): RemoteConfig {
     tls: {},
     push: { ...DEFAULT_REMOTE.push },
     web: { ...DEFAULT_REMOTE.web },
+    tailnet: { ...DEFAULT_REMOTE.tailnet },
   });
   if (rawRemote === undefined || rawRemote === null) return defaults();
   if (typeof rawRemote !== "object" || Array.isArray(rawRemote)) {
@@ -872,6 +876,7 @@ function parseRemote(rawRemote: unknown): RemoteConfig {
     tls: parseRemoteTls(remote["tls"]),
     push: parseRemotePush(remote["push"]),
     web: parseRemoteWeb(remote["web"], bridgePort),
+    tailnet: parseRemoteTailnet(remote["tailnet"]),
     idleDisableMinutes: typeof idle === "number" ? idle : DEFAULT_REMOTE.idleDisableMinutes,
   };
 }
@@ -1094,6 +1099,23 @@ function parseRemotePush(rawPush: unknown): RemoteConfig["push"] {
     return value;
   };
   return { enabled: flag("enabled"), includeProjectNames: flag("includeProjectNames") };
+}
+
+function parseRemoteTailnet(rawTailnet: unknown): RemoteConfig["tailnet"] {
+  if (rawTailnet === undefined || rawTailnet === null) return { ...DEFAULT_REMOTE.tailnet };
+  if (typeof rawTailnet !== "object" || Array.isArray(rawTailnet)) {
+    throw new Error("Config `remote.tailnet` must be an object");
+  }
+  const tailnet = rawTailnet as Record<string, unknown>;
+  const flag = (key: "enabled" | "relay"): boolean => {
+    const value = tailnet[key];
+    if (value === undefined) return DEFAULT_REMOTE.tailnet[key];
+    if (typeof value !== "boolean") {
+      throw new Error(`Config \`remote.tailnet.${key}\` must be true or false`);
+    }
+    return value;
+  };
+  return { enabled: flag("enabled"), relay: flag("relay") };
 }
 
 /**

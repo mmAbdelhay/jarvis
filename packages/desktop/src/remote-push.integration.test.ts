@@ -239,6 +239,7 @@ function remoteConfig(push: { enabled: boolean; includeProjectNames: boolean }):
     tls: {},
     push,
     web: { enabled: false },
+    tailnet: { enabled: false, relay: false },
     idleDisableMinutes: 0,
   };
 }

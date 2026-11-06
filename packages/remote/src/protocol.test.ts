@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AUTH_CHANNELS } from "@jarvis/wire";
+import { AUTH_CHANNELS, MAX_PAIR_FRAME_BYTES, MAX_PASSWORD_LENGTH } from "@jarvis/wire";
 import {
   CLOSE,
   type ClientMessage,
@@ -8,6 +8,7 @@ import {
   type PairingLink,
   parseClientMessage,
   parseAuthArgs,
+  parsePairFrame,
   parsePairingUri,
   parsePairMessage,
 } from "./protocol.js";
@@ -174,6 +175,82 @@ describe("parsePairMessage", () => {
     ],
   ])("refuses %s", (_label, text) => {
     expect(parsePairMessage(text)).toBeUndefined();
+  });
+
+  it("refuses a join frame: joining is parsePairFrame's alone", () => {
+    const join = { t: "join", v: 2, password: "hunter2", deviceName: "Mac", client: "x" };
+    expect(parsePairMessage(JSON.stringify(join))).toBeUndefined();
+  });
+});
+
+describe("parsePairFrame", () => {
+  const JOIN = {
+    t: "join" as const,
+    v: 2,
+    password: "correct horse",
+    deviceName: "Studio",
+    client: "desktop-0.1.13",
+  };
+  const PAIR = {
+    t: "pair" as const,
+    v: 2,
+    secret: TOKEN,
+    deviceName: "Phone",
+    client: "ios-1.0",
+  };
+
+  it("parses a well-formed join frame, keeping only its known fields", () => {
+    expect(parsePairFrame(JSON.stringify(JOIN))).toEqual(JOIN);
+    expect(parsePairFrame(JSON.stringify({ ...JOIN, extra: "x" }))).toEqual(JOIN);
+  });
+
+  it("accepts a password exactly at the login length bound", () => {
+    const password = "p".repeat(MAX_PASSWORD_LENGTH);
+    expect(parsePairFrame(JSON.stringify({ ...JOIN, password }))).toEqual({ ...JOIN, password });
+  });
+
+  it.each<[string, Record<string, unknown>]>([
+    ["an empty password", { password: "" }],
+    ["a password over the login length bound", { password: "p".repeat(MAX_PASSWORD_LENGTH + 1) }],
+    ["a non-string password", { password: 1234 }],
+    ["a missing password", { password: undefined }],
+    ["an empty device name", { deviceName: "" }],
+    ["a 300-char device name", { deviceName: "a".repeat(300) }],
+    ["a 200-char client", { client: "c".repeat(200) }],
+    ['v:"2"', { v: "2" }],
+  ])("refuses a join frame with %s", (_label, patch) => {
+    const text = JSON.stringify({ ...JOIN, ...patch });
+    expect(Buffer.byteLength(text, "utf8")).toBeLessThanOrEqual(MAX_PAIR_FRAME_BYTES);
+    expect(parsePairFrame(text)).toBeUndefined();
+  });
+
+  // Every field is within its own bound, so only the frame limit can refuse it.
+  it("refuses a join frame over MAX_PAIR_FRAME_BYTES", () => {
+    const text = JSON.stringify({
+      t: "join",
+      v: 2,
+      password: "€".repeat(MAX_PASSWORD_LENGTH),
+      deviceName: "€".repeat(256),
+      client: "€".repeat(128),
+    });
+    expect(Buffer.byteLength(text, "utf8")).toBeGreaterThan(MAX_PAIR_FRAME_BYTES);
+    expect(parsePairFrame(text)).toBeUndefined();
+  });
+
+  it("parses a pair frame exactly as parsePairMessage does", () => {
+    const text = JSON.stringify(PAIR);
+    expect(parsePairFrame(text)).toEqual(PAIR);
+    expect(parsePairFrame(text)).toEqual(parsePairMessage(text));
+  });
+
+  it.each<[string, string]>([
+    ["a short pair secret", JSON.stringify({ ...PAIR, secret: "short" })],
+    ["a pair frame over the limit", JSON.stringify({ ...PAIR, pad: "x".repeat(4096) })],
+    ["a hello", JSON.stringify({ t: "hello", v: 2, deviceId: DEVICE_ID, token: TOKEN })],
+    ["an array", "[]"],
+    ["not JSON", "{"],
+  ])("refuses %s", (_label, text) => {
+    expect(parsePairFrame(text)).toBeUndefined();
   });
 });
 

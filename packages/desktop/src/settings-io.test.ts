@@ -58,6 +58,7 @@ const draft: JarvisConfig = {
     tls: {},
     push: { enabled: false, includeProjectNames: false },
     web: { enabled: false },
+    tailnet: { enabled: false, relay: false },
     idleDisableMinutes: 0,
   },
   daemon: { enabled: false },
@@ -100,6 +101,7 @@ const fullDraft: JarvisConfig = {
     tls: { certPath: "/certs/m.crt", keyPath: "/certs/m.key" },
     push: { enabled: true, includeProjectNames: true },
     web: { enabled: false },
+    tailnet: { enabled: true, relay: true },
     idleDisableMinutes: 30,
   },
   daemon: { enabled: true },
@@ -721,6 +723,7 @@ describe("remote round-trip", () => {
       sidecarProxy: false,
       push: { enabled: false, includeProjectNames: false },
       web: { enabled: false },
+      tailnet: { enabled: false, relay: false },
       idleDisableMinutes: 0,
     });
   });
