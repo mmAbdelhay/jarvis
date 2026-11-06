@@ -121,6 +121,11 @@ export type AuditEvent =
       scope: "device" | "global" | "capacity";
       count: number;
     }
+  // A password join over the tailnet failed.
+  | { kind: "join-failed"; source: string }
+  // Join attempts a lockout refused, coalesced to at most one line per 60 s
+  // with the window's count and latest source (join-limits.ts).
+  | { kind: "join-refused"; source: string; count: number }
   // Phase 0: every remote owner session was revoked at once (Sign out
   // everywhere, a password change, a passkey delete).
   | {
