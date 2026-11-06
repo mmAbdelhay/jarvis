@@ -7,6 +7,7 @@ import type { RandomBytes } from "./io.js";
 import { createPairing, type Pairing, type PairingOutcome } from "./pairing.js";
 import { type PairRefusal, type PairSessionDeps, createPairSession } from "./pair-session.js";
 import { HANDSHAKE_TIMEOUT_MS, PROTOCOL_VERSION } from "./protocol.js";
+import { MAX_PASSWORD_LENGTH } from "@jarvis/wire";
 import { FakeSocket } from "./socket-double.js";
 
 /** A RandomBytes double that fills each call's buffer with an incrementing byte, so successive mints never collide. */
@@ -112,9 +113,7 @@ function pairFrame(
 const JOIN_PASSWORD = "correct horse battery";
 const JOIN_TOKENS = { accessToken: "access", refreshToken: "refresh", accessExpiresAt: 123 };
 
-function joinFrame(
-  overrides: { v?: number; password?: string; deviceName?: string; client?: string } = {},
-): string {
+function joinFrame(overrides: Record<string, unknown> = {}): string {
   return JSON.stringify({
     t: "join",
     v: PROTOCOL_VERSION,
@@ -274,6 +273,65 @@ describe("createPairSession: join", () => {
     session.onText(pairFrame(WRONG_SECRET, "Phone", PROTOCOL_VERSION + 1));
 
     expect(socket.closed?.code).toBe(4426);
+  });
+
+  describe.each([
+    ["join present", () => joinDeps()],
+    ["join absent", () => undefined],
+  ])("a malformed join frame, %s", (_label, makeJoin) => {
+    it.each<[string, Record<string, unknown>]>([
+      ["an empty password", { password: "" }],
+      ["an over-long password", { password: "p".repeat(MAX_PASSWORD_LENGTH + 1) }],
+      ["a non-string password", { password: 1234 }],
+      ["a missing password", { password: undefined }],
+      ["a string v", { v: "2" }],
+      ["a non-integer v", { v: 2.5 }],
+      ["a negative v", { v: -1 }],
+      ["a missing v", { v: undefined }],
+      ["an empty device name", { deviceName: "" }],
+      ["an over-long device name", { deviceName: "a".repeat(257) }],
+      ["a non-string device name", { deviceName: 7 }],
+      ["a missing device name", { deviceName: undefined }],
+      ["an over-long client", { client: "c".repeat(129) }],
+      ["a non-string client", { client: 7 }],
+      ["a missing client", { client: undefined }],
+    ])("with %s closes 4401 like any other refusal, unchecked", async (_field, patch) => {
+      const h = makeHarness();
+      const join = makeJoin();
+      const { socket, session, onFailure, onSettled } = h.makeSession(join);
+
+      session.onText(joinFrame(patch));
+      await flush();
+
+      expect(socket.closed).toEqual({ code: 4401, reason: "" });
+      expect(socket.sent).toEqual([]);
+      expect(h.devices.count()).toBe(0);
+      if (join !== undefined) expect(join.checkPassword).not.toHaveBeenCalled();
+      expect(onFailure).toHaveBeenCalledTimes(1);
+      expect(onSettled).toHaveBeenCalledTimes(1);
+      expect((await h.auditLines()).join("\n")).toContain('reason="bad-frame"');
+    });
+  });
+
+  it.each<[string, string]>([
+    ["invalid JSON", '{"t":"join"'],
+    [
+      "a frame over the size limit",
+      joinFrame({
+        password: "€".repeat(MAX_PASSWORD_LENGTH),
+        deviceName: "€".repeat(256),
+        client: "€".repeat(128),
+      }),
+    ],
+    ["a malformed pair frame", JSON.stringify({ t: "pair", v: PROTOCOL_VERSION, secret: "short" })],
+    ["an unknown frame type", JSON.stringify({ t: "joined", v: PROTOCOL_VERSION })],
+  ])("%s cannot be classified as a join and still closes 4400", (_label, text) => {
+    const h = makeHarness();
+    const { socket, session } = h.makeSession(joinDeps());
+
+    session.onText(text);
+
+    expect(socket.closed).toEqual({ code: 4400, reason: "" });
   });
 
   it("the audit line names the device and the source and never the password", async () => {

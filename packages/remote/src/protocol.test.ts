@@ -218,10 +218,13 @@ describe("parsePairFrame", () => {
     ["a 300-char device name", { deviceName: "a".repeat(300) }],
     ["a 200-char client", { client: "c".repeat(200) }],
     ['v:"2"', { v: "2" }],
-  ])("refuses a join frame with %s", (_label, patch) => {
+    ["a missing client", { client: undefined }],
+    ["a non-integer v", { v: 2.5 }],
+    ["a negative v", { v: -1 }],
+  ])("classifies a join frame with %s as join-invalid, with no detail", (_label, patch) => {
     const text = JSON.stringify({ ...JOIN, ...patch });
     expect(Buffer.byteLength(text, "utf8")).toBeLessThanOrEqual(MAX_PAIR_FRAME_BYTES);
-    expect(parsePairFrame(text)).toBeUndefined();
+    expect(parsePairFrame(text)).toEqual({ t: "join-invalid" });
   });
 
   // Every field is within its own bound, so only the frame limit can refuse it.

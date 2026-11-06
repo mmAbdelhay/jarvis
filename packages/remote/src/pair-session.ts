@@ -107,8 +107,16 @@ export function createPairSession(socket: SocketLike, deps: PairSessionDeps): Se
     if (phase !== "awaiting-pair") return; // frames after the first are ignored
 
     const message = parsePairFrame(text);
+    // Too big, not JSON, or not a valid frame of another type: nothing here
+    // can be classified as a join, so 4400 says nothing about a join check.
     if (message === undefined) {
       refuse("bad-frame", CLOSE.badFrame);
+      return;
+    }
+    // A malformed join closes like every other refused join, so its code
+    // cannot be told from a wrong password's.
+    if (message.t === "join-invalid") {
+      refuse("bad-frame", CLOSE.unauthorized);
       return;
     }
     const isJoin = message.t === "join";

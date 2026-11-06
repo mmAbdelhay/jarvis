@@ -267,14 +267,24 @@ export function parsePairMessage(text: string): PairClientMessage | undefined {
   return obj === undefined ? undefined : toPairMessage(obj);
 }
 
+/** A frame whose `t` is `join` but whose fields are invalid. Carries nothing else. */
+export type InvalidJoinFrame = { t: "join-invalid" };
+
 /**
- * Parses a pre-auth frame that may be a pairing or a join. Never throws;
- * anything invalid is `undefined`, with no detail that could carry a password.
+ * Parses a pre-auth frame that may be a pairing or a join. Never throws, and
+ * no result carries detail that could hold a password. A frame that says it
+ * is a join but is invalid is `join-invalid`, so it can be refused like any
+ * other join. `undefined` is everything else invalid, including a frame over
+ * the size limit or invalid JSON: those are rejected before `t` is read, so
+ * they cannot be classified as joins.
  */
-export function parsePairFrame(text: string): PairClientMessage | PairJoinMessage | undefined {
+export function parsePairFrame(
+  text: string,
+): PairClientMessage | PairJoinMessage | InvalidJoinFrame | undefined {
   const obj = parsePreAuthObject(text);
   if (obj === undefined) return undefined;
-  return toPairMessage(obj) ?? toJoinMessage(obj);
+  if (obj.t === "join") return toJoinMessage(obj) ?? { t: "join-invalid" };
+  return toPairMessage(obj);
 }
 
 // Unpadded base64url, as WebAuthn's JSON encoding produces it.
