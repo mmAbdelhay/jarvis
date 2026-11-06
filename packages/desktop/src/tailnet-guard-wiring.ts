@@ -11,7 +11,10 @@ export type RemoteTailnetGuardDeps = Pick<
 > & {
   /** The live `remote:` section. */
   remote(): RemoteConfig;
-  access: Pick<RemoteAccess, "setTailnetBlock" | "reloadCertificate" | "status">;
+  access: Pick<
+    RemoteAccess,
+    "setTailnetBlock" | "tailnetReadFailed" | "reloadCertificate" | "status"
+  >;
 };
 
 export function createRemoteTailnetGuard(deps: RemoteTailnetGuardDeps): TailnetGuard {
@@ -24,6 +27,11 @@ export function createRemoteTailnetGuard(deps: RemoteTailnetGuardDeps): TailnetG
     relay: () => remote().tailnet.relay,
     ports: () => [remote().port, effectiveWebPort(remote())],
     setTailnetBlock: (reason) => access.setTailnetBlock(reason),
+    unverified: () => {
+      const { tailnet } = access.status();
+      return tailnet.kind === "blocked" && tailnet.reason === "unverified";
+    },
+    readFailed: () => access.tailnetReadFailed(),
     reloadCertificate: () => access.reloadCertificate(),
     connectedDevices: () => access.status().devices.filter((device) => device.connected).length,
     certificate: () => remote().tls,

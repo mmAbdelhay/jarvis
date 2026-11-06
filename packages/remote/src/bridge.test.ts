@@ -737,6 +737,7 @@ describe("createBridge: password join", () => {
       tls: { certPath: "/tls/cert.pem", keyPath: "/tls/key.pem" },
       tailnet,
     });
+    await bridge.setTailnetBlock(undefined);
     return { h, bridge };
   }
 
@@ -778,6 +779,7 @@ describe("createBridge: password join", () => {
       tls: { certPath: "/tls/cert.pem", keyPath: "/tls/key.pem" },
       tailnet: { enabled: true, relay: false },
     });
+    await bridge.setTailnetBlock(undefined);
     const socket = new FakeSocket();
 
     h.listenCalls[0]
@@ -800,6 +802,7 @@ describe("createBridge: password join", () => {
       tls: { certPath: "/tls/cert.pem", keyPath: "/tls/key.pem" },
       tailnet: { enabled: true, relay: false },
     });
+    await bridge.setTailnetBlock(undefined);
     const socket = new FakeSocket();
 
     h.listenCalls[0]
@@ -934,16 +937,20 @@ describe("createBridge: tailnet gate", () => {
     return socket;
   }
 
+  /** `verdict: false` stops short of what the guard would answer next. */
   async function start(
-    options: { devices?: string[]; config?: Parameters<Bridge["apply"]>[0] } & Parameters<
-      typeof makeHarness
-    >[0] = {},
+    options: {
+      devices?: string[];
+      config?: Parameters<Bridge["apply"]>[0];
+      verdict?: boolean;
+    } & Parameters<typeof makeHarness>[0] = {},
   ) {
-    const { devices = [], config = TAILNET_ON(), ...harness } = options;
+    const { devices = [], config = TAILNET_ON(), verdict = true, ...harness } = options;
     const h = makeHarness({ cert: CONFIGURED, ...harness });
     await seedDevices(h.fs, h.random, h.clock.now, devices);
     const bridge = await createBridge(h.deps);
     await bridge.apply(config);
+    if (verdict) await bridge.setTailnetBlock(undefined);
     return { h, bridge };
   }
 
@@ -1221,6 +1228,7 @@ describe("createBridge: tailnet gate", () => {
       const bridge = await createBridge(h.deps);
 
       await bridge.apply(TAILNET_ON({ idleDisableMinutes: 2 }));
+      await bridge.setTailnetBlock(undefined);
       expect(bridge.status().idle).toBeUndefined();
 
       h.clock.advance(24 * 60 * 60_000);
@@ -1252,11 +1260,12 @@ describe("createBridge: tailnet gate", () => {
       expect(bridge.status().idle).toEqual({ kind: "armed", disableAt: 120_000 });
 
       await bridge.apply(TAILNET_ON({ idleDisableMinutes: 2 }));
+      await bridge.setTailnetBlock(undefined);
       expect(bridge.status().idle).toBeUndefined();
 
       h.clock.advance(5 * 60_000);
       await flush();
-      expect(h.listeners[0]?.closed).toBe(false);
+      expect(h.listeners.at(-1)?.closed).toBe(false);
       expect(bridge.status().enabled).toBe(true);
     });
 
@@ -1353,6 +1362,7 @@ describe("createBridge: tailnet gate", () => {
       expect(bridge.status().tailnet).toEqual({ kind: "off" });
 
       await bridge.apply(TAILNET_ON());
+      await bridge.setTailnetBlock(undefined);
       expect(bridge.status().tailnet).toEqual({ kind: "on" });
       expect(bridge.status().listening).toBeDefined();
     });
@@ -1388,6 +1398,7 @@ describe("createBridge: tailnet gate", () => {
       expect(bridge.status().listening).toBeUndefined();
 
       await bridge.apply(TAILNET_ON());
+      await bridge.setTailnetBlock(undefined);
 
       expect(h.listenCalls).toHaveLength(2);
       expect(bridge.status().tailnet).toEqual({ kind: "on" });
@@ -1440,6 +1451,7 @@ describe("createBridge: tailnet gate", () => {
       const h = makeHarness({ cert: CONFIGURED, fs: first.h.fs });
       const bridge = await createBridge(h.deps);
       await bridge.apply(TAILNET_ON());
+      await bridge.setTailnetBlock(undefined);
 
       expect(h.listenCalls).toHaveLength(1);
       expect(bridge.status().tailnet).toEqual({ kind: "on" });
@@ -1493,6 +1505,184 @@ describe("createBridge: tailnet gate", () => {
 
       expect(h.listenCalls).toHaveLength(2);
       expect(bridge.status().tailnet).toEqual({ kind: "on" });
+    });
+  });
+
+  describe("before the first verdict", () => {
+    /** The apply alone: no verdict has come back from the guard. */
+    const unverified = (options: Parameters<typeof start>[0] = {}) =>
+      start({ ...options, verdict: false });
+
+    it("with no paired device nothing listens, and status says why", async () => {
+      const { h, bridge } = await unverified();
+
+      expect(h.listenCalls).toHaveLength(0);
+      expect(bridge.status().listening).toBeUndefined();
+      expect(bridge.status().tailnet).toEqual({ kind: "blocked", reason: "unverified" });
+    });
+
+    it("a clean verdict is what opens it", async () => {
+      const { h, bridge } = await unverified();
+
+      expect(await bridge.setTailnetBlock(undefined)).toBe(true);
+
+      expect(h.listenCalls).toHaveLength(1);
+      expect(bridge.status().tailnet).toEqual({ kind: "on" });
+    });
+
+    it("a Funnel verdict latches, and nothing ever opened", async () => {
+      const { h, bridge } = await unverified({ devices: ["Phone"] });
+
+      await bridge.setTailnetBlock("funnel");
+
+      expect(h.listenCalls).toHaveLength(0);
+      expect(bridge.status().tailnet).toEqual({ kind: "blocked", reason: "funnel" });
+    });
+
+    it("a relay-missing verdict decides relay and Funnel together", async () => {
+      const { h, bridge } = await unverified({
+        config: TAILNET_ON({ bindAddress: "127.0.0.1", tailnet: { enabled: true, relay: true } }),
+      });
+      expect(bridge.status().tailnet).toEqual({ kind: "blocked", reason: "unverified" });
+
+      await bridge.setTailnetBlock("relay-missing");
+
+      expect(h.listenCalls).toHaveLength(0);
+      expect(bridge.status().tailnet).toEqual({ kind: "blocked", reason: "relay-missing" });
+
+      await bridge.setTailnetBlock(undefined);
+      expect(bridge.status().tailnet).toEqual({ kind: "on" });
+    });
+
+    it("a paired device waits for the first read, up to its 10 s timeout", async () => {
+      const { h, bridge } = await unverified({ devices: ["Phone"] });
+      expect(h.listenCalls).toHaveLength(0);
+
+      h.clock.advance(9_999);
+      await flush();
+      expect(h.listenCalls).toHaveLength(0);
+
+      h.clock.advance(1);
+      await flush();
+      expect(h.listenCalls).toHaveLength(1);
+      expect(bridge.status().tailnet).toEqual({ kind: "blocked", reason: "unverified" });
+      expect(tryJoin(h).closed).toEqual({ code: CLOSE.unauthorized, reason: "" });
+    });
+
+    it("a paired device connects once a read has failed, and joins stay refused", async () => {
+      const { h, bridge } = await unverified({ devices: ["Phone"] });
+
+      await bridge.tailnetReadFailed();
+
+      expect(h.listenCalls).toHaveLength(1);
+      expect(bridge.status().tailnet).toEqual({ kind: "blocked", reason: "unverified" });
+      expect(tryJoin(h).closed).toEqual({ code: CLOSE.unauthorized, reason: "" });
+      expect(h.clock.pending()).toBe(0);
+    });
+
+    it("with no paired device a failed read and the cap open nothing", async () => {
+      const { h, bridge } = await unverified();
+
+      await bridge.tailnetReadFailed();
+      h.clock.advance(60_000);
+      await flush();
+
+      expect(h.listenCalls).toHaveLength(0);
+      expect(bridge.status().tailnet).toEqual({ kind: "blocked", reason: "unverified" });
+
+      await bridge.setTailnetBlock(undefined);
+      expect(h.listenCalls).toHaveLength(1);
+    });
+
+    it("a pairing window does not open a machine with no paired device", async () => {
+      const { h, bridge } = await unverified();
+      await bridge.tailnetReadFailed();
+
+      expect(await bridge.openPairing()).toBe("unavailable");
+
+      expect(h.listenCalls).toHaveLength(0);
+    });
+
+    it("a failed read after a verdict decides nothing", async () => {
+      const { h, bridge } = await start();
+
+      await bridge.tailnetReadFailed();
+
+      expect(bridge.status().tailnet).toEqual({ kind: "on" });
+      expect(h.listenCalls).toHaveLength(1);
+      expect(h.listeners[0]?.closed).toBe(false);
+    });
+
+    it("the peer file is not served until the verdict", async () => {
+      const { h, bridge } = await unverified({ devices: ["Phone"] });
+      await bridge.tailnetReadFailed();
+      expect(h.webListenCalls).toHaveLength(1);
+
+      expect(h.webListenCalls[0]?.peer()).toBeUndefined();
+
+      await bridge.setTailnetBlock(undefined);
+      expect(h.webListenCalls[0]?.peer()).toMatchObject({ name: NAME });
+    });
+
+    it.each([
+      ["the switch", TAILNET_OFF],
+      ["remote.enabled", TAILNET_ON({ enabled: false })],
+    ])("%s going from off to on starts over", async (_label, off) => {
+      const { h, bridge } = await start({ devices: ["Phone"] });
+      expect(h.listeners[0]?.closed).toBe(false);
+
+      await bridge.apply(off);
+      await bridge.apply(TAILNET_ON());
+
+      expect(bridge.status().listening).toBeUndefined();
+      expect(bridge.status().tailnet).toEqual({ kind: "blocked", reason: "unverified" });
+
+      await bridge.setTailnetBlock("funnel");
+      expect(bridge.status().tailnet).toEqual({ kind: "blocked", reason: "funnel" });
+      expect(bridge.status().listening).toBeUndefined();
+    });
+
+    it("an open pairing window does not survive the switch coming on", async () => {
+      const { bridge } = await start({ devices: ["Phone"], config: TAILNET_OFF });
+      expect(await bridge.openPairing()).toBe("opened");
+
+      await bridge.apply(TAILNET_ON());
+      await flush();
+
+      expect(bridge.status().pairing).toEqual({ kind: "closed" });
+    });
+
+    it("an apply with the switch already on starts nothing over", async () => {
+      const { h, bridge } = await start();
+
+      await bridge.apply(TAILNET_ON({ sidecarProxy: false }));
+
+      expect(bridge.status().tailnet).not.toEqual({ kind: "blocked", reason: "unverified" });
+      expect(h.clock.pending()).toBe(0);
+    });
+
+    it("turning the switch off ends it, and with it the timer", async () => {
+      const { h, bridge } = await unverified({ devices: ["Phone"] });
+
+      await bridge.apply(TAILNET_OFF);
+
+      expect(bridge.status().tailnet).toEqual({ kind: "off" });
+      expect(bridge.status().listening).toBeDefined();
+      expect(h.clock.pending()).toBe(0);
+    });
+
+    it("stop clears the timer", async () => {
+      const { h, bridge } = await unverified({ devices: ["Phone"] });
+
+      await bridge.stop();
+
+      expect(h.clock.pending()).toBe(0);
+    });
+
+    it("with the switch off a paired device listens at once, as today", async () => {
+      const { h } = await unverified({ devices: ["Phone"], config: TAILNET_OFF });
+      expect(h.listenCalls).toHaveLength(1);
+      expect(h.clock.pending()).toBe(0);
     });
   });
 
@@ -1566,7 +1756,8 @@ describe("createBridge: tailnet gate", () => {
       const bridge = await createBridge(h.deps);
       const answer = holdNextLoad(h);
 
-      const applying = bridge.apply(TAILNET_ON());
+      await bridge.apply(TAILNET_ON());
+      const applying = bridge.setTailnetBlock(undefined);
       await flush();
       const reloading = bridge.reloadCertificate();
       answer(OLD);
@@ -1583,7 +1774,8 @@ describe("createBridge: tailnet gate", () => {
       const bridge = await createBridge(h.deps);
       const answer = holdNextLoad(h);
 
-      const applying = bridge.apply(TAILNET_ON());
+      await bridge.apply(TAILNET_ON());
+      const applying = bridge.setTailnetBlock(undefined);
       await flush();
       const reloading = bridge.reloadCertificate();
       answer(OLD);
@@ -1622,7 +1814,8 @@ describe("createBridge: tailnet gate", () => {
         return listen(options);
       };
 
-      const applying = bridge.apply(TAILNET_ON());
+      await bridge.apply(TAILNET_ON());
+      const applying = bridge.setTailnetBlock(undefined);
       await flush();
       h.loadCertificate.mockResolvedValue(certWith("configured", []));
       const reloading = bridge.reloadCertificate();

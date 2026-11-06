@@ -209,6 +209,7 @@ export type RemoteAccess = RemoteControls & {
   /** The Tailscale guard's verdict and renewal. Both wait for `start`'s own
    *  apply, like `apply` does: a verdict sent before it would be dropped. */
   setTailnetBlock(reason: "funnel" | "relay-missing" | undefined): Promise<boolean>;
+  tailnetReadFailed(): Promise<void>;
   reloadCertificate(): Promise<void>;
   /** The Settings switch turned on: drops the bridge's Funnel latch. */
   rearmTailnet(): Promise<void>;
@@ -505,6 +506,10 @@ export function createRemoteAccess(deps: RemoteAccessDeps): RemoteAccess {
       await started;
       if (stopped || bridge === undefined) return false;
       return bridge.setTailnetBlock(reason);
+    },
+    async tailnetReadFailed(): Promise<void> {
+      await started;
+      if (!stopped) await bridge?.tailnetReadFailed();
     },
     async reloadCertificate(): Promise<void> {
       await started;

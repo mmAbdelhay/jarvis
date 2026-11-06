@@ -2320,6 +2320,10 @@ export const MESSAGES = {
         ar: "محجوب: توجيه Tailscale إلى جارفيس غير موجود، فلا يمكن لأي جهاز الانضمام. أوقف هذا المفتاح ثم شغّله لإعادة إنشائه.",
         en: "Blocked: the Tailscale forward to Jarvis is missing, so no device can join. Turn this switch off and on again to set it up.",
       },
+      unverified: {
+        ar: "محجوب: لم يتمكن جارفيس بعد من قراءة إعدادات Tailscale للتأكد من أن Funnel لا يكشفه، فلا يمكن لأي جهاز جديد الانضمام. تأكد من أن Tailscale مثبّت ويعمل؛ تُعاد المحاولة كل دقيقة.",
+        en: "Blocked: Jarvis has not yet been able to read Tailscale's settings to confirm Funnel does not expose it, so no new device can join. Check that Tailscale is installed and running; this is retried every minute.",
+      },
     };
     return text[key][language];
   },

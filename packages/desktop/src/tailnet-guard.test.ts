@@ -410,6 +410,7 @@ function harness(initial: Partial<HarnessState> = {}) {
     now: NOW,
     enabled: true,
     relay: false,
+    unverified: false,
     connected: 0,
     notAfter: NOW + 60 * DAY,
     serve: { code: 0, stdout: "{}", stderr: "" },
@@ -437,7 +438,11 @@ function harness(initial: Partial<HarnessState> = {}) {
     }
   });
   const armed: { callback: () => void; ms: number }[] = [];
-  const setTailnetBlock = vi.fn(async (_reason: unknown) => true);
+  const setTailnetBlock = vi.fn(async (_reason: unknown) => {
+    state.unverified = false;
+    return true;
+  });
+  const readFailed = vi.fn(async () => {});
   const reloadCertificate = vi.fn(async () => {});
   const log = vi.fn();
   const certificateExpiry = vi.fn(async () => state.notAfter);
@@ -456,6 +461,8 @@ function harness(initial: Partial<HarnessState> = {}) {
     relay: () => state.relay,
     ports: () => PORTS,
     setTailnetBlock,
+    unverified: () => state.unverified,
+    readFailed,
     reloadCertificate,
     connectedDevices: () => state.connected,
     certificate: () => ({
@@ -488,6 +495,7 @@ function harness(initial: Partial<HarnessState> = {}) {
     exec,
     armed,
     setTailnetBlock,
+    readFailed,
     reloadCertificate,
     log,
     certificateExpiry,
@@ -512,6 +520,8 @@ type HarnessState = {
   now: number;
   enabled: boolean;
   relay: boolean;
+  /** What the bridge reports: no verdict it trusts. */
+  unverified: boolean;
   connected: number;
   notAfter: number;
   serve: { code: number; stdout: string; stderr: string } | Error;
@@ -638,6 +648,42 @@ describe("createTailnetGuard: a failed read decides nothing", () => {
     h.state.serve = new Error("timed out");
     await h.poll();
     expect(h.log).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("createTailnetGuard: while the bridge is unverified", () => {
+  it("resends a verdict equal to the last one, after each successful read", async () => {
+    const h = harness({ serve: serving({}) });
+    await h.start();
+    expect(h.setTailnetBlock).toHaveBeenCalledTimes(1);
+
+    h.state.unverified = true;
+    await h.poll();
+    expect(h.setTailnetBlock).toHaveBeenCalledTimes(2);
+    expect(h.setTailnetBlock).toHaveBeenLastCalledWith(undefined);
+
+    // Taken, so the usual rule is back.
+    await h.poll();
+    expect(h.setTailnetBlock).toHaveBeenCalledTimes(2);
+  });
+
+  it("a failed read sends no verdict and says the read failed", async () => {
+    const h = harness({ serve: refused, unverified: true });
+    await h.start();
+    expect(h.setTailnetBlock).not.toHaveBeenCalled();
+    expect(h.readFailed).toHaveBeenCalledTimes(1);
+  });
+
+  it("a successful read does not say a read failed", async () => {
+    const h = harness({ serve: serving({}) });
+    await h.start();
+    expect(h.readFailed).not.toHaveBeenCalled();
+  });
+
+  it("with the switch off nothing is read, so no read fails", async () => {
+    const h = harness({ enabled: false, serve: refused });
+    await h.start();
+    expect(h.readFailed).not.toHaveBeenCalled();
   });
 });
 

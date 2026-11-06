@@ -191,6 +191,11 @@ export type TailnetGuardDeps = {
   ports(): number[];
   /** False when the bridge dropped the verdict; it is sent again next poll. */
   setTailnetBlock(reason: Verdict): Promise<boolean>;
+  /** The bridge still has no verdict it trusts, whatever was last sent: the
+   *  switch came on after that, by a path this guard did not see. */
+  unverified(): boolean;
+  /** A read failed: it decides nothing, but a paired device can stop waiting on it. */
+  readFailed(): Promise<void>;
   reloadCertificate(): Promise<void>;
   connectedDevices(): number;
   certificate(): { certPath?: string; keyPath?: string };
@@ -263,6 +268,7 @@ export function createTailnetGuard(deps: TailnetGuardDeps): TailnetGuard {
         readFailureLogged = true;
         deps.log("tailnet guard: cannot read Tailscale serve status; keeping the last verdict");
       }
+      await deps.readFailed();
       return;
     }
     readFailureLogged = false;
@@ -273,7 +279,7 @@ export function createTailnetGuard(deps: TailnetGuardDeps): TailnetGuard {
       : deps.relay() && !relayConfirmed(status, ports)
         ? "relay-missing"
         : undefined;
-    if (verdict === lastSent) return;
+    if (verdict === lastSent && !deps.unverified()) return;
     try {
       lastSent = (await deps.setTailnetBlock(verdict)) ? verdict : UNSENT;
     } catch (error) {

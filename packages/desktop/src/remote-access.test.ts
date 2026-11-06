@@ -206,6 +206,7 @@ function fakeBridge(): { bridge: Bridge; push: ReturnType<typeof vi.fn> } {
     deletePasskey: vi.fn(async () => true),
     signOutEverywhere: vi.fn(async () => {}),
     setTailnetBlock: vi.fn(async () => true),
+    tailnetReadFailed: vi.fn(async () => {}),
     rearmTailnet: vi.fn(async () => {}),
     reloadCertificate: vi.fn(async () => {}),
     stop: vi.fn(async () => {}),

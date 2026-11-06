@@ -11,7 +11,9 @@
 // device is already paired, a pairing window (or its confirmation, or a
 // pair socket already in flight) is open, or Tailscale access is on with
 // every one of its own conditions met (`tailnetStatus`). A Funnel block
-// overrides all of that until the switch is turned off or re-enabled. Every public method that can
+// overrides all of that until the switch is turned off or re-enabled. So does
+// the wait for the guard's first read, after which only a paired device keeps
+// the listener up until that read succeeds. Every public method that can
 // change any of those inputs awaits `reconcile()`, the only place the gate
 // is ever evaluated. `reconcile()` is itself serialised on a promise queue
 // so two overlapping calls (a `revoke` racing an `apply`, say) never step on
@@ -156,8 +158,9 @@ export type RemoteWebStatus =
 /**
  * The Tailscale access gate. Joins are allowed only while `on`. `off` covers
  * the switch or `enabled` being off. `funnel` holds until the switch is turned
- * off or re-enabled (`rearmTailnet`); every other reason ends as soon as it
- * stops being true.
+ * off or re-enabled (`rearmTailnet`). `unverified` is the switch coming on,
+ * until a read of Tailscale has succeeded. Every other reason ends as soon as
+ * it stops being true.
  */
 export type RemoteTailnetStatus =
   | { kind: "off" }
@@ -169,7 +172,8 @@ type TailnetBlockReason =
   | "no-certificate"
   | "bad-bind"
   | "funnel"
-  | "relay-missing";
+  | "relay-missing"
+  | "unverified";
 
 export type RemoteProblem =
   | "bad-address"
@@ -393,9 +397,13 @@ export type Bridge = {
   /** The guard's verdict. `"funnel"` closes every listener and latches: from
    *  then on only `rearmTailnet`, turning the switch off or a restart reopens
    *  them. With the switch off it is ignored. `undefined` clears
-   *  `"relay-missing"`, never that latch. False when the verdict was dropped
-   *  (the switch off, or the bridge stopped), so it has to be sent again. */
+   *  `"relay-missing"`, never that latch. Any verdict ends `unverified`: only
+   *  a successful read sends one. False when the verdict was dropped (the
+   *  switch off, or the bridge stopped), so it has to be sent again. */
   setTailnetBlock(reason: "funnel" | "relay-missing" | undefined): Promise<boolean>;
+  /** A read of Tailscale failed. It decides nothing, but it was the read a
+   *  paired device was waiting on, so that device stops waiting. */
+  tailnetReadFailed(): Promise<void>;
   /** The user turned Tailscale access on again: drops the Funnel latch, and
    *  the guard evaluates Funnel afresh. `"relay-missing"` stays until the
    *  guard has confirmed the forward. */
@@ -413,6 +421,9 @@ export type Bridge = {
  * successful listen or the next `apply()` — both of those clear them
  * explicitly, elsewhere.
  */
+/** How long a paired device waits for the guard's first read: that read's own timeout. */
+const TAILNET_FIRST_READ_MS = 10_000;
+
 function isStickyProblem(problem: RemoteProblem | undefined): boolean {
   return (
     problem === "devices-unreadable" ||
@@ -678,6 +689,12 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
   // it can never leave paired devices shut out with status reading "off".
   let funnelLatched = false;
   let relayMissing = false;
+  // Fail closed: from the switch coming on until a read of Tailscale has
+  // succeeded, nothing is known of Funnel or the relay, so joins are refused
+  // and the tailnet term opens nothing. `tailnetFirstReadTimer` is the wait
+  // for that read: while armed, even a paired device's listener stays closed.
+  let tailnetUnverified = false;
+  let tailnetFirstReadTimer: unknown;
   // Bumped by `reloadCertificate`; part of the listener's key, so the same
   // paths with new bytes on disk still restart it, and of `certificateKey`.
   let certificateGeneration = 0;
@@ -735,6 +752,25 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
   /** Reachable with nothing connected is the point of the switch, so idleness never ends it. */
   function tailnetSwitchedOn(): boolean {
     return config?.enabled === true && config.tailnet.enabled;
+  }
+
+  function endTailnetFirstReadWait(): void {
+    if (tailnetFirstReadTimer === undefined) return;
+    deps.timers.clearTimeout(tailnetFirstReadTimer);
+    tailnetFirstReadTimer = undefined;
+  }
+
+  /** The switch came on: whatever was known of Tailscale before says nothing now. */
+  function startTailnetUnverified(): void {
+    tailnetUnverified = true;
+    pairing.cancel();
+    endTailnetFirstReadWait();
+    tailnetFirstReadTimer = deps.timers.setTimeout(() => {
+      tailnetFirstReadTimer = undefined;
+      reconcile().catch((error: unknown) =>
+        deps.log(`bridge: reconcile failed: ${describeError(error)}`),
+      );
+    }, TAILNET_FIRST_READ_MS);
   }
 
   /** Rule 3: never more than one live handle. */
@@ -822,6 +858,7 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
     current: BridgeConfig,
   ): Exclude<TailnetBlockReason, "no-certificate"> | undefined {
     if (funnelLatched) return "funnel";
+    if (tailnetUnverified) return "unverified";
     if (relayMissing) return "relay-missing";
     if (!owner.hasPassword()) return "no-owner-password";
     if (!tailnetBindAllowed(current.bindAddress, current.tailnet.relay)) return "bad-bind";
@@ -915,15 +952,17 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
       config.enabled &&
       !idleDisabled &&
       !funnelLatched &&
+      tailnetFirstReadTimer === undefined &&
       devicesReadable &&
       ownerReadable &&
       sessionsReadable &&
       owner.hasPassword() &&
       host !== undefined &&
       (devices.count() > 0 ||
-        pairing.status().kind !== "closed" ||
-        pairSessions > 0 ||
-        tailnetStatus().kind === "on");
+        (!tailnetUnverified &&
+          (pairing.status().kind !== "closed" ||
+            pairSessions > 0 ||
+            tailnetStatus().kind === "on")));
 
     const desiredKey =
       wanted && config !== undefined && host !== undefined
@@ -1381,6 +1420,7 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
     gateRead = undefined;
     effectiveIdleMinutes = resolveIdleDisableMinutes(newConfig.idleDisableMinutes, deps.log);
     if (newConfig.enabled) idleDisabledRecord = undefined;
+    const wasSwitchedOn = tailnetSwitchedOn();
     config = {
       enabled: newConfig.enabled,
       bindAddress: newConfig.bindAddress,
@@ -1393,7 +1433,13 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
       },
       tailnet: { enabled: newConfig.tailnet.enabled, relay: newConfig.tailnet.relay },
     };
-    if (!tailnetSwitchedOn()) funnelLatched = false;
+    if (!tailnetSwitchedOn()) {
+      funnelLatched = false;
+      tailnetUnverified = false;
+      endTailnetFirstReadWait();
+    } else if (!wasSwitchedOn) {
+      startTailnetUnverified();
+    }
     if (!config.enabled) pairing.cancel();
     await reconcile();
   }
@@ -1721,6 +1767,8 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
     // A late verdict, after the switch went off, must not close anything.
     if (reason === "funnel" && !tailnetSwitchedOn()) return false;
     relayMissing = reason === "relay-missing";
+    tailnetUnverified = false;
+    endTailnetFirstReadWait();
     if (reason === "funnel") {
       funnelLatched = true;
       deps.log("bridge: Funnel exposes a bridge port; listeners closed until access is re-enabled");
@@ -1728,6 +1776,12 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
     }
     await reconcile();
     return true;
+  }
+
+  async function tailnetReadFailed(): Promise<void> {
+    if (stopped || tailnetFirstReadTimer === undefined) return;
+    endTailnetFirstReadWait();
+    await reconcile();
   }
 
   async function rearmTailnet(): Promise<void> {
@@ -1757,6 +1811,7 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
     // direct clear, not a `checkIdle()` call. Rule 5: `stop()` also clears
     // the persisted "disabled" record.
     clearIdleTimer();
+    endTailnetFirstReadWait();
     idleSince = undefined;
     idleDisabledRecord = undefined;
     pairing.cancel();
@@ -1803,6 +1858,7 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
     deletePasskey,
     signOutEverywhere,
     setTailnetBlock,
+    tailnetReadFailed,
     rearmTailnet,
     reloadCertificate,
     stop,

@@ -3647,6 +3647,7 @@ describe("Tailscale access", () => {
       { kind: "blocked", reason: "bad-bind" },
       { kind: "blocked", reason: "funnel" },
       { kind: "blocked", reason: "relay-missing" },
+      { kind: "blocked", reason: "unverified" },
     ];
 
     it.each(STATES)("shows the bridge's state %j", async (tailnet) => {
