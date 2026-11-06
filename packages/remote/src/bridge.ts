@@ -404,6 +404,9 @@ export type Bridge = {
   /** A read of Tailscale failed. It decides nothing, but it was the read a
    *  paired device was waiting on, so that device stops waiting. */
   tailnetReadFailed(): Promise<void>;
+  /** With the switch on and the last listen failed, tries it again: the
+   *  Tailscale address may have come up since. Does nothing otherwise. */
+  retryListener(): Promise<void>;
   /** The user turned Tailscale access on again: drops the Funnel latch, and
    *  the guard evaluates Funnel afresh. `"relay-missing"` stays until the
    *  guard has confirmed the forward. */
@@ -1784,6 +1787,12 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
     await reconcile();
   }
 
+  /** A failed listen left `listenerKey` empty, so the step tries it again if it is still wanted. */
+  async function retryListener(): Promise<void> {
+    if (stopped || !tailnetSwitchedOn() || problem !== "listen-failed") return;
+    await reconcile();
+  }
+
   async function rearmTailnet(): Promise<void> {
     if (stopped) return;
     funnelLatched = false;
@@ -1859,6 +1868,7 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
     signOutEverywhere,
     setTailnetBlock,
     tailnetReadFailed,
+    retryListener,
     rearmTailnet,
     reloadCertificate,
     stop,

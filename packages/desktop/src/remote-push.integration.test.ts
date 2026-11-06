@@ -227,6 +227,7 @@ function createFakePushBridge(): {
     signOutEverywhere: async () => {},
     setTailnetBlock: async () => true,
     tailnetReadFailed: async () => {},
+    retryListener: async () => {},
     rearmTailnet: async () => {},
     reloadCertificate: async () => {},
     stop: async () => {},

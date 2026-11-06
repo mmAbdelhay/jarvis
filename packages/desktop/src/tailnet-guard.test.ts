@@ -443,6 +443,7 @@ function harness(initial: Partial<HarnessState> = {}) {
     return true;
   });
   const readFailed = vi.fn(async () => {});
+  const retryListener = vi.fn(async () => {});
   const reloadCertificate = vi.fn(async () => {});
   const log = vi.fn();
   const certificateExpiry = vi.fn(async () => state.notAfter);
@@ -463,6 +464,7 @@ function harness(initial: Partial<HarnessState> = {}) {
     setTailnetBlock,
     unverified: () => state.unverified,
     readFailed,
+    retryListener,
     reloadCertificate,
     connectedDevices: () => state.connected,
     certificate: () => ({
@@ -496,6 +498,7 @@ function harness(initial: Partial<HarnessState> = {}) {
     armed,
     setTailnetBlock,
     readFailed,
+    retryListener,
     reloadCertificate,
     log,
     certificateExpiry,
@@ -684,6 +687,52 @@ describe("createTailnetGuard: while the bridge is unverified", () => {
     const h = harness({ enabled: false, serve: refused });
     await h.start();
     expect(h.readFailed).not.toHaveBeenCalled();
+  });
+});
+
+describe("createTailnetGuard: a listener that failed", () => {
+  it("each poll asks the bridge to re-attempt it, after the verdict", async () => {
+    const h = harness();
+    await h.start();
+    expect(h.retryListener).toHaveBeenCalledTimes(1);
+    expect(h.setTailnetBlock.mock.invocationCallOrder[0]).toBeLessThan(
+      h.retryListener.mock.invocationCallOrder[0] ?? 0,
+    );
+
+    await h.poll();
+    expect(h.retryListener).toHaveBeenCalledTimes(2);
+  });
+
+  it("with the switch off it asks nothing", async () => {
+    const h = harness({ enabled: false });
+    await h.start();
+    await h.poll();
+    expect(h.retryListener).not.toHaveBeenCalled();
+  });
+
+  it("no second poll is armed until the retry has finished", async () => {
+    const h = harness();
+    let release: () => void = () => {};
+    h.retryListener.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    await h.start();
+    expect(h.armed).toHaveLength(0);
+
+    release();
+    await h.flush();
+    expect(h.armed).toHaveLength(1);
+  });
+
+  it("a failing retry is logged and the next poll still runs", async () => {
+    const h = harness();
+    h.retryListener.mockRejectedValueOnce(new Error("retry broke"));
+    await h.start();
+    expect(h.log).toHaveBeenCalledWith(expect.stringContaining("retry broke"));
+    expect(h.armed).toHaveLength(1);
   });
 });
 

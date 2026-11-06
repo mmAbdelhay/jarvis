@@ -13,7 +13,7 @@ export type RemoteTailnetGuardDeps = Pick<
   remote(): RemoteConfig;
   access: Pick<
     RemoteAccess,
-    "setTailnetBlock" | "tailnetReadFailed" | "reloadCertificate" | "status"
+    "setTailnetBlock" | "tailnetReadFailed" | "retryListener" | "reloadCertificate" | "status"
   >;
 };
 
@@ -32,6 +32,7 @@ export function createRemoteTailnetGuard(deps: RemoteTailnetGuardDeps): TailnetG
       return tailnet.kind === "blocked" && tailnet.reason === "unverified";
     },
     readFailed: () => access.tailnetReadFailed(),
+    retryListener: () => access.retryListener(),
     reloadCertificate: () => access.reloadCertificate(),
     connectedDevices: () => access.status().devices.filter((device) => device.connected).length,
     certificate: () => remote().tls,

@@ -60,7 +60,7 @@ async function setup(
     }));
     await writeFile(join(dir, "devices.json"), JSON.stringify({ version: 1, devices }));
   }
-  const state = { config: initial, serve: FUNNEL as unknown, serveReads: 0 };
+  const state = { config: initial, serve: FUNNEL as unknown, serveReads: 0, failListens: 0 };
   let heldRead: Promise<ExecResult> | undefined;
   const listeners: { closed: boolean }[] = [];
   const makeAccess = () =>
@@ -77,6 +77,10 @@ async function setup(
         now: Date.now,
         timers: nodeTimers,
         listen: async (options) => {
+          if (state.failListens > 0) {
+            state.failListens -= 1;
+            throw new Error("EADDRNOTAVAIL");
+          }
           const listener = { closed: false };
           listeners.push(listener);
           return {
@@ -356,6 +360,37 @@ describe("the guard and the bridge", () => {
     read.answer({ code: 0, stdout: "{}", stderr: "" });
     await saving;
     expect(h.tailnet()).toEqual({ kind: "on" });
+  });
+
+  it("a listen that failed at boot comes up on a later poll", async () => {
+    const h = await setup(ON);
+    h.state.serve = {};
+    h.state.failListens = 2; // The first poll's verdict and its own retry.
+    h.guard.start();
+    await h.settle();
+    expect(h.access.status().problem).toBe("listen-failed");
+    expect(h.openListeners()).toBe(0);
+
+    await h.poll();
+
+    expect(h.access.status().problem).toBeUndefined();
+    expect(h.openListeners()).toBe(1);
+  });
+
+  it("with the switch off a failed listen is left for the usual events", async () => {
+    const h = await setup(ON);
+    h.state.serve = {};
+    h.state.failListens = 2; // The first poll's verdict and its own retry.
+    h.guard.start();
+    await h.settle();
+    expect(h.access.status().problem).toBe("listen-failed");
+
+    h.state.failListens = 0;
+    h.state.config = TAILNET_OFF;
+    await h.poll();
+
+    expect(h.access.status().problem).toBe("listen-failed");
+    expect(h.openListeners()).toBe(0);
   });
 
   it("a transition the guard never saw cannot stay stuck, with the same verdict as last sent", async () => {

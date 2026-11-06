@@ -196,6 +196,10 @@ export type TailnetGuardDeps = {
   unverified(): boolean;
   /** A read failed: it decides nothing, but a paired device can stop waiting on it. */
   readFailed(): Promise<void>;
+  /** A failed listen is otherwise never tried again until an event: a machine
+   *  that booted before Tailscale had its address would stay down. Does
+   *  nothing unless the bridge's last listen failed. */
+  retryListener(): Promise<void>;
   reloadCertificate(): Promise<void>;
   connectedDevices(): number;
   certificate(): { certPath?: string; keyPath?: string };
@@ -374,6 +378,7 @@ export function createTailnetGuard(deps: TailnetGuardDeps): TailnetGuard {
   async function poll(): Promise<void> {
     try {
       await evaluate(false);
+      if (!stopped && deps.enabled()) await deps.retryListener();
       await renewalStep();
     } catch (error) {
       deps.log(`tailnet guard: poll failed: ${errorMessage(error)}`);

@@ -1508,6 +1508,87 @@ describe("createBridge: tailnet gate", () => {
     });
   });
 
+  describe("retryListener", () => {
+    /** First listen rejects, later ones work: tailscaled not up at boot. */
+    function failFirstListen(h: ReturnType<typeof makeHarness>): void {
+      const listen = h.deps.listen;
+      let failed = false;
+      h.deps.listen = async (options) => {
+        if (!failed) {
+          failed = true;
+          throw new Error("EADDRNOTAVAIL");
+        }
+        return listen(options);
+      };
+    }
+
+    async function afterFailedListen() {
+      const h = makeHarness({ cert: CONFIGURED });
+      failFirstListen(h);
+      const bridge = await createBridge(h.deps);
+      await bridge.apply(TAILNET_ON());
+      await bridge.setTailnetBlock(undefined);
+      expect(bridge.status().problem).toBe("listen-failed");
+      expect(h.listeners).toHaveLength(0);
+      return { h, bridge };
+    }
+
+    it("re-attempts a failed listen on the Tailscale address", async () => {
+      const { h, bridge } = await afterFailedListen();
+
+      await bridge.retryListener();
+
+      expect(h.listeners).toHaveLength(1);
+      expect(bridge.status().problem).toBeUndefined();
+      expect(bridge.status().tailnet).toEqual({ kind: "on" });
+    });
+
+    it("does nothing when nothing failed", async () => {
+      const { h, bridge } = await start();
+      const load = h.loadCertificate.mock.calls.length;
+
+      await bridge.retryListener();
+
+      expect(h.listenCalls).toHaveLength(1);
+      expect(h.loadCertificate).toHaveBeenCalledTimes(load);
+    });
+
+    it.each([
+      ["the switch", TAILNET_OFF],
+      ["remote.enabled", TAILNET_ON({ enabled: false })],
+    ])("does nothing with %s off", async (_label, off) => {
+      const { h, bridge } = await afterFailedListen();
+      await bridge.apply(off);
+      const attempts = h.deps.listen;
+      const listen = vi.fn(attempts);
+      h.deps.listen = listen;
+
+      await bridge.retryListener();
+
+      expect(listen).not.toHaveBeenCalled();
+    });
+
+    it("does nothing after stop", async () => {
+      const { h, bridge } = await afterFailedListen();
+      await bridge.stop();
+
+      await bridge.retryListener();
+
+      expect(h.listeners).toHaveLength(0);
+    });
+
+    it("keeps the problem while the retry fails too", async () => {
+      const { h, bridge } = await afterFailedListen();
+      h.deps.listen = async () => {
+        throw new Error("EADDRNOTAVAIL");
+      };
+
+      await bridge.retryListener();
+
+      expect(bridge.status().problem).toBe("listen-failed");
+    });
+  });
+
   describe("before the first verdict", () => {
     /** The apply alone: no verdict has come back from the guard. */
     const unverified = (options: Parameters<typeof start>[0] = {}) =>
