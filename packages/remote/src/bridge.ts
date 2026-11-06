@@ -115,6 +115,9 @@ export type ListenOptions = {
     origin?: OriginClass,
   ): SessionHandlers;
   log(line: string): void;
+  // True only for relay mode on a loopback host: every connection must then
+  // open with a PROXY v2 header (proxy-front.ts). `listenTls` rejects it elsewhere.
+  proxyProtocol?: boolean;
 };
 
 export type Listener = { port: number; close(): Promise<void> };
@@ -134,6 +137,8 @@ export type WebListenOptions = {
   bridgePort: number;
   /** What `/jarvis-peer.json` answers, read per request: `undefined` unless Tailscale access is on. */
   peer: () => PeerInfo | undefined;
+  /** As `ListenOptions.proxyProtocol`. */
+  proxyProtocol?: boolean;
 };
 
 export type ListenWeb = (options: WebListenOptions) => Promise<Listener>;
@@ -457,6 +462,11 @@ function tailnetBindAllowed(bindAddress: string, relay: boolean): boolean {
   if (host === undefined) return false;
   const kind = bindKindOf(host);
   return kind === "mesh" || (kind === "loopback" && relay);
+}
+
+/** Relay mode: the relay sits in front of a loopback bind and says who really connected. */
+function usesProxyProtocol(current: BridgeConfig, host: string): boolean {
+  return current.tailnet.enabled && current.tailnet.relay && bindKindOf(host) === "loopback";
 }
 
 /** A browser's Origin for `https://name:port` leaves out the default port. */
@@ -919,6 +929,7 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
             config.tls.keyPath ?? null,
             config.sidecarProxy,
             certificateGeneration,
+            usesProxyProtocol(config, host),
           ])
         : undefined;
 
@@ -993,6 +1004,7 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
             webOrigin: () => webListening?.origin,
             onSocket,
             log: deps.log,
+            ...(usesProxyProtocol(config, host) ? { proxyProtocol: true } : {}),
           });
         } catch (error) {
           problem = "listen-failed";
@@ -1118,6 +1130,7 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
         manifest,
         bridgePort: listening.port,
         peer: peerInfo,
+        ...(usesProxyProtocol(config, listening.host) ? { proxyProtocol: true } : {}),
       });
       webListener = started;
       webListening = { port: started.port, origin: webOriginFor(hostname, started.port) };

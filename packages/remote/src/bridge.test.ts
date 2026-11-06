@@ -991,6 +991,60 @@ describe("createBridge: tailnet gate", () => {
       expect(bridge.status().tailnet).toEqual({ kind: "on" });
     });
 
+    it("relay on loopback asks both listeners for the PROXY front", async () => {
+      const { h } = await start({
+        config: TAILNET_ON({ bindAddress: "127.0.0.1", tailnet: { enabled: true, relay: true } }),
+      });
+
+      expect(h.listenCalls[0]?.proxyProtocol).toBe(true);
+      expect(h.webListenCalls[0]?.proxyProtocol).toBe(true);
+    });
+
+    it.each([
+      ["a Tailscale bind, relay off", { tailnet: { enabled: true, relay: false } }],
+      [
+        "a Tailscale bind, relay on",
+        { bindAddress: "100.79.83.16", tailnet: { enabled: true, relay: true } },
+      ],
+      ["loopback, relay off", { bindAddress: "127.0.0.1" }],
+      [
+        "loopback, switch off, relay left on",
+        { bindAddress: "127.0.0.1", tailnet: { enabled: false, relay: true } },
+      ],
+    ])("%s: no front on either listener", async (_label, overrides) => {
+      const { h } = await start({
+        devices: ["Phone"],
+        config: TAILNET_ON(overrides),
+      });
+
+      expect(h.listenCalls).toHaveLength(1);
+      expect(h.listenCalls[0]).not.toHaveProperty("proxyProtocol");
+      expect(h.webListenCalls).toHaveLength(1);
+      expect(h.webListenCalls[0]).not.toHaveProperty("proxyProtocol");
+    });
+
+    it("flipping relay restarts both listeners with the flag following it", async () => {
+      const relayOn = TAILNET_ON({
+        bindAddress: "127.0.0.1",
+        tailnet: { enabled: true, relay: true },
+      });
+      const { h, bridge } = await start({ devices: ["Phone"], config: relayOn });
+
+      await bridge.apply({ ...relayOn, tailnet: { enabled: true, relay: false } });
+
+      expect(h.listenCalls).toHaveLength(2);
+      expect(h.listenCalls[1]).not.toHaveProperty("proxyProtocol");
+      expect(h.webListenCalls).toHaveLength(2);
+      expect(h.webListenCalls[1]).not.toHaveProperty("proxyProtocol");
+
+      await bridge.apply(relayOn);
+
+      expect(h.listenCalls).toHaveLength(3);
+      expect(h.listenCalls[2]?.proxyProtocol).toBe(true);
+      expect(h.webListenCalls).toHaveLength(3);
+      expect(h.webListenCalls[2]?.proxyProtocol).toBe(true);
+    });
+
     it("relay does not make a LAN bind allowed", async () => {
       const { h, bridge } = await start({
         config: TAILNET_ON({

@@ -3,6 +3,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
 import type { Duplex } from "node:stream";
 import type { PeerInfo } from "@jarvis/wire";
+import { listenProxyFront, PROXY_HEADER_TIMEOUT_MS, type ProxyFront } from "./proxy-front.js";
 
 const HANDSHAKE_TIMEOUT_MS = 5_000;
 const REQUEST_TIMEOUT_MS = 5_000;
@@ -215,6 +216,7 @@ type WebServer = {
   on(event: string, listener: (...args: never[]) => void): WebServer;
   once(event: string, listener: (...args: never[]) => void): WebServer;
   off(event: string, listener: (...args: never[]) => void): WebServer;
+  emit(event: string, ...args: unknown[]): boolean;
   listen(port: number, host: string): WebServer;
   address(): string | { port: number } | null;
   close(callback: (error?: Error) => void): WebServer;
@@ -225,6 +227,8 @@ export type ListenWebOptions = RequestHandlerOptions & {
   cert: string | Buffer;
   key: string | Buffer;
   createServer?: (options: Record<string, unknown>) => unknown;
+  /** Relay mode: a PROXY v2 front owns the port (proxy-front.ts). Loopback hosts only. */
+  proxyProtocol?: boolean;
 };
 
 export function listenWeb(
@@ -274,6 +278,9 @@ export function listenWeb(
       socket.on("close", () => sockets.delete(socket));
     }) as (...args: never[]) => void);
 
+    // Relay mode only: owns the port, so `server` itself never binds one.
+    let front: ProxyFront | undefined;
+
     function onListenError(error: Error): void {
       server.off("listening", onListening as (...args: never[]) => void);
       reject(error);
@@ -283,15 +290,19 @@ export function listenWeb(
       server.off("error", onListenError as (...args: never[]) => void);
       server.on("error", (() => {}) as (...args: never[]) => void);
       const address = server.address();
-      const port = typeof address === "object" && address !== null ? address.port : options.port;
+      const port =
+        front?.port ??
+        (typeof address === "object" && address !== null ? address.port : options.port);
       handleRequest = createWebRequestHandler({ ...options, port });
       resolve({
         port,
-        close() {
-          return new Promise<void>((resolveClose, rejectClose) => {
-            for (const socket of sockets) socket.destroy();
+        async close() {
+          for (const socket of sockets) socket.destroy();
+          await front?.close();
+          await new Promise<void>((resolveClose, rejectClose) => {
             server.close((error) => {
-              if (error) rejectClose(error);
+              // Behind a front, "not running" is all this can say: it never bound.
+              if (error && front === undefined) rejectClose(error);
               else resolveClose();
             });
           });
@@ -301,6 +312,20 @@ export function listenWeb(
 
     server.once("error", onListenError as (...args: never[]) => void);
     server.once("listening", onListening as (...args: never[]) => void);
-    server.listen(options.port, options.host);
+    if (options.proxyProtocol === true) {
+      listenProxyFront({
+        host: options.host,
+        port: options.port,
+        target: server,
+        timeoutMs: PROXY_HEADER_TIMEOUT_MS,
+      }).then((started) => {
+        front = started;
+        // Never bound, so Node would never say this itself, and its request
+        // and header timeouts only start checking once it has been said.
+        server.emit("listening");
+      }, reject);
+    } else {
+      server.listen(options.port, options.host);
+    }
   });
 }
