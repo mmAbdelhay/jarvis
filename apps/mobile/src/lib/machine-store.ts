@@ -63,6 +63,9 @@ export class MachineLimitError extends Error {
 export type MachineStore = {
   open(): Promise<"ok" | "failed">;
   list(): Promise<MachineEntry[]>;
+  /** For showing machines: one whose read throws is left out and logged, so it
+   *  hides no healthy one. A store that is not open still rejects. */
+  listReadable(): Promise<MachineEntry[]>;
   activeId(): MachineId | undefined;
   load(id: MachineId): Promise<{ record: PairingRecord; credential: Credential } | undefined>;
   loadActive(): Promise<
@@ -88,6 +91,7 @@ const EMPTY_INDEX: MachineIndex = { v: 1, ids: [] };
 const NO_FLAGS: MachineFlags = { refreshTokenStored: false, pushRegistered: false };
 const CLEANUP_FAILED_LINE = "machines: a clean-up failed, retrying at the next open";
 const INDEX_WRITE_FAILED_LINE = "machines: writing the index failed, retrying at the next open";
+const UNREADABLE_MACHINE_LINE = "machines: a machine could not be read, left out";
 
 function soleMachineIndex(id: MachineId): MachineIndex {
   return { v: 1, ids: [id], active: id, legacy: id };
@@ -392,6 +396,22 @@ export function createMachineStore(deps: {
     return entries;
   }
 
+  async function listReadable(): Promise<MachineEntry[]> {
+    await enqueue(async () => assertOpen());
+    const entries: MachineEntry[] = [];
+    for (const id of index.ids) {
+      try {
+        const loaded = await load(id);
+        if (loaded !== undefined) entries.push({ id, record: loaded.record });
+      } catch {
+        // A store that stopped being open is not one bad machine: it rejects.
+        assertOpen();
+        deps.log(UNREADABLE_MACHINE_LINE);
+      }
+    }
+    return entries;
+  }
+
   return {
     open() {
       return enqueue(async () => {
@@ -407,6 +427,7 @@ export function createMachineStore(deps: {
       });
     },
     list,
+    listReadable,
     activeId() {
       assertOpen();
       return activeIdNow();

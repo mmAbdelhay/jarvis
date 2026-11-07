@@ -21,3 +21,9 @@ export function takeClearFailedSignal(): { id: MachineId | null } | undefined {
   signalled = undefined;
   return value;
 }
+
+/** Clears the signal if it names this machine: a later failure of another
+ *  machine is still waiting for its own /pair. */
+export function dropClearFailedSignal(id: MachineId | null): void {
+  if (signalled?.id === id) signalled = undefined;
+}

@@ -19,6 +19,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { UnlockOutcome } from "@/lib/auth-session";
+import { MachineSwitcherButton } from "@/components/MachineSwitcher";
 import { AuthCard, useAuthCardContentTop, useAuthCardRootStyle } from "@/components/WidePanel";
 import { t } from "@/lib/i18n";
 import type { MessageKey } from "@/lib/i18n";
@@ -165,6 +166,10 @@ function UnlockScreen() {
         )}
 
         {message !== undefined && <Text style={styles.error}>{t(language, message)}</Text>}
+
+        {/* Never disabled: an owner who cannot unlock this machine, or a prompt
+            that is up, must not trap them on it. */}
+        <MachineSwitcherButton variant="link" />
       </View>
     </KeyboardAvoidingView>
   );

@@ -13,6 +13,7 @@ import { useEffect, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Icon } from "@/components/Icon";
+import { MachineSwitcherButton } from "@/components/MachineSwitcher";
 import { t } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
 import { useRpcClient } from "@/lib/rpc-context";
@@ -119,12 +120,7 @@ function Sidebar(props: {
         { paddingTop: props.topInset + 20, paddingBottom: props.bottomInset + 20 },
       ]}
     >
-      <View style={[styles.brandRow, rail && styles.brandRowRail]}>
-        <View style={styles.brandMark}>
-          <Icon name="brand" size={16} strokeWidth={2.4} color={theme.colors.primaryText} />
-        </View>
-        {!rail && <Text style={styles.brand}>Jarvis</Text>}
-      </View>
+      <MachineSwitcherButton variant={rail ? "rail" : "brand"} />
       <View style={[styles.nav, rail && styles.navRail]} accessibilityRole="tablist">
         {items.filter((item) => item.key !== "settings").map(navItem)}
       </View>
@@ -169,23 +165,6 @@ const styles = StyleSheet.create({
     borderEndColor: theme.colors.hairlineSoft,
   },
   sidebarRail: { width: SIDEBAR_RAIL_WIDTH, paddingHorizontal: 10, gap: 6, alignItems: "center" },
-  brandRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    paddingHorizontal: 8,
-    paddingBottom: 18,
-  },
-  brandRowRail: { paddingHorizontal: 0, paddingBottom: 14 },
-  brandMark: {
-    width: 30,
-    height: 30,
-    borderRadius: 9,
-    backgroundColor: theme.colors.accent,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  brand: { color: theme.colors.text, fontFamily: theme.font.extrabold, fontSize: 18 },
   nav: { gap: 4 },
   navRail: { gap: 6 },
   navItem: {

@@ -938,6 +938,48 @@ describe("list, active and lookups", () => {
     expect(storedIndex(h).ids).toEqual([LAN_ID]);
   });
 
+  it("listReadable answers what list answers while every read works", async () => {
+    const { store } = await twoMachines();
+    expect(await store.listReadable()).toEqual(await store.list());
+  });
+
+  it("listReadable leaves out a machine whose read throws, logs a fixed line, and keeps the rest", async () => {
+    const { h, store } = await twoMachines();
+    h.secure.failGet = (key) => key === `jarvis.m.${NAME_ID}.pairing`;
+    expect((await store.listReadable()).map((entry) => entry.id)).toEqual([LAN_ID]);
+    expect(h.logs).toEqual(["machines: a machine could not be read, left out"]);
+    // A read that fails is not a missing machine: it stays held.
+    expect(store.has(NAME_ID)).toBe(true);
+  });
+
+  it("list itself still rejects on a read that throws", async () => {
+    const { h, store } = await twoMachines();
+    h.secure.failGet = (key) => key === `jarvis.m.${NAME_ID}.pairing`;
+    await expect(store.list()).rejects.toThrow("keychain read failed");
+  });
+
+  it("listReadable rejects on a store that failed to open", async () => {
+    const h = harness();
+    seedLegacy(h);
+    h.secure.failGet = () => true;
+    const store = h.build();
+    expect(await store.open()).toBe("failed");
+    await expect(store.listReadable()).rejects.toThrow("not open");
+  });
+
+  it("listReadable rejects when the store fails a reopen during the walk: not one bad machine", async () => {
+    const { h, store } = await twoMachines();
+    const reads: string[] = [];
+    h.secure.failGet = (key) => {
+      reads.push(key);
+      return reads.length > 1;
+    };
+    const listing = store.listReadable();
+    const reopening = store.open();
+    await expect(listing).rejects.toThrow("not open");
+    expect(await reopening).toBe("failed");
+  });
+
   it("setActive persists, and a new store reads it back", async () => {
     const { h, store } = await twoMachines();
     await store.setActive(NAME_ID);

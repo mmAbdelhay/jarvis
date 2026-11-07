@@ -25,11 +25,11 @@ import {
   type ForgetOutcome,
   type MachineScope,
   applyForgetOutcome,
-  machineLabel,
   prepareSwitchRoute,
   retryClear,
   unpairedHandlerFor,
 } from "./machine-sessions";
+import { machineLabel } from "./machine-switcher";
 import { isClearingPairing, setClearingPairing } from "./pairing-guard";
 import { handleNotificationTap } from "./push-context-support";
 import { takeRevokedSignal } from "./revoked-signal";
@@ -428,6 +428,32 @@ describe("a switch that cannot happen", () => {
     expect(await h.sessions.reconnect()).toBe("connected");
     expect(h.sessions.current().client).toBe(a.client);
     expect(a.client.state()).not.toBe("closed");
+  });
+
+  it('a machine removed during the wait: "unknown", abandoned, and neither built nor connected', async () => {
+    const h = machinesHarness();
+    const a = await h.start();
+    const holding = deferred<void>();
+    a.authSession.quiesce = () => holding.promise;
+
+    // The switch's read lands before the removal, the rest of it after.
+    const switching = h.sessions.switchTo(B_ID);
+    const forgetting = h.sessions.forget(B_ID, "unpair");
+    await settle();
+    expect(h.store.has(B_ID)).toBe(false);
+    holding.resolve();
+
+    expect(await switching).toBe("unknown");
+
+    expect(h.events).toContain("abandoned");
+    expect(h.built).not.toContain(B_ID);
+    expect(h.socketsOf(B_ID)).toHaveLength(0);
+    expect(h.sessions.current().id).toBe(A_ID);
+    expect(await forgetting).toEqual({ kind: "next", id: A_ID });
+    expect(h.logs).toContain("machines: the next machine went during the switch");
+    // The banner's retry brings back the machine on screen.
+    expect(await h.sessions.reconnect()).toBe("connected");
+    expect(h.sessions.current().client).toBe(a.client);
   });
 
   it("a switch that goes through never reports abandoned", async () => {
@@ -1004,6 +1030,26 @@ describe("forget", () => {
       expect(h.sessions.current().id).toBe(B_ID);
     });
 
+    it("a retry that succeeds takes a signal set behind /pair's back", async () => {
+      const h = machinesHarness({ ids: [A_ID, B_ID] });
+      await h.start();
+      setClearFailedSignal(A_ID);
+
+      expect(await retryClear(h.sessions, A_ID)).toBe("scan");
+
+      expect(takeClearFailedSignal()).toBeUndefined();
+    });
+
+    it("a retry that succeeds leaves another machine's signal", async () => {
+      const h = machinesHarness();
+      await h.start();
+      setClearFailedSignal(C_ID);
+
+      expect(await retryClear(h.sessions, A_ID)).toBe("scan");
+
+      expect(takeClearFailedSignal()).toEqual({ id: C_ID });
+    });
+
     it("on a store that could not open: the machine stays, and it answers clearFailed", async () => {
       const h = machinesHarness();
       await h.start();
@@ -1198,7 +1244,38 @@ describe("forget", () => {
       h.gate.flush();
 
       expect(h.routes).toEqual([]);
+      // The signal went with the route: a later /pair must not name a machine
+      // the user moved past.
+      expect(takeClearFailedSignal()).toBeUndefined();
+    });
+
+    it("clearFailed dropped: another machine's failure, signalled since, is left alone", async () => {
+      const h = machinesHarness();
+      await h.start();
       takeClearFailedSignal();
+      h.secure.failDelete = () => true;
+      h.navigator.ready = false;
+      const outcome = await h.sessions.forget(A_ID, "unpair");
+      apply(h, A_ID, "unpair", outcome);
+      await h.sessions.switchTo(B_ID);
+      setClearFailedSignal(C_ID);
+
+      h.navigator.ready = true;
+      h.gate.flush();
+
+      expect(takeClearFailedSignal()).toEqual({ id: C_ID });
+    });
+
+    it("clearFailed: a route that runs leaves the signal for /pair", async () => {
+      const h = machinesHarness();
+      await h.start();
+      takeClearFailedSignal();
+      h.secure.failDelete = () => true;
+      const outcome = await h.sessions.forget(A_ID, "unpair");
+      apply(h, A_ID, "unpair", outcome);
+
+      expect(h.routes).toEqual(["/pair"]);
+      expect(takeClearFailedSignal()).toEqual({ id: A_ID });
     });
 
     it("none: goes once the navigator is up, with nothing on screen", async () => {
@@ -1213,6 +1290,57 @@ describe("forget", () => {
       h.gate.flush();
 
       expect(h.routes).toEqual(["/pair"]);
+    });
+  });
+
+  describe("the store closing under the move off", () => {
+    function closingUnderTheMove(h: ReturnType<typeof machinesHarness>) {
+      h.store.nextAfter = () => {
+        throw new Error("machines: store is not open");
+      };
+    }
+
+    it("publishes the null scope, so /pair's route is not dropped", async () => {
+      const h = machinesHarness({ ids: [A_ID, B_ID] });
+      const a = await h.start();
+      closingUnderTheMove(h);
+
+      const outcome = await h.sessions.forget(A_ID, "unpair");
+      apply(h, A_ID, "unpair", outcome);
+
+      expect(outcome).toEqual({ kind: "none" });
+      expect(h.sessions.current().id).toBeNull();
+      expect(a.connectionStore.isDisposed()).toBe(true);
+      expect(h.routes).toEqual(["/pair"]);
+      expect(h.logs).toContain("machines: moving off a forgotten machine failed");
+    });
+
+    it("a revocation says why on /pair", async () => {
+      const h = machinesHarness({ ids: [A_ID, B_ID] });
+      await h.start();
+      takeRevokedSignal();
+      closingUnderTheMove(h);
+
+      await h.sessions.forget(A_ID, "revoked");
+
+      expect(takeRevokedSignal()).toBe(true);
+    });
+
+    it("a machine that reached the screen before the throw stays", async () => {
+      const h = machinesHarness({ ids: [A_ID, B_ID] });
+      await h.start();
+      await h.sessions.switchTo(B_ID);
+      const b = h.sessions.current();
+      await h.sessions.switchTo(A_ID);
+      // B is published by the move off, then its connect throws.
+      b.client.connect = () => {
+        throw new Error("no native module");
+      };
+
+      expect(await h.sessions.forget(A_ID, "unpair")).toEqual({ kind: "next", id: B_ID });
+
+      expect(h.sessions.current().id).toBe(B_ID);
+      expect(h.logs).toContain("machines: moving off a forgotten machine failed");
     });
   });
 

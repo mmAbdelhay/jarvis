@@ -27,13 +27,14 @@
 
 import type { AuthChannel, AuthSession, DeviceAuth, RefreshLock } from "./auth-session";
 import { createAuthSession } from "./auth-session";
-import { setClearFailedSignal, takeClearFailedSignal } from "./clear-failed-signal";
+import { dropClearFailedSignal, setClearFailedSignal } from "./clear-failed-signal";
 import type { Clock } from "./clock";
 import { type ConnectStoredOutcome, connectFromStoredPairing, endpointOf } from "./connect-stored";
 import type { ConnectionStore } from "./connection-store";
 import { createConnectionStore } from "./connection-store";
 import type { MachineId } from "./machine-index";
 import type { MachineStore } from "./machine-store";
+import { machineLabel } from "./machine-switcher";
 import { afterClearRetry, afterForgetRoute } from "./pair-flow";
 import { isClearingPairing, setClearingPairing } from "./pairing-guard";
 import type { PairingRecord } from "./pairing-record";
@@ -285,13 +286,18 @@ export function createMachineSessions(deps: {
 
     // Published even if superseded by now: the old client is closed either
     // way, and only the latest attempt connects.
-    let next: MachineScope;
+    let next: MachineScope | undefined;
     try {
-      next = publish(scopeOf(id));
+      // `setActive` refuses a machine that has gone, and that throw is caught
+      // above: only this stops `loaded`, read before a removal, being connected.
+      if (store.has(id)) next = publish(scopeOf(id));
+      else deps.log("machines: the next machine went during the switch");
     } catch {
+      deps.log("machines: publishing the next machine failed");
+    }
+    if (next === undefined) {
       // The machine went during the wait, or the store closed. The old machine
       // stays on screen, closed, and its banner offers the retry.
-      deps.log("machines: publishing the next machine failed");
       try {
         deps.switchAbandoned();
       } catch {
@@ -351,13 +357,16 @@ export function createMachineSessions(deps: {
       if (outcome !== "unknown" || store.has(next)) return { kind: "next", id: next };
       next = store.nextAfter(id);
     }
-    latestAttempt += 1;
-    if (scope.id !== null) {
-      // Before the publish: the listener that brings the new tree takes it.
-      if (cause === "revoked") setRevokedSignal();
-      publish(deps.buildScope(null));
-    }
+    moveToNullScope(cause);
     return { kind: "none" };
+  }
+
+  function moveToNullScope(cause: ForgetCause): void {
+    latestAttempt += 1;
+    if (scope.id === null) return;
+    // Before the publish: the listener that brings the new tree takes it.
+    if (cause === "revoked") setRevokedSignal();
+    publish(deps.buildScope(null));
   }
 
   async function runForget(id: MachineId, cause: ForgetCause): Promise<ForgetOutcome> {
@@ -390,8 +399,13 @@ export function createMachineSessions(deps: {
     try {
       return await moveOff(id, cause);
     } catch {
-      // The store closed under the move. /pair says so, as `check-failed`.
       deps.log("machines: moving off a forgotten machine failed");
+      // The next machine reached the screen before the throw: it stays.
+      if (scope.id !== id && scope.id !== null) return { kind: "next", id: scope.id };
+      // The store closed under the move. /pair says so, as `check-failed`, and
+      // its route needs the null scope on screen, or it is dropped and the user
+      // stays on the removed machine's tree.
+      moveToNullScope(cause);
       return { kind: "none" };
     }
   }
@@ -535,11 +549,6 @@ export function createMachineScopeBuilder(
   };
 }
 
-/** What a machine is called in a notice. */
-export function machineLabel(record: PairingRecord): string {
-  return record.laptopName ?? record.name?.split(".")[0] ?? record.host;
-}
-
 /** Who must be on screen for a route an outcome asked for to still apply. */
 function machineOnScreenAfter(id: MachineId | null, outcome: ForgetOutcome): MachineId | null {
   switch (outcome.kind) {
@@ -576,6 +585,8 @@ export function applyForgetOutcome(deps: {
     const expected = machineOnScreenAfter(deps.id, outcome);
     deps.gate.navigate(() => {
       if (deps.sessions.current().id === expected) deps.navigateToPair();
+      // Left for the next /pair, it would name a machine the user moved past.
+      else if (outcome.kind === "clearFailed") dropClearFailedSignal(deps.id);
     });
     return;
   }
@@ -583,15 +594,16 @@ export function applyForgetOutcome(deps: {
 }
 
 /** /pair's retry of a failed clear: the id its signal carried, and nothing else.
- *  Its own failure stays on that phase, so it leaves no signal for a later
- *  visit. Whatever a success moves to, the screen has its route: another
- *  machine's Dashboard, or the scan with nothing left. */
+ *  Its own failure stays on that phase, and a success is past it, so either way
+ *  it leaves no signal for a later visit: another caller may have failed on this
+ *  machine while /pair was up. Whatever a success moves to, the screen has its
+ *  route: another machine's Dashboard, or the scan with nothing left. */
 export async function retryClear(
   sessions: Pick<MachineSessions, "forget">,
   id: MachineId | null,
 ): Promise<"scan" | "clearFailed"> {
   const outcome = await sessions.forget(id, "unpair");
-  if (outcome.kind === "clearFailed") takeClearFailedSignal();
+  dropClearFailedSignal(id);
   return afterClearRetry(outcome.kind !== "clearFailed");
 }
 

@@ -1713,6 +1713,12 @@ export const STRINGS = {
     en: "{name} no longer accepts this phone. You can add it again.",
     ar: "لم يعد {name} يقبل هذا الهاتف. يمكنك إضافته مرة أخرى.",
   },
+  "machines.title": { en: "Machines", ar: "الأجهزة" },
+  "machines.online": { en: "Online", ar: "متصل" },
+  "machines.offline": { en: "Offline", ar: "غير متصل" },
+  "machines.checking": { en: "Checking", ar: "جارٍ التحقق" },
+  "machines.other": { en: "Other machines", ar: "أجهزة أخرى" },
+  "machines.current": { en: "This one", ar: "هذا الجهاز" },
 } as const satisfies Record<string, Record<Language, string>>;
 
 export type MessageKey = keyof typeof STRINGS;

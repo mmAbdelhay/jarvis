@@ -18,6 +18,7 @@ import { ProjectToolRow } from "@/components/ProjectToolRow";
 import { ReviewsSection } from "@/components/ReviewsSection";
 import { Icon } from "@/components/Icon";
 import { IconButton } from "@/components/IconButton";
+import { MachineSwitcherButton } from "@/components/MachineSwitcher";
 import { MetricStrip } from "@/components/MetricStrip";
 import { type AwakeStatus, createAwakeStore } from "@/lib/awake-store";
 import { type ChangeCountsView, createChangeCountsStore } from "@/lib/change-counts";
@@ -175,7 +176,6 @@ export default function DashboardScreen() {
     [store, router, language],
   );
   const pill = machinePillModel(connection, laptopName);
-  const pillPalette = PILL_PALETTE[pill.tone];
   const pillText = pill.label.kind === "name" ? pill.label.name : t(language, pill.label.key);
   const now = Date.now();
   const openSheet = useCallback(
@@ -255,12 +255,7 @@ export default function DashboardScreen() {
             <Text style={styles.brand}>Jarvis</Text>
           </View>
           <View style={styles.headerEnd}>
-            <View style={[styles.connection, { backgroundColor: pillPalette.ground }]}>
-              <View style={[styles.liveDot, { backgroundColor: theme.colors[pill.tone] }]} />
-              <Text style={[styles.connectionText, { color: pillPalette.text }]} numberOfLines={1}>
-                {pillText}
-              </Text>
-            </View>
+            <MachineSwitcherButton variant="pill" />
             <IconButton
               icon="settings"
               iconSize={18}
@@ -426,13 +421,6 @@ export default function DashboardScreen() {
   );
 }
 
-// The pill's ground and text per tone: success, warning and danger palettes.
-const PILL_PALETTE = {
-  success: { ground: theme.colors.successSurface, text: theme.colors.successText },
-  warning: { ground: theme.colors.warningSurface, text: theme.colors.warningText },
-  danger: { ground: theme.colors.dangerSurface, text: theme.colors.dangerText },
-} as const;
-
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: theme.colors.ground },
   content: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 16, gap: 16 },
@@ -458,17 +446,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   brand: { ...theme.type.brand, color: theme.colors.text },
-  connection: {
-    flexShrink: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: theme.radius.pill,
-  },
-  liveDot: { width: 7, height: 7, borderRadius: 999 },
-  connectionText: { flexShrink: 1, fontFamily: theme.font.semibold, fontSize: 12 },
   error: { color: theme.colors.danger, fontFamily: theme.font.body, fontSize: 12 },
   // Wide: under the grid, inside the same centred 1180 measure.
   errorWide: { width: "100%", maxWidth: WIDE_PANEL_MAX_WIDTH, alignSelf: "center" },
