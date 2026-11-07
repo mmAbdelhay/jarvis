@@ -474,7 +474,7 @@ describe("remote-push.integration: laptop, everything real but the socket, the E
         to: EXPO_TOKEN,
         title: MESSAGES.pushTitle("ar"),
         body: MESSAGES.pushBody("session-done", undefined, "ar"),
-        data: { kind: "session-done", sessionId: "s1" },
+        data: { kind: "session-done", sessionId: "s1", device: D1.id },
         sound: "default",
         priority: "high",
         channelId: "jarvis",
@@ -594,6 +594,13 @@ describe("remote-push.integration: laptop, everything real but the socket, the E
     await vi.advanceTimersByTimeAsync(PUSH_FLUSH_MS);
     sent += 1;
     expect(fetchCalls).toHaveLength(sent);
+    // Each phone's message names that phone's own device, as the phone knows it.
+    const batch = JSON.parse(fetchCalls.at(-1)?.body ?? "[]") as {
+      to: string;
+      data: { device: string };
+    }[];
+    expect(batch.find((m) => m.to === EXPO_TOKEN)?.data.device).toBe(D1.id);
+    expect(batch.find((m) => m.to === EXPO_TOKEN_2)?.data.device).toBe(D2.id);
     expect(remoteAccess.pushTargets()).toEqual([
       { deviceId: D2.id, token: EXPO_TOKEN_2, platform: "android", language: "en" },
     ]);

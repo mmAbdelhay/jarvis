@@ -592,10 +592,12 @@ describe("loadPrefs", () => {
       const store = new FakeStore(JSON.stringify({ machineFlags: { [ID]: FLAGS } }));
       await setKeepSignedIn(store, "en-US", true);
       await setDiffMode(store, "en-US", "split");
-      await createPrefsFacade(store, "en-US", {
-        notifications: false,
-        pushRegistered: false,
-      }).set({ notifications: true });
+      await createPrefsFacade(
+        store,
+        "en-US",
+        { notifications: false, pushRegistered: false },
+        { read: async () => false, write: async () => {} },
+      ).set({ notifications: true });
       await savePrefs(store, await loadPrefs(store, "en-US"));
       const prefs = await loadPrefs(store, "en-US");
       expect(prefs.machineFlags).toEqual({ [ID]: FLAGS });

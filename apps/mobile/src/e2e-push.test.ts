@@ -31,7 +31,9 @@ import type {
   NotificationsAdapter,
   PushPermission,
 } from "./lib/notifications";
+import type { MachineScope } from "./lib/machine-sessions";
 import type { Prefs, PrefsStore } from "./lib/prefs";
+import { loadPrefs, savePrefs } from "./lib/prefs";
 import { createPrefsFacade, handleNotificationTap, waitForOpen } from "./lib/push-context-support";
 import { createPushRegistration, type PushRegistrationDeps } from "./lib/push-registration";
 import type { Credential, Endpoint } from "./lib/rpc-client";
@@ -138,10 +140,20 @@ describe("push scenario over the real client and controller", () => {
         log: (line) => logs.push(line),
       });
 
-      const prefs: PushRegistrationDeps["prefs"] = createPrefsFacade(prefsStore, LOCALE_TAG, {
-        notifications: false,
-        pushRegistered: false,
-      });
+      // The one machine sits in the legacy slot, whose flag is the top-level field.
+      const prefs: PushRegistrationDeps["prefs"] = createPrefsFacade(
+        prefsStore,
+        LOCALE_TAG,
+        { notifications: false, pushRegistered: false },
+        {
+          read: async () => (await loadPrefs(prefsStore, LOCALE_TAG)).pushRegistered,
+          write: async (pushRegistered) =>
+            savePrefs(prefsStore, {
+              ...(await loadPrefs(prefsStore, LOCALE_TAG)),
+              pushRegistered,
+            }),
+        },
+      );
       const registration = createPushRegistration({
         client,
         adapter,
@@ -238,16 +250,21 @@ describe("push scenario over the real client and controller", () => {
       // --- 4. A tapped notification: waits for "open" (already open here),
       // fetches sessions:list, plans a route only from the validated
       // response, and hands it to a recording router. Mirrors
-      // push-context.tsx's PushProvider.handle(), reusing the same exported
-      // building blocks as the provider. ---
+      // notification-tap-host.tsx, reusing the same exported building blocks
+      // as the host. ---
       const handledIds = new Set<string>();
       const handleTap = (response: NotificationResponse) =>
         handleNotificationTap(
           {
-            client,
+            sessions: {
+              current: () => ({ client }) as MachineScope,
+              switchTo: async () => "same",
+            },
+            findByDeviceId: async () => undefined,
             router: { push: (route) => router.pushed.push(route) },
             handledIds,
             waitForOpen: (tapClient) => waitForOpen(tapClient, NOTIFICATION_NAV_WAIT_MS),
+            notice: () => {},
           },
           response,
         );

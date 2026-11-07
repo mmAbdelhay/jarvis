@@ -215,8 +215,10 @@ export function shouldNotify(
  * The payload for one target — behaviour rule 3. `project` reaches the
  * message only when `includeProjectNames` is true and the event carries
  * one, truncated to MAX_PUSH_PROJECT_CHARS; `data` never carries anything
- * else beyond `kind`, a validated `sessionId` (session-* kinds only) and
- * that same `project`.
+ * else beyond `kind`, the target's own `device` id (a phone holding many
+ * machines finds which one sent this by it; an old phone drops the key), a
+ * validated `sessionId` (session-* kinds only), that same `project`, and a
+ * review's `pr` under the same switch.
  */
 export function buildPushMessage(
   target: PushTarget,
@@ -241,7 +243,7 @@ export function buildPushMessage(
           ...(includeProjectNames ? { repo: pr.slice(0, hash) } : {}),
         };
 
-  const data: Record<string, string> = { kind: event.kind };
+  const data: Record<string, string> = { kind: event.kind, device: target.deviceId };
   if (sessionId !== undefined) data.sessionId = sessionId;
   if (project !== undefined) data.project = project;
   // Gated exactly like `project`: `owner/name` is a repo name, and with

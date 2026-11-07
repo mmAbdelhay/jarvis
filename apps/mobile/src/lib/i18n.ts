@@ -1710,6 +1710,14 @@ export const STRINGS = {
     en: "{name} no longer accepts this phone. You can add it again.",
     ar: "لم يعد {name} يقبل هذا الهاتف. يمكنك إضافته مرة أخرى.",
   },
+  "machines.tapGone": {
+    en: "That machine is no longer on this phone",
+    ar: "لم يعد ذلك الجهاز موجودًا على هذا الهاتف",
+  },
+  "settings.pushOtherMachines": {
+    en: "Other machines update when you next open them",
+    ar: "تتحدّث الأجهزة الأخرى عندما تفتحها في المرة القادمة",
+  },
   "machines.title": { en: "Machines", ar: "الأجهزة" },
   "machines.online": { en: "Online", ar: "متصل" },
   "machines.offline": { en: "Offline", ar: "غير متصل" },

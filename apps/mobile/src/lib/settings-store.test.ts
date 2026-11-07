@@ -244,6 +244,7 @@ function baseDeps(overrides: Partial<SettingsStoreDeps> = {}): {
     client: fake.client,
     clock,
     appVersion: "1.2.3",
+    machineCount: () => 1,
     unpair: async () => {
       unpairCalls.push(1);
       return NONE;
@@ -1176,6 +1177,27 @@ describe("createSettingsStore: appVersion", () => {
     await flush();
 
     expect(store.get().appVersion).toBe("9.9.9");
+  });
+});
+
+describe("createSettingsStore: other machines", () => {
+  it("with one machine there is nothing to say about others", () => {
+    const { deps } = baseDeps({ machineCount: () => 1 });
+    expect(createSettingsStore(deps).get().hasOtherMachines).toBe(false);
+  });
+
+  it("with two there is", () => {
+    const { deps } = baseDeps({ machineCount: () => 2 });
+    expect(createSettingsStore(deps).get().hasOtherMachines).toBe(true);
+  });
+
+  it("a store that did not open answers no others, and the screen still builds", () => {
+    const { deps } = baseDeps({
+      machineCount: () => {
+        throw new Error("machines: store is not open");
+      },
+    });
+    expect(createSettingsStore(deps).get().hasOtherMachines).toBe(false);
   });
 });
 

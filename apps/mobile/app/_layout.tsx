@@ -38,12 +38,15 @@ import {
   unpairedHandlerFor,
 } from "@/lib/machine-sessions";
 import { machineStore, openMachineStore } from "@/lib/machine-store-instance";
+import { createNativeNotificationsAdapter } from "@/lib/native-notifications";
 import { nativeTransport } from "@/lib/native-transport";
+import { NotificationTapHost } from "@/lib/notification-tap-host";
 import { filePrefsStore } from "@/lib/prefs-file";
 import { createAppPhoneUpdateStore } from "@/lib/phone-update-app";
 import { PhoneUpdateProvider } from "@/lib/phone-update-context";
 import { DEFAULT_IDLE_LOCK_MINUTES, loadPrefs } from "@/lib/prefs";
 import { PushProvider } from "@/lib/push-context";
+import { coldStartMachine } from "@/lib/push-context-support";
 import { createDeviceAuth } from "@/lib/device-auth";
 import { refreshLock } from "@/lib/refresh-lock";
 import { refreshStore } from "@/lib/refresh-store";
@@ -68,6 +71,8 @@ const PLATFORM = clientPlatformFor(Platform.OS);
 // The app's one phone-update store, started by PhoneUpdateProvider for the
 // app's lifetime (Settings → Updates, Home's banner).
 const phoneUpdateStore = createAppPhoneUpdateStore();
+// Loads no native module until it is asked something.
+const notifications = createNativeNotificationsAdapter();
 // M11 rule 6: constructed once, module-wide — a pairing with a `name`
 // routes through `systemTransport` (OS trust store), one without pins
 // natively through `nativeTransport`, exactly as before. Task 13: the
@@ -95,9 +100,6 @@ export default function RootLayout() {
   // From prepareSwitch until the next scope is published: the tree on screen
   // belongs to the machine being left, and raises no unlock screen of its own.
   const switchingRef = useRef(false);
-  // Rule 2 of push-context.tsx: above the key, or `lastResponse()` would
-  // replay a tap after each switch.
-  const handledIdsRef = useRef<Set<string>>(new Set());
   // Above the key, as a route can be waiting across a remount. `isReady` is the
   // check the router itself makes before it throws (expo-router's
   // global-state/store.js, `assertIsReady`).
@@ -177,16 +179,23 @@ export default function RootLayout() {
   // once-per-id on a client that never opens. `start` answers once the store
   // has opened, or failed to; the tree's own launch connect routes on that.
   // A launch landing on /pair connects nothing (dashboard-entry.ts): a machine
-  // connects when the route reaches /dashboard.
+  // connects when the route reaches /dashboard. A tap that brought the app up
+  // names the machine to start on, so the last active one is never connected
+  // on the way to it. The tap itself is handled by NotificationTapHost, which
+  // finds that machine already on screen.
   const launchPathname = useRef(usePathname()).current;
   const [started, setStarted] = useState(false);
   useEffect(() => {
     let cancelled = false;
-    void sessions
-      .start(undefined, () => shouldConnectOnRoute(launchPathname, false))
-      .then(() => {
-        if (!cancelled) setStarted(true);
+    void (async () => {
+      await openMachineStore();
+      const preferred = await coldStartMachine({
+        lastResponse: () => notifications.lastResponse(),
+        findByDeviceId: machineStore.findByDeviceId,
       });
+      await sessions.start(preferred, () => shouldConnectOnRoute(launchPathname, false));
+      if (!cancelled) setStarted(true);
+    })();
     return () => {
       cancelled = true;
     };
@@ -270,12 +279,12 @@ export default function RootLayout() {
       <MachinesContext.Provider value={sessions}>
         <NavigatorGateContext.Provider value={gate}>
           <PhoneUpdateProvider store={phoneUpdateStore}>
+            <NotificationTapHost adapter={notifications} />
             <Fragment key={scope.generation}>
               <ScopedTree
                 scope={scope}
                 sessions={sessions}
                 language={language}
-                handledIds={handledIdsRef.current}
                 switchingRef={switchingRef}
                 gate={gate}
                 revoked={revoked}
@@ -295,12 +304,11 @@ function ScopedTree(props: {
   scope: MachineScope;
   sessions: MachineSessions;
   language: Language;
-  handledIds: Set<string>;
   switchingRef: React.RefObject<boolean>;
   gate: NavigatorGate;
   revoked: boolean;
 }): React.JSX.Element {
-  const { scope, sessions, language, handledIds, switchingRef, gate, revoked } = props;
+  const { scope, sessions, language, switchingRef, gate, revoked } = props;
   const { client, connectionStore, authSession } = scope;
   const router = useRouter();
   const layout = useLayoutClass();
@@ -355,7 +363,7 @@ function ScopedTree(props: {
 
   return (
     <RpcContext.Provider value={rpcContextValue}>
-      <PushProvider handledIds={handledIds} gate={gate}>
+      <PushProvider>
         <VoiceProvider>
           <SafeAreaProvider>
             {/* Every touch anywhere restarts the idle-lock window. */}

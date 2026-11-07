@@ -9,7 +9,7 @@
 // wire is dropped rather than carried through, and a malformed field
 // anywhere answers `undefined` for the whole value rather than a partial
 // result.
-import { isSubscriptionKey } from "./protocol.js";
+import { DEVICE_ID_PATTERN, isSubscriptionKey } from "./protocol.js";
 
 export const PUSH_KINDS = [
   "session-done",
@@ -48,7 +48,15 @@ export const PUSH_UNREGISTER_CHANNEL = "remote:unregisterPush";
 export type PushPlatform = "ios" | "android";
 export type PushLanguage = "ar" | "en";
 
-export type PushData = { kind: PushKind; sessionId?: string; project?: string; pr?: string };
+export type PushData = {
+  kind: PushKind;
+  sessionId?: string;
+  project?: string;
+  pr?: string;
+  // The target's own device id, which is how a phone holding many machines
+  // tells which one sent this. An older laptop sends none.
+  device?: string;
+};
 
 export type PushRegistration = { token: string; platform: PushPlatform; language: PushLanguage };
 
@@ -95,8 +103,9 @@ function isValidPushProject(value: unknown): value is string {
  * received notification — field-by-field rebuild, same discipline as
  * every other parser here: an unknown `kind`, a `sessionId` that fails
  * {@link isSubscriptionKey}, or a `project` that isn't 1-{@link
- * MAX_PUSH_PROJECT_CHARS} control-character-free characters, or a `pr`
- * that fails {@link isPrKey} all answer
+ * MAX_PUSH_PROJECT_CHARS} control-character-free characters, a `pr`
+ * that fails {@link isPrKey}, or a `device` that fails
+ * {@link DEVICE_ID_PATTERN} all answer
  * `undefined` for the whole value. Any other key on the input is dropped.
  */
 export function parsePushData(value: unknown): PushData | undefined {
@@ -127,11 +136,19 @@ export function parsePushData(value: unknown): PushData | undefined {
     pr = prRaw;
   }
 
+  const deviceRaw = raw["device"];
+  let device: string | undefined;
+  if (deviceRaw !== undefined) {
+    if (typeof deviceRaw !== "string" || !DEVICE_ID_PATTERN.test(deviceRaw)) return undefined;
+    device = deviceRaw;
+  }
+
   return {
     kind,
     ...(sessionId !== undefined ? { sessionId } : {}),
     ...(project !== undefined ? { project } : {}),
     ...(pr !== undefined ? { pr } : {}),
+    ...(device !== undefined ? { device } : {}),
   };
 }
 

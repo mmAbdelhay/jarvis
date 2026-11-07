@@ -155,6 +155,9 @@ export function SettingsSections(props: Props): React.JSX.Element {
               {notificationsText}
             </Text>
           )}
+          {props.view.hasOtherMachines && (
+            <Text style={styles.cardLine}>{t(props.language, "settings.pushOtherMachines")}</Text>
+          )}
           {props.view.notifications.phase === "blocked" && (
             <TouchableOpacity style={styles.button} onPress={() => void Linking.openSettings()}>
               <Text style={styles.buttonText}>

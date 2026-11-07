@@ -148,6 +148,32 @@ describe("parsePushData", () => {
   });
 });
 
+describe("parsePushData: device", () => {
+  const DEVICE = "0123456789abcdef0123456789abcdef";
+
+  it("keeps a valid device", () => {
+    const value = { kind: "session-done", sessionId: "s1", device: DEVICE };
+    expect(parsePushData(value)).toEqual(value);
+  });
+
+  it("absent is fine, and adds no key", () => {
+    expect(parsePushData({ kind: "reply" })).not.toHaveProperty("device");
+  });
+
+  it.each([
+    "",
+    "d1",
+    "0123456789ABCDEF0123456789abcdef",
+    `${DEVICE}0`,
+    `${DEVICE}\n`,
+    7,
+    null,
+    [DEVICE],
+  ])("a malformed device %j answers undefined for the whole value", (device) => {
+    expect(parsePushData({ kind: "reply", device })).toBeUndefined();
+  });
+});
+
 const VALID_TOKEN = "ExponentPushToken[xxxxxxxxxxxxxxxxxxxxxx]";
 
 function validRegistration(overrides: Record<string, unknown> = {}): Record<string, unknown> {

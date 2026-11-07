@@ -19,7 +19,7 @@ import { platformKey, t } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
 import { useMachineSessions, useNavigatorGate } from "@/lib/machine-context";
 import { applyForgetOutcome } from "@/lib/machine-sessions";
-import { loadScreenMachine } from "@/lib/machine-store-instance";
+import { loadScreenMachine, machineStore } from "@/lib/machine-store-instance";
 import { filePrefsStore } from "@/lib/prefs-file";
 import { usePushRegistration } from "@/lib/push-context";
 import { useAuthSession, useConnectionStore, useMachineId, useRpcClient } from "@/lib/rpc-context";
@@ -94,6 +94,7 @@ function SettingsScreen() {
         client,
         clock: realClock,
         appVersion: APP_VERSION,
+        machineCount: () => machineStore.count(),
         unpair: () => sessions.forget(machineId, "unpair"),
         afterForget: (outcome) =>
           applyForgetOutcome({

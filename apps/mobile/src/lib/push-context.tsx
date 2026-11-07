@@ -3,51 +3,38 @@
 // for `VoiceController`: this file only wires the controller's
 // dependencies to the real app (the scope's `RpcClient`, the native
 // notifications adapter, a small prefs facade, the current language and
-// the channel's display name) and owns the notification-tap subscription
-// (rule 2). Every *decision* about permission/registration state lives in
-// push-registration.ts; every decision about where a tap navigates lives
-// in notification-tap.ts. This file only builds the controller once and
-// drives the tap handler — it is never the thing that turns notifications
+// the channel's display name). Taps are heard above the key, by
+// notification-tap-host.tsx. Every *decision* about permission/registration
+// state lives in push-registration.ts. This file only builds the controller
+// once — it is never the thing that turns notifications
 // on or off itself: the only caller of `PushRegistration.setEnabled` is
 // settings-store.ts's `setNotifications`, reached from a user's tap on the
 // Settings switch. The pure pieces this component builds
-// (`createPrefsFacade`, `waitForOpen`, `recordHandledId`) live in
+// (`createPrefsFacade`, `loadPushSeed`) live in
 // push-context-support.ts, not here — see that file's own header for why.
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
-import { useRouter } from "expo-router";
 import { t } from "./i18n";
 import { useLanguage } from "./language-context";
+import { machineStore } from "./machine-store-instance";
 import { createNativeNotificationsAdapter } from "./native-notifications";
-import { NOTIFICATION_NAV_WAIT_MS } from "./notification-tap";
 import type { NotificationsAdapter } from "./notifications";
-import { loadPrefs } from "./prefs";
 import { filePrefsStore } from "./prefs-file";
-import { createPrefsFacade, handleNotificationTap, waitForOpen } from "./push-context-support";
+import { NO_MACHINE_PUSH_FLAG, createPrefsFacade, loadPushSeed } from "./push-context-support";
 import type { PushPrefs, PushRegistration } from "./push-registration";
 import { createPushRegistration } from "./push-registration";
-import { useRpcClient } from "./rpc-context";
-import type { NavigatorGate } from "./scope-routing";
+import { useMachineId, useRpcClient } from "./rpc-context";
 
 const PushContext = createContext<PushRegistration | undefined>(undefined);
 
-export function PushProvider(props: {
-  children: React.ReactNode;
-  // Rule 2: each response id is handled at most once. Owned above the key in
-  // `_layout.tsx`: this provider remounts on a switch, and `lastResponse()`
-  // would replay the last tap on every machine switched to.
-  handledIds: Set<string>;
-  // This provider renders nothing, so no navigator, until its prefs load, and a
-  // tap read at launch can be answered first.
-  gate: NavigatorGate;
-}): React.JSX.Element | null {
-  const { handledIds, gate } = props;
+export function PushProvider(props: { children: React.ReactNode }): React.JSX.Element | null {
   const client = useRpcClient();
   const language = useLanguage();
-  const router = useRouter();
-  const tapRouter = useMemo(
-    () => ({ push: (route: string): void => gate.navigate(() => router.push(route)) }),
-    [router, gate],
+  // Fixed for this mount, as the key above remounts this on a switch.
+  const machineId = useMachineId();
+  const pushFlag = useMemo(
+    () => (machineId === null ? NO_MACHINE_PUSH_FLAG : machineStore.pushFlag(machineId)),
+    [machineId],
   );
 
   // Loaded once, before the registration is ever built (fix round 1,
@@ -64,18 +51,13 @@ export function PushProvider(props: {
     let cancelled = false;
     void (async () => {
       const localeTag = Intl.DateTimeFormat().resolvedOptions().locale;
-      const loaded = await loadPrefs(filePrefsStore, localeTag);
-      if (!cancelled) {
-        setPrefsSeed({
-          notifications: loaded.notifications,
-          pushRegistered: loaded.pushRegistered,
-        });
-      }
+      const loaded = await loadPushSeed(filePrefsStore, localeTag, pushFlag);
+      if (!cancelled) setPrefsSeed(loaded);
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [pushFlag]);
 
   const adapterRef = useRef<NotificationsAdapter | undefined>(undefined);
   if (adapterRef.current === undefined) {
@@ -100,7 +82,7 @@ export function PushProvider(props: {
     registrationRef.current = createPushRegistration({
       client,
       adapter,
-      prefs: createPrefsFacade(filePrefsStore, localeTag, prefsSeed),
+      prefs: createPrefsFacade(filePrefsStore, localeTag, prefsSeed, pushFlag),
       language: () => language,
       channelName: () => t(language, "notifications.channelName"),
       log: (line) => console.log(line),
@@ -117,40 +99,6 @@ export function PushProvider(props: {
       disposedRef.current = true;
     };
   }, [registration]);
-
-  useEffect(() => {
-    const unsubscribe = adapter.onResponse((response) => {
-      void handleNotificationTap(
-        {
-          client,
-          router: tapRouter,
-          handledIds,
-          waitForOpen: (tapClient) => waitForOpen(tapClient, NOTIFICATION_NAV_WAIT_MS),
-        },
-        response,
-      );
-    });
-
-    let cancelled = false;
-    void adapter.lastResponse().then((response) => {
-      if (!cancelled && response !== undefined) {
-        void handleNotificationTap(
-          {
-            client,
-            router: tapRouter,
-            handledIds,
-            waitForOpen: (tapClient) => waitForOpen(tapClient, NOTIFICATION_NAV_WAIT_MS),
-          },
-          response,
-        );
-      }
-    });
-
-    return () => {
-      cancelled = true;
-      unsubscribe();
-    };
-  }, [adapter, client, tapRouter, handledIds]);
 
   if (registration === undefined) {
     return null;

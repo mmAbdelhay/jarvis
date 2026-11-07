@@ -45,6 +45,9 @@ export type PushView = {
   language?: Language;
 };
 
+// `notifications` is the phone's one switch. `pushRegistered` is this machine's
+// own (`createPrefsFacade`), which is how a machine learns at its next open that
+// the switch went off while it was not on screen.
 export type PushPrefs = { notifications: boolean; pushRegistered: boolean };
 
 export type PushRegistrationDeps = {

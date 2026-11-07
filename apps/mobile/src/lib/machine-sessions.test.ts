@@ -1962,22 +1962,23 @@ describe("prepareSwitchRoute", () => {
 describe("tapped notifications", () => {
   it("handled tap ids survive a change of scope", async () => {
     const h = machinesHarness();
-    const a = await h.start();
-    await h.sessions.switchTo(B_ID);
-    const b = h.sessions.current();
+    await h.start();
     const handledIds = new Set<string>();
     const response = { id: "tap-1", data: { kind: "session-done", sessionId: "s1" } };
     const routes: string[] = [];
-    const tapDeps = (scope: MachineScope) => ({
-      client: scope.client,
+    const tapDeps = {
+      sessions: h.sessions,
+      findByDeviceId: h.store.findByDeviceId,
       router: { push: (route: string) => routes.push(route) },
       handledIds,
       waitForOpen: async () => false,
-    });
-    await handleNotificationTap(tapDeps(a), response);
+      notice: () => {},
+    };
+    await handleNotificationTap(tapDeps, response);
+    await h.sessions.switchTo(B_ID);
     const waited = vi.fn(async () => true);
 
-    await handleNotificationTap({ ...tapDeps(b), waitForOpen: waited }, response);
+    await handleNotificationTap({ ...tapDeps, waitForOpen: waited }, response);
 
     expect(waited).not.toHaveBeenCalled();
   });

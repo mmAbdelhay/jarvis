@@ -72,6 +72,9 @@ export type SettingsView = {
   // M10 Task 5, rule 10: mirrors `deps.push.get()` — the push controller
   // owns permission/registration state; this store only relays it.
   notifications: PushView;
+  // The switch reaches a machine not on screen only when it is next opened
+  // (decision 9), which Settings says only when there is such a machine.
+  hasOtherMachines: boolean;
   connection: ConnectionView;
   lastFrameAgoMs?: number;
   appVersion: string;
@@ -146,6 +149,8 @@ export type SettingsStoreDeps = {
   client: RpcClient;
   clock: Clock;
   appVersion: string;
+  /** How many machines this phone holds. Throws when the store did not open. */
+  machineCount(): number;
   unpair(): Promise<ForgetOutcome>;
   /** Where that unpair leaves the user: `applyForgetOutcome`. */
   afterForget(outcome: ForgetOutcome): void;
@@ -172,6 +177,14 @@ const TICK_MS = 1_000;
 export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
   const listeners = new Set<(view: SettingsView) => void>();
 
+  function hasOtherMachines(): boolean {
+    try {
+      return deps.machineCount() > 1;
+    } catch {
+      return false;
+    }
+  }
+
   let view: SettingsView = {
     language: undefined,
     restartRequired: false,
@@ -179,6 +192,7 @@ export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
     idleLockMinutes: DEFAULT_IDLE_LOCK_MINUTES,
     keepSignedIn: false,
     notifications: deps.push.get(),
+    hasOtherMachines: hasOtherMachines(),
     connection: deps.connection.get(),
     appVersion: deps.appVersion,
     reconnectError: false,
