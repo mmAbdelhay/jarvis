@@ -317,6 +317,7 @@ describe("createSettingsStore: setLanguage", () => {
         idleLockMinutes: 15,
         refreshTokenStored: false,
         keepSignedIn: false,
+        machineFlags: {},
       }),
     ]);
   });
@@ -341,6 +342,7 @@ describe("createSettingsStore: setLanguage", () => {
         idleLockMinutes: 15,
         refreshTokenStored: false,
         keepSignedIn: false,
+        machineFlags: {},
       }),
       JSON.stringify({
         language: "en",
@@ -352,6 +354,7 @@ describe("createSettingsStore: setLanguage", () => {
         idleLockMinutes: 15,
         refreshTokenStored: false,
         keepSignedIn: false,
+        machineFlags: {},
       }),
     ]);
     expect(store.get().speakReplies).toBe(false);
@@ -380,6 +383,7 @@ describe("createSettingsStore: setSpeakReplies (M8 Task 7, rule 17)", () => {
         idleLockMinutes: 15,
         refreshTokenStored: false,
         keepSignedIn: false,
+        machineFlags: {},
       }),
     ]);
   });
@@ -1154,6 +1158,24 @@ describe("createSettingsStore: owner login (Phase 0)", () => {
     expect(saved).toMatchObject({ keepSignedIn: true, speakReplies: true });
     expect(authCalls).toEqual(["policy"]);
     expect(store.get().keepSignedIn).toBe(true);
+  });
+
+  it("every prefs writer here keeps the per-machine flags", async () => {
+    const machineFlags = {
+      "mac.tail.ts.net_7717": { refreshTokenStored: true, pushRegistered: true },
+    };
+    const prefs = createFakePrefsStore(JSON.stringify({ machineFlags }));
+    const { deps } = baseDeps({ prefs });
+    const store = createSettingsStore(deps);
+    await flush();
+    await store.setLanguage("ar");
+    await store.setSpeakReplies(false);
+    await store.setIdleLockMinutes(30);
+    await store.setKeepSignedIn(true);
+    expect(prefs.written).toHaveLength(4);
+    for (const text of prefs.written) {
+      expect(JSON.parse(text)).toMatchObject({ machineFlags });
+    }
   });
 
   it("logout forwards to the auth session", async () => {

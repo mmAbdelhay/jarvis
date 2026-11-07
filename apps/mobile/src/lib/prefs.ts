@@ -1,4 +1,5 @@
 import { type Language, languageFromLocale } from "./i18n";
+import { MACHINE_ID_PATTERN, type MachineId } from "./machine-index";
 import { SIDECAR_ZOOM_MAX, SIDECAR_ZOOM_MIN } from "./sidecar-webview-config";
 
 // The three sidecar kinds the "Editor"/"Database"/"Cluster" rows on
@@ -49,7 +50,14 @@ export type Prefs = {
   // Wide Changes: the diff's layout. Absent until the viewer picks one
   // (read as "unified"); anything but a known value is dropped.
   changesDiffMode?: DiffMode;
+  // The same two flags as `refreshTokenStored` and `pushRegistered`, for each
+  // machine held beside the legacy slot (machine-store.ts). The legacy
+  // machine keeps using the top-level pair. Defaults to `{}`; a bad entry is
+  // dropped alone, and a lost one costs one password entry, never a prompt.
+  machineFlags: Record<MachineId, MachineFlags>;
 };
+
+export type MachineFlags = { refreshTokenStored: boolean; pushRegistered: boolean };
 
 export type DiffMode = "unified" | "split";
 export function isDiffMode(value: unknown): value is DiffMode {
@@ -108,6 +116,22 @@ function parseSidecarZoom(value: unknown): SidecarZoomPrefs {
   return result;
 }
 
+const MAX_MACHINE_FLAGS = 32;
+
+function parseMachineFlags(value: unknown): Record<MachineId, MachineFlags> {
+  if (typeof value !== "object" || value === null) return {};
+  const kept: [MachineId, MachineFlags][] = [];
+  for (const [id, flags] of Object.entries(value)) {
+    if (kept.length === MAX_MACHINE_FLAGS) break;
+    if (!MACHINE_ID_PATTERN.test(id) || typeof flags !== "object" || flags === null) continue;
+    const { refreshTokenStored, pushRegistered } = flags as Record<string, unknown>;
+    if (typeof refreshTokenStored !== "boolean" || typeof pushRegistered !== "boolean") continue;
+    kept.push([id, { refreshTokenStored, pushRegistered }]);
+  }
+  // `fromEntries`, never assignment: `__proto__` passes the id pattern.
+  return Object.fromEntries(kept);
+}
+
 export async function loadPrefs(store: PrefsStore, localeTag: string): Promise<Prefs> {
   // Rule 16: an invalid/missing `language` still falls back to the locale
   // default independently of `speakReplies` — the two fields never affect
@@ -122,6 +146,7 @@ export async function loadPrefs(store: PrefsStore, localeTag: string): Promise<P
     idleLockMinutes: DEFAULT_IDLE_LOCK_MINUTES,
     refreshTokenStored: false,
     keepSignedIn: false,
+    machineFlags: {},
   };
 
   let text: string | undefined;
@@ -178,6 +203,7 @@ export async function loadPrefs(store: PrefsStore, localeTag: string): Promise<P
     idleLockMinutes,
     refreshTokenStored,
     keepSignedIn,
+    machineFlags: parseMachineFlags(raw.machineFlags),
   };
 }
 

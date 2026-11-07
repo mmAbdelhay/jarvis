@@ -60,6 +60,7 @@ describe("createPrefsFacade", () => {
       idleLockMinutes: 15,
       refreshTokenStored: false,
       keepSignedIn: false,
+      machineFlags: {},
     } satisfies Prefs);
 
     const facade = createPrefsFacade(store, "en-US", {
@@ -79,6 +80,7 @@ describe("createPrefsFacade", () => {
       idleLockMinutes: 15,
       refreshTokenStored: false,
       keepSignedIn: false,
+      machineFlags: {},
     });
     expect(facade.get()).toEqual<PushPrefs>({ notifications: true, pushRegistered: false });
   });

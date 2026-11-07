@@ -20,6 +20,7 @@ import { createConnectionStore } from "@/lib/connection-store";
 import type { Language } from "@/lib/i18n";
 import { isRtl, t } from "@/lib/i18n";
 import { LanguageContext } from "@/lib/language-context";
+import { createMachineStore } from "@/lib/machine-store";
 import { nativeTransport } from "@/lib/native-transport";
 import { isClearingPairing } from "@/lib/pairing-guard";
 import { clearPairing } from "@/lib/pairing-record";
@@ -55,6 +56,23 @@ const transport = createAppTransport(PLATFORM, {
   pin: nativeTransport,
   system: systemTransportFor(PLATFORM),
 });
+// The machine index beside the pairing keys. Opening it migrates an existing
+// pairing, invisibly; every caller still reads the legacy keys for now.
+const machineStore = createMachineStore({
+  secure: expoSecureStore,
+  refresh: refreshStore,
+  prefs: filePrefsStore,
+  localeTag: Intl.DateTimeFormat().resolvedOptions().locale,
+  singleSlot: PLATFORM === "web",
+  log: (line) => console.log(line),
+});
+let machineStoreOpened: Promise<void> | undefined;
+function openMachineStore(): Promise<void> {
+  machineStoreOpened ??= machineStore.open().then((outcome) => {
+    if (outcome === "failed") console.warn("machines: open failed");
+  });
+  return machineStoreOpened;
+}
 
 // Composes the app's two per-app controller providers into the one slot
 // `RootLayout`'s tree already had for `VoiceProvider` alone (fix round 1,
@@ -308,6 +326,7 @@ export default function RootLayout() {
   // directly, and without this guard it would reconnect with a token that
   // is (or is about to be) invalidated by that clear.
   const connectFromStoredPairing = useCallback(async () => {
+    await openMachineStore();
     const outcome = await connectFromStored({
       secureStore: expoSecureStore,
       client,

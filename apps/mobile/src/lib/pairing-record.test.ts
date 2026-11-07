@@ -2,10 +2,13 @@ import { describe, expect, it } from "vitest";
 import type { Credential } from "./rpc-client";
 import {
   clearPairing,
+  clearPairingAt,
   loadPairing,
+  loadPairingAt,
   PairingAlreadyExistsError,
   type PairingRecord,
   savePairing,
+  savePairingAt,
 } from "./pairing-record";
 import type { SecureStore } from "./secure-store";
 
@@ -263,6 +266,65 @@ describe("savePairing refuses when a valid record already exists (Important-1)",
       expect(loaded).toEqual({ record: RECORD, credential: CREDENTIAL });
     },
   );
+});
+
+describe("the *At functions, at a machine's own keys", () => {
+  const KEYS = { record: "jarvis.m.a_1.pairing", token: "jarvis.m.a_1.token" };
+
+  it("round-trips at the given keys and leaves the legacy keys alone", async () => {
+    const store = new FakeSecureStore();
+    await savePairingAt(store, KEYS, RECORD, CREDENTIAL);
+
+    expect(store.raw(KEYS.token)).toBe(CREDENTIAL.token);
+    expect(store.raw("jarvis.pairing")).toBeUndefined();
+    expect(store.raw("jarvis.token")).toBeUndefined();
+    expect(await loadPairingAt(store, KEYS)).toEqual({ record: RECORD, credential: CREDENTIAL });
+  });
+
+  it("savePairingAt overwrites a valid pairing: the caller decides, there is no existing-check", async () => {
+    const store = new FakeSecureStore();
+    await savePairingAt(store, KEYS, RECORD, CREDENTIAL);
+    const next: Credential = { deviceId: RECORD.deviceId, token: "N".repeat(43) };
+    await savePairingAt(store, KEYS, RECORD, next);
+    expect((await loadPairingAt(store, KEYS))?.credential).toEqual(next);
+  });
+
+  it("savePairingAt writes the token before the record, and persists field by field", async () => {
+    const writes: string[] = [];
+    const store = new FakeSecureStore();
+    const set = store.set.bind(store);
+    store.set = (key, value) => {
+      writes.push(key);
+      return set(key, value);
+    };
+    const leaky = { ...RECORD, token: CREDENTIAL.token } as PairingRecord;
+    await savePairingAt(store, KEYS, leaky, CREDENTIAL);
+    expect(writes).toEqual([KEYS.token, KEYS.record]);
+    expect(store.raw(KEYS.record)).not.toContain(CREDENTIAL.token);
+  });
+
+  it("loadPairingAt clears only its own keys for an invalid record", async () => {
+    const store = new FakeSecureStore();
+    await savePairing(store, RECORD, CREDENTIAL);
+    store.putRaw(KEYS.record, "{not json");
+    store.putRaw(KEYS.token, CREDENTIAL.token);
+
+    expect(await loadPairingAt(store, KEYS)).toBeUndefined();
+    expect(store.raw(KEYS.record)).toBeUndefined();
+    expect(store.raw(KEYS.token)).toBeUndefined();
+    expect(await loadPairing(store)).toEqual({ record: RECORD, credential: CREDENTIAL });
+  });
+
+  it("clearPairingAt deletes only its own keys", async () => {
+    const store = new FakeSecureStore();
+    await savePairing(store, RECORD, CREDENTIAL);
+    await savePairingAt(store, KEYS, RECORD, CREDENTIAL);
+    await clearPairingAt(store, KEYS);
+
+    expect(store.raw(KEYS.record)).toBeUndefined();
+    expect(store.raw(KEYS.token)).toBeUndefined();
+    expect(await loadPairing(store)).toBeDefined();
+  });
 });
 
 describe("clearPairing", () => {
