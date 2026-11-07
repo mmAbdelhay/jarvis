@@ -563,9 +563,10 @@ export const STRINGS = {
     en: "Camera access is needed to scan the QR code.",
     ar: "الوصول إلى الكاميرا مطلوب لمسح رمز QR.",
   },
+  // Only the browser build refuses a held machine: a phone holds many.
   "pair.alreadyPaired": {
-    en: "This phone is already paired. Unpair in Settings first.",
-    ar: "هذا الهاتف مقترن بالفعل. ألغِ الاقتران من الإعدادات أولًا.",
+    en: "This browser is already paired. Unpair in Settings first.",
+    ar: "هذا المتصفح مقترن بالفعل. ألغِ الاقتران من الإعدادات أولًا.",
   },
   "pair.confirm": {
     en: "Pair with {host}:{port}? Certificate ends in …{tail}.",
@@ -1492,10 +1493,6 @@ export const STRINGS = {
     en: "Remove this pairing from this browser? You'll need a new pairing link to pair again. To fully revoke access, also remove this device in the computer's Settings.",
     ar: "هل تريد إزالة هذا الاقتران من هذا المتصفح؟ ستحتاج إلى رابط اقتران جديد للاقتران مرة أخرى. لإلغاء الوصول بالكامل، احذف هذا الجهاز أيضًا من إعدادات الكمبيوتر.",
   },
-  "pair.alreadyPaired.web": {
-    en: "This browser is already paired. Unpair in Settings first.",
-    ar: "هذا المتصفح مقترن بالفعل. ألغِ الاقتران من الإعدادات أولًا.",
-  },
   "pair.saveFailed.web": {
     en: "Couldn't save the pairing in this browser. Try again.",
     ar: "تعذّر حفظ الاقتران في هذا المتصفح. حاول مرة أخرى.",
@@ -1720,6 +1717,32 @@ export const STRINGS = {
   "machines.other": { en: "Other machines", ar: "أجهزة أخرى" },
   "machines.current": { en: "This one", ar: "هذا الجهاز" },
   "machines.openFailed": { en: "That machine could not be opened", ar: "تعذّر فتح ذلك الجهاز" },
+  "machines.add": { en: "Add machine", ar: "إضافة جهاز" },
+  "pair.joinTitle": { en: "Add by name", ar: "إضافة بالاسم" },
+  "pair.joinName": {
+    en: "Full name, like mac.tail1234.ts.net",
+    ar: "الاسم الكامل، مثل mac.tail1234.ts.net",
+  },
+  "pair.joinPassword": { en: "Owner password", ar: "كلمة مرور المالك" },
+  "pair.joinShortName": {
+    en: "Use the full name ending in .ts.net",
+    ar: "استخدم الاسم الكامل المنتهي بـ .ts.net",
+  },
+  "pair.joinInvalid": { en: "That name is not valid", ar: "هذا الاسم غير صالح" },
+  "pair.joinRefused": {
+    en: "Not accepted. Check the password, and that Tailscale access is on at that machine",
+    ar: "لم يُقبل الطلب. تحقق من كلمة المرور، ومن تفعيل الوصول عبر Tailscale على ذلك الجهاز",
+  },
+  "pair.joinRateLimited": {
+    en: "Too many attempts. Wait and try again",
+    ar: "محاولات كثيرة جدًا. انتظر ثم حاول مرة أخرى",
+  },
+  "pair.sameMachine": { en: "This machine is already added", ar: "هذا الجهاز مضاف بالفعل" },
+  "pair.openMachine": { en: "Open it", ar: "افتحه" },
+  "pair.limit": {
+    en: "This phone holds 16 machines. Unpair one first",
+    ar: "يحمل هذا الهاتف 16 جهازًا. ألغِ اقتران أحدها أولًا",
+  },
 } as const satisfies Record<string, Record<Language, string>>;
 
 export type MessageKey = keyof typeof STRINGS;

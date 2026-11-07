@@ -29,6 +29,7 @@ import type { Language, MessageKey } from "./i18n";
 import type { MachineId } from "./machine-index";
 import type { ForgetOutcome } from "./machine-sessions";
 import { fingerprintTail as computeFingerprintTail } from "./pair-flow";
+import { JOINED_FINGERPRINT } from "./pairing";
 import { isClearingPairing, setClearingPairing } from "./pairing-guard";
 import type { PairingRecord } from "./pairing-record";
 import type { AuthSession } from "./auth-session";
@@ -286,7 +287,8 @@ export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
     // function scope — only the projection below, and the tail, reach
     // `view`.
     const laptop: SettingsLaptop = {
-      host: record.host,
+      // A joined record's host and fingerprint are placeholders (decision 16).
+      host: record.name ?? record.host,
       port: record.port,
       deviceId: record.deviceId,
       pairedAt: record.pairedAt,
@@ -294,7 +296,13 @@ export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
     if (record.laptopName !== undefined) {
       laptop.laptopName = record.laptopName;
     }
-    setView({ laptop, fingerprintTail: computeFingerprintTail(record.fingerprint) });
+    setView({
+      laptop,
+      fingerprintTail:
+        record.fingerprint === JOINED_FINGERPRINT
+          ? undefined
+          : computeFingerprintTail(record.fingerprint),
+    });
   }
 
   void loadLanguage();

@@ -32,14 +32,15 @@ export type NavigatorGate = {
    *  the publish that replaces it), on from the next tree's layout effect. */
   setMounted(mounted: boolean): void;
   /** Runs at once with a navigator up. Otherwise it waits for `flush`; only the
-   *  latest waits, so it must check that it still applies when it runs. */
-  navigate(action: () => void): void;
+   *  latest waits, so it must check that it still applies when it runs.
+   *  `onDropped`: a later route took its place, and it will never run. */
+  navigate(action: () => void, onDropped?: () => void): void;
   /** Runs what waited, if a navigator is up by now. */
   flush(): void;
 };
 
 export function createNavigatorGate(isReady: () => boolean): NavigatorGate {
-  let waiting: (() => void) | undefined;
+  let waiting: { action: () => void; onDropped?: () => void } | undefined;
   let mounted = false;
 
   function ready(): boolean {
@@ -48,7 +49,7 @@ export function createNavigatorGate(isReady: () => boolean): NavigatorGate {
 
   function flush(): void {
     if (waiting === undefined || !ready()) return;
-    const action = waiting;
+    const { action } = waiting;
     waiting = undefined;
     action();
   }
@@ -58,12 +59,27 @@ export function createNavigatorGate(isReady: () => boolean): NavigatorGate {
     setMounted(next) {
       mounted = next;
     },
-    navigate(action) {
-      waiting = action;
+    navigate(action, onDropped) {
+      const dropped = waiting;
+      waiting = { action, onDropped };
+      dropped?.onDropped?.();
       flush();
     },
     flush,
   };
+}
+
+/** /pair is done, and the user goes to the machine on screen. A switch routes
+ *  for itself (`prepareSwitchRoute`), then remounts the tree with this screen in
+ *  it, so a screen no longer up by the time this runs asks for nothing more. */
+export function leavePairScreen(deps: {
+  gate: NavigatorGate;
+  screenUp(): boolean;
+  toDashboard(): void;
+}): void {
+  deps.gate.navigate(() => {
+    if (deps.screenUp()) deps.toDashboard();
+  });
 }
 
 export type ScopeRouting = {

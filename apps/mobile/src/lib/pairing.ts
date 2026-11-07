@@ -11,10 +11,12 @@
 // nothing retains it at all.
 
 import {
+  type AuthTokens,
   CLOSE,
   DEVICE_ID_PATTERN,
   HANDSHAKE_TIMEOUT_MS,
   type PairClientMessage,
+  type PairJoinMessage,
   type PairingLink,
   PROTOCOL_VERSION,
   SECRET_PATTERN,
@@ -22,6 +24,7 @@ import {
   encodeMessage,
   isUnspecifiedAddress,
 } from "@jarvis/wire";
+import { parseTokens } from "./auth-session";
 import type { ClientPlatform } from "./client-platform";
 import type { Clock } from "./clock";
 import type { PairingRecord } from "./pairing-record";
@@ -254,6 +257,173 @@ export function pair(deps: PairDeps, link: PairingLink, deviceName: string): Pro
         case "error":
           // Diagnostic only (transport.ts): the close that always follows
           // carries the real code/reason this function acts on.
+          return;
+      }
+    }
+  });
+}
+
+/** The record of a joined machine (decision 16): with `name` set, neither of
+ *  these is read for dialling. Every display of either must prefer the name. */
+export const JOINED_HOST = "0.0.0.0";
+export const JOINED_FINGERPRINT = "0".repeat(64);
+/** Past the open: the target's password check can wait behind others. */
+export const JOIN_WAIT_MS = 30_000;
+/** What a socket reports when no close frame arrived: the connection went. */
+const ABNORMAL_CLOSE = 1006;
+
+export type JoinOutcome =
+  | { ok: true; record: PairingRecord; credential: Credential; tokens: AuthTokens }
+  | { ok: false; reason: "refused" | "rate-limited" | "unreachable" | "timeout" | "protocol" };
+
+function joinCloseReason(code: number): "refused" | "rate-limited" | "unreachable" | "protocol" {
+  switch (code) {
+    case CLOSE.unauthorized:
+      return "refused";
+    case CLOSE.tooManyRequests:
+      return "rate-limited";
+    case ABNORMAL_CLOSE:
+      return "unreachable";
+    default:
+      return "protocol";
+  }
+}
+
+function parseJoinedFrame(
+  text: string,
+): { deviceId: string; token: string; tokens: AuthTokens } | undefined {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+  if (typeof raw !== "object" || raw === null) return undefined;
+  const obj = raw as Record<string, unknown>;
+  if (obj.t !== "joined") return undefined;
+  if (obj.v !== PROTOCOL_VERSION) return undefined;
+  if (typeof obj.deviceId !== "string" || !DEVICE_ID_PATTERN.test(obj.deviceId)) return undefined;
+  if (typeof obj.token !== "string" || !SECRET_PATTERN.test(obj.token)) return undefined;
+  const tokens = parseTokens(obj.tokens);
+  if (tokens === undefined) return undefined;
+  return { deviceId: obj.deviceId, token: obj.token, tokens };
+}
+
+/**
+ * The owner password in place of a pairing secret, over the same socket. As in
+ * `pair()`: the password is copied once into a local, blanked the moment its one
+ * frame has gone or the exchange has ended, never put in an outcome, and this
+ * module has no log. Nothing an error says is kept, as a send's error could name
+ * what it was sending.
+ */
+export function joinMachine(
+  deps: PairDeps,
+  address: { name: string; port: number },
+  password: string,
+  deviceName: string,
+): Promise<JoinOutcome> {
+  const { name, port } = address;
+  let secret: string | undefined = password;
+
+  return new Promise((resolve) => {
+    let settled = false;
+    let opened = false;
+    let timeoutTimer: unknown;
+
+    function settle(outcome: JoinOutcome): void {
+      if (settled) return;
+      settled = true;
+      secret = undefined;
+      if (timeoutTimer !== undefined) {
+        deps.clock.clearTimeout(timeoutTimer);
+        timeoutTimer = undefined;
+      }
+      resolve(outcome);
+    }
+
+    let socket: TransportSocket | undefined;
+    try {
+      socket = deps.transport.open(
+        socketUrl(name, port, "/pair"),
+        { kind: "system" } satisfies Trust,
+        onEvent,
+      );
+    } catch {
+      settle({ ok: false, reason: "unreachable" });
+      return;
+    }
+
+    if (!opened) {
+      timeoutTimer = deps.clock.setTimeout(() => {
+        timeoutTimer = undefined;
+        socket?.close(CLOSE.normal, "connect timeout");
+        settle({ ok: false, reason: "unreachable" });
+      }, HANDSHAKE_TIMEOUT_MS);
+    }
+
+    function onOpen(): void {
+      // The one frame has gone: a second `open` sends nothing, and leaves the
+      // wait where it is.
+      if (opened || secret === undefined) return;
+      opened = true;
+      if (timeoutTimer !== undefined) deps.clock.clearTimeout(timeoutTimer);
+      timeoutTimer = deps.clock.setTimeout(() => {
+        timeoutTimer = undefined;
+        socket?.close(CLOSE.normal, "timeout");
+        settle({ ok: false, reason: "timeout" });
+      }, JOIN_WAIT_MS);
+      const frame: PairJoinMessage = {
+        t: "join",
+        v: PROTOCOL_VERSION,
+        password: secret,
+        deviceName,
+        client: deps.client,
+      };
+      try {
+        socket?.send(encodeMessage(frame));
+      } catch {
+        socket?.close(CLOSE.normal, "send failed");
+        settle({ ok: false, reason: "unreachable" });
+        return;
+      }
+      secret = undefined;
+    }
+
+    function onEvent(event: TransportEvent): void {
+      if (settled) return;
+      switch (event.kind) {
+        case "open":
+          onOpen();
+          return;
+        case "message": {
+          const parsed = parseJoinedFrame(event.text);
+          if (parsed === undefined) {
+            socket?.close(CLOSE.normal, "protocol violation");
+            settle({ ok: false, reason: "protocol" });
+            return;
+          }
+          const record: PairingRecord = {
+            deviceId: parsed.deviceId,
+            host: JOINED_HOST,
+            port,
+            fingerprint: JOINED_FINGERPRINT,
+            name,
+            pairedAt: deps.clock.now(),
+            laptopName: name.split(".")[0],
+          };
+          const credential: Credential = { deviceId: parsed.deviceId, token: parsed.token };
+          socket?.close(CLOSE.normal, "joined");
+          settle({ ok: true, record, credential, tokens: parsed.tokens });
+          return;
+        }
+        case "close":
+          settle({
+            ok: false,
+            reason: opened ? joinCloseReason(event.code) : "unreachable",
+          });
+          return;
+        case "error":
+          // Diagnostic only (transport.ts): the close that follows decides.
           return;
       }
     }

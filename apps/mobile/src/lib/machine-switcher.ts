@@ -1,6 +1,7 @@
 // The machine switcher's decisions. Screens stay thin: MachineSwitcher.tsx only
 // lays out what these answer.
 
+import type { ClientPlatform } from "./client-platform";
 import type { ConnectionView } from "./connection-store";
 import type { MachineId } from "./machine-index";
 import type { MachineOnline } from "./machine-probe";
@@ -58,6 +59,11 @@ export function otherMachinesLinkVisible(
   activeId: MachineId | undefined,
 ): boolean {
   return entries.some((entry) => entry.id !== activeId);
+}
+
+/** The browser holds one machine per origin: its own list comes with Task 8. */
+export function addMachineRowVisible(platform: ClientPlatform): boolean {
+  return platform !== "web";
 }
 
 /** Probes run only for a sheet someone can see. `appActive` is the sessions'

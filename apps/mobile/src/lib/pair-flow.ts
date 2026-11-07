@@ -4,14 +4,23 @@
 // transition, and the already-paired fail-closed decision all live here,
 // testable without a React Native renderer.
 
-import type { PairingLink } from "@jarvis/wire";
-import type { ForgetCause, ForgetOutcome } from "./machine-sessions";
-import { needsHost, withHost } from "./pairing";
+import type { AuthTokens, PairingLink } from "@jarvis/wire";
+import { parsePairingUri } from "@jarvis/wire";
+import type { MessageKey } from "./i18n";
+import { DEFAULT_BRIDGE_PORT, parseMachineAddress } from "./machine-address";
+import { type MachineId, machineIdOf } from "./machine-index";
+import type { ForgetCause, ForgetOutcome, SwitchOutcome } from "./machine-sessions";
+import { MachineLimitError, type MachineEntry } from "./machine-store";
+import { JOINED_HOST, type JoinOutcome, needsHost, withHost } from "./pairing";
+import { PairingAlreadyExistsError, type PairingRecord } from "./pairing-record";
+import type { Credential } from "./rpc-client";
 
 export type PairFlowPhaseKind =
   | "checking"
   | "alreadyPaired"
   | "clearFailed"
+  | "sameMachine"
+  | "join"
   | "scan"
   | "needsHost"
   | "confirm"
@@ -21,23 +30,248 @@ export type PairFlowPhaseKind =
 
 /**
  * A new pairing attempt — from a scan, a pasted link, or a `jarvis://` deep
- * link — may only begin from the "scan" step, and never while a pairing
- * record already exists. Both are load-bearing:
+ * link — may only begin from the "scan" step, and, in the browser, never while
+ * it holds a machine. Both are load-bearing:
  *
  * - the phase check stops a second, concurrent link from clobbering one
  *   already in flight (ruling C1c);
- * - the `alreadyPaired` check stops a tapped link from silently replacing
- *   an existing pairing (ruling C1a) — `jarvis://pair?...` resolves to this
- *   same screen through Expo Router's own `pair` route, whatever state the
- *   phone was already in, so the screen itself is the only place left to
- *   refuse it.
+ * - `held` is the browser's refusal, one machine per origin (ruling C1a): a
+ *   phone holds many, so it passes `false`, and answers the one link it must
+ *   refuse, for a machine it already holds, with `intakeLink`'s `sameMachine`.
  */
-export function canStartIntake(params: {
-  alreadyPaired: boolean;
-  phaseKind: PairFlowPhaseKind;
-}): boolean {
-  if (params.alreadyPaired) return false;
+export function canStartIntake(params: { held: boolean; phaseKind: PairFlowPhaseKind }): boolean {
+  if (params.held) return false;
   return params.phaseKind === "scan";
+}
+
+/** What a link does next on a phone. Never starts a pairing: `step` has no such
+ *  variant, and a held machine's link stops short of any store or socket. */
+export type LinkIntake =
+  | { kind: "dropped" }
+  | { kind: "invalid" }
+  | { kind: "checkFailed" }
+  | { kind: "limit" }
+  | { kind: "sameMachine"; id: MachineId }
+  | { kind: "step"; link: PairingLink; step: IntakeStep };
+
+export function intakeLink(params: {
+  phaseKind: PairFlowPhaseKind;
+  uri: string;
+  isHeld(id: MachineId): boolean;
+  atLimit(): boolean;
+}): LinkIntake {
+  if (!canStartIntake({ held: false, phaseKind: params.phaseKind })) return { kind: "dropped" };
+  const link = parsePairingUri(params.uri);
+  if (link === undefined) return { kind: "invalid" };
+  const step = intakeStep(link);
+  // A link with no address yet has no id: `heldAfterHost` asks once it has one.
+  if (step.kind === "needsHost") return { kind: "step", link, step };
+  try {
+    const id = heldAfterHost(link, params.isHeld);
+    if (id !== undefined) return { kind: "sameMachine", id };
+    if (params.atLimit()) return { kind: "limit" };
+  } catch {
+    return { kind: "checkFailed" };
+  }
+  return { kind: "step", link, step };
+}
+
+/** The held machine this link's address lands on. */
+export function heldAfterHost(
+  link: PairingLink,
+  isHeld: (id: MachineId) => boolean,
+): MachineId | undefined {
+  const id = machineIdOf(link);
+  return isHeld(id) ? id : undefined;
+}
+
+/** Where a pairing or a join ends. Nothing here holds a secret. */
+export type SaveStep =
+  | { kind: "success"; id: MachineId }
+  | { kind: "sameMachine"; id: MachineId }
+  | { kind: "limit" }
+  | { kind: "saveFailed" };
+
+/** The store's own refusals are what stand behind every earlier check. A failed
+ *  save leaves the machine on screen as it was. After a join it also leaves a
+ *  device entry on the target that nobody holds tokens for: that machine's device
+ *  list shows it, and it can be revoked there. */
+export async function savePairing(
+  addAndSwitch: (
+    record: PairingRecord,
+    credential: Credential,
+    tokens?: AuthTokens,
+  ) => Promise<MachineId>,
+  record: PairingRecord,
+  credential: Credential,
+  tokens?: AuthTokens,
+): Promise<SaveStep> {
+  try {
+    return { kind: "success", id: await addAndSwitch(record, credential, tokens) };
+  } catch (err) {
+    if (err instanceof PairingAlreadyExistsError) {
+      return { kind: "sameMachine", id: machineIdOf(record) };
+    }
+    if (err instanceof MachineLimitError) return { kind: "limit" };
+    return { kind: "saveFailed" };
+  }
+}
+
+export type JoinFailure =
+  | "short-name"
+  | "invalid"
+  | "refused"
+  | "rate-limited"
+  | "unreachable"
+  | "timeout"
+  | "protocol";
+
+export function joinFailureKey(failure: JoinFailure): MessageKey {
+  switch (failure) {
+    case "short-name":
+      return "pair.joinShortName";
+    case "invalid":
+      return "pair.joinInvalid";
+    case "refused":
+      return "pair.joinRefused";
+    case "rate-limited":
+      return "pair.joinRateLimited";
+    // pair.timeout speaks of an approval and a new code: a join has neither.
+    case "unreachable":
+    case "timeout":
+      return "pair.unreachable";
+    case "protocol":
+      return "pair.protocol";
+  }
+}
+
+export function pairStepKey(kind: "limit" | "saveFailed"): MessageKey {
+  return kind === "limit" ? "pair.limit" : "pair.saveFailed";
+}
+
+export type SubmitJoinDeps = {
+  isHeld(id: MachineId): boolean;
+  atLimit(): boolean;
+  /** Everything before this is decided here: a frame is about to go. */
+  waiting(): void;
+  join(address: { name: string; port: number }, password: string): Promise<JoinOutcome>;
+  /** The screen that asked is still up: nothing is added behind a user who left. */
+  stillWanted(): boolean;
+  addAndSwitch(
+    record: PairingRecord,
+    credential: Credential,
+    tokens?: AuthTokens,
+  ): Promise<MachineId>;
+};
+
+export type JoinStep =
+  | SaveStep
+  | { kind: "join"; failure: JoinFailure }
+  | { kind: "checkFailed" }
+  | { kind: "abandoned" };
+
+/** Adding by name, from the typed text to the switch. Same id and limit are
+ *  checked before any frame goes. The password goes on to `deps.join`, and is in
+ *  no answer. */
+export async function submitJoin(
+  deps: SubmitJoinDeps,
+  nameText: string,
+  password: string,
+): Promise<JoinStep> {
+  const address = parseMachineAddress(nameText, DEFAULT_BRIDGE_PORT);
+  if (address.kind !== "ok") return { kind: "join", failure: address.kind };
+  const { name, port } = address;
+  try {
+    const id = machineIdOf({ name, host: JOINED_HOST, port });
+    if (deps.isHeld(id)) return { kind: "sameMachine", id };
+    if (deps.atLimit()) return { kind: "limit" };
+  } catch {
+    return { kind: "checkFailed" };
+  }
+  deps.waiting();
+  let outcome: JoinOutcome;
+  try {
+    outcome = await deps.join({ name, port }, password);
+  } catch {
+    // Not read: an error here may have the frame in it.
+    return { kind: "join", failure: "unreachable" };
+  }
+  if (!outcome.ok) return { kind: "join", failure: outcome.reason };
+  if (!deps.stillWanted()) return { kind: "abandoned" };
+  return savePairing(deps.addAndSwitch, outcome.record, outcome.credential, outcome.tokens);
+}
+
+/** /pair's way to a machine: the back button, `pair.openMachine`, and the machine
+ *  a retried clear named. Anything but `unknown` is on its way. */
+export async function openHeldMachine(
+  id: MachineId,
+  deps: {
+    switchTo(id: MachineId): Promise<SwitchOutcome>;
+    leave(): void;
+    failed(): void;
+    log(line: string): void;
+  },
+): Promise<void> {
+  let outcome: SwitchOutcome;
+  try {
+    outcome = await deps.switchTo(id);
+  } catch {
+    deps.log("pair: opening a machine failed");
+    deps.failed();
+    return;
+  }
+  if (outcome === "unknown") deps.failed();
+  else deps.leave();
+}
+
+/** Where /pair's back button goes: the machine on screen if it can be gone back
+ *  to, else the first other one. A clear that keeps failing is what is being left
+ *  (decision 11), so it is never that machine. While an answer is on its way, or
+ *  once it has come, there is no back. */
+export function pairBackTarget(params: {
+  phaseKind: PairFlowPhaseKind;
+  onScreen: MachineId | null;
+  clearFailedId: MachineId | null;
+  held: readonly MachineId[];
+}): MachineId | undefined {
+  const { phaseKind, onScreen, clearFailedId, held } = params;
+  if (phaseKind === "checking" || phaseKind === "waiting" || phaseKind === "success") {
+    return undefined;
+  }
+  const others = held.filter((id) => id !== clearFailedId);
+  if (onScreen !== null && others.includes(onScreen)) return onScreen;
+  return others[0];
+}
+
+/** A signal taken on arrival, for the machine on screen, or for no one: left over
+ *  from a machine the user has since moved past, it says nothing about this one. */
+export function clearFailedEntry(
+  signal: { id: MachineId | null } | undefined,
+  onScreen: MachineId | null,
+): { id: MachineId | null } | undefined {
+  return signal?.id === onScreen ? signal : undefined;
+}
+
+export type HeldRead = { ok: true; ids: MachineId[] } | { ok: false };
+
+/** Fails closed on a store that could not open. One machine that cannot be read
+ *  hides no other: an add of that id still reaches the store's own refusal. */
+export async function readHeldMachines(
+  open: () => Promise<unknown>,
+  store: { listReadable(): Promise<MachineEntry[]> },
+): Promise<HeldRead> {
+  try {
+    await open();
+    const entries = await store.listReadable();
+    return { ok: true, ids: entries.map((entry) => entry.id) };
+  } catch {
+    return { ok: false };
+  }
+}
+
+/** A phone may always add a machine, so only the read can stop it. */
+export function phaseAfterRead(read: HeldRead): "scan" | "checkFailed" {
+  return read.ok ? "scan" : "checkFailed";
 }
 
 /**

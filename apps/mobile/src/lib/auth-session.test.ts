@@ -6,6 +6,7 @@ import { createFakeClock } from "./clock";
 import { createWebDeviceAuth } from "./web-device-auth";
 import type { ClientState, RpcResult } from "./rpc-client";
 import type { SecureStore } from "./secure-store";
+import { shouldShowUnlock } from "./unlock-screen";
 
 const MIN = 60_000;
 const ACCESS_TTL = 15 * MIN;
@@ -209,6 +210,114 @@ function setup(
 function tokenArg(call: Call | undefined, field: string): string | undefined {
   return (call?.args[0] as Record<string, string> | undefined)?.[field];
 }
+
+describe("auth-session: adoptJoinTokens", () => {
+  function joinTokens(clock: ReturnType<typeof createFakeClock>) {
+    return {
+      accessToken: "a".repeat(64),
+      refreshToken: "b".repeat(64),
+      accessExpiresAt: clock.now() + ACCESS_TTL,
+    };
+  }
+
+  /** A scope nothing has connected yet. */
+  function fresh(options: { passcode?: boolean } = {}) {
+    const context = setup(options);
+    context.double.setState("idle");
+    context.double.events.length = 0;
+    return context;
+  }
+
+  it("stores the refresh token first and asks nothing of the connection", async () => {
+    const { session, clock, double, store, flag } = fresh();
+    await expect(session.adoptJoinTokens(joinTokens(clock))).resolves.toBe(true);
+
+    expect(double.events).toEqual(["store.set"]);
+    expect(store.values.get(REFRESH_TOKEN_KEY)).toBe("b".repeat(64));
+    expect(flag.state.stored).toBe(true);
+    expect(double.calls).toEqual([]);
+    expect(session.get().lockedLocally).toBe(false);
+  });
+
+  it("no passcode: nothing on disk, and the refresh token stays in memory", async () => {
+    const { session, clock, double, store } = fresh({ passcode: false });
+    await expect(session.adoptJoinTokens(joinTokens(clock))).resolves.toBe(true);
+    expect(store.writes).toEqual([]);
+
+    // Past the access token, so only the refresh token can answer.
+    clock.advance(ACCESS_TTL);
+    double.setState("locked");
+    await flush();
+    const refresh = double.calls.find((call) => call.channel === "auth:refresh");
+    expect(tokenArg(refresh, "refreshToken")).toBe("b".repeat(64));
+    expect(store.writes).toEqual([]);
+  });
+
+  it("a write that fails leaves nothing stale, and the session in memory", async () => {
+    const { session, clock, double, store, flag } = fresh();
+    flag.state.stored = true;
+    store.values.set(REFRESH_TOKEN_KEY, "stale");
+    store.failNextSet();
+
+    await expect(session.adoptJoinTokens(joinTokens(clock))).resolves.toBe(true);
+
+    expect(store.values.has(REFRESH_TOKEN_KEY)).toBe(false);
+    double.setState("locked");
+    await flush();
+    expect(tokenArg(double.calls[0], "accessToken")).toBe("a".repeat(64));
+  });
+
+  it("the first locked welcome resumes, and the unlock screen never shows", async () => {
+    const { session, clock, double, device } = fresh();
+    await session.adoptJoinTokens(joinTokens(clock));
+
+    const shown: boolean[] = [];
+    session.subscribe((view) => {
+      shown.push(shouldShowUnlock(double.rpc.state(), view, "/dashboard"));
+    });
+    double.setState("locked");
+    await flush();
+
+    expect(double.calls.map((call) => call.channel)).toEqual(["auth:resume"]);
+    expect(tokenArg(double.calls[0], "accessToken")).toBe("a".repeat(64));
+    expect(double.rpc.state()).toBe("open");
+    expect(shown.length).toBeGreaterThan(0);
+    expect(shown).not.toContain(true);
+    expect(shouldShowUnlock(double.rpc.state(), session.get(), "/dashboard")).toBe(false);
+    expect(device.state.prompts).toBe(0);
+  });
+
+  it("already locked: it resumes, and never unlocks a connection the laptop has not", async () => {
+    const { session, clock, double } = setup();
+    double.reply("auth:resume", { ok: false, error: { kind: "offline" } });
+
+    await session.adoptJoinTokens(joinTokens(clock));
+    await flush();
+
+    expect(double.calls.map((call) => call.channel)).toEqual(["auth:resume"]);
+    expect(double.events).not.toContain("unlock");
+  });
+
+  it("the idle window starts at the join, not when the scope was built", async () => {
+    const { session, clock, double } = fresh();
+    clock.advance(IDLE - 1);
+    await session.adoptJoinTokens(joinTokens(clock));
+
+    clock.advance(1_000);
+
+    expect(session.get().lockedLocally).toBe(false);
+    expect(double.events).not.toContain("lock");
+  });
+
+  it("logs no token", async () => {
+    const { session, clock, double, logs } = fresh();
+    await session.adoptJoinTokens(joinTokens(clock));
+    double.setState("locked");
+    await flush();
+    expect(logs.join("\n")).not.toContain("a".repeat(64));
+    expect(logs.join("\n")).not.toContain("b".repeat(64));
+  });
+});
 
 describe("auth-session: quiesce", () => {
   it("answers at once with no refresh in flight", async () => {

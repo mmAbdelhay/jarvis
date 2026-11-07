@@ -221,7 +221,7 @@ function PairWebScreen() {
     (link: PairingLink | undefined) => {
       if (
         !canStartIntake({
-          alreadyPaired: alreadyPairedRef.current,
+          held: alreadyPairedRef.current,
           phaseKind: phaseRef.current.kind,
         })
       ) {

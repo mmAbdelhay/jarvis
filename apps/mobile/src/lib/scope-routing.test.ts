@@ -3,7 +3,12 @@ import { describe, expect, it } from "vitest";
 import type { AuthView } from "./auth-session";
 import { A_ID, B_ID, machinesHarness, recordOf, settle, welcome } from "./fake-machines";
 import { prepareSwitchRoute } from "./machine-sessions";
-import { createNavigatorGate, createScopeRouting, reconnectOrPair } from "./scope-routing";
+import {
+  createNavigatorGate,
+  createScopeRouting,
+  leavePairScreen,
+  reconnectOrPair,
+} from "./scope-routing";
 
 const UNLOCKED = { busy: false, lockedLocally: false } as AuthView;
 const LOCKED = { busy: false, lockedLocally: true } as AuthView;
@@ -28,6 +33,88 @@ function gated() {
   gate.setMounted(true);
   return { navigator, gate };
 }
+
+describe("a route the gate lets go", () => {
+  it("is told when a later route takes its place, and never runs", () => {
+    const { navigator, gate } = gated();
+    const dropped: string[] = [];
+    gate.navigate(
+      () => navigator.go("/pair"),
+      () => dropped.push("/pair"),
+    );
+    expect(dropped).toEqual([]);
+
+    gate.navigate(() => navigator.go("/unlock"));
+    expect(dropped).toEqual(["/pair"]);
+
+    navigator.ready = true;
+    gate.flush();
+    expect(navigator.routes).toEqual(["/unlock"]);
+    expect(dropped).toEqual(["/pair"]);
+  });
+
+  it("is not told when it runs", () => {
+    const { navigator, gate } = gated();
+    const dropped: string[] = [];
+    gate.navigate(
+      () => navigator.go("/pair"),
+      () => dropped.push("/pair"),
+    );
+    navigator.ready = true;
+    gate.flush();
+    gate.navigate(() => navigator.go("/unlock"));
+
+    expect(navigator.routes).toEqual(["/pair", "/unlock"]);
+    expect(dropped).toEqual([]);
+  });
+
+  it("is not told when it runs at once", () => {
+    const { navigator, gate } = gated();
+    navigator.ready = true;
+    const dropped: string[] = [];
+    gate.navigate(
+      () => navigator.go("/pair"),
+      () => dropped.push("/pair"),
+    );
+    gate.navigate(() => navigator.go("/unlock"));
+
+    expect(dropped).toEqual([]);
+  });
+});
+
+describe("leavePairScreen", () => {
+  it("with the navigator up, goes at once", () => {
+    const { navigator, gate } = gated();
+    navigator.ready = true;
+    leavePairScreen({ gate, screenUp: () => true, toDashboard: () => navigator.go("/dashboard") });
+    expect(navigator.routes).toEqual(["/dashboard"]);
+  });
+
+  it("asks for nothing with no navigator up, and waits for one", () => {
+    const { navigator, gate } = gated();
+    gate.setMounted(false);
+    navigator.ready = true;
+    leavePairScreen({ gate, screenUp: () => true, toDashboard: () => navigator.go("/dashboard") });
+    expect(navigator.routes).toEqual([]);
+
+    gate.setMounted(true);
+    gate.flush();
+    expect(navigator.routes).toEqual(["/dashboard"]);
+  });
+
+  it("a switch took the screen away: the switch has routed, so nothing more goes", () => {
+    const { navigator, gate } = gated();
+    let up = true;
+    navigator.ready = true;
+    gate.setMounted(false);
+    leavePairScreen({ gate, screenUp: () => up, toDashboard: () => navigator.go("/dashboard") });
+
+    up = false;
+    gate.setMounted(true);
+    gate.flush();
+    expect(navigator.routes).toEqual([]);
+  });
+});
 
 describe("no navigation before the navigator mounts", () => {
   it("a route asked for early waits for the mount, then runs once", () => {

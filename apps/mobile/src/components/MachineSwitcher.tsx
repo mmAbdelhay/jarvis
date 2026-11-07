@@ -4,6 +4,7 @@
 // is active. Decisions
 // live in machine-switcher.ts and machine-probe.ts; this file is layout and
 // wiring.
+import { useRouter } from "expo-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Icon } from "@/components/Icon";
@@ -13,12 +14,13 @@ import { machinePillModel } from "@/lib/connection-pill";
 import { dialogs } from "@/lib/dialog";
 import { type MessageKey, t } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
-import { useMachineSessions } from "@/lib/machine-context";
+import { useMachineSessions, useNavigatorGate } from "@/lib/machine-context";
 import type { MachineId } from "@/lib/machine-index";
 import { type MachineOnline, createOnlineStore, probeMachine } from "@/lib/machine-probe";
 import type { MachineEntry } from "@/lib/machine-store";
 import { loadScreenMachine, machineStore, openMachineStore } from "@/lib/machine-store-instance";
 import {
+  addMachineRowVisible,
   otherMachinesLinkVisible,
   shouldProbe,
   switcherRows,
@@ -58,6 +60,8 @@ async function readMachines(): Promise<MachineEntry[]> {
 export function MachineSwitcher(props: { visible: boolean; onClose(): void }) {
   const { visible, onClose } = props;
   const language = useLanguage();
+  const router = useRouter();
+  const gate = useNavigatorGate();
   const sessions = useMachineSessions();
   const machineId = useMachineId();
   const connectionStore = useConnectionStore();
@@ -168,6 +172,20 @@ export function MachineSwitcher(props: { visible: boolean; onClose(): void }) {
                 </View>
               </Pressable>
             ))}
+            {addMachineRowVisible(PLATFORM) && (
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => {
+                  onClose();
+                  gate.navigate(() => router.push("/pair"));
+                }}
+                style={styles.row}
+              >
+                <Text style={styles.name} numberOfLines={1}>
+                  {t(language, "machines.add")}
+                </Text>
+              </Pressable>
+            )}
           </ScrollView>
         </Pressable>
       </Pressable>

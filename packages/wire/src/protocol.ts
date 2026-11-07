@@ -280,6 +280,7 @@ export function encodeMessage(
     | ServerMessage
     | PairClientMessage
     | PairServerMessage
+    | PairJoinMessage
     | PairJoinedMessage,
 ): string {
   return JSON.stringify(message);

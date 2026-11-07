@@ -25,6 +25,7 @@
 // machine and is never connected. It has nowhere to write a refresh token, so
 // no later machine can ever read one of its tokens.
 
+import type { AuthTokens } from "@jarvis/wire";
 import type { AuthChannel, AuthSession, DeviceAuth, RefreshLock } from "./auth-session";
 import { createAuthSession } from "./auth-session";
 import { dropClearFailedSignal, setClearFailedSignal } from "./clear-failed-signal";
@@ -93,6 +94,16 @@ export type MachineSessions = {
    *  the first one's answer. `null` is the null scope's own: nothing to remove,
    *  but a store that could not open is not "nothing". */
   forget(id: MachineId | null, cause: ForgetCause): Promise<ForgetOutcome>;
+  /** A pairing or a join just made: stores it, then goes to it. Rejects only when
+   *  the store refused it, with nothing changed. A switch that does not get there
+   *  leaves the machine held: its own outcome is the store's `activeId`. Tokens
+   *  from a join reach the session before its connection, so the locked welcome
+   *  resumes with them. Without any, the unlock screen shows. */
+  addAndSwitch(
+    record: PairingRecord,
+    credential: Credential,
+    tokens?: AuthTokens,
+  ): Promise<MachineId>;
 };
 
 export function createMachineSessions(deps: {
@@ -348,6 +359,29 @@ export function createMachineSessions(deps: {
     return startSwitch(id, false);
   }
 
+  async function addAndSwitch(
+    record: PairingRecord,
+    credential: Credential,
+    tokens?: AuthTokens,
+  ): Promise<MachineId> {
+    const id = await store.add(record, credential);
+    try {
+      // A new credential: an old scope at this address is dropped here, before
+      // these tokens could land in it.
+      noteCredential(id, credential);
+      if (tokens !== undefined) await scopeOf(id).authSession.adoptJoinTokens(tokens);
+    } catch {
+      // The machine is held, and its unlock screen is the way in.
+      deps.log("machines: seeding a new machine's session failed");
+    }
+    try {
+      await startSwitch(id, false);
+    } catch {
+      deps.log("machines: switching to a new machine failed");
+    }
+    return id;
+  }
+
   /** The machine has gone: whatever was on screen for it moves on. */
   async function moveOff(id: MachineId, cause: ForgetCause): Promise<ForgetOutcome> {
     // A switch in flight decides what is on screen.
@@ -368,9 +402,12 @@ export function createMachineSessions(deps: {
   function moveToNullScope(cause: ForgetCause): void {
     latestAttempt += 1;
     if (scope.id === null) return;
+    // Built first: a signal with no publish to take it would reach the next
+    // machine's tree.
+    const built = deps.buildScope(null);
     // Before the publish: the listener that brings the new tree takes it.
     if (cause === "revoked") setRevokedSignal();
-    publish(deps.buildScope(null));
+    publish(built);
   }
 
   async function runForget(id: MachineId, cause: ForgetCause): Promise<ForgetOutcome> {
@@ -445,6 +482,7 @@ export function createMachineSessions(deps: {
     },
     reconnect: connectActive,
     switchTo,
+    addAndSwitch,
     setAppActive(active) {
       const changed = active !== appActive;
       appActive = active;
@@ -596,11 +634,14 @@ export function applyForgetOutcome(deps: {
   acted.add(outcome);
   if (afterForgetRoute(deps.cause, outcome) === "pair") {
     const expected = machineOnScreenAfter(deps.id, outcome);
+    // Left for the next /pair, it would name a machine the user moved past.
+    const dropSignal = (): void => {
+      if (outcome.kind === "clearFailed") dropClearFailedSignal(deps.id);
+    };
     deps.gate.navigate(() => {
       if (deps.sessions.current().id === expected) deps.navigateToPair();
-      // Left for the next /pair, it would name a machine the user moved past.
-      else if (outcome.kind === "clearFailed") dropClearFailedSignal(deps.id);
-    });
+      else dropSignal();
+    }, dropSignal);
     return;
   }
   if (deps.cause === "revoked") deps.noticeRemoved?.();
@@ -609,14 +650,17 @@ export function applyForgetOutcome(deps: {
 /** /pair's retry of a failed clear: the id its signal carried, and nothing else.
  *  Its own failure stays on that phase, and a success is past it, so either way
  *  it leaves no signal for a later visit: another caller may have failed on this
- *  machine while /pair was up. Whatever a success moves to, the screen has its
- *  route: another machine's Dashboard, or the scan with nothing left. */
+ *  machine while /pair was up. With nothing left, the scan is next. `next` names
+ *  a machine and promises no more: if reading it failed, the removed machine's
+ *  closed tree is still on screen, so the caller must go there itself
+ *  (`openHeldMachine`). */
 export async function retryClear(
   sessions: Pick<MachineSessions, "forget">,
   id: MachineId | null,
-): Promise<"scan" | "clearFailed"> {
+): Promise<"scan" | "clearFailed" | { next: MachineId }> {
   const outcome = await sessions.forget(id, "unpair");
   dropClearFailedSignal(id);
+  if (outcome.kind === "next") return { next: outcome.id };
   return afterClearRetry(outcome.kind !== "clearFailed");
 }
 

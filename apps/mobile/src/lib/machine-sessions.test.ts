@@ -29,12 +29,16 @@ import {
   retryClear,
   unpairedHandlerFor,
 } from "./machine-sessions";
+import { createMachineStore } from "./machine-store";
 import { machineLabel } from "./machine-switcher";
+import { clearFailedEntry, entryPhaseKind, openHeldMachine, pairBackTarget } from "./pair-flow";
 import { isClearingPairing, setClearingPairing } from "./pairing-guard";
+import { PairingAlreadyExistsError } from "./pairing-record";
 import { handleNotificationTap } from "./push-context-support";
 import { takeRevokedSignal } from "./revoked-signal";
 import { createNavigatorGate } from "./scope-routing";
 import { createTopBarStore } from "./top-bar-store";
+import { shouldShowUnlock } from "./unlock-screen";
 
 const OFFLINE = { ok: false, error: { kind: "offline" } };
 const SOME_CAPACITY = [
@@ -1043,11 +1047,46 @@ describe("forget", () => {
       expect(h.store.has(A_ID)).toBe(true);
 
       h.secure.failDelete = undefined;
-      expect(await retryClear(h.sessions, signal?.id ?? null)).toBe("scan");
+      expect(await retryClear(h.sessions, signal?.id ?? null)).toEqual({ next: B_ID });
 
       expectOnlyAGone(h, await flagsOf(h.prefs));
       expect(h.store.has(C_ID)).toBe(true);
       expect(h.sessions.current().id).toBe(B_ID);
+    });
+
+    it("a retry that leaves no machine answers scan", async () => {
+      const h = machinesHarness({ ids: [A_ID] });
+      await h.start();
+      takeClearFailedSignal();
+
+      expect(await retryClear(h.sessions, A_ID)).toBe("scan");
+      expect(h.sessions.current().id).toBeNull();
+    });
+
+    it("a retry that names the next machine when A's dead tree is still on screen: the screen can move it", async () => {
+      const h = machinesHarness({ ids: [A_ID, B_ID] });
+      await h.start();
+      const bRecord = `jarvis.m.${B_ID}.pairing`;
+      h.secure.failGet = (key) => key === bRecord;
+
+      // The record went; the move onto B could not read B.
+      expect(await retryClear(h.sessions, A_ID)).toEqual({ next: B_ID });
+      expect(h.store.has(A_ID)).toBe(false);
+      expect(h.sessions.current().id).toBe(A_ID);
+
+      // What /pair does with that answer.
+      h.secure.failGet = undefined;
+      const left: string[] = [];
+      await openHeldMachine(B_ID, {
+        switchTo: h.sessions.switchTo,
+        leave: () => left.push("leave"),
+        failed: () => left.push("failed"),
+        log: h.logs.push.bind(h.logs),
+      });
+
+      expect(left).toEqual(["leave"]);
+      expect(h.sessions.current().id).toBe(B_ID);
+      expect(h.socketsOf(B_ID)).toHaveLength(1);
     });
 
     it("a retry that succeeds takes a signal set behind /pair's back", async () => {
@@ -1055,7 +1094,7 @@ describe("forget", () => {
       await h.start();
       setClearFailedSignal(A_ID);
 
-      expect(await retryClear(h.sessions, A_ID)).toBe("scan");
+      expect(await retryClear(h.sessions, A_ID)).toEqual({ next: B_ID });
 
       expect(takeClearFailedSignal()).toBeUndefined();
     });
@@ -1065,9 +1104,108 @@ describe("forget", () => {
       await h.start();
       setClearFailedSignal(C_ID);
 
-      expect(await retryClear(h.sessions, A_ID)).toBe("scan");
+      expect(await retryClear(h.sessions, A_ID)).toEqual({ next: B_ID });
 
       expect(takeClearFailedSignal()).toEqual({ id: C_ID });
+    });
+
+    describe("the back button from a clear that keeps failing", () => {
+      async function stuckOnA() {
+        const h = machinesHarness({ ids: [A_ID, B_ID] });
+        await h.start();
+        takeClearFailedSignal();
+        h.secure.failDelete = () => true;
+        revoke(h, A_ID);
+        await settle();
+        const signal = clearFailedEntry(takeClearFailedSignal(), h.sessions.current().id);
+        expect(signal).toEqual({ id: A_ID });
+        const held = (await h.store.listReadable()).map((entry) => entry.id);
+        const target = pairBackTarget({
+          phaseKind: "clearFailed",
+          onScreen: h.sessions.current().id,
+          clearFailedId: signal?.id ?? null,
+          held,
+        });
+        expect(target).toBe(B_ID);
+        return h;
+      }
+
+      it("leaves A's reconnect loop for the other machine, and a relaunch lands there", async () => {
+        const h = await stuckOnA();
+        const aSockets = h.socketsOf(A_ID).length;
+        const left: string[] = [];
+
+        await openHeldMachine(B_ID, {
+          switchTo: h.sessions.switchTo,
+          leave: () => left.push("leave"),
+          failed: () => left.push("failed"),
+          log: h.logs.push.bind(h.logs),
+        });
+        h.clock.advance(10 * 60_000);
+        await settle();
+
+        expect(left).toEqual(["leave"]);
+        expect(h.sessions.current().id).toBe(B_ID);
+        expect(h.socketsOf(B_ID)).toHaveLength(1);
+        expect(h.socketsOf(A_ID)).toHaveLength(aSockets);
+        expect(h.store.has(A_ID)).toBe(true);
+
+        const relaunched = createMachineStore({
+          secure: h.secure,
+          refresh: h.refresh,
+          prefs: h.prefs,
+          localeTag: "en-US",
+          singleSlot: false,
+          log: () => {},
+        });
+        await relaunched.open();
+        expect(relaunched.activeId()).toBe(B_ID);
+      });
+
+      it("the next /pair visit shows no clear-failed phase for the machine moved past", async () => {
+        const h = await stuckOnA();
+        // A second failure, while /pair was up: its signal has nobody to take it.
+        await h.sessions.forget(A_ID, "revoked");
+
+        await h.sessions.switchTo(B_ID);
+
+        expect(clearFailedEntry(takeClearFailedSignal(), h.sessions.current().id)).toBeUndefined();
+        expect(entryPhaseKind(false)).toBe("checking");
+      });
+    });
+
+    describe("the next /pair visit, after a revocation", () => {
+      it("a machine added after the revocation shows no revoked text", async () => {
+        takeRevokedSignal();
+        const h = machinesHarness({ ids: [A_ID] });
+        await h.start();
+        const revokedOnTree: boolean[] = [];
+        h.sessions.subscribe(() => revokedOnTree.push(takeRevokedSignal()));
+        revoke(h, A_ID);
+        await settle();
+        expect(revokedOnTree).toEqual([true]);
+        const nullView = h.sessions.current().connectionStore.get();
+        expect(bannerModel(nullView, revokedOnTree[0])).toMatchObject({ key: "conn.unpaired" });
+
+        await h.sessions.addAndSwitch(recordOf(B_ID), { deviceId: "b".repeat(32), token: "B" });
+
+        expect(revokedOnTree).toEqual([true, false]);
+        const scope = h.sessions.current();
+        await h.unlockCurrent();
+        expect(scope.id).toBe(B_ID);
+        expect(bannerModel(scope.connectionStore.get(), revokedOnTree[1])).toBeUndefined();
+      });
+
+      it("a null scope that could not be built leaves no signal for the next machine's tree", async () => {
+        takeRevokedSignal();
+        const h = machinesHarness({ ids: [A_ID] });
+        await h.start();
+        h.failBuildingNullScope();
+        revoke(h, A_ID);
+        await settle();
+
+        expect(takeRevokedSignal()).toBe(false);
+      });
     });
 
     it("on a store that could not open: the machine stays, and it answers clearFailed", async () => {
@@ -1851,5 +1989,211 @@ describe("the clear-failed signal, through the sessions' handler", () => {
     setClearFailedSignal(B_ID);
     expect(takeClearFailedSignal()).toEqual({ id: B_ID });
     expect(takeClearFailedSignal()).toBeUndefined();
+  });
+
+  it("a clearFailed route another route replaced in the gate drops its signal", async () => {
+    const h = machinesHarness({ ids: [A_ID, B_ID] });
+    await h.start();
+    takeClearFailedSignal();
+    h.secure.failDelete = () => true;
+    h.navigator.ready = false;
+    h.socketOf(A_ID).emit({ kind: "close", code: CLOSE.revoked, reason: "" });
+    await settle();
+    expect(h.routes).toEqual([]);
+
+    h.gate.navigate(() => h.routes.push("/unlock"));
+    h.navigator.ready = true;
+    h.gate.flush();
+
+    expect(h.routes).toEqual(["/unlock"]);
+    expect(takeClearFailedSignal()).toBeUndefined();
+  });
+
+  it("a clearFailed route that runs keeps its signal for /pair", async () => {
+    const h = machinesHarness({ ids: [A_ID, B_ID] });
+    await h.start();
+    takeClearFailedSignal();
+    h.secure.failDelete = () => true;
+    h.navigator.ready = false;
+    h.socketOf(A_ID).emit({ kind: "close", code: CLOSE.revoked, reason: "" });
+    await settle();
+
+    h.navigator.ready = true;
+    h.gate.flush();
+
+    expect(h.routes).toEqual(["/pair"]);
+    expect(takeClearFailedSignal()).toEqual({ id: A_ID });
+  });
+});
+
+describe("addAndSwitch", () => {
+  const CREDENTIAL = { deviceId: "b".repeat(32), token: "B".repeat(43) };
+
+  function joinTokens(h: ReturnType<typeof machinesHarness>) {
+    return tokenReply("7", h.clock.now() + ACCESS_TTL_MS);
+  }
+
+  it("the tokens are stored before anything connects", async () => {
+    const h = machinesHarness({ ids: [A_ID] });
+    await h.start();
+    const seen: Array<string | undefined> = [];
+    h.setPrepareSwitch(() => seen.push(h.refresh.values.get(refreshKeyOf(B_ID))));
+
+    const id = await h.sessions.addAndSwitch(recordOf(B_ID), CREDENTIAL, joinTokens(h));
+
+    expect(id).toBe(B_ID);
+    expect(seen).toEqual([tokenReply("7", 0).refreshToken]);
+    expect(h.sessions.current().id).toBe(B_ID);
+    expect(h.store.activeId()).toBe(B_ID);
+    expect(h.socketsOf(B_ID)).toHaveLength(1);
+    expect(h.events).toContain("disconnect 192.168.1.5_4317");
+  });
+
+  it("after a join, the first locked welcome resumes with no unlock screen and no prompt", async () => {
+    const h = machinesHarness({ ids: [A_ID] });
+    await h.start();
+    await h.sessions.addAndSwitch(recordOf(B_ID), CREDENTIAL, joinTokens(h));
+    const scope = h.sessions.current();
+    const socket = h.socketOf(B_ID);
+
+    const shown: boolean[] = [];
+    scope.authSession.subscribe((view) => {
+      shown.push(shouldShowUnlock(scope.client.state(), view, "/dashboard"));
+    });
+    welcome(socket);
+    await settle();
+
+    expect(requestsOn(socket, "auth:resume")).toHaveLength(1);
+    expect(requestsOn(socket, "auth:resume")[0]?.a).toEqual([
+      { accessToken: tokenReply("7", 0).accessToken },
+    ]);
+    expect(shouldShowUnlock(scope.client.state(), scope.authSession.get(), "/dashboard")).toBe(
+      false,
+    );
+
+    answer(socket, "auth:resume", { locked: false, hasPasskeys: false });
+    await settle();
+
+    expect(scope.client.state()).toBe("open");
+    expect(shown).not.toContain(true);
+    expect(shouldShowUnlock(scope.client.state(), scope.authSession.get(), "/dashboard")).toBe(
+      false,
+    );
+    expect(h.device.prompts).toBe(0);
+    expect(requestsOn(socket, "auth:login")).toEqual([]);
+  });
+
+  it("a phone with no passcode: the join still resumes, and nothing is on disk", async () => {
+    const h = machinesHarness({ ids: [A_ID] });
+    await h.start();
+    h.device.passcode = false;
+
+    await h.sessions.addAndSwitch(recordOf(B_ID), CREDENTIAL, joinTokens(h));
+    const socket = h.socketOf(B_ID);
+    welcome(socket);
+    await settle();
+
+    expect(h.refresh.values.has(refreshKeyOf(B_ID))).toBe(false);
+    expect(requestsOn(socket, "auth:resume")).toHaveLength(1);
+  });
+
+  it("QR add: no tokens, so the unlock screen shows as today", async () => {
+    const h = machinesHarness({ ids: [A_ID] });
+    await h.start();
+
+    await h.sessions.addAndSwitch(recordOf(B_ID), CREDENTIAL);
+    const scope = h.sessions.current();
+    const socket = h.socketOf(B_ID);
+    welcome(socket);
+    await settle();
+
+    expect(scope.id).toBe(B_ID);
+    expect(scope.client.state()).toBe("locked");
+    expect(requestsOn(socket, "auth:resume")).toEqual([]);
+    expect(h.refresh.values.has(refreshKeyOf(B_ID))).toBe(false);
+    expect(shouldShowUnlock(scope.client.state(), scope.authSession.get(), "/dashboard")).toBe(
+      true,
+    );
+  });
+
+  it("the first machine on an empty phone: off the null scope and onto it", async () => {
+    const h = machinesHarness({ ids: [] });
+    await h.start();
+    expect(h.sessions.current().id).toBeNull();
+
+    await h.sessions.addAndSwitch(recordOf(B_ID), CREDENTIAL);
+
+    expect(h.sessions.current().id).toBe(B_ID);
+    expect(h.socketsOf(B_ID)).toHaveLength(1);
+  });
+
+  it("a held machine: the store refuses, and its record, tokens and session are untouched", async () => {
+    const h = machinesHarness({ ids: [A_ID, B_ID] });
+    await h.start();
+    await h.unlockCurrent();
+    const scope = h.sessions.current();
+    const secure = [...h.secure.values];
+    const refresh = [...h.refresh.values];
+
+    await expect(
+      h.sessions.addAndSwitch(recordOf(A_ID), { deviceId: "a".repeat(32), token: "x" }),
+    ).rejects.toBeInstanceOf(PairingAlreadyExistsError);
+
+    expect([...h.secure.values]).toEqual(secure);
+    expect([...h.refresh.values]).toEqual(refresh);
+    expect(h.sessions.current()).toBe(scope);
+    expect(scope.client.state()).toBe("open");
+  });
+
+  it("a keychain that refuses the save: nothing is seeded and nothing switches", async () => {
+    const h = machinesHarness({ ids: [A_ID] });
+    await h.start();
+    h.secure.failSet = (key) => key.includes(B_ID);
+    const built = h.built.length;
+
+    await expect(
+      h.sessions.addAndSwitch(recordOf(B_ID), CREDENTIAL, joinTokens(h)),
+    ).rejects.toThrow();
+
+    expect(h.built).toHaveLength(built);
+    expect(h.refresh.values.has(refreshKeyOf(B_ID))).toBe(false);
+    expect(h.sessions.current().id).toBe(A_ID);
+    expect(h.store.activeId()).toBe(A_ID);
+  });
+
+  it("an old session at that address is not offered to the new pairing", async () => {
+    const h = machinesHarness({ ids: [A_ID, B_ID] });
+    await h.start();
+    await h.sessions.switchTo(B_ID);
+    await h.unlockCurrent();
+    const old = h.sessions.current();
+    await h.sessions.switchTo(A_ID);
+    // A store self-heal took B away with no word to the sessions.
+    await h.realStore.remove(B_ID);
+
+    await h.sessions.addAndSwitch(recordOf(B_ID), { deviceId: "9".repeat(32), token: "N" });
+
+    const scope = h.sessions.current();
+    expect(scope.id).toBe(B_ID);
+    expect(scope.client).not.toBe(old.client);
+    const socket = h.socketOf(B_ID);
+    welcome(socket);
+    await settle();
+    expect(requestsOn(socket, "auth:resume")).toEqual([]);
+    expect(requestsOn(socket, "auth:refresh")).toEqual([]);
+  });
+
+  it("no token reaches a log", async () => {
+    const h = machinesHarness({ ids: [A_ID] });
+    await h.start();
+    const tokens = joinTokens(h);
+
+    await h.sessions.addAndSwitch(recordOf(B_ID), CREDENTIAL, tokens);
+    welcome(h.socketOf(B_ID));
+    await settle();
+
+    const logs = h.logs.join("\n");
+    expect(logs).not.toContain(tokens.accessToken);
+    expect(logs).not.toContain(tokens.refreshToken);
   });
 });

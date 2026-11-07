@@ -150,6 +150,11 @@ export type AuthSession = {
   unlockWithPassword(password: string): Promise<UnlockOutcome>;
   unlockWithStoredRefresh(): Promise<UnlockOutcome>;
   unlockWithPasskey(getAssertion: GetPasskeyAssertion): Promise<UnlockOutcome>;
+  /** The tokens a join (pairing.ts) brought, before this session's connection
+   *  exists: stored first under the same no-passcode rule as any other. The
+   *  locked welcome then resumes with them, through `autoUnlock`. False when the
+   *  session was dropped meanwhile. */
+  adoptJoinTokens(tokens: AuthTokens): Promise<boolean>;
   /** The device-owner gate's answer may have changed (the browser's "Keep
    *  me signed in"): off deletes the stored token; on, while unlocked,
    *  rotates once so the new token is stored through the normal path. */
@@ -169,7 +174,7 @@ export type AuthSession = {
   dispose(): void;
 };
 
-function parseTokens(value: unknown): AuthTokens | undefined {
+export function parseTokens(value: unknown): AuthTokens | undefined {
   if (typeof value !== "object" || value === null) return undefined;
   const raw = value as Record<string, unknown>;
   if (typeof raw.accessToken !== "string" || !AUTH_TOKEN_PATTERN.test(raw.accessToken)) {
@@ -391,6 +396,14 @@ export function createAuthSession(deps: AuthSessionDeps): AuthSession {
    *  after an idle lock the rotated token is still stored (the old stored
    *  one is now spent), after a revocation it is not. */
   async function adoptTokens(tokens: AuthTokens, startedEpoch: number): Promise<boolean> {
+    if (!(await holdTokens(tokens, startedEpoch))) return false;
+    deps.rpc.unlock();
+    return true;
+  }
+
+  /** `adoptTokens` short of the connection, which has unlocked only when these
+   *  tokens came in answer on it. */
+  async function holdTokens(tokens: AuthTokens, startedEpoch: number): Promise<boolean> {
     const receivedAt = deps.clock.now();
     const lifetime = Math.min(
       MAX_LIFETIME_MS,
@@ -408,7 +421,6 @@ export function createAuthSession(deps: AuthSessionDeps): AuthSession {
     armRefreshTimer(lifetime);
     armIdleTimer();
     setView({ lockedLocally: false, lockCause: undefined });
-    deps.rpc.unlock();
     return true;
   }
 
@@ -633,6 +645,16 @@ export function createAuthSession(deps: AuthSessionDeps): AuthSession {
     return (await adoptTokens(tokens, startedEpoch)) ? "unlocked" : "failed";
   }
 
+  async function adoptJoinTokens(tokens: AuthTokens): Promise<boolean> {
+    // The owner just gave the password: the idle window starts here.
+    touch();
+    if (!(await holdTokens(tokens, epoch))) return false;
+    // These came from another socket, so a connection already locked has heard
+    // nothing of them: the laptop opens it for a resume, and for nothing less.
+    if (deps.rpc.state() === "locked") void autoUnlock();
+    return true;
+  }
+
   async function storagePolicyChanged(): Promise<void> {
     if (!(await hasPasscode())) {
       // A deleted record may linger on disk: spend the token it held with
@@ -738,6 +760,7 @@ export function createAuthSession(deps: AuthSessionDeps): AuthSession {
     unlockWithPassword,
     unlockWithStoredRefresh,
     unlockWithPasskey,
+    adoptJoinTokens,
     storagePolicyChanged,
     logout,
     forget,

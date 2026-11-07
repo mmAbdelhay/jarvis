@@ -1,5 +1,5 @@
 import { PUSH_UNREGISTER_CHANNEL } from "@jarvis/wire";
-import { describe, expect, expectTypeOf, it } from "vitest";
+import { describe, expect, expectTypeOf, it, vi } from "vitest";
 import { takeClearFailedSignal } from "./clear-failed-signal";
 import { createFakeClock } from "./clock";
 import type { ConnectStoredOutcome } from "./connect-stored";
@@ -19,6 +19,7 @@ import {
 } from "./fake-machines";
 import { type ForgetOutcome, applyForgetOutcome } from "./machine-sessions";
 import { createMachineStore } from "./machine-store";
+import { JOINED_FINGERPRINT, JOINED_HOST } from "./pairing";
 import type { PairingRecord } from "./pairing-record";
 import type { PrefsStore } from "./prefs";
 import { PUSH_REGISTER_TIMEOUT_MS } from "./push-registration";
@@ -515,6 +516,41 @@ describe("createSettingsStore: notifications (M10 Task 5, rule 10)", () => {
       expect(written.pushRegistered).toBe(true);
     },
   );
+});
+
+describe("createSettingsStore: a machine added by name", () => {
+  const NAMED = "mac.tail1234.ts.net";
+
+  it("shows the name and no fingerprint tail, with nothing of the zeros", async () => {
+    const { deps } = baseDeps({
+      loadRecord: async () => ({
+        deviceId: RECORD.deviceId,
+        host: JOINED_HOST,
+        port: 7717,
+        fingerprint: JOINED_FINGERPRINT,
+        name: NAMED,
+        laptopName: "mac",
+        pairedAt: 1_000,
+      }),
+    });
+    const store = createSettingsStore(deps);
+    await vi.waitFor(() => expect(store.get().laptop).toBeDefined());
+
+    expect(store.get().laptop?.host).toBe(NAMED);
+    expect(store.get().fingerprintTail).toBeUndefined();
+    const text = JSON.stringify(store.get());
+    expect(text).not.toContain("0000");
+    expect(text).not.toContain(JOINED_HOST);
+  });
+
+  it("a QR pairing with a name keeps its real tail, and shows the name", async () => {
+    const { deps } = baseDeps({ loadRecord: async () => ({ ...RECORD, name: NAMED }) });
+    const store = createSettingsStore(deps);
+    await vi.waitFor(() => expect(store.get().laptop).toBeDefined());
+
+    expect(store.get().laptop?.host).toBe(NAMED);
+    expect(store.get().fingerprintTail).toBe("beef");
+  });
 });
 
 describe("createSettingsStore: laptop projection (I4)", () => {

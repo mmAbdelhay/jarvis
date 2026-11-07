@@ -5,6 +5,7 @@ import type { SwitchOutcome } from "./machine-sessions";
 import type { MachineEntry } from "./machine-store";
 import {
   type SwitcherRow,
+  addMachineRowVisible,
   machineLabel,
   otherMachinesLinkVisible,
   shouldProbe,
@@ -124,6 +125,13 @@ describe("the unlock link's visibility", () => {
 
   it("shown when the machine on screen is the one that could not be read: there is a way out", () => {
     expect(otherMachinesLinkVisible(ENTRIES.slice(1, 2), "a_1")).toBe(true);
+  });
+});
+
+describe("the add row", () => {
+  it("shows on a phone, and not in the browser", () => {
+    expect(addMachineRowVisible("native")).toBe(true);
+    expect(addMachineRowVisible("web")).toBe(false);
   });
 });
 

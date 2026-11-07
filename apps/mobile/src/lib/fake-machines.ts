@@ -207,6 +207,7 @@ export function machinesHarness(options: { ids?: MachineId[]; active?: MachineId
   let prepareSwitch: () => void = () => {
     events.push("prepare");
   };
+  let nullScopeFails = false;
 
   const realStore = createMachineStore({
     secure,
@@ -256,6 +257,7 @@ export function machinesHarness(options: { ids?: MachineId[]; active?: MachineId
   const sessions: MachineSessions = createMachineSessions({
     store,
     buildScope(id) {
+      if (id === null && nullScopeFails) throw new Error("no null scope");
       built.push(id);
       const scope = build(id);
       const { client, authSession } = scope;
@@ -341,6 +343,9 @@ export function machinesHarness(options: { ids?: MachineId[]; active?: MachineId
     start,
     setPrepareSwitch(fn: () => void) {
       prepareSwitch = fn;
+    },
+    failBuildingNullScope() {
+      nullScopeFails = true;
     },
   };
 }
