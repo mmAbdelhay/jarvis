@@ -1,14 +1,16 @@
 // The sheet that lists this phone's machines and switches between them, and the
 // triggers that open it: Home's connection pill, WideShell's brand row or rail
-// mark, and /unlock's link. Probing runs only while the sheet is up. Decisions
+// mark, and /unlock's link. Probing runs only while the sheet is up and the app
+// is active. Decisions
 // live in machine-switcher.ts and machine-probe.ts; this file is layout and
 // wiring.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Icon } from "@/components/Icon";
 import { clientPlatformFor } from "@/lib/client-platform";
 import { realClock } from "@/lib/clock";
 import { machinePillModel } from "@/lib/connection-pill";
+import { dialogs } from "@/lib/dialog";
 import { type MessageKey, t } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
 import { useMachineSessions } from "@/lib/machine-context";
@@ -16,7 +18,12 @@ import type { MachineId } from "@/lib/machine-index";
 import { type MachineOnline, createOnlineStore, probeMachine } from "@/lib/machine-probe";
 import type { MachineEntry } from "@/lib/machine-store";
 import { loadScreenMachine, machineStore, openMachineStore } from "@/lib/machine-store-instance";
-import { otherMachinesLinkVisible, switcherRows, tapSwitcherRow } from "@/lib/machine-switcher";
+import {
+  otherMachinesLinkVisible,
+  shouldProbe,
+  switcherRows,
+  tapSwitcherRow,
+} from "@/lib/machine-switcher";
 import { nativeTransport } from "@/lib/native-transport";
 import { useConnectionStore, useMachineId } from "@/lib/rpc-context";
 import { systemTransportFor } from "@/lib/system-transport";
@@ -67,6 +74,10 @@ export function MachineSwitcher(props: { visible: boolean; onClose(): void }) {
     [sessions],
   );
   const [online, setOnline] = useState<ReadonlyMap<MachineId, MachineOnline>>(onlineStore.get());
+  const [appActive, setAppActive] = useState(sessions.isAppActive());
+  // Its caller's function may be new on each render: no reason to read again.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     if (!visible) return;
@@ -75,18 +86,33 @@ export function MachineSwitcher(props: { visible: boolean; onClose(): void }) {
       (read) => {
         if (!cancelled) setEntries(read);
       },
-      () => console.warn("machines: reading the machines for the switcher failed"),
+      () => {
+        console.warn("machines: reading the machines for the switcher failed");
+        // A store that could not open: an empty sheet would say nothing.
+        if (cancelled) return;
+        onCloseRef.current();
+        dialogs.notice(t(language, "machines.openFailed"));
+      },
     );
     setConnection(connectionStore.get());
     const unsubscribeConnection = connectionStore.subscribe(setConnection);
-    setOnline(onlineStore.get());
-    const unsubscribeOnline = onlineStore.subscribe(() => setOnline(onlineStore.get()));
     return () => {
       cancelled = true;
       unsubscribeConnection();
-      unsubscribeOnline();
     };
-  }, [visible, connectionStore, onlineStore]);
+  }, [visible, connectionStore, language]);
+
+  useEffect(() => {
+    setAppActive(sessions.isAppActive());
+    return sessions.subscribeAppActive(setAppActive);
+  }, [sessions]);
+
+  const probing = shouldProbe({ visible, appActive });
+  useEffect(() => {
+    if (!probing) return;
+    setOnline(onlineStore.get());
+    return onlineStore.subscribe(() => setOnline(onlineStore.get()));
+  }, [probing, onlineStore]);
 
   const rows = switcherRows({
     entries,
@@ -117,6 +143,7 @@ export function MachineSwitcher(props: { visible: boolean; onClose(): void }) {
                   tapSwitcherRow(row, {
                     switchTo: sessions.switchTo,
                     close: onClose,
+                    notice: () => dialogs.notice(t(language, "machines.openFailed")),
                     log: (line) => console.warn(line),
                   })
                 }
@@ -185,17 +212,18 @@ function PillButton(props: { onPress(): void; label: string }) {
 
   const pill = machinePillModel(connection, laptopName);
   const palette = PILL_PALETTE[pill.tone];
+  const pillText = pill.label.kind === "name" ? pill.label.name : t(language, pill.label.key);
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={props.label}
+      accessibilityLabel={`${props.label}: ${pillText}`}
       hitSlop={8}
       onPress={props.onPress}
       style={[styles.pill, { backgroundColor: palette.ground }]}
     >
       <View style={[styles.liveDot, { backgroundColor: theme.colors[pill.tone] }]} />
       <Text style={[styles.pillText, { color: palette.text }]} numberOfLines={1}>
-        {pill.label.kind === "name" ? pill.label.name : t(language, pill.label.key)}
+        {pillText}
       </Text>
     </Pressable>
   );

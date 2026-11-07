@@ -952,6 +952,33 @@ describe("list, active and lookups", () => {
     expect(store.has(NAME_ID)).toBe(true);
   });
 
+  it("listReadable reads no token key at all", async () => {
+    const { h, store } = await twoMachines();
+    const reads: string[] = [];
+    h.secure.failGet = (key) => {
+      reads.push(key);
+      return false;
+    };
+    expect((await store.listReadable()).map((entry) => entry.id)).toEqual([LAN_ID, NAME_ID]);
+    expect(reads).toEqual(["jarvis.pairing", `jarvis.m.${NAME_ID}.pairing`]);
+  });
+
+  it("listReadable heals a record that is gone or corrupt, as a load does", async () => {
+    const { h, store } = await twoMachines();
+    h.secure.values.set(`jarvis.m.${NAME_ID}.pairing`, "not json");
+    expect((await store.listReadable()).map((entry) => entry.id)).toEqual([LAN_ID]);
+    expect(storedIndex(h).ids).toEqual([LAN_ID]);
+    expect(h.secure.values.has(`jarvis.m.${NAME_ID}.token`)).toBe(false);
+  });
+
+  it("listReadable shows a record whose token is gone; the load that uses it finds out", async () => {
+    const { h, store } = await twoMachines();
+    h.secure.values.delete(`jarvis.m.${NAME_ID}.token`);
+    expect((await store.listReadable()).map((entry) => entry.id)).toEqual([LAN_ID, NAME_ID]);
+    expect(await store.load(NAME_ID)).toBeUndefined();
+    expect(store.has(NAME_ID)).toBe(false);
+  });
+
   it("list itself still rejects on a read that throws", async () => {
     const { h, store } = await twoMachines();
     h.secure.failGet = (key) => key === `jarvis.m.${NAME_ID}.pairing`;

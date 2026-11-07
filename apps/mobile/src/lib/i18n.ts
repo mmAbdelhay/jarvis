@@ -1719,6 +1719,7 @@ export const STRINGS = {
   "machines.checking": { en: "Checking", ar: "جارٍ التحقق" },
   "machines.other": { en: "Other machines", ar: "أجهزة أخرى" },
   "machines.current": { en: "This one", ar: "هذا الجهاز" },
+  "machines.openFailed": { en: "That machine could not be opened", ar: "تعذّر فتح ذلك الجهاز" },
 } as const satisfies Record<string, Record<Language, string>>;
 
 export type MessageKey = keyof typeof STRINGS;

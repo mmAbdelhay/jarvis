@@ -720,6 +720,26 @@ describe("setAppActive", () => {
     expect(onB).toHaveBeenCalledTimes(1);
   });
 
+  it("answers whether the app is active, and tells a listener only of a change", () => {
+    const h = machinesHarness();
+    const heard: boolean[] = [];
+    const leave = h.sessions.subscribeAppActive((active) => heard.push(active));
+    expect(h.sessions.isAppActive()).toBe(true);
+
+    h.sessions.setAppActive(true);
+    expect(heard).toEqual([]);
+
+    h.sessions.setAppActive(false);
+    h.sessions.setAppActive(false);
+    expect(h.sessions.isAppActive()).toBe(false);
+    expect(heard).toEqual([false]);
+
+    leave();
+    h.sessions.setAppActive(true);
+    expect(h.sessions.isAppActive()).toBe(true);
+    expect(heard).toEqual([false]);
+  });
+
   it("the session hears of a return before the client, and of a suspend after it", async () => {
     const h = machinesHarness();
     const a = await h.start();

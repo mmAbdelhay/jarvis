@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { ConnectionView } from "./connection-store";
 import type { MachineOnline } from "./machine-probe";
+import type { SwitchOutcome } from "./machine-sessions";
 import type { MachineEntry } from "./machine-store";
 import {
   type SwitcherRow,
   machineLabel,
   otherMachinesLinkVisible,
+  shouldProbe,
   switcherRows,
   tapSwitcherRow,
 } from "./machine-switcher";
@@ -125,8 +127,17 @@ describe("the unlock link's visibility", () => {
   });
 });
 
+describe("shouldProbe", () => {
+  it("only with the sheet visible and the app active", () => {
+    expect(shouldProbe({ visible: true, appActive: true })).toBe(true);
+    expect(shouldProbe({ visible: true, appActive: false })).toBe(false);
+    expect(shouldProbe({ visible: false, appActive: true })).toBe(false);
+    expect(shouldProbe({ visible: false, appActive: false })).toBe(false);
+  });
+});
+
 describe("tapSwitcherRow", () => {
-  function harness(switchTo?: (id: string) => Promise<unknown>) {
+  function harness(switchTo?: (id: string) => Promise<SwitchOutcome>) {
     const events: string[] = [];
     const logs: string[] = [];
     return {
@@ -135,13 +146,19 @@ describe("tapSwitcherRow", () => {
       deps: {
         switchTo:
           switchTo ??
-          (async (id: string) => {
+          (async (id: string): Promise<SwitchOutcome> => {
             events.push(`switch ${id}`);
+            return "switched";
           }),
         close: () => events.push("close"),
+        notice: () => events.push("notice"),
         log: (line: string) => logs.push(line),
       },
     };
+  }
+
+  async function settled(): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, 0));
   }
 
   const row = (active: boolean): SwitcherRow => ({
@@ -159,22 +176,46 @@ describe("tapSwitcherRow", () => {
   });
 
   it("another row switches and closes at once, without waiting for the switch", () => {
-    let finish: () => void = () => {};
+    let finish: (outcome: SwitchOutcome) => void = () => {};
     const h = harness((id) => {
       h.events.push(`switch ${id}`);
-      return new Promise<void>((resolve) => {
+      return new Promise<SwitchOutcome>((resolve) => {
         finish = resolve;
       });
     });
     tapSwitcherRow(row(false), h.deps);
     expect(h.events).toEqual(["close", "switch b_1"]);
-    finish();
+    finish("switched");
   });
 
-  it("a switch that rejects is a fixed log line, never an unhandled rejection", async () => {
+  it('a switch answering "unknown" gives the notice', async () => {
+    const h = harness(async () => "unknown");
+    tapSwitcherRow(row(false), h.deps);
+    await settled();
+    expect(h.events).toEqual(["close", "notice"]);
+  });
+
+  it("the other answers give no notice", async () => {
+    for (const outcome of ["switched", "same", "superseded"] as const) {
+      const h = harness(async () => outcome);
+      tapSwitcherRow(row(false), h.deps);
+      await settled();
+      expect(h.events).toEqual(["close"]);
+    }
+  });
+
+  it("the active row gives no notice and asks for no switch", async () => {
+    const h = harness(async () => "unknown");
+    tapSwitcherRow(row(true), h.deps);
+    await settled();
+    expect(h.events).toEqual(["close"]);
+  });
+
+  it("a switch that rejects is a fixed log line and the notice, never an unhandled rejection", async () => {
     const h = harness(() => Promise.reject(new Error("a token: secret")));
     tapSwitcherRow(row(false), h.deps);
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await settled();
     expect(h.logs).toEqual(["machines: switching from the switcher failed"]);
+    expect(h.events).toEqual(["close", "notice"]);
   });
 });

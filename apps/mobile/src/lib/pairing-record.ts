@@ -150,6 +150,21 @@ export async function loadPairingAt(
   return { record, credential: { deviceId: record.deviceId, token } };
 }
 
+/** The record alone, for showing a machine: the token's key is never read, and
+ *  nothing here cleans up. Undefined means gone or unusable. */
+export async function loadRecordAt(
+  store: SecureStore,
+  keys: PairingKeys,
+): Promise<PairingRecord | undefined> {
+  const recordText = await store.get(keys.record);
+  if (recordText === undefined) return undefined;
+  try {
+    return parseRecord(JSON.parse(recordText));
+  } catch {
+    return undefined;
+  }
+}
+
 /** Writes one pairing at `keys`, over whatever is there: the existing-check
  *  is the caller's (machine-store.ts's `add`). */
 export async function savePairingAt(

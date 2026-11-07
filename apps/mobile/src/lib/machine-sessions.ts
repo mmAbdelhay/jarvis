@@ -80,6 +80,9 @@ export type MachineSessions = {
   reconnect(shouldConnect?: () => boolean): Promise<ConnectStoredOutcome>;
   switchTo(id: MachineId): Promise<SwitchOutcome>;
   setAppActive(active: boolean): void;
+  isAppActive(): boolean;
+  /** Told only when the answer changes. */
+  subscribeAppActive(cb: (active: boolean) => void): () => void;
   /** The idle window, for every machine's session, on screen or not, and for
    *  those built later. */
   setIdleMs(ms: number): void;
@@ -105,6 +108,7 @@ export function createMachineSessions(deps: {
   const { store } = deps;
   const quiesceMs = deps.quiesceMs ?? DEFAULT_QUIESCE_MS;
   const listeners = new Set<(scope: MachineScope) => void>();
+  const appActiveListeners = new Set<(active: boolean) => void>();
   const scopes = new Map<MachineId, BuiltScope>();
   const scopeKeys = new Map<MachineId, string>();
   /** The pairing each kept scope last connected with. */
@@ -442,8 +446,17 @@ export function createMachineSessions(deps: {
     reconnect: connectActive,
     switchTo,
     setAppActive(active) {
+      const changed = active !== appActive;
       appActive = active;
       applyAppActive(scope);
+      if (changed) for (const listener of [...appActiveListeners]) listener(active);
+    },
+    isAppActive: () => appActive,
+    subscribeAppActive(cb) {
+      appActiveListeners.add(cb);
+      return () => {
+        appActiveListeners.delete(cb);
+      };
     },
     setIdleMs(ms) {
       idleMs = ms;

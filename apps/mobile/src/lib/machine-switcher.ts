@@ -4,6 +4,7 @@
 import type { ConnectionView } from "./connection-store";
 import type { MachineId } from "./machine-index";
 import type { MachineOnline } from "./machine-probe";
+import type { SwitchOutcome } from "./machine-sessions";
 import type { MachineEntry } from "./machine-store";
 import type { PairingRecord } from "./pairing-record";
 
@@ -59,16 +60,33 @@ export function otherMachinesLinkVisible(
   return entries.some((entry) => entry.id !== activeId);
 }
 
-/** The sheet closes either way, and never waits for the switch. */
+/** Probes run only for a sheet someone can see. `appActive` is the sessions'
+ *  own answer (`MachineSessions.isAppActive`), so this has no policy of its own
+ *  for what counts as the background. */
+export function shouldProbe(input: { visible: boolean; appActive: boolean }): boolean {
+  return input.visible && input.appActive;
+}
+
+/** The sheet closes either way, and never waits for the switch, so `notice` is
+ *  all that says a machine could not be opened. */
 export function tapSwitcherRow(
   row: SwitcherRow,
   deps: {
-    switchTo(id: MachineId): Promise<unknown>;
+    switchTo(id: MachineId): Promise<SwitchOutcome>;
     close(): void;
+    notice(): void;
     log(line: string): void;
   },
 ): void {
   deps.close();
   if (row.active) return;
-  deps.switchTo(row.id).catch(() => deps.log("machines: switching from the switcher failed"));
+  deps.switchTo(row.id).then(
+    (outcome) => {
+      if (outcome === "unknown") deps.notice();
+    },
+    () => {
+      deps.log("machines: switching from the switcher failed");
+      deps.notice();
+    },
+  );
 }

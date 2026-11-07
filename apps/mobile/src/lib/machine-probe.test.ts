@@ -108,6 +108,40 @@ describe("probeMachine", () => {
     expect(await answer).toBe("offline");
   });
 
+  it("a late open closes the socket, when the close during connecting did nothing", async () => {
+    const clock = createFakeClock();
+    const inner = createFakeTransport();
+    // React Native's Android WebSocket: a close before the upgrade finishes is
+    // dropped, and the socket then opens all the same.
+    let connecting = true;
+    const answer = probeMachine(
+      {
+        transport: {
+          open(url, trust, onEvent) {
+            const socket = inner.open(url, trust, onEvent);
+            const { close } = socket;
+            socket.close = (code, reason) => {
+              if (!connecting) close(code, reason);
+            };
+            return socket;
+          },
+        },
+        clock,
+      },
+      namedRecord(),
+    );
+    const socket = inner.sockets[0];
+    clock.advance(PROBE_TIMEOUT_MS);
+    expect(await answer).toBe("offline");
+    expect(socket?.closedWith).toBeUndefined();
+
+    connecting = false;
+    socket?.emit({ kind: "open" });
+
+    expect(socket?.closedWith?.code).toBe(CLOSE.normal);
+    expect(socket?.frames).toEqual([]);
+  });
+
   it("the timer goes with the answer: a later tick closes nothing again", async () => {
     const { answer, socket, clock } = probing();
     socket?.emit({ kind: "open" });

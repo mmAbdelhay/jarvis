@@ -44,6 +44,7 @@ import {
   type PairingRecord,
   loadPairing,
   loadPairingAt,
+  loadRecordAt,
   savePairingAt,
 } from "./pairing-record";
 import { type MachineFlags, type PrefsStore, loadPrefs, savePrefs } from "./prefs";
@@ -63,8 +64,9 @@ export class MachineLimitError extends Error {
 export type MachineStore = {
   open(): Promise<"ok" | "failed">;
   list(): Promise<MachineEntry[]>;
-  /** For showing machines: one whose read throws is left out and logged, so it
-   *  hides no healthy one. A store that is not open still rejects. */
+  /** For showing machines, with no token read: one whose read throws is left
+   *  out and logged, so it hides no healthy one. A store that is not open still
+   *  rejects. */
   listReadable(): Promise<MachineEntry[]>;
   activeId(): MachineId | undefined;
   load(id: MachineId): Promise<{ record: PairingRecord; credential: Credential } | undefined>;
@@ -290,6 +292,16 @@ export function createMachineStore(deps: {
     return loaded;
   }
 
+  /** No token read. A record gone or corrupt heals as in `loadQueued`; a token
+   *  gone is found by the `load` that needs it. */
+  async function loadRecordQueued(id: MachineId): Promise<PairingRecord | undefined> {
+    assertOpen();
+    if (!index.ids.includes(id)) return undefined;
+    const record = await loadRecordAt(secure, machineKeys(id, index));
+    if (record === undefined) await healHeld(id);
+    return record;
+  }
+
   async function addSingleSlot(record: PairingRecord, credential: Credential): Promise<MachineId> {
     if (index.ids.length > 0 || (await loadPairing(secure)) !== undefined) {
       throw new PairingAlreadyExistsError();
@@ -401,8 +413,8 @@ export function createMachineStore(deps: {
     const entries: MachineEntry[] = [];
     for (const id of index.ids) {
       try {
-        const loaded = await load(id);
-        if (loaded !== undefined) entries.push({ id, record: loaded.record });
+        const record = await enqueue(() => loadRecordQueued(id));
+        if (record !== undefined) entries.push({ id, record });
       } catch {
         // A store that stopped being open is not one bad machine: it rejects.
         assertOpen();

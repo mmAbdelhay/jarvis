@@ -54,6 +54,13 @@ export function probeMachine(
     try {
       timer = deps.clock.setTimeout(() => finish("offline"), PROBE_TIMEOUT_MS);
       socket = deps.transport.open(url, trust, (event) => {
+        if (answered) {
+          // React Native on Android drops a close made before the upgrade
+          // finishes, then opens anyway. Left open, the server's handshake
+          // timer counts it as a failed sign-in against this phone.
+          if (event.kind === "open") closeSocket();
+          return;
+        }
         if (event.kind === "open") finish("online");
         else if (event.kind === "close") finish("offline");
       });
