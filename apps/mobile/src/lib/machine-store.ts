@@ -15,8 +15,10 @@
 // write that fails after good reads never locks the user out: the store takes
 // the new index in memory, logs a fixed line, and leaves the old index on disk
 // for the next open to finish, in the same order. The exceptions are the keys
-// a pairing lives by: `remove` and `add` fail if a token or record delete of
-// that id fails, and `add` fails if it cannot write the new keys and index.
+// a pairing lives by: `remove` fails only if the token and record deletes both
+// fail, since either one gone makes the pairing unusable, and `add` fails if a
+// token or record delete of that id fails, or it cannot write the new keys and
+// index.
 //
 // A read that throws is never taken for a missing machine: it rejects, or
 // answers "failed" from `open`, and changes nothing. Until an open succeeds
@@ -103,7 +105,8 @@ export function createMachineStore(deps: {
 }): MachineStore {
   const { secure, refresh, prefs, localeTag } = deps;
 
-  // Only ever what the secure store holds: replaced after a write succeeds.
+  // What the secure store holds, or, after a clean-up or index write failed,
+  // where it should get to: the next open finishes the job (`adoptIndex`).
   let index: MachineIndex = EMPTY_INDEX;
   // Until an open succeeds `index` says nothing about the disk, and writing
   // it would lose every machine it does not name.
@@ -157,10 +160,14 @@ export function createMachineStore(deps: {
     return false;
   }
 
-  async function clearKeys(keys: ReturnType<typeof machineKeys>): Promise<void> {
-    await secure.delete(keys.token);
-    await secure.delete(keys.record);
-    await refresh.delete(keys.refresh);
+  /** Each delete on its own: a pairing with either key missing is unusable,
+   *  so a failure of one must not keep the other. */
+  async function deletePairingKeys(
+    keys: ReturnType<typeof machineKeys>,
+  ): Promise<{ token: boolean; record: boolean }> {
+    const token = await tryCleanUp(() => secure.delete(keys.token));
+    const record = await tryCleanUp(() => secure.delete(keys.record));
+    return { token, record };
   }
 
   async function clearMachineFlags(id: MachineId): Promise<void> {
@@ -189,23 +196,19 @@ export function createMachineStore(deps: {
     await adoptIndex(indexWithout(index, id), cleaned && refreshGone && flagsGone);
   }
 
-  /** The user's Unpair: a token or record that stays is a failure to show,
-   *  since the machine would come back at the next launch. */
+  /** Unpair, the user's or a revocation's. With both keys left the machine
+   *  would come back at the next launch, which is a failure to show. With one
+   *  gone the pairing is unusable, and the entry on disk retries the other. */
   async function removeHeld(id: MachineId): Promise<void> {
-    const keys = machineKeys(id, index);
-    await secure.delete(keys.token);
-    await secure.delete(keys.record);
-    await letGo(id, true);
+    const gone = await deletePairingKeys(machineKeys(id, index));
+    if (!gone.token && !gone.record) throw new Error("machines: the pairing could not be deleted");
+    await letGo(id, gone.token && gone.record);
   }
 
   /** A record found unusable: nothing connects with it either way. */
   async function healHeld(id: MachineId): Promise<void> {
-    const keys = machineKeys(id, index);
-    const pairingGone = await tryCleanUp(async () => {
-      await secure.delete(keys.token);
-      await secure.delete(keys.record);
-    });
-    await letGo(id, pairingGone);
+    const gone = await deletePairingKeys(machineKeys(id, index));
+    await letGo(id, gone.token && gone.record);
   }
 
   /** Puts the index right when an older build changed the legacy slot. The
@@ -220,8 +223,8 @@ export function createMachineStore(deps: {
     if (legacyId === undefined) {
       // A crash during `remove`, or the old app's unpair. Once the id goes,
       // nothing can address these: safe to repeat, and before the index.
-      // Nothing connects to this machine, so a token left behind by a failed
-      // delete cannot be replayed, and it must not stop the user pairing.
+      // Nothing here connects to this machine, so a token left behind by a
+      // failed delete is not replayed, and it must not stop the user pairing.
       const refreshGone = await tryCleanUp(() => refresh.delete(LEGACY_REFRESH_KEY));
       const flagsGone = await tryCleanUp(clearLegacyFlags);
       await adoptIndex(indexWithout(stored, stored.legacy as MachineId), refreshGone && flagsGone);
@@ -230,7 +233,9 @@ export function createMachineStore(deps: {
 
     // The slot now holds this machine, so keys of its own are stale. Deleting
     // is safe to repeat: the delete comes first and the index write decides.
-    const keysGone = await tryCleanUp(() => clearKeys(machineKeys(legacyId, EMPTY_INDEX)));
+    const staleKeys = machineKeys(legacyId, EMPTY_INDEX);
+    const pairingGone = await deletePairingKeys(staleKeys);
+    const refreshGone = await tryCleanUp(() => refresh.delete(staleKeys.refresh));
     const flagsGone = await tryCleanUp(() => clearMachineFlags(legacyId));
 
     const replaced = stored.legacy;
@@ -244,7 +249,7 @@ export function createMachineStore(deps: {
     const active = replaced !== undefined && stored.active === replaced ? legacyId : stored.active;
     if (active !== undefined) next.active = active;
     next.legacy = legacyId;
-    await adoptIndex(next, keysGone && flagsGone);
+    await adoptIndex(next, pairingGone.token && pairingGone.record && refreshGone && flagsGone);
   }
 
   async function openQueued(): Promise<void> {

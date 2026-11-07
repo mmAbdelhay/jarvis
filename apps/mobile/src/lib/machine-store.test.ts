@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { takeClearFailedSignal } from "./clear-failed-signal";
 import { MACHINE_INDEX_KEY, parseMachineIndex } from "./machine-index";
 import {
   type MachineStore,
@@ -11,6 +12,7 @@ import { phaseAfterCheck } from "./pair-flow";
 import { PairingAlreadyExistsError, type PairingRecord } from "./pairing-record";
 import { type PrefsStore, loadPrefs } from "./prefs";
 import type { SecureStore } from "./secure-store";
+import { createUnpairedHandler } from "./unpaired-handler";
 
 const REFRESH_TOKEN = "R".repeat(43);
 const DEVICE_A = "a".repeat(32);
@@ -792,27 +794,45 @@ describe("remove", () => {
     expect(h.refresh.deletes).toEqual([]);
   }
 
-  it("a failed token delete rejects and the machine stays held, as the unpair failure shows", async () => {
+  it("both deletes failing: it attempts each, rejects, and the machine stays held", async () => {
     const h = legacyAndAnother();
     const store = await opened(h);
-    h.secure.failDelete = (key) => key === "jarvis.token";
+    h.secure.failDelete = (key) => key === "jarvis.token" || key === "jarvis.pairing";
+    const attempted: string[] = [];
+    const secureDelete = h.secure.delete.bind(h.secure);
+    h.secure.delete = (key) => {
+      attempted.push(key);
+      return secureDelete(key);
+    };
 
     await expect(store.remove(LAN_ID)).rejects.toThrow();
+    expect(attempted).toEqual(["jarvis.token", "jarvis.pairing"]);
     expect(store.activeId()).toBe(LAN_ID);
     expect(h.refresh.values.get("jarvis.refresh")).toBe(REFRESH_TOKEN);
     expect(storedIndex(h).legacy).toBe(LAN_ID);
   });
 
-  it("a crash at the record delete on the legacy machine: the next open leaves nothing behind", async () => {
-    const h = legacyAndAnother();
-    const first = await opened(h);
-    h.secure.failDelete = (key) => key === "jarvis.pairing";
-    await expect(first.remove(LAN_ID)).rejects.toThrow();
-    h.secure.failDelete = undefined;
-    expect(storedIndex(h).legacy).toBe(LAN_ID);
+  it.each([
+    ["token", "jarvis.token", "jarvis.pairing"],
+    ["record", "jarvis.pairing", "jarvis.token"],
+  ])(
+    "a failed %s delete: the other key still goes, gone at once, the disk entry retries",
+    async (_part, failing, other) => {
+      const h = legacyAndAnother();
+      const first = await opened(h);
+      h.secure.failDelete = (key) => key === failing;
+      await first.remove(LAN_ID);
 
-    await expectLegacyCleanedUp(h, await opened(h));
-  });
+      expect(h.secure.values.has(other)).toBe(false);
+      expect(h.secure.values.has(failing)).toBe(true);
+      expect(h.refresh.values.has("jarvis.refresh")).toBe(false);
+      expect(first.activeId()).toBe(NAME_ID);
+      expect(storedIndex(h).legacy).toBe(LAN_ID);
+      h.secure.failDelete = undefined;
+
+      await expectLegacyCleanedUp(h, await opened(h));
+    },
+  );
 
   it("a failed refresh delete on the legacy machine: gone at once, and the next open leaves nothing behind", async () => {
     const h = legacyAndAnother();
@@ -1265,6 +1285,78 @@ describe("a failed clean-up never locks the user out", () => {
     await opened(h);
     expect(storedIndex(h)).toEqual({ v: 1, ids: [LAN_ID], active: LAN_ID, legacy: LAN_ID });
     expect(h.logs).toEqual([INDEX_LINE, "machines: index unreadable, rebuilt"]);
+  });
+
+  it.each([
+    ["token", "secure", `jarvis.m.${NAME_ID}.token`],
+    ["record", "secure", `jarvis.m.${NAME_ID}.pairing`],
+    ["refresh", "refresh", `jarvis.m.${NAME_ID}.refresh`],
+  ] as const)(
+    "a legacy slot replaced with the %s delete failing: the other stale keys still go, and it retries",
+    async (_part, which, failing) => {
+      const h = harness();
+      seedLegacy(h, namedRecord("mac.tail.ts.net", DEVICE_C));
+      seedMachine(h, NAME_ID, namedRecord("mac.tail.ts.net"), "OLD-PER-MACHINE");
+      seedIndex(h, { ids: [NAME_ID], active: NAME_ID });
+      h[which].failDelete = (key) => key === failing;
+
+      const store = await opened(h);
+      expect(store.refreshKey(NAME_ID)).toBe("jarvis.refresh");
+      const stale = [
+        h.secure.values.has(`jarvis.m.${NAME_ID}.token`),
+        h.secure.values.has(`jarvis.m.${NAME_ID}.pairing`),
+        h.refresh.values.has(`jarvis.m.${NAME_ID}.refresh`),
+      ];
+      expect(stale.filter(Boolean)).toHaveLength(1);
+      expect(storedIndex(h).legacy).toBeUndefined();
+
+      h[which].failDelete = undefined;
+      await opened(h);
+      expect(storedIndex(h).legacy).toBe(NAME_ID);
+      expect(h.secure.values.has(`jarvis.m.${NAME_ID}.token`)).toBe(false);
+      expect(h.secure.values.has(`jarvis.m.${NAME_ID}.pairing`)).toBe(false);
+      expect(h.refresh.values.has(`jarvis.m.${NAME_ID}.refresh`)).toBe(false);
+    },
+  );
+
+  it.each(["jarvis.token", "jarvis.pairing"])(
+    "a revoked machine with %s's delete failing for good: cleared, and every launch reaches the scan and pairs",
+    async (failing) => {
+      const h = migratedLegacy();
+      h.secure.failDelete = (key) => key === failing;
+      const revoked = await opened(h);
+      const routes: string[] = [];
+      const onUnpaired = createUnpairedHandler({
+        clearPairing: () => removeActiveMachine(revoked),
+        navigateToPair: (outcome) => routes.push(outcome),
+        log: () => {},
+      });
+
+      expect(await onUnpaired()).toBe("cleared");
+      expect(routes).toEqual(["cleared"]);
+      expect(await revoked.loadActive()).toBeUndefined();
+
+      // Relaunch, more than once: nothing connects with this machine again.
+      expect(await (await opened(h)).loadActive()).toBeUndefined();
+      const later = await opened(h);
+      expect(await later.loadActive()).toBeUndefined();
+      await reachesScanAndPairs(later);
+    },
+  );
+
+  it("a revoked machine with every keychain delete failing still ends in clearFailed", async () => {
+    const h = migratedLegacy();
+    h.secure.failDelete = () => true;
+    const revoked = await opened(h);
+    const onUnpaired = createUnpairedHandler({
+      clearPairing: () => removeActiveMachine(revoked),
+      navigateToPair: () => {},
+      log: () => {},
+    });
+
+    expect(await onUnpaired()).toBe("clearFailed");
+    expect(takeClearFailedSignal()).toBe(true);
+    expect(revoked.activeId()).toBe(LAN_ID);
   });
 
   it("a legacy slot replaced under a failing clean-up: opens with the new machine, disk unchanged until it works", async () => {
