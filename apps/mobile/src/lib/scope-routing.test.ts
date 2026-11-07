@@ -25,6 +25,7 @@ function fakeNavigator() {
 function gated() {
   const navigator = fakeNavigator();
   const gate = createNavigatorGate(() => navigator.ready);
+  gate.setMounted(true);
   return { navigator, gate };
 }
 
@@ -117,7 +118,7 @@ describe("no navigation before the navigator mounts", () => {
   });
 
   it("a revocation answered before any navigator mounts: its /pair waits", async () => {
-    const h = machinesHarness();
+    const h = machinesHarness({ ids: [A_ID] });
     h.navigator.ready = false;
     await h.start();
     welcome(h.socketOf(A_ID));
@@ -136,6 +137,7 @@ describe("no navigation before the navigator mounts", () => {
     h.navigator.ready = false;
     await h.start();
     welcome(h.socketOf(A_ID));
+    h.secure.failDelete = () => true;
     h.socketOf(A_ID).emit({ kind: "close", code: CLOSE.revoked, reason: "" });
     await settle();
 
@@ -145,6 +147,70 @@ describe("no navigation before the navigator mounts", () => {
 
     expect(h.sessions.current().id).toBe(B_ID);
     expect(h.routes).toEqual([]);
+  });
+
+  describe("the tick after the commit that removed the old navigator", () => {
+    // The commit that removes the old Stack is default-lane: its listener
+    // cleanup waits for the passive flush, so `isReady` still answers true.
+    // Only the layout effect's cleanup has run by then.
+    function staleTick() {
+      const { navigator, gate } = gated();
+      navigator.ready = true;
+      gate.setMounted(false);
+      return { navigator, gate };
+    }
+
+    it("a route held there runs on the next mount, not on the stale answer", () => {
+      const { navigator, gate } = staleTick();
+
+      gate.navigate(() => navigator.go("/pair"));
+      expect(navigator.routes).toEqual([]);
+
+      gate.setMounted(true);
+      gate.flush();
+      expect(navigator.routes).toEqual(["/pair"]);
+    });
+
+    it("isReady needs both the router's answer and the mount", () => {
+      const { navigator, gate } = staleTick();
+      expect(gate.isReady()).toBe(false);
+      gate.setMounted(true);
+      expect(gate.isReady()).toBe(true);
+      navigator.ready = false;
+      expect(gate.isReady()).toBe(false);
+    });
+
+    it("nothing is mounted until a tree says so", () => {
+      const gate = createNavigatorGate(() => true);
+      expect(gate.isReady()).toBe(false);
+    });
+
+    it("a switch prepared there asks for no route", () => {
+      const { navigator, gate } = staleTick();
+      const router = {
+        canDismiss: () => true,
+        dismissAll: () => navigator.go("dismissAll"),
+        replace: (route: string) => navigator.go(route),
+      };
+      prepareSwitchRoute(router, gate, () => {});
+      expect(navigator.routes).toEqual([]);
+    });
+
+    it("a revocation landing there, the machine alone: /pair waits for the new tree", async () => {
+      const h = machinesHarness({ ids: [A_ID] });
+      await h.start();
+      // What the layout does on each publish: the old tree is on its way out.
+      h.sessions.subscribe(() => h.gate.setMounted(false));
+      welcome(h.socketOf(A_ID));
+
+      h.socketOf(A_ID).emit({ kind: "close", code: CLOSE.revoked, reason: "" });
+      await settle();
+      expect(h.routes).toEqual([]);
+
+      h.gate.setMounted(true);
+      h.gate.flush();
+      expect(h.routes).toEqual(["/pair"]);
+    });
   });
 
   it("a switch with no navigator up asks for no route", () => {

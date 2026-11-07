@@ -2,6 +2,7 @@ import type { PairingLink } from "@jarvis/wire";
 import { describe, expect, it } from "vitest";
 import {
   afterClearRetry,
+  afterForgetRoute,
   type AlreadyPairedCheck,
   canStartIntake,
   entryPhaseKind,
@@ -226,4 +227,28 @@ describe("afterClearRetry (fix round 2, I2 ruling)", () => {
       expect(afterClearRetry(false)).toBe("clearFailed");
     },
   );
+});
+
+describe("afterForgetRoute", () => {
+  const NEXT = { kind: "next", id: "b_1" } as const;
+
+  it.each(["revoked", "unpair", "pair-again"] as const)(
+    "%s: a failed clear goes to /pair",
+    (cause) => {
+      expect(afterForgetRoute(cause, { kind: "clearFailed" })).toBe("pair");
+    },
+  );
+
+  it.each(["revoked", "unpair", "pair-again"] as const)(
+    "%s: no machine left goes to /pair",
+    (cause) => {
+      expect(afterForgetRoute(cause, { kind: "none" })).toBe("pair");
+    },
+  );
+
+  it("another machine: revoked and unpair stay, pair-again goes to /pair", () => {
+    expect(afterForgetRoute("revoked", NEXT)).toBe("stay");
+    expect(afterForgetRoute("unpair", NEXT)).toBe("stay");
+    expect(afterForgetRoute("pair-again", NEXT)).toBe("pair");
+  });
 });

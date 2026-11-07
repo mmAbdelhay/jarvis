@@ -11,6 +11,13 @@
 // runs them once `Stack`'s own effects have registered it. Anything else that
 // can ask for a route on its own timing (a socket's revocation, the end of a
 // reconnect, a tapped notification) goes through the gate.
+//
+// `isReady` alone can be stale for one tick. The commit that removes the old
+// `Stack` is default-lane, so its listener cleanup waits for the passive flush;
+// a route asked for in that gap sees ready, the forced sync render flushes the
+// cleanup first, and the router's queue then runs with no navigator. So the
+// gate also asks whether a tree is mounted, which a layout effect answers: its
+// cleanup runs during the commit itself.
 
 import type { AuthView } from "./auth-session";
 import { shouldConnectOnRoute } from "./dashboard-entry";
@@ -19,7 +26,11 @@ import type { ClientState, RpcClient } from "./rpc-client";
 import { shouldShowUnlock } from "./unlock-screen";
 
 export type NavigatorGate = {
+  /** A navigator is up, by the router's answer, under a tree still mounted. */
   isReady(): boolean;
+  /** Off when a tree goes (from its layout effect's cleanup, and already at
+   *  the publish that replaces it), on from the next tree's layout effect. */
+  setMounted(mounted: boolean): void;
   /** Runs at once with a navigator up. Otherwise it waits for `flush`; only the
    *  latest waits, so it must check that it still applies when it runs. */
   navigate(action: () => void): void;
@@ -29,16 +40,24 @@ export type NavigatorGate = {
 
 export function createNavigatorGate(isReady: () => boolean): NavigatorGate {
   let waiting: (() => void) | undefined;
+  let mounted = false;
+
+  function ready(): boolean {
+    return mounted && isReady();
+  }
 
   function flush(): void {
-    if (waiting === undefined || !isReady()) return;
+    if (waiting === undefined || !ready()) return;
     const action = waiting;
     waiting = undefined;
     action();
   }
 
   return {
-    isReady,
+    isReady: ready,
+    setMounted(next) {
+      mounted = next;
+    },
     navigate(action) {
       waiting = action;
       flush();

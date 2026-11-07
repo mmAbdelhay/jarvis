@@ -197,9 +197,12 @@ export function machinesHarness(options: { ids?: MachineId[]; active?: MachineId
     answer: Promise.resolve(true) as Promise<boolean>,
   };
   const routes: string[] = [];
+  /** What `dialogs.notice` would have named: each revoked machine's label. */
+  const notices: string[] = [];
   /** Up unless a test says otherwise: whether a navigator is mounted. */
   const navigator = { ready: true };
   const gate = createNavigatorGate(() => navigator.ready);
+  gate.setMounted(true);
   const built: Array<MachineId | null> = [];
   let prepareSwitch: () => void = () => {
     events.push("prepare");
@@ -239,9 +242,12 @@ export function machinesHarness(options: { ids?: MachineId[]; active?: MachineId
     onUnpaired: (id) =>
       unpairedHandlerFor({
         id,
+        cause: "revoked",
         sessions,
+        loadRecord: async (machine) => (await store.load(machine))?.record,
         gate,
         navigateToPair: () => routes.push("/pair"),
+        noticeRemoved: (name) => notices.push(name),
         log,
       })(),
     log,
@@ -323,6 +329,7 @@ export function machinesHarness(options: { ids?: MachineId[]; active?: MachineId
     events,
     device,
     routes,
+    notices,
     navigator,
     gate,
     built,

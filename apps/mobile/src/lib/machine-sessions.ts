@@ -17,6 +17,8 @@
 // - A kept scope is used only for the pairing it was built on. One whose record
 //   is gone, or that a read finds under a new credential, is dropped, so a
 //   session's old tokens are never offered to whoever holds that address now.
+// - `forget` clears one machine by its id, and only then moves the screen off
+//   it, so another machine's keys and scope are never in play.
 //
 // `current()` has an answer from the start, the null scope, since a store that
 // has not opened cannot say which machine is active. The null scope holds no
@@ -25,13 +27,16 @@
 
 import type { AuthChannel, AuthSession, DeviceAuth, RefreshLock } from "./auth-session";
 import { createAuthSession } from "./auth-session";
+import { setClearFailedSignal, takeClearFailedSignal } from "./clear-failed-signal";
 import type { Clock } from "./clock";
 import { type ConnectStoredOutcome, connectFromStoredPairing, endpointOf } from "./connect-stored";
 import type { ConnectionStore } from "./connection-store";
 import { createConnectionStore } from "./connection-store";
 import type { MachineId } from "./machine-index";
 import type { MachineStore } from "./machine-store";
-import { isClearingPairing } from "./pairing-guard";
+import { afterClearRetry, afterForgetRoute } from "./pair-flow";
+import { isClearingPairing, setClearingPairing } from "./pairing-guard";
+import type { PairingRecord } from "./pairing-record";
 import type { Credential, Endpoint, RpcClient } from "./rpc-client";
 import { createRpcClient } from "./rpc-client";
 import type { NavigatorGate } from "./scope-routing";
@@ -56,6 +61,13 @@ type BuiltScope = Omit<MachineScope, "generation">;
 
 export type SwitchOutcome = "switched" | "same" | "unknown" | "superseded";
 
+export type ForgetCause = "revoked" | "unpair" | "pair-again";
+
+export type ForgetOutcome =
+  | { kind: "clearFailed" }
+  | { kind: "next"; id: MachineId }
+  | { kind: "none" };
+
 export type MachineSessions = {
   current(): MachineScope;
   subscribe(cb: (scope: MachineScope) => void): () => void;
@@ -69,11 +81,13 @@ export type MachineSessions = {
   /** The idle window, for every machine's session, on screen or not, and for
    *  those built later. */
   setIdleMs(ms: number): void;
-  /** Unpair: removes the machine and its session's tokens. A scope on screen
-   *  stays until the next one is published, but is never reused: a machine
-   *  paired again may live under other keys. Rejects when the store could not
-   *  open, or could delete neither key; then nothing else changes. */
-  removeMachine(id: MachineId | null): Promise<void>;
+  /** Clears this one machine, then moves off it if it is on screen: to the first
+   *  remaining machine, or to the null scope. Never rejects. When the store
+   *  could not remove it, the machine stays and the clear-failed signal names
+   *  it. A second call for an id still being forgotten does nothing, and shares
+   *  the first one's answer. `null` is the null scope's own: nothing to remove,
+   *  but a store that could not open is not "nothing". */
+  forget(id: MachineId | null, cause: ForgetCause): Promise<ForgetOutcome>;
 };
 
 export function createMachineSessions(deps: {
@@ -93,8 +107,10 @@ export function createMachineSessions(deps: {
   const scopeKeys = new Map<MachineId, string>();
   /** The pairing each kept scope last connected with. */
   const scopeCredentials = new Map<MachineId, Credential>();
+  const forgetting = new Map<MachineId | null, Promise<ForgetOutcome>>();
+  const nullScope = deps.buildScope(null);
   let generation = 0;
-  let scope: MachineScope = { ...deps.buildScope(null), generation };
+  let scope: MachineScope = { ...nullScope, generation };
   let appActive = true;
   let idleMs: number | undefined;
   let latestAttempt = 0;
@@ -229,7 +245,12 @@ export function createMachineSessions(deps: {
     }
   }
 
-  async function runSwitch(id: MachineId, attempt: number): Promise<SwitchOutcome> {
+  /** `leftClosed`: the machine being left has closed its client already. */
+  async function runSwitch(
+    id: MachineId,
+    attempt: number,
+    leftClosed: boolean,
+  ): Promise<SwitchOutcome> {
     let loaded: Awaited<ReturnType<MachineStore["load"]>>;
     try {
       loaded = await store.load(id);
@@ -252,7 +273,7 @@ export function createMachineSessions(deps: {
     } catch {
       deps.log("machines: preparing the switch failed");
     }
-    scope.client.disconnect();
+    if (!leftClosed) scope.client.disconnect();
 
     try {
       await store.setActive(id);
@@ -283,6 +304,19 @@ export function createMachineSessions(deps: {
     return "switched";
   }
 
+  function startSwitch(id: MachineId, leftClosed: boolean): Promise<SwitchOutcome> {
+    latestAttempt += 1;
+    switchesInFlight += 1;
+    const run = runSwitch(id, latestAttempt, leftClosed).finally(() => {
+      switchesInFlight -= 1;
+    });
+    lastSwitch = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
   async function switchTo(id: MachineId): Promise<SwitchOutcome> {
     // Opens the store only if it has to: an open store answers in this tick,
     // so a read in flight is refused from the moment the switch is asked for.
@@ -299,17 +333,72 @@ export function createMachineSessions(deps: {
     }
     if (!held) return "unknown";
     if (switchesInFlight === 0 && scope.id === id && isLive(scope)) return "same";
+    return startSwitch(id, false);
+  }
 
+  /** The machine has gone: whatever was on screen for it moves on. */
+  async function moveOff(id: MachineId): Promise<ForgetOutcome> {
+    // A switch in flight decides what is on screen.
+    while (switchesInFlight > 0) await lastSwitch;
+    if (scope.id !== id && scope.id !== null) return { kind: "next", id: scope.id };
+    let next = store.nextAfter(id);
+    while (next !== undefined) {
+      const outcome = await startSwitch(next, true);
+      // Gone from the index means its record was found unusable, so the one
+      // after it. Still held means a read failed: the banner's retry reconnects.
+      if (outcome !== "unknown" || store.has(next)) return { kind: "next", id: next };
+      next = store.nextAfter(id);
+    }
     latestAttempt += 1;
-    switchesInFlight += 1;
-    const run = runSwitch(id, latestAttempt).finally(() => {
-      switchesInFlight -= 1;
-    });
-    lastSwitch = run.then(
-      () => undefined,
-      () => undefined,
-    );
-    return run;
+    if (scope.id !== null) publish(nullScope);
+    return { kind: "none" };
+  }
+
+  async function runForget(id: MachineId, cause: ForgetCause): Promise<ForgetOutcome> {
+    deps.log(`machines: forgetting a machine, ${cause}`);
+    setClearingPairing(id, true);
+    try {
+      const built = scopes.get(id) ?? (scope.id === id ? scope : undefined);
+      try {
+        built?.client.disconnect();
+      } catch {
+        deps.log("machines: disconnecting a machine being forgotten failed");
+      }
+      await store.open();
+      try {
+        await built?.authSession.forget();
+      } catch {
+        deps.log("machines: forgetting a machine's session failed");
+      }
+      try {
+        await store.remove(id);
+      } catch {
+        deps.log("machines: removing a machine failed");
+        setClearFailedSignal(id);
+        return { kind: "clearFailed" };
+      }
+      dropScope(id);
+    } finally {
+      setClearingPairing(id, false);
+    }
+    try {
+      return await moveOff(id);
+    } catch {
+      // The store closed under the move. /pair says so, as `check-failed`.
+      deps.log("machines: moving off a forgotten machine failed");
+      return { kind: "none" };
+    }
+  }
+
+  async function forgetNullScope(): Promise<ForgetOutcome> {
+    await store.open();
+    try {
+      store.activeId();
+      return { kind: "none" };
+    } catch {
+      setClearFailedSignal(null);
+      return { kind: "clearFailed" };
+    }
   }
 
   return {
@@ -341,18 +430,14 @@ export function createMachineSessions(deps: {
       scope.authSession.setIdleMs(ms);
       for (const built of scopes.values()) built.authSession.setIdleMs(ms);
     },
-    async removeMachine(id) {
-      await store.open();
-      if (id === null) {
-        // Nothing to remove, but a store that could not open is not "nothing".
-        store.activeId();
-        return;
-      }
-      await store.remove(id);
-      const built = scopes.get(id);
-      if (built === undefined) return;
-      await built.authSession.forget();
-      dropScope(id);
+    forget(id, cause) {
+      const running = forgetting.get(id);
+      if (running !== undefined) return running;
+      const run = (id === null ? forgetNullScope() : runForget(id, cause)).finally(() => {
+        forgetting.delete(id);
+      });
+      forgetting.set(id, run);
+      return run;
     },
   };
 }
@@ -437,25 +522,112 @@ export function createMachineScopeBuilder(
   };
 }
 
-/** The one clear-and-navigate for a machine: its connection store's reaction to
- *  a revocation, and the banner's "Pair again". The id is fixed, so a clear
- *  that ends after a switch still clears that machine, and leaves the new
- *  machine's screen alone. */
-export function unpairedHandlerFor(deps: {
+/** What a machine is called in a notice. */
+export function machineLabel(record: PairingRecord): string {
+  return record.laptopName ?? record.name?.split(".")[0] ?? record.host;
+}
+
+/** Who must be on screen for a route an outcome asked for to still apply. */
+function machineOnScreenAfter(id: MachineId | null, outcome: ForgetOutcome): MachineId | null {
+  switch (outcome.kind) {
+    case "clearFailed":
+      return id;
+    case "next":
+      return outcome.id;
+    case "none":
+      return null;
+  }
+}
+
+// Each run of `forget` answers one object, shared by any second caller.
+const acted = new WeakSet<ForgetOutcome>();
+
+/** Where a forget leaves the user, acted on once however many callers shared
+ *  it: a second `router.replace` could remount /pair, which has already taken
+ *  its one-shot signal. A route goes through the gate, and when it runs checks
+ *  that the machine it was meant for is still the one on screen. */
+export function applyForgetOutcome(deps: {
   id: MachineId | null;
-  sessions: Pick<MachineSessions, "current" | "removeMachine">;
+  cause: ForgetCause;
+  outcome: ForgetOutcome;
+  sessions: Pick<MachineSessions, "current">;
   gate: NavigatorGate;
   navigateToPair(): void;
+  /** The automatic path's notice: no user asked for this. */
+  noticeRemoved?(): void;
+}): void {
+  const { outcome } = deps;
+  if (acted.has(outcome)) return;
+  acted.add(outcome);
+  if (afterForgetRoute(deps.cause, outcome) === "pair") {
+    const expected = machineOnScreenAfter(deps.id, outcome);
+    deps.gate.navigate(() => {
+      if (deps.sessions.current().id === expected) deps.navigateToPair();
+    });
+    return;
+  }
+  if (deps.cause === "revoked") deps.noticeRemoved?.();
+}
+
+/** /pair's retry of a failed clear: the id its signal carried, and nothing else.
+ *  Its own failure stays on that phase, so it leaves no signal for a later
+ *  visit. Whatever a success moves to, the screen has its route: another
+ *  machine's Dashboard, or the scan with nothing left. */
+export async function retryClear(
+  sessions: Pick<MachineSessions, "forget">,
+  id: MachineId | null,
+): Promise<"scan" | "clearFailed"> {
+  const outcome = await sessions.forget(id, "unpair");
+  if (outcome.kind === "clearFailed") takeClearFailedSignal();
+  return afterClearRetry(outcome.kind !== "clearFailed");
+}
+
+/** The record goes with the machine, so its label is read before. */
+async function labelBefore(
+  id: MachineId,
+  loadRecord: (id: MachineId) => Promise<PairingRecord | undefined>,
+): Promise<string> {
+  let record: PairingRecord | undefined;
+  try {
+    record = await loadRecord(id);
+  } catch {
+    // Named from the id below.
+  }
+  return record === undefined ? id.slice(0, id.lastIndexOf("_")) : machineLabel(record);
+}
+
+/** The one clear-and-route for a machine: its connection store's reaction to a
+ *  revocation, and the banner's "Pair again". The id is fixed, so a clear that
+ *  ends after a switch still clears that machine, and leaves the new machine's
+ *  screen alone. */
+export function unpairedHandlerFor(deps: {
+  id: MachineId | null;
+  cause: "revoked" | "pair-again";
+  sessions: Pick<MachineSessions, "current" | "forget">;
+  loadRecord(id: MachineId): Promise<PairingRecord | undefined>;
+  gate: NavigatorGate;
+  navigateToPair(): void;
+  noticeRemoved?(name: string): void;
   log(line: string): void;
 }): () => Promise<UnpairedOutcome> {
+  let label = "";
   return createUnpairedHandler({
-    id: deps.id,
-    clearPairing: () => deps.sessions.removeMachine(deps.id),
-    navigateToPair: () => {
-      deps.gate.navigate(() => {
-        if (deps.sessions.current().id === deps.id) deps.navigateToPair();
-      });
+    forget: async () => {
+      if (deps.id !== null && deps.noticeRemoved !== undefined) {
+        label = await labelBefore(deps.id, deps.loadRecord);
+      }
+      return deps.sessions.forget(deps.id, deps.cause);
     },
+    afterForget: (outcome) =>
+      applyForgetOutcome({
+        id: deps.id,
+        cause: deps.cause,
+        outcome,
+        sessions: deps.sessions,
+        gate: deps.gate,
+        navigateToPair: deps.navigateToPair,
+        noticeRemoved: () => deps.noticeRemoved?.(label),
+      }),
     log: deps.log,
   });
 }

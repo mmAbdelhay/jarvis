@@ -17,7 +17,8 @@ import { clientPlatformFor } from "@/lib/client-platform";
 import { dialogs } from "@/lib/dialog";
 import { platformKey, t } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
-import { useMachineSessions } from "@/lib/machine-context";
+import { useMachineSessions, useNavigatorGate } from "@/lib/machine-context";
+import { applyForgetOutcome } from "@/lib/machine-sessions";
 import { loadScreenMachine } from "@/lib/machine-store-instance";
 import { filePrefsStore } from "@/lib/prefs-file";
 import { usePushRegistration } from "@/lib/push-context";
@@ -54,6 +55,7 @@ function SettingsScreen() {
   const push = usePushRegistration();
   const authSession = useAuthSession();
   const sessions = useMachineSessions();
+  const gate = useNavigatorGate();
   const machineId = useMachineId();
   const [scope, setScope] = useState<SettingsScope>("browser");
   // Home's update banner opens /settings?section=updates: scroll there once
@@ -92,10 +94,21 @@ function SettingsScreen() {
         client,
         clock: realClock,
         appVersion: APP_VERSION,
-        unpair: () => sessions.removeMachine(machineId),
+        unpair: () => sessions.forget(machineId, "unpair"),
+        afterForget: (outcome) =>
+          applyForgetOutcome({
+            id: machineId,
+            cause: "unpair",
+            outcome,
+            sessions,
+            gate,
+            navigateToPair: () => router.replace("/pair"),
+          }),
         navigateToPair: () => {
-          // An unpair that ends after a switch leaves the new machine's screen.
-          if (sessions.current().id === machineId) router.replace("/pair");
+          gate.navigate(() => {
+            // A reconnect that ends after a switch leaves the new machine's screen.
+            if (sessions.current().id === machineId) router.replace("/pair");
+          });
         },
         log: console.log,
         // M10 Task 6, rule 10 of settings-store.ts: this store only relays
@@ -106,7 +119,7 @@ function SettingsScreen() {
         auth: authSession,
         setIdleMs: sessions.setIdleMs,
       }),
-    [machineId, sessions, client, connection, router, push, authSession],
+    [machineId, sessions, gate, client, connection, router, push, authSession],
   );
 
   const [view, setView] = useState<SettingsView>(store.get());

@@ -37,7 +37,6 @@ import { AuthCard, useAuthCardRootStyle } from "@/components/WidePanel";
 import { platformKey, t } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
 import {
-  afterClearRetry,
   type AlreadyPairedCheck,
   canStartIntake,
   type ConfirmStep,
@@ -48,6 +47,7 @@ import {
 import { setPasskeyOfferSignal } from "@/lib/passkey-offer-signal";
 import { useMachineSessions } from "@/lib/machine-context";
 import type { MachineId } from "@/lib/machine-index";
+import { retryClear as retryClearOf } from "@/lib/machine-sessions";
 import { machineStore, openMachineStore } from "@/lib/machine-store-instance";
 import { linkRefusedOn, pair, type PairOutcome } from "@/lib/pairing";
 import { PairingAlreadyExistsError } from "@/lib/pairing-record";
@@ -207,20 +207,13 @@ function PairWebScreen() {
   }, [checkAlreadyPaired, safeSetPhase]);
 
   const retryClear = useCallback(async () => {
-    let cleared: boolean;
-    try {
-      // The machine the signal named, with its session's memory of the token.
-      await sessions.removeMachine(clearFailedIdRef.current);
-      cleared = true;
-    } catch {
-      console.warn("pair: retrying the clear failed");
-      cleared = false;
-    }
-    if (afterClearRetry(cleared) === "scan") {
+    // The machine the signal named, with its session's memory of the token.
+    if ((await retryClearOf(sessions, clearFailedIdRef.current)) === "scan") {
       alreadyPairedRef.current = false;
       safeSetPhase({ kind: "scan" });
       return;
     }
+    console.warn("pair: retrying the clear failed");
     safeSetPhase({ kind: "clearFailed" });
   }, [sessions, safeSetPhase]);
 

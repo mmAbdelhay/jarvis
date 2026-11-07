@@ -12,7 +12,7 @@
 // (`fingerprintTail`) ever reach `view` (and so React state).
 //
 // Two dependencies aren't literal 1:1 mirrors of a plain data read:
-// `navigateToPair` (unpair's disconnect → clear → navigate sequence is
+// `afterForget` (unpair's disconnect → clear → route sequence is
 // something a test needs to observe the store itself performing) and the
 // shared `connectFromStored` (connect-stored.ts's `connectFromStoredPairing`,
 // partially applied by the caller with the app's machine store and client)
@@ -27,6 +27,7 @@ import type { ConnectionStore, ConnectionView } from "./connection-store";
 import { languageFromLocale } from "./i18n";
 import type { Language, MessageKey } from "./i18n";
 import type { MachineId } from "./machine-index";
+import type { ForgetOutcome } from "./machine-sessions";
 import { fingerprintTail as computeFingerprintTail } from "./pair-flow";
 import { isClearingPairing, setClearingPairing } from "./pairing-guard";
 import type { PairingRecord } from "./pairing-record";
@@ -73,7 +74,8 @@ export type SettingsView = {
   connection: ConnectionView;
   lastFrameAgoMs?: number;
   appVersion: string;
-  // Set when `deps.unpair()` (the keychain clear) threw — the screen shows
+  // Set when `deps.unpair()` itself threw — a clear the store could not do
+  // answers an outcome instead, and goes to /pair's own phase. The screen shows
   // `settings.unpairFailed` and the Unpair button stays available to
   // retry, instead of the failure being a silent, unhandled rejection.
   unpairError: boolean;
@@ -142,7 +144,7 @@ export type SettingsStoreDeps = {
   // immediately before the shared function would call `client.connect`, so
   // a reconnect whose keychain read finishes after either this store's own
   // `unpair()` *or* the automatic unpaired handler's clear (final review
-  // R-M2 — unpaired-handler.ts now sets the same per-machine flag) has
+  // R-M2 — `MachineSessions.forget` sets the same per-machine flag) has
   // started can never connect with a pairing that is (or is about to be)
   // cleared.
   connectFromStored(shouldConnect: () => boolean): Promise<ConnectStoredOutcome>;
@@ -150,7 +152,10 @@ export type SettingsStoreDeps = {
   client: RpcClient;
   clock: Clock;
   appVersion: string;
-  unpair(): Promise<void>;
+  unpair(): Promise<ForgetOutcome>;
+  /** Where that unpair leaves the user: `applyForgetOutcome`. */
+  afterForget(outcome: ForgetOutcome): void;
+  /** A reconnect that found no pairing. */
   navigateToPair(): void;
   // Fix round 1 (Minor): a throwing `disconnect()`, or a subscriber that
   // throws out of `setView`, used to log via a raw `console.error(...,
@@ -405,8 +410,9 @@ export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
       } catch {
         deps.log("settings-store: disconnect() threw before clearing the pairing");
       }
+      let outcome: ForgetOutcome;
       try {
-        await deps.unpair();
+        outcome = await deps.unpair();
       } catch {
         safeSetView({ unpairError: true });
         return;
@@ -420,14 +426,14 @@ export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
       } catch {
         deps.log("settings-store: disconnect() threw after clearing the pairing");
       }
-      // Fix round 1 (Minor): the tail — `navigateToPair()` is caller-
-      // supplied (app/settings.tsx's `router.replace`) and can throw just
-      // as easily as `disconnect()` can; wrapped for the same reason, so
-      // `unpair()`'s promise never rejects regardless of which step fails.
+      // Fix round 1 (Minor): the tail — `afterForget()` is caller-supplied
+      // (app/settings.tsx's route) and can throw just as easily as
+      // `disconnect()` can; wrapped for the same reason, so `unpair()`'s
+      // promise never rejects regardless of which step fails.
       try {
-        deps.navigateToPair();
+        deps.afterForget(outcome);
       } catch {
-        deps.log("settings-store: navigateToPair() threw after unpair");
+        deps.log("settings-store: afterForget() threw after unpair");
       }
     } finally {
       unpairing = false;

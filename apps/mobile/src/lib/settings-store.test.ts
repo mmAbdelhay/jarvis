@@ -1,12 +1,23 @@
 import { PUSH_UNREGISTER_CHANNEL } from "@jarvis/wire";
 import { describe, expect, expectTypeOf, it } from "vitest";
+import { takeClearFailedSignal } from "./clear-failed-signal";
 import { createFakeClock } from "./clock";
 import type { ConnectStoredOutcome } from "./connect-stored";
 import { connectFromStoredPairing } from "./connect-stored";
 import type { ConnectionStore, ConnectionView } from "./connection-store";
 import { createConnectionStore } from "./connection-store";
 import { MACHINE_INDEX_KEY } from "./machine-index";
-import { A_ID, B_ID, machinesHarness, refreshKeyOf, refreshTokenOf } from "./fake-machines";
+import {
+  A_ID,
+  B_ID,
+  answer,
+  machinesHarness,
+  refreshKeyOf,
+  refreshTokenOf,
+  requestsOn,
+  settle,
+} from "./fake-machines";
+import { type ForgetOutcome, applyForgetOutcome } from "./machine-sessions";
 import { createMachineStore } from "./machine-store";
 import type { PairingRecord } from "./pairing-record";
 import type { PrefsStore } from "./prefs";
@@ -25,6 +36,7 @@ import type { SettingsStoreDeps, SettingsView } from "./settings-store";
 import { connectionStateKey, createSettingsStore } from "./settings-store";
 
 const MACHINE_ID = "m_1";
+const NONE: ForgetOutcome = { kind: "none" };
 
 type StateDetail = { closeCode?: number; lastFrameAt?: number; pinMismatch?: true };
 type StateHandler = (state: ClientState, detail: StateDetail) => void;
@@ -233,6 +245,10 @@ function baseDeps(overrides: Partial<SettingsStoreDeps> = {}): {
     appVersion: "1.2.3",
     unpair: async () => {
       unpairCalls.push(1);
+      return NONE;
+    },
+    afterForget: () => {
+      navigateCalls.push(1);
     },
     navigateToPair: () => {
       navigateCalls.push(1);
@@ -550,8 +566,9 @@ describe("createSettingsStore: unpair (I1)", () => {
       client: fake.client,
       unpair: async () => {
         order.push("clear");
+        return NONE;
       },
-      navigateToPair: () => {
+      afterForget: () => {
         order.push("navigate");
       },
     });
@@ -568,11 +585,11 @@ describe("createSettingsStore: unpair (I1)", () => {
   });
 
   it(
-    "fix round 1 (Minor): a throwing navigateToPair() never makes unpair() reject " +
-      "[bite-proof: drop the try/catch around navigateToPair(); this rejects]",
+    "fix round 1 (Minor): a throwing afterForget() never makes unpair() reject " +
+      "[bite-proof: drop the try/catch around afterForget(); this rejects]",
     async () => {
       const { deps, logs } = baseDeps({
-        navigateToPair: () => {
+        afterForget: () => {
           throw new Error("router.replace failed");
         },
       });
@@ -580,7 +597,7 @@ describe("createSettingsStore: unpair (I1)", () => {
       await flush();
 
       await expect(store.unpair()).resolves.toBeUndefined();
-      expect(logs).toContain("settings-store: navigateToPair() threw after unpair");
+      expect(logs).toContain("settings-store: afterForget() threw after unpair");
     },
   );
 
@@ -627,6 +644,7 @@ describe("createSettingsStore: unpair (I1)", () => {
     const { deps, navigateCalls } = baseDeps({
       unpair: async () => {
         if (shouldFail) throw new Error("keychain delete failed");
+        return NONE;
       },
     });
     const store = createSettingsStore(deps);
@@ -666,6 +684,7 @@ describe("createSettingsStore: unpair (I1)", () => {
         client: fake.client,
         unpair: async () => {
           clearCallCount += 1;
+          return NONE;
         },
       });
       const store = createSettingsStore(deps);
@@ -701,6 +720,7 @@ describe("createSettingsStore: unpair (I1)", () => {
       client: fake.client,
       unpair: async () => {
         order.push("clear");
+        return NONE;
       },
     });
     const store = createSettingsStore(deps);
@@ -745,6 +765,7 @@ describe("createSettingsStore: unpair (I1)", () => {
       unpair: async () => {
         clearCalls.push(1);
         await clearing;
+        return NONE;
       },
     });
     const store = createSettingsStore(deps);
@@ -925,6 +946,7 @@ describe("createSettingsStore: reconnect (I3, shared connect-stored path)", () =
           connectFromStoredPairing({ machines, id: "m_1", client: fake.client, shouldConnect }),
         unpair: async () => {
           await clearing;
+          return NONE;
         },
       });
       const store = createSettingsStore(deps);
@@ -978,7 +1000,10 @@ describe("createSettingsStore: reconnect (I3, shared connect-stored path)", () =
     expect(machines.activeId()).toBeDefined();
 
     const { deps, navigateCalls } = baseDeps({
-      unpair: async () => machines.remove(machines.activeId() as string),
+      unpair: async () => {
+        await machines.remove(machines.activeId() as string);
+        return NONE;
+      },
     });
     const store = createSettingsStore(deps);
     await flush();
@@ -1010,7 +1035,10 @@ describe("createSettingsStore: reconnect (I3, shared connect-stored path)", () =
     });
     expect(await machines.open()).toBe("failed");
     const { deps } = baseDeps({
-      unpair: async () => machines.remove(machines.activeId() as string),
+      unpair: async () => {
+        await machines.remove(machines.activeId() as string);
+        return NONE;
+      },
     });
     const store = createSettingsStore(deps);
     await flush();
@@ -1262,25 +1290,84 @@ describe("createSettingsStore: owner login (Phase 0)", () => {
 });
 
 describe("settings-store: unpair with more than one machine", () => {
-  it("unpair of A leaves B's refresh token and flag intact", async () => {
+  function realDeps(h: ReturnType<typeof machinesHarness>, a: { id: string | null }) {
+    const scope = h.sessions.current();
+    return baseDeps({
+      machineId: a.id,
+      client: scope.client,
+      connection: scope.connectionStore,
+      unpair: () => h.sessions.forget(a.id, "unpair"),
+      afterForget: (outcome) =>
+        applyForgetOutcome({
+          id: a.id,
+          cause: "unpair",
+          outcome,
+          sessions: h.sessions,
+          gate: h.gate,
+          navigateToPair: () => h.routes.push("/pair"),
+        }),
+    });
+  }
+
+  it("unpair of A stays on B with no notice, and leaves B's refresh token and flag intact", async () => {
     const h = machinesHarness();
     const a = await h.start();
-    const { deps, navigateCalls } = baseDeps({
-      machineId: a.id,
-      client: a.client,
-      connection: a.connectionStore,
-      unpair: () => h.sessions.removeMachine(a.id),
-    });
-    const store = createSettingsStore(deps);
+    const store = createSettingsStore(realDeps(h, a).deps);
     await store.unpair();
 
     expect(store.get().unpairError).toBe(false);
-    expect(navigateCalls).toEqual([1]);
+    expect(h.routes).toEqual([]);
+    expect(h.notices).toEqual([]);
+    expect(h.sessions.current().id).toBe(B_ID);
     expect(h.refresh.values.has(refreshKeyOf(A_ID))).toBe(false);
     expect(h.refresh.values.get(refreshKeyOf(B_ID))).toBe(refreshTokenOf(B_ID));
     const prefs = JSON.parse(h.prefs.text ?? "{}");
     expect(prefs.refreshTokenStored).toBe(false);
     expect(prefs.machineFlags[B_ID].refreshTokenStored).toBe(true);
+  });
+
+  it("unpair of the only machine goes to /pair", async () => {
+    const h = machinesHarness({ ids: [A_ID] });
+    const a = await h.start();
+    const store = createSettingsStore(realDeps(h, a).deps);
+    await store.unpair();
+
+    expect(h.routes).toEqual(["/pair"]);
+    expect(h.sessions.current().id).toBeNull();
+  });
+
+  it("the push unregister still runs before the disconnect", async () => {
+    const h = machinesHarness();
+    const a = await h.start();
+    await h.unlockCurrent();
+    const store = createSettingsStore(realDeps(h, a).deps);
+    h.events.length = 0;
+
+    const unpairing = store.unpair();
+    await settle();
+    expect(requestsOn(h.socketOf(A_ID), PUSH_UNREGISTER_CHANNEL)).toHaveLength(1);
+    expect(h.events).toEqual([]);
+    expect(h.store.has(A_ID)).toBe(true);
+
+    answer(h.socketOf(A_ID), PUSH_UNREGISTER_CHANNEL, null);
+    await unpairing;
+
+    expect(h.events[0]).toBe(`disconnect ${A_ID}`);
+    expect(h.store.has(A_ID)).toBe(false);
+  });
+
+  it("a clear that fails goes to /pair's clearFailed, with no inline error", async () => {
+    const h = machinesHarness();
+    const a = await h.start();
+    takeClearFailedSignal();
+    h.secure.failDelete = () => true;
+    const store = createSettingsStore(realDeps(h, a).deps);
+    await store.unpair();
+
+    expect(h.routes).toEqual(["/pair"]);
+    expect(takeClearFailedSignal()).toEqual({ id: A_ID });
+    expect(store.get().unpairError).toBe(false);
+    expect(h.store.has(A_ID)).toBe(true);
   });
 
   it("unpair started on A and ending after a switch still removes A, never the new active machine", async () => {
@@ -1296,7 +1383,7 @@ describe("settings-store: unpair with more than one machine", () => {
       connection: a.connectionStore,
       unpair: async () => {
         await held;
-        await h.sessions.removeMachine(a.id);
+        return h.sessions.forget(a.id, "unpair");
       },
     });
     const store = createSettingsStore(deps);
@@ -1308,6 +1395,7 @@ describe("settings-store: unpair with more than one machine", () => {
 
     expect(h.store.has(A_ID)).toBe(false);
     expect(h.store.has(B_ID)).toBe(true);
+    expect(h.sessions.current().id).toBe(B_ID);
     expect(h.refresh.values.get(refreshKeyOf(B_ID))).toBe(refreshTokenOf(B_ID));
   });
 

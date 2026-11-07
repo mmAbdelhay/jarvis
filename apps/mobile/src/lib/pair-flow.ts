@@ -5,6 +5,7 @@
 // testable without a React Native renderer.
 
 import type { PairingLink } from "@jarvis/wire";
+import type { ForgetCause, ForgetOutcome } from "./machine-sessions";
 import { needsHost, withHost } from "./pairing";
 
 export type PairFlowPhaseKind =
@@ -148,6 +149,16 @@ export function entryPhaseKind(clearFailedSignal: boolean): "clearFailed" | "che
  */
 export function afterClearRetry(cleared: boolean): "scan" | "clearFailed" {
   return cleared ? "scan" : "clearFailed";
+}
+
+/**
+ * Where a forget (machine-sessions.ts) leaves the user. A failed clear and an
+ * empty phone both have only /pair. With another machine on screen, only a user
+ * who asked to pair goes there: nobody is stranded while working machines exist.
+ */
+export function afterForgetRoute(cause: ForgetCause, outcome: ForgetOutcome): "pair" | "stay" {
+  if (outcome.kind !== "next") return "pair";
+  return cause === "pair-again" ? "pair" : "stay";
 }
 
 /**

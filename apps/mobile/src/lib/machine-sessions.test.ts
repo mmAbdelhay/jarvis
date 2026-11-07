@@ -20,8 +20,16 @@ import {
   welcome,
 } from "./fake-machines";
 import { MACHINE_INDEX_KEY } from "./machine-index";
-import { type MachineScope, prepareSwitchRoute, unpairedHandlerFor } from "./machine-sessions";
-import { setClearingPairing } from "./pairing-guard";
+import {
+  type ForgetOutcome,
+  type MachineScope,
+  applyForgetOutcome,
+  machineLabel,
+  prepareSwitchRoute,
+  retryClear,
+  unpairedHandlerFor,
+} from "./machine-sessions";
+import { isClearingPairing, setClearingPairing } from "./pairing-guard";
 import { handleNotificationTap } from "./push-context-support";
 import { createNavigatorGate } from "./scope-routing";
 import { createTopBarStore } from "./top-bar-store";
@@ -126,7 +134,7 @@ describe("nothing of one machine reaches another", () => {
     const a = await h.start();
     await h.sessions.switchTo(B_ID);
     const stale = a.client.call("sessions:list", []);
-    await h.sessions.removeMachine(B_ID);
+    await h.sessions.forget(B_ID, "unpair");
 
     expect(await h.sessions.reconnect()).toBe("connected");
 
@@ -740,7 +748,7 @@ describe("each scope's key and flag are fixed when it is built", () => {
   });
 });
 
-describe("removing a machine, by each of the three callers' paths", () => {
+describe("forget", () => {
   function expectOnlyAGone(
     h: ReturnType<typeof machinesHarness>,
     flags: Awaited<ReturnType<typeof flagsOf>>,
@@ -754,38 +762,389 @@ describe("removing a machine, by each of the three callers' paths", () => {
     expect(flags.machineFlags?.[A_ID]).toBeUndefined();
   }
 
-  it("the unpaired handler, from a revocation of A: B's refresh token and flag stay", async () => {
-    const h = machinesHarness();
-    await h.start();
-    await h.unlockCurrent();
-    h.socketOf(A_ID).emit({ kind: "close", code: CLOSE.revoked, reason: "" });
-    await settle();
+  function revoke(h: ReturnType<typeof machinesHarness>, id: string) {
+    h.socketOf(id).emit({ kind: "close", code: CLOSE.revoked, reason: "" });
+  }
 
-    expect(h.routes).toEqual(["/pair"]);
-    expectOnlyAGone(h, await flagsOf(h.prefs));
+  /** What a pair-again or an unpair does with its answer. */
+  function apply(
+    h: ReturnType<typeof machinesHarness>,
+    id: string | null,
+    cause: "revoked" | "unpair" | "pair-again",
+    outcome: ForgetOutcome,
+  ) {
+    applyForgetOutcome({
+      id,
+      cause,
+      outcome,
+      sessions: h.sessions,
+      gate: h.gate,
+      navigateToPair: () => h.routes.push("/pair"),
+      noticeRemoved: () => h.notices.push(String(id)),
+    });
+  }
+
+  describe("revoked", () => {
+    it("active with one other: its keys are gone, the other's stay, the other connects, the notice names it", async () => {
+      const h = machinesHarness({ ids: [A_ID, B_ID] });
+      await h.start();
+      await h.unlockCurrent();
+      revoke(h, A_ID);
+      await settle();
+
+      expectOnlyAGone(h, await flagsOf(h.prefs));
+      expect(h.store.has(A_ID)).toBe(false);
+      expect(h.sessions.current().id).toBe(B_ID);
+      expect(h.store.activeId()).toBe(B_ID);
+      expect(h.socketsOf(B_ID)).toHaveLength(1);
+      expect(h.notices).toEqual(["192.168.1.5"]);
+      expect(h.routes).toEqual([]);
+    });
+
+    it("active alone: /pair, the index empty, the null scope published", async () => {
+      const h = machinesHarness({ ids: [A_ID] });
+      const a = await h.start();
+      await h.unlockCurrent();
+      revoke(h, A_ID);
+      await settle();
+
+      expect(h.routes).toEqual(["/pair"]);
+      expect(h.notices).toEqual([]);
+      expect(await h.store.list()).toEqual([]);
+      expect(h.sessions.current().id).toBeNull();
+      expect(a.connectionStore.isDisposed()).toBe(true);
+    });
+
+    it("two in a row end on the third, each named", async () => {
+      const h = machinesHarness();
+      await h.start();
+      welcome(h.socketOf(A_ID));
+      revoke(h, A_ID);
+      await settle();
+      expect(h.sessions.current().id).toBe(B_ID);
+
+      welcome(h.socketOf(B_ID));
+      revoke(h, B_ID);
+      await settle();
+
+      expect(h.sessions.current().id).toBe(C_ID);
+      expect(h.socketsOf(C_ID)).toHaveLength(1);
+      expect(await h.store.list()).toHaveLength(1);
+      expect(h.refresh.values.get(refreshKeyOf(C_ID))).toBe(refreshTokenOf(C_ID));
+      expect(h.notices).toEqual(["192.168.1.5", "mac"]);
+      expect(h.routes).toEqual([]);
+    });
+
+    it("while inactive: discovered on activating it, and takes the same path", async () => {
+      const h = machinesHarness();
+      await h.start();
+      await h.sessions.switchTo(B_ID);
+      expect(h.store.has(B_ID)).toBe(true);
+
+      welcome(h.socketOf(B_ID));
+      revoke(h, B_ID);
+      await settle();
+
+      expect(h.store.has(B_ID)).toBe(false);
+      expect(h.sessions.current().id).toBe(A_ID);
+      expect(h.notices).toEqual(["mac"]);
+      expect(h.routes).toEqual([]);
+    });
   });
 
-  it("the retry on /pair removes the id the signal carries, and B stays", async () => {
-    const h = machinesHarness();
-    await h.start();
-    takeClearFailedSignal();
-    h.secure.failDelete = () => true;
-    h.socketOf(A_ID).emit({ kind: "close", code: CLOSE.revoked, reason: "" });
-    await settle();
-    const signal = takeClearFailedSignal();
-    expect(signal).toEqual({ id: A_ID });
+  describe("the notice's label", () => {
+    const base = recordOf(A_ID);
 
-    h.secure.failDelete = undefined;
-    await h.sessions.removeMachine(signal?.id ?? null);
+    it("is the laptop's name first", () => {
+      expect(machineLabel({ ...base, laptopName: "Studio", name: "mac.tail.ts.net" })).toBe(
+        "Studio",
+      );
+    });
+
+    it("then the first DNS label of the name", () => {
+      expect(machineLabel({ ...base, name: "mac.tail.ts.net" })).toBe("mac");
+    });
+
+    it("then the host", () => {
+      expect(machineLabel(base)).toBe("192.168.1.5");
+    });
+  });
+
+  it("unpair with one other: stays on the other with no notice", async () => {
+    const h = machinesHarness({ ids: [A_ID, B_ID] });
+    await h.start();
+
+    const outcome = await h.sessions.forget(A_ID, "unpair");
+    apply(h, A_ID, "unpair", outcome);
+
+    expect(outcome).toEqual({ kind: "next", id: B_ID });
+    expect(h.sessions.current().id).toBe(B_ID);
+    expect(h.socketsOf(B_ID)).toHaveLength(1);
+    expect(h.routes).toEqual([]);
+    expect(h.notices).toEqual([]);
+  });
+
+  it("pair-again with one other: only that machine cleared, route /pair, the other active", async () => {
+    const h = machinesHarness({ ids: [A_ID, B_ID] });
+    await h.start();
+
+    const outcome = await h.sessions.forget(A_ID, "pair-again");
+    apply(h, A_ID, "pair-again", outcome);
 
     expectOnlyAGone(h, await flagsOf(h.prefs));
+    expect(h.routes).toEqual(["/pair"]);
+    expect(h.notices).toEqual([]);
+    expect(h.sessions.current().id).toBe(B_ID);
+    expect(h.store.activeId()).toBe(B_ID);
+  });
+
+  it("switches in the Task 3 order, with no disconnect of the removed client beyond its own", async () => {
+    const h = machinesHarness({ ids: [A_ID, B_ID] });
+    await h.start();
+
+    await h.sessions.forget(A_ID, "unpair");
+
+    expect(h.events).toEqual([
+      "disconnect 192.168.1.5_4317",
+      "quiesce 192.168.1.5_4317",
+      "prepare",
+      `setActive ${B_ID}`,
+      `publish ${B_ID}`,
+      `disconnect ${B_ID}`,
+      `connect ${B_ID}`,
+    ]);
+  });
+
+  it("no machine left: no switch is prepared", async () => {
+    const h = machinesHarness({ ids: [A_ID] });
+    await h.start();
+
+    expect(await h.sessions.forget(A_ID, "unpair")).toEqual({ kind: "none" });
+
+    expect(h.events).toEqual(["disconnect 192.168.1.5_4317", "publish null"]);
+  });
+
+  it("the next machine's record has gone: it is healed away and the one after it taken", async () => {
+    const h = machinesHarness();
+    await h.start();
+    h.secure.values.delete(`jarvis.m.${B_ID}.pairing`);
+
+    expect(await h.sessions.forget(A_ID, "unpair")).toEqual({ kind: "next", id: C_ID });
+
+    expect(h.sessions.current().id).toBe(C_ID);
+    expect(h.store.has(B_ID)).toBe(false);
+  });
+
+  it("the clearing guard is up from the start to the removal, and down by the switch", async () => {
+    const h = machinesHarness({ ids: [A_ID, B_ID] });
+    await h.start();
+    const seen: boolean[] = [];
+    h.setPrepareSwitch(() => seen.push(isClearingPairing(A_ID)));
+
+    const forgetting = h.sessions.forget(A_ID, "unpair");
+    expect(isClearingPairing(A_ID)).toBe(true);
+    await forgetting;
+
+    expect(seen).toEqual([false]);
+    expect(isClearingPairing(A_ID)).toBe(false);
+  });
+
+  describe("a failed clear", () => {
+    function failingEveryDelete(h: ReturnType<typeof machinesHarness>) {
+      takeClearFailedSignal();
+      h.secure.failDelete = () => true;
+    }
+
+    it("keeps the machine and routes to clearFailed with its id", async () => {
+      const h = machinesHarness({ ids: [A_ID, B_ID] });
+      await h.start();
+      failingEveryDelete(h);
+      revoke(h, A_ID);
+      await settle();
+
+      expect(takeClearFailedSignal()).toEqual({ id: A_ID });
+      expect(h.store.has(A_ID)).toBe(true);
+      expect(h.sessions.current().id).toBe(A_ID);
+      expect(h.routes).toEqual(["/pair"]);
+      expect(h.notices).toEqual([]);
+      expect(isClearingPairing(A_ID)).toBe(false);
+    });
+
+    it("answers clearFailed for one key's delete only when both fail", async () => {
+      const h = machinesHarness({ ids: [A_ID, B_ID] });
+      await h.start();
+      takeClearFailedSignal();
+      h.secure.failDelete = (key) => key === "jarvis.token";
+
+      expect(await h.sessions.forget(A_ID, "unpair")).toEqual({ kind: "next", id: B_ID });
+
+      expect(takeClearFailedSignal()).toBeUndefined();
+    });
+
+    it("the retry on /pair removes that id only, and leaves no signal behind", async () => {
+      const h = machinesHarness();
+      await h.start();
+      failingEveryDelete(h);
+      revoke(h, A_ID);
+      await settle();
+      const signal = takeClearFailedSignal();
+      expect(signal).toEqual({ id: A_ID });
+
+      expect(await retryClear(h.sessions, signal?.id ?? null)).toBe("clearFailed");
+      expect(takeClearFailedSignal()).toBeUndefined();
+      expect(h.store.has(A_ID)).toBe(true);
+
+      h.secure.failDelete = undefined;
+      expect(await retryClear(h.sessions, signal?.id ?? null)).toBe("scan");
+
+      expectOnlyAGone(h, await flagsOf(h.prefs));
+      expect(h.store.has(C_ID)).toBe(true);
+      expect(h.sessions.current().id).toBe(B_ID);
+    });
+
+    it("on a store that could not open: the machine stays, and it answers clearFailed", async () => {
+      const h = machinesHarness();
+      await h.start();
+      takeClearFailedSignal();
+      h.secure.failGet = (key) => key === MACHINE_INDEX_KEY;
+
+      expect(await h.sessions.forget(A_ID, "unpair")).toEqual({ kind: "clearFailed" });
+
+      expect(takeClearFailedSignal()).toEqual({ id: A_ID });
+      expect(h.secure.values.has("jarvis.token")).toBe(true);
+      expect(h.secure.values.has("jarvis.pairing")).toBe(true);
+    });
+  });
+
+  describe("a second forget while one runs", () => {
+    it("for the same id does nothing: one removal, one switch, one answer acted on", async () => {
+      const h = machinesHarness({ ids: [A_ID, B_ID] });
+      await h.start();
+      const remove = h.store.remove;
+      let removals = 0;
+      h.store.remove = (id) => {
+        removals += 1;
+        return remove(id);
+      };
+
+      const first = h.sessions.forget(A_ID, "revoked");
+      const second = h.sessions.forget(A_ID, "pair-again");
+      const [one, two] = await Promise.all([first, second]);
+      apply(h, A_ID, "revoked", one);
+      apply(h, A_ID, "pair-again", two);
+
+      expect(removals).toBe(1);
+      expect(h.events.filter((event) => event === `publish ${B_ID}`)).toHaveLength(1);
+      expect(h.routes).toEqual([]);
+      expect(h.notices).toEqual([A_ID]);
+    });
+
+    it("for another id runs: the guard is per id", async () => {
+      const h = machinesHarness();
+      await h.start();
+
+      const [one, two] = await Promise.all([
+        h.sessions.forget(A_ID, "unpair"),
+        h.sessions.forget(B_ID, "unpair"),
+      ]);
+
+      expect(h.store.has(A_ID)).toBe(false);
+      expect(h.store.has(B_ID)).toBe(false);
+      expect(h.sessions.current().id).toBe(C_ID);
+      expect(one).toEqual({ kind: "next", id: C_ID });
+      expect(two.kind).toBe("next");
+    });
+
+    it("once the first has ended, runs again", async () => {
+      const h = machinesHarness({ ids: [A_ID] });
+      await h.start();
+      takeClearFailedSignal();
+      h.secure.failDelete = () => true;
+      expect((await h.sessions.forget(A_ID, "unpair")).kind).toBe("clearFailed");
+      takeClearFailedSignal();
+
+      h.secure.failDelete = undefined;
+      expect((await h.sessions.forget(A_ID, "unpair")).kind).toBe("none");
+    });
+  });
+
+  describe("a route from the outcome goes through the gate and rechecks", () => {
+    it("pair-again: held with no navigator, and dropped if another machine is on screen by then", async () => {
+      const h = machinesHarness();
+      await h.start();
+      h.navigator.ready = false;
+      const outcome = await h.sessions.forget(A_ID, "pair-again");
+      apply(h, A_ID, "pair-again", outcome);
+      expect(h.routes).toEqual([]);
+
+      await h.sessions.switchTo(C_ID);
+      h.navigator.ready = true;
+      h.gate.flush();
+
+      expect(h.routes).toEqual([]);
+    });
+
+    it("clearFailed: dropped if its machine has left the screen by then", async () => {
+      const h = machinesHarness();
+      await h.start();
+      takeClearFailedSignal();
+      h.secure.failDelete = () => true;
+      h.navigator.ready = false;
+      const outcome = await h.sessions.forget(A_ID, "unpair");
+      apply(h, A_ID, "unpair", outcome);
+
+      await h.sessions.switchTo(B_ID);
+      h.navigator.ready = true;
+      h.gate.flush();
+
+      expect(h.routes).toEqual([]);
+      takeClearFailedSignal();
+    });
+
+    it("none: goes once the navigator is up, with nothing on screen", async () => {
+      const h = machinesHarness({ ids: [A_ID] });
+      await h.start();
+      h.navigator.ready = false;
+      const outcome = await h.sessions.forget(A_ID, "unpair");
+      apply(h, A_ID, "unpair", outcome);
+      expect(h.routes).toEqual([]);
+
+      h.navigator.ready = true;
+      h.gate.flush();
+
+      expect(h.routes).toEqual(["/pair"]);
+    });
+  });
+
+  it("the machine forgotten is off screen: no switch, and the one on screen stays", async () => {
+    const h = machinesHarness();
+    await h.start();
+    await h.sessions.switchTo(B_ID);
+    h.events.length = 0;
+
+    expect(await h.sessions.forget(A_ID, "unpair")).toEqual({ kind: "next", id: B_ID });
+
+    // Only its own client, closed already. B's is untouched.
+    expect(h.events).toEqual([`disconnect ${A_ID}`]);
+    expect(h.sessions.current().id).toBe(B_ID);
+  });
+
+  it("the machine's scope was never built: its keys go all the same", async () => {
+    const h = machinesHarness();
+    await h.start();
+
+    expect(await h.sessions.forget(C_ID, "unpair")).toEqual({ kind: "next", id: A_ID });
+
+    expect(h.store.has(C_ID)).toBe(false);
+    expect(h.refresh.values.has(refreshKeyOf(C_ID))).toBe(false);
+    expect(h.built).not.toContain(C_ID);
   });
 
   it("a removal of B: C's and A's refresh tokens stay", async () => {
     const h = machinesHarness({ active: B_ID });
     const b = await h.start();
 
-    await h.sessions.removeMachine(B_ID);
+    await h.sessions.forget(B_ID, "unpair");
 
     expect(h.refresh.values.has(refreshKeyOf(B_ID))).toBe(false);
     expect(h.refresh.values.get(refreshKeyOf(C_ID))).toBe(refreshTokenOf(C_ID));
@@ -802,7 +1161,7 @@ describe("removing a machine, by each of the three callers' paths", () => {
     const a = await h.start();
     await h.unlockCurrent();
 
-    await h.sessions.removeMachine(A_ID);
+    await h.sessions.forget(A_ID, "unpair");
     h.clock.advance(ACCESS_TTL_MS);
     await settle();
 
@@ -810,34 +1169,35 @@ describe("removing a machine, by each of the three callers' paths", () => {
     expect(a.authSession.get().lockedLocally).toBe(false);
   });
 
-  it("on a store that could not open, nothing is removed", async () => {
-    const h = machinesHarness();
-    await h.start();
-    h.secure.failGet = (key) => key === MACHINE_INDEX_KEY;
-    expect(await h.store.open()).toBe("failed");
+  it("the removed machine's scope is disposed, and never reused", async () => {
+    const h = machinesHarness({ ids: [A_ID, B_ID] });
+    const a = await h.start();
 
-    await expect(h.sessions.removeMachine(A_ID)).rejects.toThrow();
+    await h.sessions.forget(A_ID, "unpair");
 
-    expect(h.secure.values.has("jarvis.token")).toBe(true);
-    expect(h.refresh.values.has(refreshKeyOf(A_ID))).toBe(true);
+    expect(a.connectionStore.isDisposed()).toBe(true);
   });
 
-  it("removing the null scope's machine removes nothing, and refuses on a store that could not open", async () => {
+  it("the null scope's machine: nothing removed, and clearFailed on a store that could not open", async () => {
     const h = machinesHarness();
     await h.store.open();
-    await h.sessions.removeMachine(null);
+    expect(await h.sessions.forget(null, "unpair")).toEqual({ kind: "none" });
     expect(h.secure.values.has("jarvis.token")).toBe(true);
     expect(h.refresh.values.has(refreshKeyOf(A_ID))).toBe(true);
+    expect(h.published).toEqual([]);
 
+    takeClearFailedSignal();
     h.secure.failGet = () => true;
-    await expect(h.sessions.removeMachine(null)).rejects.toThrow();
+    expect(await h.sessions.forget(null, "unpair")).toEqual({ kind: "clearFailed" });
+    expect(takeClearFailedSignal()).toEqual({ id: null });
   });
 
-  it("a removed machine paired again gets a new scope under its new keys, and its old session is disposed", async () => {
-    const h = machinesHarness();
+  it("a removed machine paired again gets a new scope under its new keys", async () => {
+    const h = machinesHarness({ ids: [A_ID] });
     const a = await h.start();
-    await h.sessions.removeMachine(A_ID);
-    expect(h.sessions.current().client).toBe(a.client);
+    await h.sessions.forget(A_ID, "unpair");
+    expect(h.sessions.current().id).toBeNull();
+    expect(a.connectionStore.isDisposed()).toBe(true);
 
     await h.store.add(recordOf(A_ID), { deviceId: recordOf(A_ID).deviceId, token: "T".repeat(43) });
     await h.store.setActive(A_ID);
@@ -845,7 +1205,6 @@ describe("removing a machine, by each of the three callers' paths", () => {
 
     const again = h.sessions.current();
     expect(again.client).not.toBe(a.client);
-    expect(a.connectionStore.isDisposed()).toBe(true);
     await h.unlockCurrent("4");
     expect(h.refresh.values.get(`jarvis.m.${A_ID}.refresh`)).toBe(tokenReply("4", 0).refreshToken);
     expect(h.refresh.values.has("jarvis.refresh")).toBe(false);
@@ -952,7 +1311,7 @@ describe("removing a machine, by each of the three callers' paths", () => {
   it("the remaining machine connects next, in its own scope", async () => {
     const h = machinesHarness();
     await h.start();
-    await h.sessions.removeMachine(A_ID);
+    await h.sessions.forget(A_ID, "unpair");
 
     expect(await h.sessions.reconnect()).toBe("connected");
 
@@ -963,19 +1322,21 @@ describe("removing a machine, by each of the three callers' paths", () => {
   it("a revocation whose clear ends after a switch stays off the new machine's screen", async () => {
     const h = machinesHarness();
     await h.start();
-    const routes: string[] = [];
     const clearing = deferred<void>();
     const handler = unpairedHandlerFor({
       id: A_ID,
+      cause: "revoked",
       sessions: {
         current: () => h.sessions.current(),
-        removeMachine: async (id) => {
+        forget: async (id, cause) => {
           await clearing.promise;
-          await h.sessions.removeMachine(id);
+          return h.sessions.forget(id, cause);
         },
       },
+      loadRecord: async () => undefined,
       gate: h.gate,
-      navigateToPair: () => routes.push("/pair"),
+      navigateToPair: () => h.routes.push("/pair"),
+      noticeRemoved: (name) => h.notices.push(name),
       log: () => {},
     });
 
@@ -984,10 +1345,31 @@ describe("removing a machine, by each of the three callers' paths", () => {
     clearing.resolve();
     await handled;
 
-    expect(routes).toEqual([]);
+    expect(h.routes).toEqual([]);
     expect(h.sessions.current().id).toBe(B_ID);
     expect(h.refresh.values.has(refreshKeyOf(A_ID))).toBe(false);
     expect(h.refresh.values.get(refreshKeyOf(B_ID))).toBe(refreshTokenOf(B_ID));
+  });
+
+  it("a record that cannot be read still names the machine, from its id", async () => {
+    const h = machinesHarness({ ids: [A_ID, B_ID] });
+    await h.start();
+    const handler = unpairedHandlerFor({
+      id: A_ID,
+      cause: "revoked",
+      sessions: h.sessions,
+      loadRecord: async () => {
+        throw new Error("keychain read failed");
+      },
+      gate: h.gate,
+      navigateToPair: () => h.routes.push("/pair"),
+      noticeRemoved: (name) => h.notices.push(name),
+      log: () => {},
+    });
+
+    expect(await handler()).toBe("cleared");
+
+    expect(h.notices).toEqual(["192.168.1.5"]);
   });
 });
 
@@ -1140,6 +1522,7 @@ describe("logout or keep-signed-in off, with the store not open", () => {
 
 describe("prepareSwitchRoute", () => {
   const up = createNavigatorGate(() => true);
+  up.setMounted(true);
 
   function router(options: { canDismiss?: boolean } = {}) {
     const calls: string[] = [];

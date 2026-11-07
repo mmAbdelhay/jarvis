@@ -1717,6 +1717,10 @@ export const STRINGS = {
   "claude.upload.offline": { en: "Not connected", ar: "غير متصل" },
   "claude.upload.failed": { en: "Upload failed", ar: "فشل الرفع" },
   "claude.upload.attach": { en: "Couldn't add it to the project", ar: "تعذّرت إضافته إلى المشروع" },
+  "machines.removedNotice": {
+    en: "{name} no longer accepts this phone. You can add it again.",
+    ar: "لم يعد {name} يقبل هذا الهاتف. يمكنك إضافته مرة أخرى.",
+  },
 } as const satisfies Record<string, Record<Language, string>>;
 
 export type MessageKey = keyof typeof STRINGS;

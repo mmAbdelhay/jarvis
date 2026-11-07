@@ -149,9 +149,11 @@ describe("the pairing-to-revocation scenario, end to end", () => {
     });
     const dashboardStore = createDashboardStore({ client });
     const unpairedHandler = createUnpairedHandler({
-      id: null,
-      clearPairing: () => clearPairingAt(secureStore, LEGACY_PAIRING_KEYS),
-      navigateToPair: (outcome) => navigated.push(outcome),
+      forget: async () => {
+        await clearPairingAt(secureStore, LEGACY_PAIRING_KEYS);
+        return { kind: "none" };
+      },
+      afterForget: (outcome) => navigated.push(outcome.kind),
       log: (line) => logs.push(line),
     });
     const connectionStore = createConnectionStore({
@@ -288,7 +290,7 @@ describe("the pairing-to-revocation scenario, end to end", () => {
 
     await flushMicrotasks();
 
-    expect(navigated).toEqual(["cleared"]);
+    expect(navigated).toEqual(["none"]);
     expect(secureStore.raw("jarvis.token")).toBeUndefined();
     expect(secureStore.raw("jarvis.pairing")).toBeUndefined();
     await expect(loadPairing(secureStore)).resolves.toBeUndefined();

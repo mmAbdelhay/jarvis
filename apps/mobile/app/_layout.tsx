@@ -2,7 +2,15 @@ import Constants from "expo-constants";
 import { useFonts } from "expo-font";
 import { Stack, useNavigationContainerRef, usePathname, useRouter } from "expo-router";
 import * as ScreenOrientation from "expo-screen-orientation";
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type React from "react";
 import { AppState, I18nManager, Platform, View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -19,7 +27,8 @@ import { shouldConnectOnRoute } from "@/lib/dashboard-entry";
 import type { Language } from "@/lib/i18n";
 import { isRtl, t } from "@/lib/i18n";
 import { LanguageContext } from "@/lib/language-context";
-import { MachinesContext } from "@/lib/machine-context";
+import type { MachineId } from "@/lib/machine-index";
+import { MachinesContext, NavigatorGateContext } from "@/lib/machine-context";
 import {
   type MachineScope,
   type MachineSessions,
@@ -49,6 +58,7 @@ import {
 import { systemTransportFor } from "@/lib/system-transport";
 import { theme } from "@/lib/theme";
 import { createAppTransport } from "@/lib/trust-routing-transport";
+import { dialogs } from "@/lib/dialog";
 import { useLayoutClass } from "@/lib/use-layout-class";
 import { VoiceProvider } from "@/lib/voice-context";
 
@@ -67,6 +77,8 @@ const transport = createAppTransport(PLATFORM, {
 });
 
 const log = (line: string): void => console.log(line);
+
+const loadRecord = async (id: MachineId) => (await machineStore.load(id))?.record;
 
 export default function RootLayout() {
   const [fontsLoaded] = useFonts(APP_FONTS);
@@ -119,9 +131,13 @@ export default function RootLayout() {
         onUnpaired: (id) =>
           unpairedHandlerFor({
             id,
+            cause: "revoked",
             sessions,
+            loadRecord,
             gate,
             navigateToPair: () => routerRef.current.replace("/pair"),
+            noticeRemoved: (name) =>
+              dialogs.notice(t(languageRef.current ?? "en", "machines.removedNotice", { name })),
             log: (line) => console.warn(line),
           })(),
         log,
@@ -144,9 +160,12 @@ export default function RootLayout() {
     setScope(sessions.current());
     return sessions.subscribe((next) => {
       switchingRef.current = false;
+      // The key below changes, so the tree on screen is on its way out from
+      // here: a route asked for now waits for the next one to mount.
+      gate.setMounted(false);
       setScope(next);
     });
-  }, [sessions]);
+  }, [sessions, gate]);
 
   // Nothing mounts until the machine to start on is known: a screen on the
   // null scope would remount at once, and a tap's handler would have spent its
@@ -244,18 +263,20 @@ export default function RootLayout() {
   return (
     <LanguageContext.Provider value={language}>
       <MachinesContext.Provider value={sessions}>
-        <PhoneUpdateProvider store={phoneUpdateStore}>
-          <Fragment key={scope.generation}>
-            <ScopedTree
-              scope={scope}
-              sessions={sessions}
-              language={language}
-              handledIds={handledIdsRef.current}
-              switchingRef={switchingRef}
-              gate={gate}
-            />
-          </Fragment>
-        </PhoneUpdateProvider>
+        <NavigatorGateContext.Provider value={gate}>
+          <PhoneUpdateProvider store={phoneUpdateStore}>
+            <Fragment key={scope.generation}>
+              <ScopedTree
+                scope={scope}
+                sessions={sessions}
+                language={language}
+                handledIds={handledIdsRef.current}
+                switchingRef={switchingRef}
+                gate={gate}
+              />
+            </Fragment>
+          </PhoneUpdateProvider>
+        </NavigatorGateContext.Provider>
       </MachinesContext.Provider>
     </LanguageContext.Provider>
   );
@@ -288,7 +309,9 @@ function ScopedTree(props: {
     client.disconnect();
     void unpairedHandlerFor({
       id: scope.id,
+      cause: "pair-again",
       sessions,
+      loadRecord,
       gate,
       navigateToPair: () => router.replace("/pair"),
       log: (line) => console.warn(line),
@@ -509,6 +532,14 @@ function ScopeRouteEffects(props: {
   const routingRef = useRef<ScopeRouting | undefined>(undefined);
   routingRef.current ??= createScopeRouting();
   const routing = routingRef.current;
+
+  // A layout effect, for its cleanup: that runs during the commit that removes
+  // this tree, where `isReady` would stay true until the passive flush
+  // (scope-routing.ts).
+  useLayoutEffect(() => {
+    gate.setMounted(true);
+    return () => gate.setMounted(false);
+  }, [gate]);
 
   // Whatever asked for a route before there was a navigator to take it.
   useEffect(() => {

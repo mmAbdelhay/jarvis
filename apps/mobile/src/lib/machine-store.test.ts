@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { takeClearFailedSignal } from "./clear-failed-signal";
 import { MACHINE_INDEX_KEY, parseMachineIndex } from "./machine-index";
+import type { ForgetOutcome } from "./machine-sessions";
 import {
   type MachineStore,
   MachineLimitError,
@@ -139,6 +139,16 @@ async function opened(h: Harness): Promise<MachineStore> {
   const store = h.build();
   expect(await store.open()).toBe("ok");
   return store;
+}
+
+/** The part of `MachineSessions.forget` a store can answer for by itself. */
+async function forgetting(store: MachineStore): Promise<ForgetOutcome> {
+  try {
+    await store.remove(LAN_ID);
+    return { kind: "none" };
+  } catch {
+    return { kind: "clearFailed" };
+  }
 }
 
 async function twoMachines(): Promise<{ h: Harness; store: MachineStore }> {
@@ -1319,14 +1329,13 @@ describe("a failed clean-up never locks the user out", () => {
       const revoked = await opened(h);
       const routes: string[] = [];
       const onUnpaired = createUnpairedHandler({
-        id: LAN_ID,
-        clearPairing: () => revoked.remove(LAN_ID),
-        navigateToPair: (outcome) => routes.push(outcome),
+        forget: () => forgetting(revoked),
+        afterForget: (outcome) => routes.push(outcome.kind),
         log: () => {},
       });
 
       expect(await onUnpaired()).toBe("cleared");
-      expect(routes).toEqual(["cleared"]);
+      expect(routes).toEqual(["none"]);
       expect(await revoked.loadActive()).toBeUndefined();
 
       // Relaunch, more than once: nothing connects with this machine again.
@@ -1342,14 +1351,12 @@ describe("a failed clean-up never locks the user out", () => {
     h.secure.failDelete = () => true;
     const revoked = await opened(h);
     const onUnpaired = createUnpairedHandler({
-      id: LAN_ID,
-      clearPairing: () => revoked.remove(LAN_ID),
-      navigateToPair: () => {},
+      forget: () => forgetting(revoked),
+      afterForget: () => {},
       log: () => {},
     });
 
     expect(await onUnpaired()).toBe("clearFailed");
-    expect(takeClearFailedSignal()).toEqual({ id: LAN_ID });
     expect(revoked.activeId()).toBe(LAN_ID);
   });
 

@@ -1,134 +1,57 @@
 import { describe, expect, it, vi } from "vitest";
-import { takeClearFailedSignal } from "./clear-failed-signal";
-import { isClearingPairing } from "./pairing-guard";
+import type { ForgetOutcome } from "./machine-sessions";
 import { createUnpairedHandler } from "./unpaired-handler";
 
-const MACHINE = "a_1";
+const NONE: ForgetOutcome = { kind: "none" };
+const NEXT: ForgetOutcome = { kind: "next", id: "b_1" };
+const CLEAR_FAILED: ForgetOutcome = { kind: "clearFailed" };
 
 describe("createUnpairedHandler", () => {
-  it("clears the pairing, navigates to /pair as 'cleared', and resolves 'cleared'", async () => {
-    const clearPairing = vi.fn(async () => {});
-    const navigateToPair = vi.fn();
-    const log = vi.fn();
-    const handler = createUnpairedHandler({ id: MACHINE, clearPairing, navigateToPair, log });
-
-    await expect(handler()).resolves.toBe("cleared");
-
-    expect(clearPairing).toHaveBeenCalledTimes(1);
-    expect(navigateToPair).toHaveBeenCalledExactlyOnceWith("cleared");
-    expect(log).not.toHaveBeenCalled();
-  });
-
-  it("I2 bite-proof: still navigates to /pair when clearPairing rejects", async () => {
-    // Remove the try/catch around clearPairing (or the unconditional
-    // navigateToPair call after it) and this assertion fails: the user
-    // would be stuck on the Dashboard with no path back to /pair.
-    const clearPairing = vi.fn(async () => {
-      throw new Error("keychain unavailable");
-    });
-    const navigateToPair = vi.fn();
-    const log = vi.fn();
-    const handler = createUnpairedHandler({ id: MACHINE, clearPairing, navigateToPair, log });
-
-    await handler();
-
-    expect(navigateToPair).toHaveBeenCalledTimes(1);
-  });
-
-  it(
-    "fix round 2 (I2 ruling): navigates to /pair as 'clearFailed', not 'cleared', when clearing fails " +
-      '[bite-proof: pass "cleared" unconditionally to navigateToPair and this fails]',
-    async () => {
-      const clearPairing = vi.fn(async () => {
-        throw new Error("keychain unavailable");
-      });
-      const navigateToPair = vi.fn();
+  it.each([NONE, NEXT])(
+    "forgets, hands on the outcome $kind, and answers 'cleared'",
+    async (outcome) => {
+      const forget = vi.fn(async () => outcome);
+      const afterForget = vi.fn();
       const log = vi.fn();
-      const handler = createUnpairedHandler({ id: MACHINE, clearPairing, navigateToPair, log });
+      const handler = createUnpairedHandler({ forget, afterForget, log });
 
-      await expect(handler()).resolves.toBe("clearFailed");
+      await expect(handler()).resolves.toBe("cleared");
 
-      expect(navigateToPair).toHaveBeenCalledExactlyOnceWith("clearFailed");
+      expect(forget).toHaveBeenCalledTimes(1);
+      expect(afterForget).toHaveBeenCalledExactlyOnceWith(outcome);
+      expect(log).not.toHaveBeenCalled();
     },
   );
 
-  it("logs a secret-free line when clearPairing fails, and never throws out of the handler", async () => {
-    const clearPairing = vi.fn(async () => {
-      throw new Error("keychain unavailable");
-    });
-    const navigateToPair = vi.fn();
-    const log = vi.fn();
-    const handler = createUnpairedHandler({ id: MACHINE, clearPairing, navigateToPair, log });
-
-    await expect(handler()).resolves.toBe("clearFailed");
-
-    expect(log).toHaveBeenCalledTimes(1);
-    const [line] = log.mock.calls[0] as [string];
-    expect(line).not.toMatch(/token|secret/i);
-  });
-
-  it(
-    "sets the one-shot clearFailed signal (never a param) when clearing fails, " +
-      "and leaves it unset when clearing succeeds",
-    async () => {
-      takeClearFailedSignal(); // drain any leftover from another test in this file
-      const failingHandler = createUnpairedHandler({
-        id: MACHINE,
-        clearPairing: vi.fn(async () => {
-          throw new Error("keychain unavailable");
-        }),
-        navigateToPair: vi.fn(),
-        log: vi.fn(),
-      });
-      await failingHandler();
-      expect(takeClearFailedSignal()).toEqual({ id: MACHINE });
-      // One-shot: reading it again sees nothing.
-      expect(takeClearFailedSignal()).toBeUndefined();
-
-      const succeedingHandler = createUnpairedHandler({
-        id: MACHINE,
-        clearPairing: vi.fn(async () => {}),
-        navigateToPair: vi.fn(),
-        log: vi.fn(),
-      });
-      await succeedingHandler();
-      expect(takeClearFailedSignal()).toBeUndefined();
-    },
-  );
-
-  it(
-    "T7 r2 Minor 2 bite-proof: the app-wide clearing guard is set for the " +
-      "duration of the clear, on both outcomes " +
-      "[bite-proof: drop the setClearingPairing calls and the awaits below see false throughout]",
-    async () => {
-      let sawGuardDuringClear = false;
-      const handler = createUnpairedHandler({
-        id: MACHINE,
-        clearPairing: async () => {
-          sawGuardDuringClear = isClearingPairing(MACHINE);
-        },
-        navigateToPair: vi.fn(),
-        log: vi.fn(),
-      });
-
-      expect(isClearingPairing(MACHINE)).toBe(false);
-      await handler();
-      expect(sawGuardDuringClear).toBe(true);
-      expect(isClearingPairing(MACHINE)).toBe(false);
-    },
-  );
-
-  it("resets the app-wide clearing guard even when clearPairing throws", async () => {
+  it("a failed clear hands on clearFailed and answers it, so the episode is not marked handled", async () => {
+    const afterForget = vi.fn();
     const handler = createUnpairedHandler({
-      id: MACHINE,
-      clearPairing: vi.fn(async () => {
-        throw new Error("keychain unavailable");
-      }),
-      navigateToPair: vi.fn(),
+      forget: async () => CLEAR_FAILED,
+      afterForget,
       log: vi.fn(),
     });
 
-    await handler();
-    expect(isClearingPairing(MACHINE)).toBe(false);
+    await expect(handler()).resolves.toBe("clearFailed");
+
+    expect(afterForget).toHaveBeenCalledExactlyOnceWith(CLEAR_FAILED);
+  });
+
+  it("I2 bite-proof: a forget that rejects all the same still routes, logs a secret-free line and never throws", async () => {
+    const afterForget = vi.fn();
+    const log = vi.fn();
+    const handler = createUnpairedHandler({
+      forget: async () => {
+        throw new Error("keychain unavailable");
+      },
+      afterForget,
+      log,
+    });
+
+    await expect(handler()).resolves.toBe("clearFailed");
+
+    expect(afterForget).toHaveBeenCalledExactlyOnceWith(CLEAR_FAILED);
+    expect(log).toHaveBeenCalledTimes(1);
+    const [line] = log.mock.calls[0] as [string];
+    expect(line).not.toMatch(/token|secret/i);
   });
 });

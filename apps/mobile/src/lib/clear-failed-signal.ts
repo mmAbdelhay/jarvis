@@ -3,9 +3,9 @@
 // carried as a `clearFailed=1` route param on the `/pair` navigation — but Expo
 // Router maps `jarvis://pair?...&clearFailed=1` to the very same route param,
 // so a crafted link could forge it and bypass the "refuse while paired" check.
-// The only caller is `unpaired-handler.ts`, after its own `clearPairing()` call
-// throws, with the id its scope was built for. There is no path from a link —
-// or from anything else — into it, forged or not. `/pair` retries that id.
+// The only caller is `MachineSessions.forget`, when the store could not remove
+// the machine, with that machine's id. There is no path from a link — or from
+// anything else — into it, forged or not. `/pair` retries that id.
 
 import type { MachineId } from "./machine-index";
 

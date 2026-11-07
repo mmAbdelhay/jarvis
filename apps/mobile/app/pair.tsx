@@ -23,7 +23,6 @@ import { t } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
 import { nativeTransport } from "@/lib/native-transport";
 import {
-  afterClearRetry,
   type AlreadyPairedCheck,
   canStartIntake,
   entryPhaseKind,
@@ -33,6 +32,7 @@ import {
   shouldDrainPairingLink,
 } from "@/lib/pair-flow";
 import { useMachineSessions } from "@/lib/machine-context";
+import { retryClear as retryClearOf } from "@/lib/machine-sessions";
 import type { MachineId } from "@/lib/machine-index";
 import { machineStore, openMachineStore } from "@/lib/machine-store-instance";
 import { pair, type PairOutcome, withHost } from "@/lib/pairing";
@@ -254,21 +254,14 @@ function PairScreen() {
   // a retry that just cleared the record is already known to have nothing
   // left to find) and moves on to "scan" only once it actually succeeds.
   const retryClear = useCallback(async () => {
-    let cleared: boolean;
-    try {
-      await sessions.removeMachine(clearFailedIdRef.current);
-      cleared = true;
-    } catch {
-      // Logged without any secret: just the fact that the retry failed.
-      console.warn("pair: retrying the clear failed");
-      cleared = false;
-    }
-    const next = afterClearRetry(cleared);
+    const next = await retryClearOf(sessions, clearFailedIdRef.current);
     if (next === "scan") {
       alreadyPairedRef.current = false;
       safeSetPhase({ kind: "scan" });
       return;
     }
+    // Logged without any secret: just the fact that the retry failed.
+    console.warn("pair: retrying the clear failed");
     safeSetPhase({ kind: "clearFailed" });
   }, [sessions, safeSetPhase]);
 

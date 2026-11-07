@@ -1,59 +1,41 @@
 // Extracted from `app/_layout.tsx`: a `_layout.tsx` React component can't
-// be unit tested directly, so the actual "what happens on an unpaired
-// episode" decision lives here as a plain function instead — try to clear
-// the stored pairing, log a secret-free line if that fails, and navigate
-// to /pair *either way*, so the user is never stranded on a dead Dashboard
+// be unit tested directly, so what happens on an unpaired episode lives here as
+// a plain function instead: forget that machine, and act on where that leaves
+// the user. Never rejects, so the user is never stranded on a dead Dashboard
 // showing "This phone was unpaired." with no route forward.
 //
-// Navigating "either way" isn't enough on its own — a clearing failure
-// leaves the old record on disk, and the ordinary already-paired check
-// would then show a contradictory "already paired" screen with only a
-// Dashboard button that loops back with the now-revoked token
-// (task-6-rereview-r1.md, Important 1). The outcome this returns (and
-// passes to `navigateToPair`) is what lets `/pair` show its distinct
-// `clearFailed` phase instead (pair-flow.ts's
-// `entryPhaseKind`/`afterClearRetry`) — and what lets the connection store
-// (connection-store.ts) avoid marking the episode "handled" when it
-// wasn't.
+// The outcome this answers is what lets the connection store
+// (connection-store.ts) avoid marking the episode "handled" when the clear
+// failed. A failed clear leaves the old record on disk, and the ordinary
+// already-paired check would then show a contradictory "already paired" screen
+// with only a Dashboard button that loops back with the now-revoked token
+// (task-6-rereview-r1.md, Important 1), which is why `forget` sets the
+// clear-failed signal and `/pair` shows its distinct `clearFailed` phase
+// (pair-flow.ts's `entryPhaseKind`/`afterClearRetry`).
 //
-// The `clearFailed` phase is signalled through a one-shot, in-memory flag
-// (clear-failed-signal.ts) rather than a route param — a
-// `jarvis://pair?...&clearFailed=1` link could otherwise forge it. This is
-// the *only* place that ever calls `setClearFailedSignal()`; `/pair` reads
-// it back with `takeClearFailedSignal()`, never from a link or a param.
-//
-// The clear itself is also wrapped in the same per-machine `pairing-guard.ts`
-// flag Settings' manual unpair uses, closing the window where a Settings
-// "Reconnect" during this automatic clear could still read the
-// not-yet-removed record and reconnect with a token that's about to be
-// invalidated. `id` is fixed when the handler is built, so a clear always
-// concerns the machine that was revoked, whichever is active by then.
+// What to forget and where to go are the caller's: `unpairedHandlerFor` in
+// machine-sessions.ts fixes the machine and the cause when it builds this, so a
+// clear always concerns the machine that was revoked, whichever is active by
+// then.
 
-import { setClearFailedSignal } from "./clear-failed-signal";
-import type { MachineId } from "./machine-index";
-import { setClearingPairing } from "./pairing-guard";
+import type { ForgetOutcome } from "./machine-sessions";
 
 export type UnpairedOutcome = "cleared" | "clearFailed";
 
 export function createUnpairedHandler(deps: {
-  id: MachineId | null;
-  clearPairing(): Promise<void>;
-  navigateToPair(outcome: UnpairedOutcome): void;
+  forget(): Promise<ForgetOutcome>;
+  afterForget(outcome: ForgetOutcome): void;
   log(line: string): void;
 }): () => Promise<UnpairedOutcome> {
   return async () => {
-    setClearingPairing(deps.id, true);
+    let outcome: ForgetOutcome;
     try {
-      await deps.clearPairing();
+      outcome = await deps.forget();
     } catch {
-      deps.log("onUnpaired: clearPairing failed; routing to /pair's clearFailed phase");
-      setClearFailedSignal(deps.id);
-      deps.navigateToPair("clearFailed");
-      return "clearFailed";
-    } finally {
-      setClearingPairing(deps.id, false);
+      deps.log("onUnpaired: forgetting the machine failed; routing to /pair");
+      outcome = { kind: "clearFailed" };
     }
-    deps.navigateToPair("cleared");
-    return "cleared";
+    deps.afterForget(outcome);
+    return outcome.kind === "clearFailed" ? "clearFailed" : "cleared";
   };
 }
