@@ -1,6 +1,3 @@
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { CLOSE, encodeMessage } from "@jarvis/wire";
 import { describe, expect, it, vi } from "vitest";
 import { setClearFailedSignal, takeClearFailedSignal } from "./clear-failed-signal";
@@ -26,6 +23,7 @@ import { MACHINE_INDEX_KEY } from "./machine-index";
 import { type MachineScope, prepareSwitchRoute, unpairedHandlerFor } from "./machine-sessions";
 import { setClearingPairing } from "./pairing-guard";
 import { handleNotificationTap } from "./push-context-support";
+import { createNavigatorGate } from "./scope-routing";
 import { createTopBarStore } from "./top-bar-store";
 
 const OFFLINE = { ok: false, error: { kind: "offline" } };
@@ -57,6 +55,7 @@ describe("switchTo: the order", () => {
       `disconnect ${A_ID}`,
       `setActive ${B_ID}`,
       `publish ${B_ID}`,
+      `disconnect ${B_ID}`,
       `connect ${B_ID}`,
     ]);
     expect(h.sessions.current().id).toBe(B_ID);
@@ -104,6 +103,50 @@ describe("nothing of one machine reaches another", () => {
     await h.sessions.switchTo(B_ID);
 
     expect(await call).toEqual(OFFLINE);
+  });
+
+  it("a call a stale screen queued on a closed client settles offline on return, and never replays", async () => {
+    const h = machinesHarness();
+    const a = await h.start();
+    await h.unlockCurrent();
+    await h.sessions.switchTo(B_ID);
+    const stale = a.client.call("sessions:list", []);
+
+    await h.sessions.switchTo(A_ID);
+
+    expect(await stale).toEqual(OFFLINE);
+    expect(h.sessions.current().client).toBe(a.client);
+    welcome(h.socketOf(A_ID));
+    await settle();
+    expect(requestsOn(h.socketOf(A_ID), "sessions:list")).toEqual([]);
+  });
+
+  it("a call queued on a kept client settles offline when a reconnect brings that client back", async () => {
+    const h = machinesHarness();
+    const a = await h.start();
+    await h.sessions.switchTo(B_ID);
+    const stale = a.client.call("sessions:list", []);
+    await h.sessions.removeMachine(B_ID);
+
+    expect(await h.sessions.reconnect()).toBe("connected");
+
+    expect(h.sessions.current().client).toBe(a.client);
+    expect(await stale).toEqual(OFFLINE);
+    welcome(h.socketOf(A_ID));
+    await settle();
+    expect(requestsOn(h.socketOf(A_ID), "sessions:list")).toEqual([]);
+  });
+
+  it("a reconnect on the client on screen keeps that screen's queued calls", async () => {
+    const h = machinesHarness();
+    const a = await h.start();
+    const queued = a.client.call("sessions:list", []);
+
+    expect(await h.sessions.reconnect()).toBe("connected");
+
+    expect(h.events).not.toContain(`disconnect ${A_ID}`);
+    a.client.disconnect();
+    expect(await queued).toEqual(OFFLINE);
   });
 
   it("a late frame from A's socket reaches no handler on A or B", async () => {
@@ -313,7 +356,77 @@ describe("switching more than once", () => {
   });
 });
 
+describe("the idle preference", () => {
+  it("a shortened window reaches a machine that is not on screen", async () => {
+    const h = machinesHarness();
+    const a = await h.start();
+    await h.unlockCurrent();
+    await h.sessions.switchTo(B_ID);
+
+    h.sessions.setIdleMs(IDLE_MS / 3);
+    h.clock.advance(IDLE_MS / 3);
+    await settle();
+
+    expect(a.authSession.get().lockedLocally).toBe(true);
+    expect(a.authSession.get().lockCause).toBe("idle");
+  });
+
+  it("reaches the machine on screen", async () => {
+    const h = machinesHarness();
+    const a = await h.start();
+    await h.unlockCurrent();
+
+    h.sessions.setIdleMs(IDLE_MS / 3);
+    h.clock.advance(IDLE_MS / 3);
+    await settle();
+
+    expect(a.authSession.get().lockCause).toBe("idle");
+  });
+
+  it("a scope built later takes the window last set", async () => {
+    const h = machinesHarness();
+    await h.start();
+    h.sessions.setIdleMs(IDLE_MS / 3);
+    await h.sessions.switchTo(B_ID);
+    const b = await h.unlockCurrent();
+
+    h.clock.advance(IDLE_MS / 3);
+    await settle();
+
+    expect(b.authSession.get().lockCause).toBe("idle");
+  });
+});
+
 describe("a switch that cannot happen", () => {
+  it('a scope that cannot be built: "unknown", logged, and the switching mark cleared', async () => {
+    const h = machinesHarness();
+    const a = await h.start();
+    const { refreshKey } = h.store;
+    h.store.refreshKey = () => {
+      throw new Error("machines: store is not open");
+    };
+
+    expect(await h.sessions.switchTo(B_ID)).toBe("unknown");
+
+    expect(h.events).toContain("abandoned");
+    expect(h.logs).toContain("machines: publishing the next machine failed");
+    expect(h.sessions.current().client).toBe(a.client);
+
+    // The banner's retry brings back the machine on screen.
+    h.store.refreshKey = refreshKey;
+    expect(a.client.state()).toBe("closed");
+    expect(await h.sessions.reconnect()).toBe("connected");
+    expect(h.sessions.current().client).toBe(a.client);
+    expect(a.client.state()).not.toBe("closed");
+  });
+
+  it("a switch that goes through never reports abandoned", async () => {
+    const h = machinesHarness();
+    await h.start();
+    await h.sessions.switchTo(B_ID);
+    expect(h.events).not.toContain("abandoned");
+  });
+
   it('an unknown id: "unknown", the old machine stays connected', async () => {
     const h = machinesHarness();
     const a = await h.start();
@@ -404,6 +517,17 @@ describe("the clearing guard", () => {
 });
 
 describe("start", () => {
+  it("refused by the route it landed on: nothing connects, and a later reconnect does", async () => {
+    const h = machinesHarness();
+
+    expect(await h.sessions.start(undefined, () => false)).toBe("unpaired");
+
+    expect(h.transport.sockets).toHaveLength(0);
+    expect(h.sessions.current().id).toBeNull();
+    expect(await h.sessions.reconnect()).toBe("connected");
+    expect(h.sessions.current().id).toBe(A_ID);
+  });
+
   it("connects the last active machine", async () => {
     const h = machinesHarness({ active: C_ID });
     expect(await h.sessions.start()).toBe("connected");
@@ -738,9 +862,91 @@ describe("removing a machine, by each of the three callers' paths", () => {
     expect(await h.sessions.reconnect()).toBe("connected");
 
     expect(h.sessions.current().client).not.toBe(a.client);
+    expect(a.client.state()).toBe("closed");
     await h.unlockCurrent("6");
     expect(h.refresh.values.get(`jarvis.m.${A_ID}.refresh`)).toBe(tokenReply("6", 0).refreshToken);
     expect(h.refresh.values.has("jarvis.refresh")).toBe(false);
+  });
+
+  describe("paired again at the same address, under the same key", () => {
+    const newCredential = { deviceId: recordOf(B_ID).deviceId, token: "N".repeat(43) };
+
+    /** B's scope, signed in, with B's record then found unusable. */
+    async function bHealedAway() {
+      const h = machinesHarness({ active: B_ID });
+      const old = await h.start();
+      await h.unlockCurrent("7");
+      h.secure.values.delete(`jarvis.m.${B_ID}.pairing`);
+      return { h, old };
+    }
+
+    function signedInSession(scope: MachineScope) {
+      return scope.authSession.get().lockedLocally === false && scope.client.state() === "open";
+    }
+
+    it("a connect that finds the record gone drops the scope, so the next is new", async () => {
+      const { h, old } = await bHealedAway();
+
+      expect(await h.sessions.reconnect()).toBe("unpaired");
+      await h.store.add(recordOf(B_ID), newCredential);
+
+      expect(await h.sessions.switchTo(B_ID)).toBe("switched");
+
+      expect(h.sessions.current().client).not.toBe(old.client);
+      expect(h.sessions.current().authSession).not.toBe(old.authSession);
+      expect(signedInSession(h.sessions.current())).toBe(false);
+      expect(old.client.state()).toBe("closed");
+    });
+
+    it("a switch that finds the record gone drops the kept scope", async () => {
+      const { h, old } = await bHealedAway();
+      await h.sessions.switchTo(A_ID);
+      h.secure.values.set(`jarvis.m.${B_ID}.pairing`, "");
+      expect(await h.sessions.switchTo(B_ID)).toBe("unknown");
+
+      await h.store.add(recordOf(B_ID), newCredential);
+      expect(await h.sessions.switchTo(B_ID)).toBe("switched");
+
+      expect(h.sessions.current().client).not.toBe(old.client);
+      expect(h.sessions.current().authSession).not.toBe(old.authSession);
+    });
+
+    it("healed by a screen's own read, and the sessions never told: the new credential drops the scope", async () => {
+      const { h, old } = await bHealedAway();
+      expect(await h.store.load(B_ID)).toBeUndefined();
+      await h.store.add(recordOf(B_ID), newCredential);
+
+      expect(await h.sessions.reconnect()).toBe("connected");
+
+      const next = h.sessions.current();
+      expect(next.id).toBe(B_ID);
+      expect(next.client).not.toBe(old.client);
+      expect(next.authSession).not.toBe(old.authSession);
+      expect(old.client.state()).toBe("closed");
+      const socket = h.socketOf(B_ID);
+      expect(socket.url).toContain("mac.tail.ts.net");
+      welcome(socket);
+      await settle();
+      const sent = JSON.stringify(socket.sent);
+      expect(sent).not.toContain(tokenReply("7", 0).accessToken);
+      expect(sent).not.toContain(tokenReply("7", 0).refreshToken);
+    });
+
+    it("the same pairing again keeps its scope and its tokens", async () => {
+      const h = machinesHarness({ active: B_ID });
+      const b = await h.start();
+      await h.sessions.switchTo(A_ID);
+      await h.sessions.switchTo(B_ID);
+      expect(h.sessions.current().client).toBe(b.client);
+    });
+  });
+
+  it("a refused connect keeps the scope: the record is still there", async () => {
+    const h = machinesHarness();
+    const a = await h.start();
+    expect(await h.sessions.reconnect(() => false)).toBe("unpaired");
+    expect(await h.sessions.reconnect()).toBe("connected");
+    expect(h.sessions.current().client).toBe(a.client);
   });
 
   it("the remaining machine connects next, in its own scope", async () => {
@@ -768,6 +974,7 @@ describe("removing a machine, by each of the three callers' paths", () => {
           await h.sessions.removeMachine(id);
         },
       },
+      gate: h.gate,
       navigateToPair: () => routes.push("/pair"),
       log: () => {},
     });
@@ -859,6 +1066,26 @@ describe("logout or keep-signed-in off, with the store not open", () => {
     expect(h.logs).not.toContain("auth: deleting the stored refresh token failed");
   });
 
+  it("a logout after a failed open says it could not reach a machine's own token", async () => {
+    const h = machinesHarness({ active: B_ID });
+    h.secure.failGet = (key) => key === MACHINE_INDEX_KEY;
+    expect(await h.sessions.start()).toBe("failed");
+
+    await h.sessions.current().authSession.logout();
+
+    expect(h.refresh.values.get(refreshKeyOf(B_ID))).toBe(refreshTokenOf(B_ID));
+    expect(h.logs).toContain("machines: a logout with no open store reached the legacy token only");
+    expect(JSON.stringify(h.logs)).not.toContain(refreshTokenOf(B_ID));
+  });
+
+  it("a logout with the store open says nothing of the kind", async () => {
+    const h = machinesHarness({ active: B_ID });
+    await h.sessions.current().authSession.logout();
+    expect(h.logs).not.toContain(
+      "machines: a logout with no open store reached the legacy token only",
+    );
+  });
+
   it("keep-signed-in off after a failed open takes the token off the disk", async () => {
     const h = machinesHarness();
     h.secure.failGet = (key) => key === MACHINE_INDEX_KEY;
@@ -912,6 +1139,8 @@ describe("logout or keep-signed-in off, with the store not open", () => {
 });
 
 describe("prepareSwitchRoute", () => {
+  const up = createNavigatorGate(() => true);
+
   function router(options: { canDismiss?: boolean } = {}) {
     const calls: string[] = [];
     return {
@@ -924,17 +1153,17 @@ describe("prepareSwitchRoute", () => {
 
   it("dismisses the stack, then goes to /dashboard", () => {
     const r = router();
-    prepareSwitchRoute(r, () => {});
+    prepareSwitchRoute(r, up, () => {});
     expect(r.calls).toEqual(["dismissAll", "replace /dashboard"]);
   });
 
   it("with nothing to dismiss, as on /pair, only goes to /dashboard", () => {
     const r = router({ canDismiss: false });
-    prepareSwitchRoute(r, () => {});
+    prepareSwitchRoute(r, up, () => {});
     expect(r.calls).toEqual(["replace /dashboard"]);
   });
 
-  it("with nothing mounted, it logs and never throws", () => {
+  it("a router that throws all the same: logged, and never out of here", () => {
     const logs: string[] = [];
     const notMounted = {
       canDismiss: () => {
@@ -947,7 +1176,7 @@ describe("prepareSwitchRoute", () => {
         throw new Error("before mounting");
       },
     };
-    expect(() => prepareSwitchRoute(notMounted, (line) => logs.push(line))).not.toThrow();
+    expect(() => prepareSwitchRoute(notMounted, up, (line) => logs.push(line))).not.toThrow();
     expect(logs).toEqual(["machines: no navigator to prepare for the switch"]);
   });
 
@@ -956,7 +1185,7 @@ describe("prepareSwitchRoute", () => {
     r.dismissAll = () => {
       throw new Error("no stack");
     };
-    prepareSwitchRoute(r, () => {});
+    prepareSwitchRoute(r, up, () => {});
     expect(r.calls).toEqual(["replace /dashboard"]);
   });
 });
@@ -982,25 +1211,6 @@ describe("tapped notifications", () => {
     await handleNotificationTap({ ...tapDeps(b), waitForOpen: waited }, response);
 
     expect(waited).not.toHaveBeenCalled();
-  });
-
-  it("the tree's wiring: the ids live above the key, and everything else under it", () => {
-    const here = dirname(fileURLToPath(import.meta.url));
-    const layout = readFileSync(resolve(here, "..", "..", "app", "_layout.tsx"), "utf8");
-    const push = readFileSync(resolve(here, "push-context.tsx"), "utf8");
-
-    expect(push).not.toContain("handledIdsRef");
-    expect(push).toContain("handledIds: Set<string>");
-    expect(layout).toContain("key={scope.generation}");
-    expect(layout).toContain("handledIds={");
-    expect(layout).not.toContain("clientRef");
-    expect(layout).not.toContain("authSessionRef");
-    expect(layout).not.toContain("connectionStoreRef");
-    expect(layout).not.toContain("connectionStore.dispose");
-    expect(layout.indexOf("<PhoneUpdateProvider")).toBeLessThan(
-      layout.indexOf("key={scope.generation}"),
-    );
-    expect(layout.indexOf("key={scope.generation}")).toBeLessThan(layout.indexOf("<PushProvider"));
   });
 });
 

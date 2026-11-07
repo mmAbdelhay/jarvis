@@ -163,7 +163,9 @@ export type SettingsStoreDeps = {
   // push-registration.ts, not here.
   push: Pick<PushRegistration, "get" | "subscribe" | "setEnabled">;
   // Phase 0 owner login: this machine's auth session (machine-sessions.ts).
-  auth: Pick<AuthSession, "logout" | "setIdleMs" | "storagePolicyChanged">;
+  auth: Pick<AuthSession, "logout" | "storagePolicyChanged">;
+  /** The idle window is one preference: every machine's session takes it. */
+  setIdleMs(ms: number): void;
 };
 
 const TICK_MS = 1_000;
@@ -336,7 +338,7 @@ export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
   async function setIdleLockMinutes(minutes: IdleLockMinutes): Promise<void> {
     const current = await loadPrefs(deps.prefs, deps.localeTag);
     await savePrefs(deps.prefs, { ...current, idleLockMinutes: minutes });
-    deps.auth.setIdleMs(minutes * 60_000);
+    deps.setIdleMs(minutes * 60_000);
     setView({ idleLockMinutes: minutes });
   }
 

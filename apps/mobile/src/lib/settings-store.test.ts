@@ -243,12 +243,12 @@ function baseDeps(overrides: Partial<SettingsStoreDeps> = {}): {
       logout: async () => {
         authCalls.push("logout");
       },
-      setIdleMs: (ms: number) => {
-        authCalls.push(`idle ${ms}`);
-      },
       storagePolicyChanged: async () => {
         authCalls.push("policy");
       },
+    },
+    setIdleMs: (ms: number) => {
+      authCalls.push(`idle ${ms}`);
     },
     ...overrides,
   };

@@ -18,7 +18,7 @@ import { dialogs } from "@/lib/dialog";
 import { platformKey, t } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
 import { useMachineSessions } from "@/lib/machine-context";
-import { machineStore, openMachineStore } from "@/lib/machine-store-instance";
+import { loadScreenMachine } from "@/lib/machine-store-instance";
 import { filePrefsStore } from "@/lib/prefs-file";
 import { usePushRegistration } from "@/lib/push-context";
 import { useAuthSession, useConnectionStore, useMachineId, useRpcClient } from "@/lib/rpc-context";
@@ -83,8 +83,7 @@ function SettingsScreen() {
         machineId,
         // This screen's machine, fixed at mount, whichever is active by then.
         loadRecord: async () => {
-          await openMachineStore();
-          return machineId === null ? undefined : (await machineStore.load(machineId))?.record;
+          return (await loadScreenMachine(machineId))?.record;
         },
         // The same shared read+connect `_layout.tsx` uses on entry — one read
         // path for connecting in the app.
@@ -105,6 +104,7 @@ function SettingsScreen() {
         // (push-context.tsx), never a second instance built here.
         push,
         auth: authSession,
+        setIdleMs: sessions.setIdleMs,
       }),
     [machineId, sessions, client, connection, router, push, authSession],
   );

@@ -27,6 +27,7 @@ import { createPrefsFacade, handleNotificationTap, waitForOpen } from "./push-co
 import type { PushPrefs, PushRegistration } from "./push-registration";
 import { createPushRegistration } from "./push-registration";
 import { useRpcClient } from "./rpc-context";
+import type { NavigatorGate } from "./scope-routing";
 
 const PushContext = createContext<PushRegistration | undefined>(undefined);
 
@@ -36,14 +37,17 @@ export function PushProvider(props: {
   // `_layout.tsx`: this provider remounts on a switch, and `lastResponse()`
   // would replay the last tap on every machine switched to.
   handledIds: Set<string>;
+  // This provider renders nothing, so no navigator, until its prefs load, and a
+  // tap read at launch can be answered first.
+  gate: NavigatorGate;
 }): React.JSX.Element | null {
-  const { handledIds } = props;
+  const { handledIds, gate } = props;
   const client = useRpcClient();
   const language = useLanguage();
   const router = useRouter();
   const tapRouter = useMemo(
-    () => ({ push: (route: string): void => router.push(route) }),
-    [router],
+    () => ({ push: (route: string): void => gate.navigate(() => router.push(route)) }),
+    [router, gate],
   );
 
   // Loaded once, before the registration is ever built (fix round 1,

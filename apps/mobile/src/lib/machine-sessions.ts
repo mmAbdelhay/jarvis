@@ -14,6 +14,9 @@
 //   or while that machine is being cleared (pairing-guard.ts). A connect that
 //   arrives during a switch waits for it, or it would bring back the machine
 //   being left.
+// - A kept scope is used only for the pairing it was built on. One whose record
+//   is gone, or that a read finds under a new credential, is dropped, so a
+//   session's old tokens are never offered to whoever holds that address now.
 //
 // `current()` has an answer from the start, the null scope, since a store that
 // has not opened cannot say which machine is active. The null scope holds no
@@ -29,8 +32,9 @@ import { createConnectionStore } from "./connection-store";
 import type { MachineId } from "./machine-index";
 import type { MachineStore } from "./machine-store";
 import { isClearingPairing } from "./pairing-guard";
-import type { RpcClient } from "./rpc-client";
+import type { Credential, Endpoint, RpcClient } from "./rpc-client";
 import { createRpcClient } from "./rpc-client";
+import type { NavigatorGate } from "./scope-routing";
 import type { SecureStore } from "./secure-store";
 import type { Transport } from "./transport";
 import { type UnpairedOutcome, createUnpairedHandler } from "./unpaired-handler";
@@ -38,6 +42,7 @@ import { type UnpairedOutcome, createUnpairedHandler } from "./unpaired-handler"
 const DEFAULT_QUIESCE_MS = 3_000;
 // Never written: the null scope's store ignores what it is given.
 const NO_MACHINE_REFRESH_KEY = "jarvis.m.none";
+const NO_INDEX_LOGOUT_LINE = "machines: a logout with no open store reached the legacy token only";
 
 export type MachineScope = {
   id: MachineId | null;
@@ -54,12 +59,16 @@ export type SwitchOutcome = "switched" | "same" | "unknown" | "superseded";
 export type MachineSessions = {
   current(): MachineScope;
   subscribe(cb: (scope: MachineScope) => void): () => void;
-  /** At launch: connects `preferred` if held, else the last active machine. */
-  start(preferred?: MachineId): Promise<ConnectStoredOutcome>;
+  /** At launch: connects `preferred` if held, else the last active machine,
+   *  unless `shouldConnect` refuses: the store has opened either way. */
+  start(preferred?: MachineId, shouldConnect?: () => boolean): Promise<ConnectStoredOutcome>;
   /** Connects the machine on screen, or the active one once that is gone. */
   reconnect(shouldConnect?: () => boolean): Promise<ConnectStoredOutcome>;
   switchTo(id: MachineId): Promise<SwitchOutcome>;
   setAppActive(active: boolean): void;
+  /** The idle window, for every machine's session, on screen or not, and for
+   *  those built later. */
+  setIdleMs(ms: number): void;
   /** Unpair: removes the machine and its session's tokens. A scope on screen
    *  stays until the next one is published, but is never reused: a machine
    *  paired again may live under other keys. Rejects when the store could not
@@ -71,6 +80,9 @@ export function createMachineSessions(deps: {
   store: MachineStore;
   buildScope(id: MachineId | null): BuiltScope;
   prepareSwitch(): void;
+  /** After `prepareSwitch`, when no next scope could be published: whatever
+   *  it set up for a change of tree will not get one. */
+  switchAbandoned(): void;
   log(line: string): void;
   quiesceMs?: number;
 }): MachineSessions {
@@ -79,9 +91,12 @@ export function createMachineSessions(deps: {
   const listeners = new Set<(scope: MachineScope) => void>();
   const scopes = new Map<MachineId, BuiltScope>();
   const scopeKeys = new Map<MachineId, string>();
+  /** The pairing each kept scope last connected with. */
+  const scopeCredentials = new Map<MachineId, Credential>();
   let generation = 0;
   let scope: MachineScope = { ...deps.buildScope(null), generation };
   let appActive = true;
+  let idleMs: number | undefined;
   let latestAttempt = 0;
   let switchesInFlight = 0;
   let lastSwitch: Promise<unknown> = Promise.resolve();
@@ -91,25 +106,53 @@ export function createMachineSessions(deps: {
     built.authSession.dispose();
   }
 
+  /** Never reused from here on. One still on screen stays until the next
+   *  publish, which retires it. */
+  function dropScope(id: MachineId): void {
+    const kept = scopes.get(id);
+    scopes.delete(id);
+    scopeKeys.delete(id);
+    scopeCredentials.delete(id);
+    if (kept !== undefined && scope.client !== kept.client) retire(kept);
+  }
+
   /** The kept scope, unless its machine now lives under another key: a store
    *  self-heal can drop a machine with no word to this object, and pairing it
    *  again may not use the legacy slot. A scope's key never changes. */
   function keptScope(id: MachineId): BuiltScope | undefined {
     const kept = scopes.get(id);
     if (kept === undefined || scopeKeys.get(id) === store.refreshKey(id)) return kept;
-    scopes.delete(id);
-    if (scope.client !== kept.client) retire(kept);
+    dropScope(id);
     return undefined;
+  }
+
+  /** A new credential means a new pairing, whoever healed the old one away and
+   *  whatever key it lives under. The address may now be another machine, and
+   *  the old session's tokens must not be offered to it. */
+  function noteCredential(id: MachineId, credential: Credential): void {
+    const known = scopeCredentials.get(id);
+    if (known !== undefined) {
+      if (known.deviceId !== credential.deviceId || known.token !== credential.token) dropScope(id);
+    }
+    scopeCredentials.set(id, credential);
   }
 
   function scopeOf(id: MachineId): BuiltScope {
     let built = keptScope(id);
     if (built === undefined) {
       built = deps.buildScope(id);
+      if (idleMs !== undefined) built.authSession.setIdleMs(idleMs);
       scopes.set(id, built);
       scopeKeys.set(id, store.refreshKey(id));
     }
     return built;
+  }
+
+  /** Just before a connect of a client that may have been on screen before: a
+   *  stale screen's calls queue on a closed client, and must not replay. */
+  function connectClean(client: RpcClient, endpoint: Endpoint, credential: Credential): void {
+    client.disconnect();
+    client.connect(endpoint, credential);
   }
 
   /** The scope on screen is still the one kept for its machine, and held. */
@@ -132,6 +175,9 @@ export function createMachineSessions(deps: {
 
   function publish(built: BuiltScope): MachineScope {
     const old = scope;
+    // Only one client is ever connected. A switch has closed it already; a
+    // scope dropped from under the screen has not.
+    if (old.client !== built.client && old.client.state() !== "closed") old.client.disconnect();
     generation += 1;
     scope = { ...built, generation };
     for (const listener of [...listeners]) {
@@ -161,16 +207,21 @@ export function createMachineSessions(deps: {
         id,
         client: {
           connect(endpoint, credential) {
-            const target = scope.id === id && isLive(scope) ? scope : publish(scopeOf(id));
-            target.client.connect(endpoint, credential);
+            noteCredential(id, credential);
+            if (scope.id === id && isLive(scope)) scope.client.connect(endpoint, credential);
+            else connectClean(publish(scopeOf(id)).client, endpoint, credential);
           },
         },
         shouldConnect: () =>
           attempt === latestAttempt && !isClearingPairing(id) && (shouldConnect?.() ?? true),
       });
-      // Refused by a switch, not for want of a pairing: answer for what it
-      // left on screen.
-      if (outcome === "unpaired" && attempt !== latestAttempt) return connectActive(shouldConnect);
+      if (outcome === "unpaired") {
+        // Refused by a switch, not for want of a pairing: answer for what it
+        // left on screen.
+        if (attempt !== latestAttempt) return connectActive(shouldConnect);
+        // Its record is gone. Pairing that address again must start clean.
+        if (!store.has(id)) dropScope(id);
+      }
       return outcome;
     } catch {
       deps.log("machines: connecting failed");
@@ -186,7 +237,12 @@ export function createMachineSessions(deps: {
       deps.log("machines: reading a machine for a switch failed");
       return "unknown";
     }
-    if (loaded === undefined) return "unknown";
+    if (loaded === undefined) {
+      // Pairing that address again must start clean.
+      dropScope(id);
+      return "unknown";
+    }
+    noteCredential(id, loaded.credential);
 
     await scope.authSession.quiesce(quiesceMs);
     if (attempt !== latestAttempt) return "superseded";
@@ -206,9 +262,24 @@ export function createMachineSessions(deps: {
 
     // Published even if superseded by now: the old client is closed either
     // way, and only the latest attempt connects.
-    const next = publish(scopeOf(id));
+    let next: MachineScope;
+    try {
+      next = publish(scopeOf(id));
+    } catch {
+      // The machine went during the wait, or the store closed. The old machine
+      // stays on screen, closed, and its banner offers the retry.
+      deps.log("machines: publishing the next machine failed");
+      try {
+        deps.switchAbandoned();
+      } catch {
+        deps.log("machines: abandoning the switch failed");
+      }
+      return "unknown";
+    }
     if (attempt !== latestAttempt) return "superseded";
-    if (!isClearingPairing(id)) next.client.connect(endpointOf(loaded.record), loaded.credential);
+    if (!isClearingPairing(id)) {
+      connectClean(next.client, endpointOf(loaded.record), loaded.credential);
+    }
     return "switched";
   }
 
@@ -249,7 +320,7 @@ export function createMachineSessions(deps: {
         listeners.delete(cb);
       };
     },
-    async start(preferred) {
+    async start(preferred, shouldConnect) {
       if (preferred !== undefined && (await store.open()) === "ok" && store.has(preferred)) {
         try {
           await store.setActive(preferred);
@@ -257,13 +328,18 @@ export function createMachineSessions(deps: {
           deps.log("machines: recording the active machine failed");
         }
       }
-      return connectActive();
+      return connectActive(shouldConnect);
     },
     reconnect: connectActive,
     switchTo,
     setAppActive(active) {
       appActive = active;
       applyAppActive(scope);
+    },
+    setIdleMs(ms) {
+      idleMs = ms;
+      scope.authSession.setIdleMs(ms);
+      for (const built of scopes.values()) built.authSession.setIdleMs(ms);
     },
     async removeMachine(id) {
       await store.open();
@@ -276,8 +352,7 @@ export function createMachineSessions(deps: {
       const built = scopes.get(id);
       if (built === undefined) return;
       await built.authSession.forget();
-      scopes.delete(id);
-      if (scope.client !== built.client) retire(built);
+      dropScope(id);
     },
   };
 }
@@ -306,7 +381,9 @@ function noMachineStorage(deps: MachineScopeDeps) {
     get: async () => undefined,
     set: async () => {},
     async delete() {
-      await deps.store.open();
+      // With no index there is no knowing a machine's own key: its token stays
+      // on the disk, whichever machine the owner meant.
+      if ((await deps.store.open()) === "failed") deps.log(NO_INDEX_LOGOUT_LINE);
       const key = deps.store.refreshKeyWithNoScope();
       if (key !== undefined) await deps.refreshStore.delete(key);
     },
@@ -367,6 +444,7 @@ export function createMachineScopeBuilder(
 export function unpairedHandlerFor(deps: {
   id: MachineId | null;
   sessions: Pick<MachineSessions, "current" | "removeMachine">;
+  gate: NavigatorGate;
   navigateToPair(): void;
   log(line: string): void;
 }): () => Promise<UnpairedOutcome> {
@@ -374,20 +452,28 @@ export function unpairedHandlerFor(deps: {
     id: deps.id,
     clearPairing: () => deps.sessions.removeMachine(deps.id),
     navigateToPair: () => {
-      if (deps.sessions.current().id === deps.id) deps.navigateToPair();
+      deps.gate.navigate(() => {
+        if (deps.sessions.current().id === deps.id) deps.navigateToPair();
+      });
     },
     log: deps.log,
   });
 }
 
 /** `deps.prepareSwitch` for the app: back to /dashboard, with the stack
- *  dismissed. Safe from any route, including /unlock and /pair, and with no
- *  navigator mounted yet: the new tree mounts whichever route the router is
- *  on, and a machine that is locked brings up its own /unlock. */
+ *  dismissed. Safe from any route, including /unlock and /pair. With no
+ *  navigator mounted it asks for nothing: the router would throw later, from
+ *  an effect nothing here can catch. The new tree mounts whichever route the
+ *  router is on, and a machine that is locked brings up its own /unlock. */
 export function prepareSwitchRoute(
   router: { canDismiss(): boolean; dismissAll(): void; replace(route: "/dashboard"): void },
+  gate: NavigatorGate,
   log: (line: string) => void,
 ): void {
+  if (!gate.isReady()) {
+    log("machines: no navigator to prepare for the switch");
+    return;
+  }
   try {
     if (router.canDismiss()) router.dismissAll();
   } catch {

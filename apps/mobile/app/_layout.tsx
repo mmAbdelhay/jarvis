@@ -1,6 +1,6 @@
 import Constants from "expo-constants";
 import { useFonts } from "expo-font";
-import { Stack, usePathname, useRouter } from "expo-router";
+import { Stack, useNavigationContainerRef, usePathname, useRouter } from "expo-router";
 import * as ScreenOrientation from "expo-screen-orientation";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
@@ -11,8 +11,10 @@ import { APP_FONTS } from "@/lib/app-fonts";
 import { appActivityFor } from "@/lib/app-lifecycle";
 import { deviceOrientationPolicy } from "@/lib/app-orientation";
 import { authChannel } from "@/lib/auth-channel";
+import type { AuthSession } from "@/lib/auth-session";
 import { clientPlatformFor, clientStringFor } from "@/lib/client-platform";
 import { realClock } from "@/lib/clock";
+import type { ConnectionStore } from "@/lib/connection-store";
 import { shouldConnectOnRoute } from "@/lib/dashboard-entry";
 import type { Language } from "@/lib/i18n";
 import { isRtl, t } from "@/lib/i18n";
@@ -37,10 +39,16 @@ import { createDeviceAuth } from "@/lib/device-auth";
 import { refreshLock } from "@/lib/refresh-lock";
 import { refreshStore } from "@/lib/refresh-store";
 import { RpcContext } from "@/lib/rpc-context";
+import {
+  type NavigatorGate,
+  type ScopeRouting,
+  createNavigatorGate,
+  createScopeRouting,
+  reconnectOrPair,
+} from "@/lib/scope-routing";
 import { systemTransportFor } from "@/lib/system-transport";
 import { theme } from "@/lib/theme";
 import { createAppTransport } from "@/lib/trust-routing-transport";
-import { shouldShowUnlock } from "@/lib/unlock-screen";
 import { useLayoutClass } from "@/lib/use-layout-class";
 import { VoiceProvider } from "@/lib/voice-context";
 
@@ -77,6 +85,13 @@ export default function RootLayout() {
   // Rule 2 of push-context.tsx: above the key, or `lastResponse()` would
   // replay a tap after each switch.
   const handledIdsRef = useRef<Set<string>>(new Set());
+  // Above the key, as a route can be waiting across a remount. `isReady` is the
+  // check the router itself makes before it throws (expo-router's
+  // global-state/store.js, `assertIsReady`).
+  const navigationRef = useNavigationContainerRef();
+  const gateRef = useRef<NavigatorGate | undefined>(undefined);
+  gateRef.current ??= createNavigatorGate(() => navigationRef.isReady());
+  const gate = gateRef.current;
 
   // Built exactly once, for the app's whole lifetime. Each machine's client,
   // connection store and auth session live in its scope, and nowhere here.
@@ -105,6 +120,7 @@ export default function RootLayout() {
           unpairedHandlerFor({
             id,
             sessions,
+            gate,
             navigateToPair: () => routerRef.current.replace("/pair"),
             log: (line) => console.warn(line),
           })(),
@@ -112,7 +128,10 @@ export default function RootLayout() {
       }),
       prepareSwitch: () => {
         switchingRef.current = true;
-        prepareSwitchRoute(routerRef.current, log);
+        prepareSwitchRoute(routerRef.current, gate, log);
+      },
+      switchAbandoned: () => {
+        switchingRef.current = false;
       },
       log,
     });
@@ -133,16 +152,21 @@ export default function RootLayout() {
   // null scope would remount at once, and a tap's handler would have spent its
   // once-per-id on a client that never opens. `start` answers once the store
   // has opened, or failed to; the tree's own launch connect routes on that.
+  // A launch landing on /pair connects nothing (dashboard-entry.ts): a machine
+  // connects when the route reaches /dashboard.
+  const launchPathname = useRef(usePathname()).current;
   const [started, setStarted] = useState(false);
   useEffect(() => {
     let cancelled = false;
-    void sessions.start().then(() => {
-      if (!cancelled) setStarted(true);
-    });
+    void sessions
+      .start(undefined, () => shouldConnectOnRoute(launchPathname, false))
+      .then(() => {
+        if (!cancelled) setStarted(true);
+      });
     return () => {
       cancelled = true;
     };
-  }, [sessions]);
+  }, [sessions, launchPathname]);
 
   // M12 Task 5 (M10 ruling d): the app's one `AppState` listener, mapped
   // through `appActivityFor` onto the active machine (the sessions apply it to
@@ -202,13 +226,16 @@ export default function RootLayout() {
       I18nManager.forceRTL(isRtl(prefs.language));
 
       if (!cancelled) {
+        // Before anything mounts. The sessions keep it for each scope, built
+        // or to come, and Settings' setter goes the same way.
+        sessions.setIdleMs(prefs.idleLockMinutes * 60_000);
         setLanguage(prefs.language);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [sessions]);
 
   if (language === null || !fontsLoaded || !started) {
     return null;
@@ -225,6 +252,7 @@ export default function RootLayout() {
               language={language}
               handledIds={handledIdsRef.current}
               switchingRef={switchingRef}
+              gate={gate}
             />
           </Fragment>
         </PhoneUpdateProvider>
@@ -242,27 +270,13 @@ function ScopedTree(props: {
   language: Language;
   handledIds: Set<string>;
   switchingRef: React.RefObject<boolean>;
+  gate: NavigatorGate;
 }): React.JSX.Element {
-  const { scope, sessions, language, handledIds, switchingRef } = props;
+  const { scope, sessions, language, handledIds, switchingRef, gate } = props;
   const { client, connectionStore, authSession } = scope;
   const router = useRouter();
-  const pathname = usePathname();
   const layout = useLayoutClass();
   const wide = layout.kind === "wide";
-
-  // This machine's idle window. Saved prefs apply on every mount, since a
-  // change in Settings reached only the machine on screen then.
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      const localeTag = Intl.DateTimeFormat().resolvedOptions().locale;
-      const prefs = await loadPrefs(filePrefsStore, localeTag);
-      if (!cancelled) authSession.setIdleMs(prefs.idleLockMinutes * 60_000);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [authSession]);
 
   // M11 rule 5: the banner's "Pair again" button, confirmed there, ends up
   // here. Unlike the automatic path (whose socket the server has already
@@ -275,42 +289,11 @@ function ScopedTree(props: {
     void unpairedHandlerFor({
       id: scope.id,
       sessions,
+      gate,
       navigateToPair: () => router.replace("/pair"),
       log: (line) => console.warn(line),
     })();
-  }, [client, scope.id, sessions, router]);
-
-  // Phase 0 owner login: whenever the connection is locked (or the phone
-  // locked itself), the unlock screen goes on top of wherever the owner was.
-  const [connectionState, setConnectionState] = useState(connectionStore.get().state);
-  useEffect(() => {
-    setConnectionState(connectionStore.get().state);
-    return connectionStore.subscribe((view) => setConnectionState(view.state));
-  }, [connectionStore]);
-  const [authView, setAuthView] = useState(authSession.get());
-  useEffect(() => {
-    setAuthView(authSession.get());
-    return authSession.subscribe(setAuthView);
-  }, [authSession]);
-  // Set between a push and the route actually reaching /unlock, so a
-  // second state change in that window can't stack a second unlock screen.
-  const unlockPushPending = useRef(false);
-  // Any move out of "locked" also clears it, so a push that never reached
-  // /unlock can't block every later one.
-  useEffect(() => {
-    if (connectionState !== "locked") unlockPushPending.current = false;
-  }, [connectionState]);
-  useEffect(() => {
-    if (pathname === "/unlock") {
-      unlockPushPending.current = false;
-      return;
-    }
-    if (unlockPushPending.current || switchingRef.current) return;
-    if (shouldShowUnlock(connectionState, authView, pathname)) {
-      unlockPushPending.current = true;
-      router.push("/unlock");
-    }
-  }, [connectionState, authView, pathname, router, switchingRef]);
+  }, [client, scope.id, sessions, router, gate]);
 
   // Connects from whatever pairing is on disk — the same path Settings'
   // reconnect() uses — or routes to /pair when the read failed or found
@@ -319,27 +302,17 @@ function ScopedTree(props: {
   // refuse to connect while a clear of that machine (pairing-guard.ts) is in
   // flight: Settings is pushed over the Dashboard, so a back gesture from /pair
   // can land here directly, and without that it would reconnect with a token
-  // that is (or is about to be) invalidated by that clear. A tree no longer on
-  // screen routes nowhere.
-  const reconnect = useCallback(async () => {
-    const outcome = await sessions.reconnect();
-    if (outcome !== "connected" && sessions.current().client === client) {
-      router.replace("/pair");
-    }
-  }, [sessions, client, router]);
-
-  // Once at launch on whatever route loaded (D3: a browser reload on
-  // /unlock, /voice or /settings never connected), and again whenever the
-  // route reaches /dashboard: `connect()` is a no-op unless the client is
-  // idle/closed/unpaired (rpc-client.ts rule 8), so calling it again is
-  // always safe, and it is what activates the connection right after /pair
-  // saves a fresh pairing and navigates here — without an app restart.
-  const launchConnectHandled = useRef(false);
-  useEffect(() => {
-    const connect = shouldConnectOnRoute(pathname, launchConnectHandled.current);
-    launchConnectHandled.current = true;
-    if (connect) void reconnect();
-  }, [pathname, reconnect]);
+  // that is (or is about to be) invalidated by that clear.
+  const reconnect = useCallback(
+    () =>
+      reconnectOrPair({
+        sessions,
+        client,
+        gate,
+        navigateToPair: () => router.replace("/pair"),
+      }),
+    [sessions, client, gate, router],
+  );
 
   // `{ client, connectionStore }` is otherwise a
   // fresh object every render, re-rendering every RpcContext consumer
@@ -352,7 +325,7 @@ function ScopedTree(props: {
 
   return (
     <RpcContext.Provider value={rpcContextValue}>
-      <PushProvider handledIds={handledIds}>
+      <PushProvider handledIds={handledIds} gate={gate}>
         <VoiceProvider>
           <SafeAreaProvider>
             {/* Every touch anywhere restarts the idle-lock window. */}
@@ -501,10 +474,81 @@ function ScopedTree(props: {
                   options={{ headerShown: false, gestureEnabled: false }}
                 />
               </Stack>
+              {/* After `Stack`, on purpose: see ScopeRouteEffects. */}
+              <ScopeRouteEffects
+                connectionStore={connectionStore}
+                authSession={authSession}
+                reconnect={reconnect}
+                switchingRef={switchingRef}
+                gate={gate}
+              />
             </View>
           </SafeAreaProvider>
         </VoiceProvider>
       </PushProvider>
     </RpcContext.Provider>
   );
+}
+
+// The route effects, rendered beside `Stack` and after it. `PushProvider`
+// renders neither until its prefs load, so these can only run with `Stack`
+// mounted, and React runs a sibling's effects in order, so by the time they do
+// `Stack` has registered with the navigation container (scope-routing.ts). Up
+// in `ScopedTree` they ran on a commit with no navigator, and a route asked for
+// there brought the whole app down.
+function ScopeRouteEffects(props: {
+  connectionStore: ConnectionStore;
+  authSession: AuthSession;
+  reconnect: () => Promise<void>;
+  switchingRef: React.RefObject<boolean>;
+  gate: NavigatorGate;
+}): null {
+  const { connectionStore, authSession, reconnect, switchingRef, gate } = props;
+  const router = useRouter();
+  const pathname = usePathname();
+  const routingRef = useRef<ScopeRouting | undefined>(undefined);
+  routingRef.current ??= createScopeRouting();
+  const routing = routingRef.current;
+
+  // Whatever asked for a route before there was a navigator to take it.
+  useEffect(() => {
+    gate.flush();
+  });
+
+  // Phase 0 owner login: whenever the connection is locked (or the phone
+  // locked itself), the unlock screen goes on top of wherever the owner was.
+  const [connectionState, setConnectionState] = useState(connectionStore.get().state);
+  useEffect(() => {
+    setConnectionState(connectionStore.get().state);
+    return connectionStore.subscribe((view) => setConnectionState(view.state));
+  }, [connectionStore]);
+  const [authView, setAuthView] = useState(authSession.get());
+  useEffect(() => {
+    setAuthView(authSession.get());
+    return authSession.subscribe(setAuthView);
+  }, [authSession]);
+  useEffect(() => {
+    routing.connectionChanged(connectionState);
+  }, [routing, connectionState]);
+  useEffect(() => {
+    const push = routing.shouldPushUnlock({
+      state: connectionState,
+      auth: authView,
+      pathname,
+      switching: switchingRef.current,
+    });
+    if (push) gate.navigate(() => router.push("/unlock"));
+  }, [routing, connectionState, authView, pathname, router, switchingRef, gate]);
+
+  // Once at launch on whatever route loaded (D3: a browser reload on
+  // /unlock, /voice or /settings never connected), and again whenever the
+  // route reaches /dashboard: `connect()` is a no-op unless the client is
+  // idle/closed/unpaired (rpc-client.ts rule 8), so calling it again is
+  // always safe, and it is what activates the connection right after /pair
+  // saves a fresh pairing and navigates here — without an app restart.
+  useEffect(() => {
+    if (routing.shouldConnect(pathname)) void reconnect();
+  }, [routing, pathname, reconnect]);
+
+  return null;
 }

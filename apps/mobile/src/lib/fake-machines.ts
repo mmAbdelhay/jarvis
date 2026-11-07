@@ -18,6 +18,7 @@ import {
 import { type MachineStore, createMachineStore } from "./machine-store";
 import type { PairingRecord } from "./pairing-record";
 import type { PrefsStore } from "./prefs";
+import { createNavigatorGate } from "./scope-routing";
 import type { SecureStore } from "./secure-store";
 
 export const A_ID = "192.168.1.5_4317";
@@ -196,6 +197,9 @@ export function machinesHarness(options: { ids?: MachineId[]; active?: MachineId
     answer: Promise.resolve(true) as Promise<boolean>,
   };
   const routes: string[] = [];
+  /** Up unless a test says otherwise: whether a navigator is mounted. */
+  const navigator = { ready: true };
+  const gate = createNavigatorGate(() => navigator.ready);
   const built: Array<MachineId | null> = [];
   let prepareSwitch: () => void = () => {
     events.push("prepare");
@@ -236,6 +240,7 @@ export function machinesHarness(options: { ids?: MachineId[]; active?: MachineId
       unpairedHandlerFor({
         id,
         sessions,
+        gate,
         navigateToPair: () => routes.push("/pair"),
         log,
       })(),
@@ -265,6 +270,9 @@ export function machinesHarness(options: { ids?: MachineId[]; active?: MachineId
       return scope;
     },
     prepareSwitch: () => prepareSwitch(),
+    switchAbandoned: () => {
+      events.push("abandoned");
+    },
     log,
   });
   const published: MachineScope[] = [];
@@ -315,6 +323,8 @@ export function machinesHarness(options: { ids?: MachineId[]; active?: MachineId
     events,
     device,
     routes,
+    navigator,
+    gate,
     built,
     sessions,
     published,
