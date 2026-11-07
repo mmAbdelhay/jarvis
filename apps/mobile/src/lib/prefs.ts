@@ -211,23 +211,6 @@ export async function savePrefs(store: PrefsStore, prefs: Prefs): Promise<void> 
   await store.write(JSON.stringify(prefs));
 }
 
-/** auth-session.ts's RefreshStoredFlag over prefs.json (load, change one
- *  key, save — the same pattern as every other prefs writer). */
-export function createRefreshStoredFlag(
-  store: PrefsStore,
-  localeTag: string,
-): { read(): Promise<boolean>; write(stored: boolean): Promise<void> } {
-  return {
-    async read() {
-      return (await loadPrefs(store, localeTag)).refreshTokenStored;
-    },
-    async write(stored) {
-      const current = await loadPrefs(store, localeTag);
-      await savePrefs(store, { ...current, refreshTokenStored: stored });
-    },
-  };
-}
-
 /** Saves the browser's "Keep me signed in" choice (load, change one key,
  *  save). The caller then tells the auth session (`storagePolicyChanged`). */
 export async function setKeepSignedIn(

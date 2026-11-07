@@ -7,6 +7,7 @@ import {
   createMachineStoreOpener,
   removeActiveMachine,
 } from "./machine-store";
+import { phaseAfterCheck } from "./pair-flow";
 import { PairingAlreadyExistsError, type PairingRecord } from "./pairing-record";
 import { type PrefsStore, loadPrefs } from "./prefs";
 import type { SecureStore } from "./secure-store";
@@ -54,11 +55,13 @@ class FakeStore implements SecureStore {
 
 class FakePrefs implements PrefsStore {
   writes = 0;
+  failWrite = false;
   constructor(public text?: string) {}
   read(): Promise<string | undefined> {
     return Promise.resolve(this.text);
   }
   write(text: string): Promise<void> {
+    if (this.failWrite) return Promise.reject(new Error("prefs write failed"));
     this.writes += 1;
     this.text = text;
     return Promise.resolve();
@@ -167,12 +170,15 @@ describe("open: migrating an existing pairing", () => {
     expect(h.prefs.writes).toBe(0);
   });
 
-  it("a crash at the index write leaves the legacy keys intact and the next open migrates", async () => {
+  it("a failed index write still opens, leaves the legacy keys intact and the next open migrates", async () => {
     const h = harness();
     seedLegacy(h);
     h.secure.failSet = (key) => key === MACHINE_INDEX_KEY;
 
-    expect(await h.build().open()).toBe("failed");
+    const failing = await opened(h);
+    expect(failing.activeId()).toBe(LAN_ID);
+    expect((await failing.loadActive())?.credential).toEqual(credentialOf(lanRecord()));
+    expect(failing.refreshKey(LAN_ID)).toBe("jarvis.refresh");
     expect(h.secure.values.has(MACHINE_INDEX_KEY)).toBe(false);
     expect(h.secure.values.get("jarvis.pairing")).toBe(JSON.stringify(lanRecord()));
     expect(h.secure.values.get("jarvis.token")).toBe(credentialOf(lanRecord()).token);
@@ -358,13 +364,15 @@ describe("open: reconciling after a downgrade", () => {
     expect(prefs.pushRegistered).toBe(false);
   });
 
-  it("the legacy slot found empty: a failed refresh delete keeps the id, and the next open finishes", async () => {
+  it("the legacy slot found empty: a failed refresh delete opens without the id, keeps it on disk, and the next open finishes", async () => {
     const h = harness();
     h.refresh.values.set("jarvis.refresh", REFRESH_TOKEN);
     seedIndex(h, { ids: [LAN_ID], active: LAN_ID, legacy: LAN_ID });
     h.refresh.failDelete = (key) => key === "jarvis.refresh";
 
-    expect(await h.build().open()).toBe("failed");
+    const failing = await opened(h);
+    expect(failing.activeId()).toBeUndefined();
+    expect(await failing.list()).toEqual([]);
     expect(storedIndex(h).legacy).toBe(LAN_ID);
 
     h.refresh.failDelete = undefined;
@@ -450,17 +458,21 @@ describe("open: reconciling after a downgrade", () => {
     expect(h.refresh.values.has(`jarvis.m.${NAME_ID}.refresh`)).toBe(false);
   });
 
-  it("a crash at the reconcile's index write repeats cleanly on the next open", async () => {
+  it("a failed index write in the reconcile still opens, and repeats cleanly on the next open", async () => {
     const h = harness();
     const repaired = namedRecord("mac.tail.ts.net", DEVICE_C);
     seedLegacy(h, repaired);
     seedMachine(h, NAME_ID, namedRecord("mac.tail.ts.net"), "OLD-PER-MACHINE");
     seedIndex(h, { ids: [NAME_ID], active: NAME_ID });
     h.secure.failSet = (key) => key === MACHINE_INDEX_KEY;
-    expect(await h.build().open()).toBe("failed");
+    const failing = await opened(h);
+    expect(failing.refreshKey(NAME_ID)).toBe("jarvis.refresh");
+    expect((await failing.load(NAME_ID))?.record.deviceId).toBe(DEVICE_C);
+    expect(storedIndex(h).legacy).toBeUndefined();
 
     h.secure.failSet = undefined;
     const store = await opened(h);
+    expect(storedIndex(h).legacy).toBe(NAME_ID);
     expect((await store.load(NAME_ID))?.record.deviceId).toBe(DEVICE_C);
     expect(h.refresh.values.get("jarvis.refresh")).toBe(REFRESH_TOKEN);
   });
@@ -733,14 +745,15 @@ describe("remove", () => {
     expect(store.activeId()).toBe(NAME_ID);
   });
 
-  it("a crash before the index write leaves an entry that load self-heals", async () => {
+  it("a failed index write: gone at once, and the entry left on disk self-heals", async () => {
     const h = harness();
     seedMachine(h, NAME_ID, namedRecord("mac.tail.ts.net"), "R");
     seedMachine(h, OTHER_ID, namedRecord("other.tail.ts.net", DEVICE_C));
     seedIndex(h, { ids: [NAME_ID, OTHER_ID], active: NAME_ID });
     const first = await opened(h);
     h.secure.failSet = (key) => key === MACHINE_INDEX_KEY;
-    await expect(first.remove(NAME_ID)).rejects.toThrow();
+    await first.remove(NAME_ID);
+    expect(first.activeId()).toBe(OTHER_ID);
     h.secure.failSet = undefined;
 
     const store = await opened(h);
@@ -750,43 +763,68 @@ describe("remove", () => {
     expect(await store.load(OTHER_ID)).toBeDefined();
   });
 
-  it.each([
-    ["the record delete, with the token gone", "secure", "jarvis.pairing"],
-    ["the refresh delete, with the token and record gone", "refresh", "jarvis.refresh"],
-  ] as const)(
-    "a crash at %s on the legacy machine: the next open leaves nothing behind",
-    async (_label, which, key) => {
-      const h = harness({
-        prefs: JSON.stringify({ refreshTokenStored: true, pushRegistered: true }),
-      });
-      seedLegacy(h);
-      seedMachine(h, NAME_ID, namedRecord("mac.tail.ts.net"), "NAME-REFRESH");
-      seedIndex(h, { ids: [LAN_ID, NAME_ID], active: LAN_ID, legacy: LAN_ID });
-      const first = await opened(h);
-      h[which].failDelete = (candidate) => candidate === key;
-      await expect(first.remove(LAN_ID)).rejects.toThrow();
-      h[which].failDelete = undefined;
-      expect(storedIndex(h).legacy).toBe(LAN_ID);
+  function legacyAndAnother(): Harness {
+    const h = harness({
+      prefs: JSON.stringify({ refreshTokenStored: true, pushRegistered: true }),
+    });
+    seedLegacy(h);
+    seedMachine(h, NAME_ID, namedRecord("mac.tail.ts.net"), "NAME-REFRESH");
+    seedIndex(h, { ids: [LAN_ID, NAME_ID], active: LAN_ID, legacy: LAN_ID });
+    return h;
+  }
 
-      const store = await opened(h);
-      expect(storedIndex(h)).toEqual({ v: 1, ids: [NAME_ID] });
-      expect(h.secure.values.has("jarvis.pairing")).toBe(false);
-      expect(h.secure.values.has("jarvis.token")).toBe(false);
-      expect(h.refresh.values.has("jarvis.refresh")).toBe(false);
-      const prefs = await loadPrefs(h.prefs, "en-US");
-      expect(prefs.refreshTokenStored).toBe(false);
-      expect(prefs.pushRegistered).toBe(false);
-      expect(store.activeId()).toBe(NAME_ID);
-      expect(h.refresh.values.get(`jarvis.m.${NAME_ID}.refresh`)).toBe("NAME-REFRESH");
+  async function expectLegacyCleanedUp(h: Harness, store: MachineStore): Promise<void> {
+    expect(storedIndex(h)).toEqual({ v: 1, ids: [NAME_ID] });
+    expect(h.secure.values.has("jarvis.pairing")).toBe(false);
+    expect(h.secure.values.has("jarvis.token")).toBe(false);
+    expect(h.refresh.values.has("jarvis.refresh")).toBe(false);
+    const prefs = await loadPrefs(h.prefs, "en-US");
+    expect(prefs.refreshTokenStored).toBe(false);
+    expect(prefs.pushRegistered).toBe(false);
+    expect(store.activeId()).toBe(NAME_ID);
+    expect(h.refresh.values.get(`jarvis.m.${NAME_ID}.refresh`)).toBe("NAME-REFRESH");
 
-      // Idempotent: done once, a further open writes nothing.
-      h.secure.forgetCalls();
-      h.refresh.forgetCalls();
-      await opened(h);
-      expect(h.secure.sets).toEqual([]);
-      expect(h.refresh.deletes).toEqual([]);
-    },
-  );
+    // Idempotent: done once, a further open writes nothing.
+    h.secure.forgetCalls();
+    h.refresh.forgetCalls();
+    await opened(h);
+    expect(h.secure.sets).toEqual([]);
+    expect(h.refresh.deletes).toEqual([]);
+  }
+
+  it("a failed token delete rejects and the machine stays held, as the unpair failure shows", async () => {
+    const h = legacyAndAnother();
+    const store = await opened(h);
+    h.secure.failDelete = (key) => key === "jarvis.token";
+
+    await expect(store.remove(LAN_ID)).rejects.toThrow();
+    expect(store.activeId()).toBe(LAN_ID);
+    expect(h.refresh.values.get("jarvis.refresh")).toBe(REFRESH_TOKEN);
+    expect(storedIndex(h).legacy).toBe(LAN_ID);
+  });
+
+  it("a crash at the record delete on the legacy machine: the next open leaves nothing behind", async () => {
+    const h = legacyAndAnother();
+    const first = await opened(h);
+    h.secure.failDelete = (key) => key === "jarvis.pairing";
+    await expect(first.remove(LAN_ID)).rejects.toThrow();
+    h.secure.failDelete = undefined;
+    expect(storedIndex(h).legacy).toBe(LAN_ID);
+
+    await expectLegacyCleanedUp(h, await opened(h));
+  });
+
+  it("a failed refresh delete on the legacy machine: gone at once, and the next open leaves nothing behind", async () => {
+    const h = legacyAndAnother();
+    const first = await opened(h);
+    h.refresh.failDelete = (key) => key === "jarvis.refresh";
+    await first.remove(LAN_ID);
+    expect(first.activeId()).toBe(NAME_ID);
+    expect(storedIndex(h).legacy).toBe(LAN_ID);
+    h.refresh.failDelete = undefined;
+
+    await expectLegacyCleanedUp(h, await opened(h));
+  });
 
   it("an id not held is a no-op", async () => {
     const h = harness();
@@ -963,6 +1001,17 @@ describe("singleSlot (the browser)", () => {
     );
   });
 
+  it("does not refuse over an unusable record, and replaces it", async () => {
+    const h = harness({ singleSlot: true });
+    h.secure.values.set("jarvis.pairing", "{nope");
+    h.secure.values.set("jarvis.token", "ORPHAN");
+    const store = await opened(h);
+    const record = namedRecord("mac.tail.ts.net");
+
+    await store.add(record, credentialOf(record));
+    expect((await store.load(NAME_ID))?.credential).toEqual(credentialOf(record));
+  });
+
   it("clears a leftover refresh token and top-level flags before saving", async () => {
     const order: string[] = [];
     const h = harness({
@@ -1115,6 +1164,261 @@ describe("the queue", () => {
     h.secure.failSet = undefined;
 
     expect(await store.add(a, credentialOf(a))).toBe(NAME_ID);
+  });
+});
+
+describe("a failed clean-up never locks the user out", () => {
+  const CLEANUP_LINE = "machines: a clean-up failed, retrying at the next open";
+  const INDEX_LINE = "machines: writing the index failed, retrying at the next open";
+
+  /** What /pair's check does with this store, then the pairing it allows. */
+  async function reachesScanAndPairs(store: MachineStore): Promise<void> {
+    const held = await store.list();
+    expect(phaseAfterCheck({ ok: true, paired: held.length > 0 })).toBe("scan");
+    const record = namedRecord("mac.tail.ts.net");
+    expect(await store.add(record, credentialOf(record, "N"))).toBe(NAME_ID);
+    expect(store.activeId()).toBe(NAME_ID);
+    expect((await store.loadActive())?.credential.token).toBe("N".repeat(43));
+  }
+
+  function migratedLegacy(): Harness {
+    const h = harness({
+      prefs: JSON.stringify({ refreshTokenStored: true, pushRegistered: true }),
+    });
+    seedLegacy(h);
+    seedIndex(h, { ids: [LAN_ID], active: LAN_ID, legacy: LAN_ID });
+    return h;
+  }
+
+  it("a persistent refresh delete failure: unpair ends, every later launch opens, and it can pair", async () => {
+    const h = migratedLegacy();
+    h.refresh.failDelete = (key) => key === "jarvis.refresh";
+    const unpairing = await opened(h);
+
+    await unpairing.remove(LAN_ID);
+    expect(unpairing.activeId()).toBeUndefined();
+    expect(h.logs).toEqual([CLEANUP_LINE]);
+
+    await opened(h);
+    await reachesScanAndPairs(await opened(h));
+  });
+
+  it("a persistent prefs write failure: unpair ends, every later launch opens, and it can pair", async () => {
+    const h = migratedLegacy();
+    h.prefs.failWrite = true;
+    const unpairing = await opened(h);
+
+    await unpairing.remove(LAN_ID);
+    expect(unpairing.activeId()).toBeUndefined();
+    expect(h.refresh.values.has("jarvis.refresh")).toBe(false);
+
+    await opened(h);
+    await reachesScanAndPairs(await opened(h));
+  });
+
+  it("a persistent index write failure: unpair ends, and the entry on disk stays harmless", async () => {
+    const h = migratedLegacy();
+    h.secure.failSet = (key) => key === MACHINE_INDEX_KEY;
+    const unpairing = await opened(h);
+
+    await unpairing.remove(LAN_ID);
+    expect(unpairing.activeId()).toBeUndefined();
+    expect(h.logs).toEqual([INDEX_LINE]);
+
+    const later = await opened(h);
+    expect(later.activeId()).toBeUndefined();
+    expect(await later.list()).toEqual([]);
+  });
+
+  it("a persistent prefs failure does not stop the refresh delete, nor the reverse", async () => {
+    const h = migratedLegacy();
+    h.refresh.failDelete = () => true;
+    await (await opened(h)).remove(LAN_ID);
+    expect((await loadPrefs(h.prefs, "en-US")).refreshTokenStored).toBe(false);
+
+    const other = migratedLegacy();
+    other.prefs.failWrite = true;
+    await (await opened(other)).remove(LAN_ID);
+    expect(other.refresh.values.has("jarvis.refresh")).toBe(false);
+  });
+
+  it("a failed delete inside a read is not a failed read: an empty slot still opens", async () => {
+    const h = harness();
+    h.secure.failDelete = (key) => key === "jarvis.token";
+    const store = await opened(h);
+    expect(store.activeId()).toBeUndefined();
+    await reachesScanAndPairs(store);
+  });
+
+  it("a corrupt index whose rewrite fails opens from the legacy slot, and the next open rebuilds", async () => {
+    const h = harness();
+    seedLegacy(h);
+    h.secure.values.set(MACHINE_INDEX_KEY, "{nope");
+    h.secure.failSet = (key) => key === MACHINE_INDEX_KEY;
+
+    const failing = await opened(h);
+    expect(failing.activeId()).toBe(LAN_ID);
+    expect(h.secure.values.get(MACHINE_INDEX_KEY)).toBe("{nope");
+    expect(h.logs).toEqual([INDEX_LINE]);
+
+    h.secure.failSet = undefined;
+    await opened(h);
+    expect(storedIndex(h)).toEqual({ v: 1, ids: [LAN_ID], active: LAN_ID, legacy: LAN_ID });
+    expect(h.logs).toEqual([INDEX_LINE, "machines: index unreadable, rebuilt"]);
+  });
+
+  it("a legacy slot replaced under a failing clean-up: opens with the new machine, disk unchanged until it works", async () => {
+    const h = harness();
+    seedLegacy(h, namedRecord("mac.tail.ts.net", DEVICE_C));
+    seedMachine(h, NAME_ID, namedRecord("mac.tail.ts.net"), "OLD-PER-MACHINE");
+    seedIndex(h, { ids: [NAME_ID], active: NAME_ID });
+    h.refresh.failDelete = (key) => key === `jarvis.m.${NAME_ID}.refresh`;
+
+    const failing = await opened(h);
+    expect(failing.refreshKey(NAME_ID)).toBe("jarvis.refresh");
+    expect(storedIndex(h).legacy).toBeUndefined();
+
+    h.refresh.failDelete = undefined;
+    await opened(h);
+    expect(storedIndex(h).legacy).toBe(NAME_ID);
+    expect(h.refresh.values.has(`jarvis.m.${NAME_ID}.refresh`)).toBe(false);
+  });
+
+  it("add survives a failed refresh delete and a failed prefs write", async () => {
+    const h = harness({
+      prefs: JSON.stringify({
+        machineFlags: { [NAME_ID]: { refreshTokenStored: true, pushRegistered: true } },
+      }),
+    });
+    const store = await opened(h);
+    h.refresh.failDelete = () => true;
+    h.prefs.failWrite = true;
+    const record = namedRecord("mac.tail.ts.net");
+
+    expect(await store.add(record, credentialOf(record))).toBe(NAME_ID);
+    expect(storedIndex(h).ids).toEqual([NAME_ID]);
+    expect(await store.load(NAME_ID)).toBeDefined();
+  });
+
+  it("the browser's add survives the same two failures", async () => {
+    const h = harness({ singleSlot: true, prefs: JSON.stringify({ refreshTokenStored: true }) });
+    const store = await opened(h);
+    h.refresh.failDelete = () => true;
+    h.prefs.failWrite = true;
+    const record = namedRecord("mac.tail.ts.net");
+
+    expect(await store.add(record, credentialOf(record))).toBe(NAME_ID);
+    expect(storedIndex(h).legacy).toBe(NAME_ID);
+  });
+
+  it.each(["token", "pairing"])(
+    "add fails when the delete of that id's %s fails, and writes nothing",
+    async (part) => {
+      const h = harness();
+      const store = await opened(h);
+      h.secure.failDelete = (key) => key === `jarvis.m.${NAME_ID}.${part}`;
+      const record = namedRecord("mac.tail.ts.net");
+
+      await expect(store.add(record, credentialOf(record))).rejects.toThrow();
+      expect(h.secure.sets).toEqual([]);
+      expect(await store.list()).toEqual([]);
+    },
+  );
+
+  it("add fails when a new key or the index cannot be written", async () => {
+    const h = harness();
+    const store = await opened(h);
+    const record = namedRecord("mac.tail.ts.net");
+
+    h.secure.failSet = (key) => key === `jarvis.m.${NAME_ID}.pairing`;
+    await expect(store.add(record, credentialOf(record))).rejects.toThrow();
+    h.secure.failSet = (key) => key === MACHINE_INDEX_KEY;
+    await expect(store.add(record, credentialOf(record))).rejects.toThrow();
+    expect(await store.list()).toEqual([]);
+  });
+
+  it("load's self-heal survives a failed delete, and lets go of the id", async () => {
+    const h = harness();
+    seedMachine(h, NAME_ID, namedRecord("mac.tail.ts.net"), "R");
+    seedIndex(h, { ids: [NAME_ID] });
+    const store = await opened(h);
+    h.secure.values.set(`jarvis.m.${NAME_ID}.pairing`, "{nope");
+    h.secure.failDelete = () => true;
+
+    expect(await store.load(NAME_ID)).toBeUndefined();
+    expect(store.activeId()).toBeUndefined();
+  });
+
+  it("a read that throws still answers failed", async () => {
+    const h = migratedLegacy();
+    h.secure.failGet = (key) => key === "jarvis.pairing";
+    expect(await h.build().open()).toBe("failed");
+  });
+});
+
+describe("browser tabs, re-reading on each opener call", () => {
+  function tabs() {
+    const h = harness({ singleSlot: true });
+    const tab = () => {
+      const store = h.build();
+      return { store, open: createMachineStoreOpener(store, () => {}, { rereadEachTime: true }) };
+    };
+    return { h, a: tab(), b: tab() };
+  }
+
+  it("a tab that opened empty sees the other tab's pairing after reopening", async () => {
+    const { a, b } = tabs();
+    await a.open();
+    await b.open();
+    expect(b.store.activeId()).toBeUndefined();
+    const record = namedRecord("mac.tail.ts.net");
+    await a.store.add(record, credentialOf(record));
+
+    expect(await b.open()).toBe("ok");
+    expect(b.store.activeId()).toBe(NAME_ID);
+    expect((await b.store.list()).map((entry) => entry.id)).toEqual([NAME_ID]);
+    expect((await b.store.loadActive())?.credential).toEqual(credentialOf(record));
+  });
+
+  it("a tab holding a machine sees the other tab's unpair after reopening", async () => {
+    const { a, b } = tabs();
+    await a.open();
+    const record = namedRecord("mac.tail.ts.net");
+    await a.store.add(record, credentialOf(record));
+    await b.open();
+    expect(b.store.activeId()).toBe(NAME_ID);
+    await a.store.remove(NAME_ID);
+
+    expect(await b.open()).toBe("ok");
+    expect(b.store.activeId()).toBeUndefined();
+    expect(await b.store.list()).toEqual([]);
+  });
+
+  it("callers during one reopen still share it", async () => {
+    let opens = 0;
+    const open = createMachineStoreOpener(
+      {
+        open: async () => {
+          opens += 1;
+          return "ok" as const;
+        },
+      },
+      () => {},
+      { rereadEachTime: true },
+    );
+    await Promise.all([open(), open()]);
+    expect(opens).toBe(1);
+    await open();
+    expect(opens).toBe(2);
+  });
+
+  it("a reopen whose read throws refuses again, rather than answer from the old index", async () => {
+    const { h, a } = tabs();
+    await a.open();
+    h.secure.failGet = (key) => key === MACHINE_INDEX_KEY;
+
+    expect(await a.open()).toBe("failed");
+    expect(() => a.store.activeId()).toThrow("not open");
   });
 });
 

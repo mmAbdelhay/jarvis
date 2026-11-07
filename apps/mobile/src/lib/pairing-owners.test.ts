@@ -20,8 +20,13 @@ const STORE_NAMES = new Set(["refresh-store.ts", "refresh-store.web.ts"]);
 
 const LEGACY_IMPORT_PATTERN =
   /\bimport\s*\{[^}]*\b(?:loadPairing|savePairing|clearPairing)\b[^}]*\}\s*from\s*["'][^"']*pairing-record["']/;
+// Any other way to reach the module's values. A named import of its types and
+// of the *At functions stays open: the keys those need are banned by name.
+const WHOLE_MODULE_PATTERN =
+  /\bimport\s*\*\s*as\s+\w+\s+from\s*["'][^"']*pairing-record["']|\bexport\s*(?:\*(?:\s*as\s+\w+)?|\{[^}]*\})\s*from\s*["'][^"']*pairing-record["']|\b(?:import|require)\(\s*["'][^"']*pairing-record["']\s*\)/;
 const LEGACY_LITERAL_PATTERN = /["'`]jarvis\.(?:pairing|token|refresh)["'`]/;
-const LEGACY_NAME_PATTERN = /\b(?:REFRESH_TOKEN_KEY|LEGACY_PAIRING_KEYS|LEGACY_REFRESH_KEY)\b/;
+const LEGACY_NAME_PATTERN =
+  /\b(?:REFRESH_TOKEN_KEY|LEGACY_PAIRING_KEYS|LEGACY_REFRESH_KEY|createRefreshStoredFlag)\b/;
 
 function collectSourceFiles(dir: string): string[] {
   const files: string[] = [];
@@ -54,6 +59,12 @@ describe("the stored pairing's owners", () => {
     ).toEqual([]);
   });
 
+  it("no source file outside the two owners reaches pairing-record as a whole", () => {
+    expect(offenders((name, text) => !OWNERS.has(name) && WHOLE_MODULE_PATTERN.test(text))).toEqual(
+      [],
+    );
+  });
+
   it("no source file outside the two owners writes a legacy key", () => {
     expect(
       offenders(
@@ -83,6 +94,19 @@ describe("the stored pairing's owners", () => {
     expect(
       LEGACY_IMPORT_PATTERN.test('import { PairingAlreadyExistsError } from "./pairing-record";'),
     ).toBe(false);
+    expect(WHOLE_MODULE_PATTERN.test('import * as record from "./pairing-record";')).toBe(true);
+    expect(WHOLE_MODULE_PATTERN.test('import type * as record from "./pairing-record";')).toBe(
+      false,
+    );
+    expect(WHOLE_MODULE_PATTERN.test('export * from "./pairing-record";')).toBe(true);
+    expect(WHOLE_MODULE_PATTERN.test('export * as record from "./pairing-record";')).toBe(true);
+    expect(WHOLE_MODULE_PATTERN.test('export { loadPairing } from "./pairing-record";')).toBe(true);
+    expect(
+      WHOLE_MODULE_PATTERN.test('export type { PairingRecord } from "./pairing-record";'),
+    ).toBe(false);
+    expect(WHOLE_MODULE_PATTERN.test('await import("./pairing-record")')).toBe(true);
+    expect(WHOLE_MODULE_PATTERN.test('require("@/lib/pairing-record")')).toBe(true);
+    expect(LEGACY_NAME_PATTERN.test("createRefreshStoredFlag(store, tag)")).toBe(true);
     expect(LEGACY_LITERAL_PATTERN.test('store.get("jarvis.token")')).toBe(true);
     expect(LEGACY_LITERAL_PATTERN.test('store.get("jarvis.machines")')).toBe(false);
     expect(LEGACY_NAME_PATTERN.test("store.delete(REFRESH_TOKEN_KEY)")).toBe(true);

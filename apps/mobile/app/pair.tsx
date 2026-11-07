@@ -36,6 +36,7 @@ import { removeActiveMachine } from "@/lib/machine-store";
 import { machineStore, openMachineStore } from "@/lib/machine-store-instance";
 import { pair, type PairOutcome, withHost } from "@/lib/pairing";
 import { subscribePairingLink, takePairingLink } from "@/lib/pairing-link-holder";
+import { useAuthSession } from "@/lib/rpc-context";
 import { PairingAlreadyExistsError } from "@/lib/pairing-record";
 import { systemTransportFor } from "@/lib/system-transport";
 import { theme } from "@/lib/theme";
@@ -126,6 +127,7 @@ function PairScreen() {
   const insets = useSafeAreaInsets();
   const language = useLanguage();
   const router = useRouter();
+  const authSession = useAuthSession();
   const [permission, requestPermission] = useCameraPermissions();
   const [phase, setPhase] = useState<Phase>({ kind: "checking" });
   const [hostText, setHostText] = useState("");
@@ -253,6 +255,9 @@ function PairScreen() {
     try {
       await openMachineStore();
       await removeActiveMachine(machineStore);
+      // The session's memory of the stored token goes too, as in the other
+      // two callers: left true, the next login would not record its own.
+      await authSession.forget();
       cleared = true;
     } catch {
       // Logged without any secret: just the fact that the retry failed.
@@ -266,7 +271,7 @@ function PairScreen() {
       return;
     }
     safeSetPhase({ kind: "clearFailed" });
-  }, [safeSetPhase]);
+  }, [authSession, safeSetPhase]);
 
   const startPairing = useCallback(
     async (link: PairingLink): Promise<void> => {

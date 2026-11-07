@@ -3,7 +3,6 @@ import { languageFromLocale } from "./i18n";
 import {
   type Prefs,
   type PrefsStore,
-  createRefreshStoredFlag,
   loadPrefs,
   savePrefs,
   setDiffMode,
@@ -591,7 +590,6 @@ describe("loadPrefs", () => {
 
     it("a save by every writer in this module and the push facade keeps them", async () => {
       const store = new FakeStore(JSON.stringify({ machineFlags: { [ID]: FLAGS } }));
-      await createRefreshStoredFlag(store, "en-US").write(true);
       await setKeepSignedIn(store, "en-US", true);
       await setDiffMode(store, "en-US", "split");
       await createPrefsFacade(store, "en-US", {
@@ -602,7 +600,6 @@ describe("loadPrefs", () => {
       const prefs = await loadPrefs(store, "en-US");
       expect(prefs.machineFlags).toEqual({ [ID]: FLAGS });
       expect(prefs).toMatchObject({
-        refreshTokenStored: true,
         keepSignedIn: true,
         changesDiffMode: "split",
         notifications: true,
@@ -624,20 +621,6 @@ describe("loadPrefs", () => {
         );
         expect(prefs.refreshTokenStored).toBe(expected);
       }
-    });
-
-    it("the flag adapter changes only its own key", async () => {
-      const store = new FakeStore(JSON.stringify({ language: "ar", idleLockMinutes: 30 }));
-      const flag = createRefreshStoredFlag(store, "en-US");
-      expect(await flag.read()).toBe(false);
-      await flag.write(true);
-      expect(await flag.read()).toBe(true);
-      const prefs = await loadPrefs(store, "en-US");
-      expect(prefs).toMatchObject({
-        language: "ar",
-        idleLockMinutes: 30,
-        refreshTokenStored: true,
-      });
     });
   });
 });

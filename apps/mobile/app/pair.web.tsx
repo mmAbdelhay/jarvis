@@ -50,6 +50,7 @@ import { removeActiveMachine } from "@/lib/machine-store";
 import { machineStore, openMachineStore } from "@/lib/machine-store-instance";
 import { linkRefusedOn, pair, type PairOutcome } from "@/lib/pairing";
 import { PairingAlreadyExistsError } from "@/lib/pairing-record";
+import { useAuthSession } from "@/lib/rpc-context";
 import { systemTransportFor } from "@/lib/system-transport";
 import { theme } from "@/lib/theme";
 import {
@@ -129,6 +130,7 @@ function PairWebScreen() {
   const cardRoot = useAuthCardRootStyle();
   const language = useLanguage();
   const router = useRouter();
+  const authSession = useAuthSession();
   const [phase, setPhase] = useState<Phase>({ kind: "checking" });
   const [pastedLink, setPastedLink] = useState("");
   const [deviceName, setDeviceName] = useState(() =>
@@ -206,6 +208,9 @@ function PairWebScreen() {
     try {
       await openMachineStore();
       await removeActiveMachine(machineStore);
+      // The session's memory of the stored token goes too, as in the other
+      // two callers: left true, the next login would not record its own.
+      await authSession.forget();
       cleared = true;
     } catch {
       console.warn("pair: retrying the clear failed");
@@ -217,7 +222,7 @@ function PairWebScreen() {
       return;
     }
     safeSetPhase({ kind: "clearFailed" });
-  }, [safeSetPhase]);
+  }, [authSession, safeSetPhase]);
 
   const intake = useCallback(
     (link: PairingLink | undefined) => {

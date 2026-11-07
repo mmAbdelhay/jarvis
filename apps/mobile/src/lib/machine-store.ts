@@ -2,7 +2,7 @@
 // operation is ordered for a crash at any line:
 //
 // - Migration is the one write of the index. Before it nothing has changed
-//   and the next launch repeats it; after it, it is done. Nothing is copied
+//   and the next open repeats it; after it, it is done. Nothing is copied
 //   or deleted, so `jarvis.refresh` keeps working under the same key.
 // - add: token, record, then index. A crash before the index leaves orphan
 //   keys that the next add of that id overwrites.
@@ -10,6 +10,13 @@
 //   entry whose record is gone, which `load` self-heals by removing it. For
 //   the legacy machine `open` finishes the job too: nothing else can address
 //   `jarvis.refresh` and the top-level flags once the slot is empty.
+//
+// Only a read that throws fails an operation that reads. A clean-up or index
+// write that fails after good reads never locks the user out: the store takes
+// the new index in memory, logs a fixed line, and leaves the old index on disk
+// for the next open to finish, in the same order. The exceptions are the keys
+// a pairing lives by: `remove` and `add` fail if a token or record delete of
+// that id fails, and `add` fails if it cannot write the new keys and index.
 //
 // A read that throws is never taken for a missing machine: it rejects, or
 // answers "failed" from `open`, and changes nothing. Until an open succeeds
@@ -72,6 +79,8 @@ export type MachineStore = {
 
 const EMPTY_INDEX: MachineIndex = { v: 1, ids: [] };
 const NO_FLAGS: MachineFlags = { refreshTokenStored: false, pushRegistered: false };
+const CLEANUP_FAILED_LINE = "machines: a clean-up failed, retrying at the next open";
+const INDEX_WRITE_FAILED_LINE = "machines: writing the index failed, retrying at the next open";
 
 function soleMachineIndex(id: MachineId): MachineIndex {
   return { v: 1, ids: [id], active: id, legacy: id };
@@ -120,6 +129,34 @@ export function createMachineStore(deps: {
     index = next;
   }
 
+  /** Answers whether it worked. Each clean-up runs on its own, so one that
+   *  fails does not stop the next. */
+  async function tryCleanUp(task: () => Promise<void>): Promise<boolean> {
+    try {
+      await task();
+      return true;
+    } catch {
+      deps.log(CLEANUP_FAILED_LINE);
+      return false;
+    }
+  }
+
+  /** Takes `next` as the index either way. Answers whether it reached the
+   *  disk: after a failed clean-up it stays off, so the old index still says
+   *  there is something for the next open to finish. */
+  async function adoptIndex(next: MachineIndex, cleaned = true): Promise<boolean> {
+    if (cleaned) {
+      try {
+        await writeIndex(next);
+        return true;
+      } catch {
+        deps.log(INDEX_WRITE_FAILED_LINE);
+      }
+    }
+    index = next;
+    return false;
+  }
+
   async function clearKeys(keys: ReturnType<typeof machineKeys>): Promise<void> {
     await secure.delete(keys.token);
     await secure.delete(keys.record);
@@ -139,12 +176,36 @@ export function createMachineStore(deps: {
     await savePrefs(prefs, { ...current, refreshTokenStored: false, pushRegistered: false });
   }
 
-  /** Clears one machine's keys and flags, then lets go of it. */
+  function clearFlagsOf(id: MachineId): Promise<void> {
+    return id === index.legacy ? clearLegacyFlags() : clearMachineFlags(id);
+  }
+
+  /** Token and record are gone, or `cleaned` says they are not: the rest of
+   *  one machine, then lets go of it. */
+  async function letGo(id: MachineId, cleaned: boolean): Promise<void> {
+    const keys = machineKeys(id, index);
+    const refreshGone = await tryCleanUp(() => refresh.delete(keys.refresh));
+    const flagsGone = await tryCleanUp(() => clearFlagsOf(id));
+    await adoptIndex(indexWithout(index, id), cleaned && refreshGone && flagsGone);
+  }
+
+  /** The user's Unpair: a token or record that stays is a failure to show,
+   *  since the machine would come back at the next launch. */
   async function removeHeld(id: MachineId): Promise<void> {
-    await clearKeys(machineKeys(id, index));
-    if (id === index.legacy) await clearLegacyFlags();
-    else await clearMachineFlags(id);
-    await writeIndex(indexWithout(index, id));
+    const keys = machineKeys(id, index);
+    await secure.delete(keys.token);
+    await secure.delete(keys.record);
+    await letGo(id, true);
+  }
+
+  /** A record found unusable: nothing connects with it either way. */
+  async function healHeld(id: MachineId): Promise<void> {
+    const keys = machineKeys(id, index);
+    const pairingGone = await tryCleanUp(async () => {
+      await secure.delete(keys.token);
+      await secure.delete(keys.record);
+    });
+    await letGo(id, pairingGone);
   }
 
   /** Puts the index right when an older build changed the legacy slot. The
@@ -159,16 +220,18 @@ export function createMachineStore(deps: {
     if (legacyId === undefined) {
       // A crash during `remove`, or the old app's unpair. Once the id goes,
       // nothing can address these: safe to repeat, and before the index.
-      await refresh.delete(LEGACY_REFRESH_KEY);
-      await clearLegacyFlags();
-      await writeIndex(indexWithout(stored, stored.legacy as MachineId));
+      // Nothing connects to this machine, so a token left behind by a failed
+      // delete cannot be replayed, and it must not stop the user pairing.
+      const refreshGone = await tryCleanUp(() => refresh.delete(LEGACY_REFRESH_KEY));
+      const flagsGone = await tryCleanUp(clearLegacyFlags);
+      await adoptIndex(indexWithout(stored, stored.legacy as MachineId), refreshGone && flagsGone);
       return;
     }
 
     // The slot now holds this machine, so keys of its own are stale. Deleting
     // is safe to repeat: the delete comes first and the index write decides.
-    await clearKeys(machineKeys(legacyId, EMPTY_INDEX));
-    await clearMachineFlags(legacyId);
+    const keysGone = await tryCleanUp(() => clearKeys(machineKeys(legacyId, EMPTY_INDEX)));
+    const flagsGone = await tryCleanUp(() => clearMachineFlags(legacyId));
 
     const replaced = stored.legacy;
     const ids: MachineId[] = [];
@@ -181,7 +244,7 @@ export function createMachineStore(deps: {
     const active = replaced !== undefined && stored.active === replaced ? legacyId : stored.active;
     if (active !== undefined) next.active = active;
     next.legacy = legacyId;
-    await writeIndex(next);
+    await adoptIndex(next, keysGone && flagsGone);
   }
 
   async function openQueued(): Promise<void> {
@@ -197,11 +260,10 @@ export function createMachineStore(deps: {
     if (text === undefined) {
       // An empty phone writes nothing; the first add does.
       if (rebuilt === undefined) index = EMPTY_INDEX;
-      else await writeIndex(rebuilt);
+      else await adoptIndex(rebuilt);
       return;
     }
-    await writeIndex(rebuilt ?? EMPTY_INDEX);
-    deps.log("machines: index unreadable, rebuilt");
+    if (await adoptIndex(rebuilt ?? EMPTY_INDEX)) deps.log("machines: index unreadable, rebuilt");
   }
 
   async function loadQueued(
@@ -210,7 +272,7 @@ export function createMachineStore(deps: {
     assertOpen();
     if (!index.ids.includes(id)) return undefined;
     const loaded = await loadPairingAt(secure, machineKeys(id, index));
-    if (loaded === undefined) await removeHeld(id);
+    if (loaded === undefined) await healHeld(id);
     return loaded;
   }
 
@@ -219,9 +281,10 @@ export function createMachineStore(deps: {
       throw new PairingAlreadyExistsError();
     }
     const id = machineIdOf(record);
-    // Whatever is here belongs to an earlier pairing of the slot.
-    await refresh.delete(LEGACY_REFRESH_KEY);
-    await clearLegacyFlags();
+    // Whatever is here belongs to an earlier pairing of the slot. The laptop
+    // has already approved this one: a failure here must not lose it.
+    await tryCleanUp(() => refresh.delete(LEGACY_REFRESH_KEY));
+    await tryCleanUp(clearLegacyFlags);
     await savePairingAt(secure, LEGACY_PAIRING_KEYS, record, credential);
     await writeIndex(soleMachineIndex(id));
     return id;
@@ -255,10 +318,12 @@ export function createMachineStore(deps: {
 
     // Whatever is here belongs to an earlier pairing of this id: a crashed
     // add, a lost index, or a record that no longer loads. A leftover refresh
-    // token must not outlive it.
-    await clearKeys(keys);
-    if (id === index.legacy) await clearLegacyFlags();
-    else await clearMachineFlags(id);
+    // token must not outlive it, though the laptop has already approved this
+    // pairing: only a token or record that stays can fail it.
+    await secure.delete(keys.token);
+    await secure.delete(keys.record);
+    await tryCleanUp(() => refresh.delete(keys.refresh));
+    await tryCleanUp(() => clearFlagsOf(id));
     await savePairingAt(secure, keys, record, credential);
     if (!held) await writeIndex({ ...index, ids: [...index.ids, id] });
     return id;
@@ -317,6 +382,8 @@ export function createMachineStore(deps: {
           isOpen = true;
           return "ok" as const;
         } catch {
+          // A reopen too: the index in memory may no longer be what is stored.
+          isOpen = false;
           return "failed" as const;
         }
       });
@@ -376,18 +443,20 @@ export function createMachineStore(deps: {
 /** One `open` at a time, shared by every caller. One that worked is not
  *  repeated. One that failed is forgotten, so a later attempt can open, for
  *  instance after first unlock. Callers may ignore the outcome: until an open
- *  succeeds the store itself refuses everything, and fails them closed. */
+ *  succeeds the store itself refuses everything, and fails them closed.
+ *
+ *  `rereadEachTime` is the browser's: tabs share one keychain, each with its
+ *  own index in memory, so every call reads the disk again. */
 export function createMachineStoreOpener(
   store: Pick<MachineStore, "open">,
   log: (line: string) => void,
+  options: { rereadEachTime?: boolean } = {},
 ): () => Promise<"ok" | "failed"> {
   let opened: Promise<"ok" | "failed"> | undefined;
   return () => {
     opened ??= store.open().then((outcome) => {
-      if (outcome === "failed") {
-        log("machines: open failed");
-        opened = undefined;
-      }
+      if (outcome === "failed") log("machines: open failed");
+      if (outcome === "failed" || options.rereadEachTime === true) opened = undefined;
       return outcome;
     });
     return opened;

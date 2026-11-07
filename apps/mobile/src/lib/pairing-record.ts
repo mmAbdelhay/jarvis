@@ -2,7 +2,7 @@
 // fingerprint, the paired laptop's name, when pairing happened) and the
 // device token, kept as two separate keychain entries — `jarvis.pairing`
 // (JSON) and `jarvis.token` (the bare token string). The token never goes
-// inside the JSON record: `savePairing` writes it to its own key, and
+// inside the JSON record: `savePairingAt` writes it to its own key, and
 // `loadPairing` reads the two keys back into a `Credential` rather than
 // trusting anything the record JSON might claim about it.
 //
@@ -34,10 +34,10 @@ export type PairingRecord = {
 export type StoredCredential = Credential;
 
 /**
- * Thrown by `savePairing` (Important-1) when a valid pairing record is
- * already present: the screen's own mount-time check is not the only line
- * of defence against a confirmed link silently replacing an existing
- * pairing — `clearPairing` must run first.
+ * Thrown by machine-store.ts's `add` (Important-1) when a valid pairing
+ * record is already present: the screen's own mount-time check is not the
+ * only line of defence against a confirmed link silently replacing an
+ * existing pairing — the machine must be removed first.
  */
 export class PairingAlreadyExistsError extends Error {
   constructor() {
@@ -100,6 +100,16 @@ function parseRecord(value: unknown): PairingRecord | undefined {
   return record;
 }
 
+/** The self-heal below is a clean-up, not part of the read: if it fails the
+ *  pairing is still unusable, and the next load tries again. */
+async function tryHeal(task: () => Promise<void>): Promise<void> {
+  try {
+    await task();
+  } catch {
+    // Nothing to do: see above.
+  }
+}
+
 export async function loadPairingAt(
   store: SecureStore,
   keys: PairingKeys,
@@ -109,7 +119,7 @@ export async function loadPairingAt(
     // A token with no record (the crash window `savePairingAt` writes the
     // token first to shrink) is equally unusable — clear it rather than
     // strand it.
-    await store.delete(keys.token);
+    await tryHeal(() => store.delete(keys.token));
     return undefined;
   }
 
@@ -118,7 +128,7 @@ export async function loadPairingAt(
     // A record with no matching token is not a usable pairing: clear it
     // rather than leave an orphaned record behind for a future save to
     // collide with.
-    await store.delete(keys.record);
+    await tryHeal(() => store.delete(keys.record));
     return undefined;
   }
 
@@ -128,12 +138,12 @@ export async function loadPairingAt(
   } catch {
     // Corrupt JSON leaves a token with no usable record to pair it to —
     // clear both rather than strand the token in the keychain.
-    await clearPairingAt(store, keys);
+    await tryHeal(() => clearPairingAt(store, keys));
     return undefined;
   }
   const record = parseRecord(parsed);
   if (record === undefined) {
-    await clearPairingAt(store, keys);
+    await tryHeal(() => clearPairingAt(store, keys));
     return undefined;
   }
 
@@ -141,7 +151,7 @@ export async function loadPairingAt(
 }
 
 /** Writes one pairing at `keys`, over whatever is there: the existing-check
- *  is the caller's (`savePairing`, machine-store.ts's `add`). */
+ *  is the caller's (machine-store.ts's `add`). */
 export async function savePairingAt(
   store: SecureStore,
   keys: PairingKeys,
@@ -181,24 +191,4 @@ export async function loadPairing(
   store: SecureStore,
 ): Promise<{ record: PairingRecord; credential: Credential } | undefined> {
   return loadPairingAt(store, LEGACY_PAIRING_KEYS);
-}
-
-export async function savePairing(
-  store: SecureStore,
-  record: PairingRecord,
-  credential: Credential,
-): Promise<void> {
-  // Important-1: refuse rather than silently overwrite. Reuses
-  // `loadPairing` so an unusable (corrupt/invalid/orphan) record — which
-  // `loadPairing` itself already self-heals by clearing — never blocks a
-  // fresh save; only a genuinely valid existing pairing does.
-  const existing = await loadPairing(store);
-  if (existing !== undefined) {
-    throw new PairingAlreadyExistsError();
-  }
-  await savePairingAt(store, LEGACY_PAIRING_KEYS, record, credential);
-}
-
-export async function clearPairing(store: SecureStore): Promise<void> {
-  await clearPairingAt(store, LEGACY_PAIRING_KEYS);
 }

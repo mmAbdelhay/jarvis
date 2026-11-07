@@ -9,17 +9,21 @@ import { filePrefsStore } from "./prefs-file";
 import { refreshStore } from "./refresh-store";
 import { expoSecureStore } from "./secure-store";
 
+const SINGLE_SLOT = clientPlatformFor(Platform.OS) === "web";
+
 export const machineStore: MachineStore = createMachineStore({
   secure: expoSecureStore,
   refresh: refreshStore,
   prefs: filePrefsStore,
   localeTag: Intl.DateTimeFormat().resolvedOptions().locale,
-  singleSlot: clientPlatformFor(Platform.OS) === "web",
+  singleSlot: SINGLE_SLOT,
   log: (line) => console.log(line),
 });
 
-export const openMachineStore = createMachineStoreOpener(machineStore, (line) =>
-  console.warn(line),
+export const openMachineStore = createMachineStoreOpener(
+  machineStore,
+  (line) => console.warn(line),
+  { rereadEachTime: SINGLE_SLOT },
 );
 
 /** Rejects when the keychain cannot be read: never an empty answer for that. */
