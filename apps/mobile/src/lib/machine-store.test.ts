@@ -1607,8 +1607,9 @@ describe("until an open succeeds", () => {
     await expect(store.findByDeviceId(DEVICE_A)).rejects.toThrow("not open");
   });
 
-  it("activeId, nextAfter, has and refreshKey throw", async () => {
+  it("activeId, nextAfter, has, count and refreshKey throw", async () => {
     const { store } = await failedOpen();
+    expect(() => store.count()).toThrow("not open");
     expect(() => store.activeId()).toThrow("not open");
     expect(() => store.nextAfter(LAN_ID)).toThrow("not open");
     expect(() => store.has(LAN_ID)).toThrow("not open");
@@ -1718,6 +1719,22 @@ describe("has", () => {
     h.secure.failGet = () => true;
     expect(store.has(NAME_ID)).toBe(true);
     expect(store.has("nobody_1")).toBe(false);
+  });
+});
+
+describe("count", () => {
+  it("counts what the index holds, a machine that cannot be read included", async () => {
+    const { h, store } = await twoMachines();
+    expect(store.count()).toBe(2);
+
+    h.secure.failGet = (key) => key.includes(NAME_ID);
+    expect(await store.listReadable()).toHaveLength(1);
+    expect(store.count()).toBe(2);
+  });
+
+  it("an empty phone counts none", async () => {
+    const store = await opened(harness());
+    expect(store.count()).toBe(0);
   });
 });
 

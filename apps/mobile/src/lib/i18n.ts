@@ -1730,8 +1730,16 @@ export const STRINGS = {
   },
   "pair.joinInvalid": { en: "That name is not valid", ar: "هذا الاسم غير صالح" },
   "pair.joinRefused": {
-    en: "Not accepted. Check the password, and that Tailscale access is on at that machine",
-    ar: "لم يُقبل الطلب. تحقق من كلمة المرور، ومن تفعيل الوصول عبر Tailscale على ذلك الجهاز",
+    en: "Not accepted. Check the password, and that Tailscale access is on at that machine, or wait a while and try again",
+    ar: "لم يُقبل الطلب. تحقق من كلمة المرور، ومن تفعيل الوصول عبر Tailscale على ذلك الجهاز، أو انتظر قليلًا ثم حاول مرة أخرى",
+  },
+  "pair.joinUnreachable": {
+    en: "Couldn't reach that machine. Check the name, and that it's on and in your Tailscale network",
+    ar: "تعذّر الوصول إلى ذلك الجهاز. تحقق من الاسم، ومن أنه يعمل وموجود في شبكة Tailscale الخاصة بك",
+  },
+  "pair.linkWarning": {
+    en: "Only continue if you started this on your own machine. Never enter a password here unless you recognise this name.",
+    ar: "لا تتابع إلا إذا بدأت هذا بنفسك على جهازك. لا تُدخل كلمة مرور هنا أبدًا ما لم تتعرّف على هذا الاسم.",
   },
   "pair.joinRateLimited": {
     en: "Too many attempts. Wait and try again",

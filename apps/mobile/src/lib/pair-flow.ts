@@ -92,16 +92,18 @@ export type SaveStep =
   | { kind: "limit" }
   | { kind: "saveFailed" };
 
+type SavePairing = (
+  record: PairingRecord,
+  credential: Credential,
+  tokens?: AuthTokens,
+) => Promise<MachineId>;
+
 /** The store's own refusals are what stand behind every earlier check. A failed
  *  save leaves the machine on screen as it was. After a join it also leaves a
  *  device entry on the target that nobody holds tokens for: that machine's device
  *  list shows it, and it can be revoked there. */
 export async function savePairing(
-  addAndSwitch: (
-    record: PairingRecord,
-    credential: Credential,
-    tokens?: AuthTokens,
-  ) => Promise<MachineId>,
+  addAndSwitch: SavePairing,
   record: PairingRecord,
   credential: Credential,
   tokens?: AuthTokens,
@@ -114,6 +116,38 @@ export async function savePairing(
     }
     if (err instanceof MachineLimitError) return { kind: "limit" };
     return { kind: "saveFailed" };
+  }
+}
+
+/** A finished pairing is kept, as the target has already made a device for it:
+ *  with the screen up it goes to the machine, and with the screen gone it joins
+ *  the switcher, with nothing switching behind a user who left. */
+export function keepPairing(
+  deps: {
+    stillWanted(): boolean;
+    addAndSwitch: SavePairing;
+    add: SavePairing;
+  },
+  record: PairingRecord,
+  credential: Credential,
+  tokens?: AuthTokens,
+): Promise<SaveStep> {
+  return savePairing(deps.stillWanted() ? deps.addAndSwitch : deps.add, record, credential, tokens);
+}
+
+/** How a link reached the confirm step. Pasted or tapped, it came from someone;
+ *  a scan was aimed at a screen by the person holding the phone. */
+export type LinkSource = "scan" | "link";
+
+/** A phone holding a machine has an owner password worth asking for, and a link
+ *  can name any host with a good certificate, whose unlock screen then asks for
+ *  it. A count that cannot be told is taken for a machine held. */
+export function linkNeedsWarning(params: { source: LinkSource; heldCount(): number }): boolean {
+  if (params.source !== "link") return false;
+  try {
+    return params.heldCount() > 0;
+  } catch {
+    return true;
   }
 }
 
@@ -139,7 +173,7 @@ export function joinFailureKey(failure: JoinFailure): MessageKey {
     // pair.timeout speaks of an approval and a new code: a join has neither.
     case "unreachable":
     case "timeout":
-      return "pair.unreachable";
+      return "pair.joinUnreachable";
     case "protocol":
       return "pair.protocol";
   }
@@ -155,13 +189,10 @@ export type SubmitJoinDeps = {
   /** Everything before this is decided here: a frame is about to go. */
   waiting(): void;
   join(address: { name: string; port: number }, password: string): Promise<JoinOutcome>;
-  /** The screen that asked is still up: nothing is added behind a user who left. */
+  /** The screen that asked is still up: nothing switches behind a user who left. */
   stillWanted(): boolean;
-  addAndSwitch(
-    record: PairingRecord,
-    credential: Credential,
-    tokens?: AuthTokens,
-  ): Promise<MachineId>;
+  addAndSwitch: SavePairing;
+  add: SavePairing;
 };
 
 export type JoinStep =
@@ -172,7 +203,8 @@ export type JoinStep =
 
 /** Adding by name, from the typed text to the switch. Same id and limit are
  *  checked before any frame goes. The password goes on to `deps.join`, and is in
- *  no answer. */
+ *  no answer: nothing here holds it through the wait. `abandoned` is a join
+ *  cancelled before its frame went, with nothing to keep. */
 export async function submitJoin(
   deps: SubmitJoinDeps,
   nameText: string,
@@ -191,14 +223,19 @@ export async function submitJoin(
   deps.waiting();
   let outcome: JoinOutcome;
   try {
-    outcome = await deps.join({ name, port }, password);
+    const running = deps.join({ name, port }, password);
+    password = "";
+    outcome = await running;
   } catch {
     // Not read: an error here may have the frame in it.
     return { kind: "join", failure: "unreachable" };
   }
-  if (!outcome.ok) return { kind: "join", failure: outcome.reason };
-  if (!deps.stillWanted()) return { kind: "abandoned" };
-  return savePairing(deps.addAndSwitch, outcome.record, outcome.credential, outcome.tokens);
+  if (!outcome.ok) {
+    return outcome.reason === "abandoned"
+      ? { kind: "abandoned" }
+      : { kind: "join", failure: outcome.reason };
+  }
+  return keepPairing(deps, outcome.record, outcome.credential, outcome.tokens);
 }
 
 /** /pair's way to a machine: the back button, `pair.openMachine`, and the machine
@@ -222,6 +259,13 @@ export async function openHeldMachine(
   }
   if (outcome === "unknown") deps.failed();
   else deps.leave();
+}
+
+/** Where a machine that could not be opened leaves /pair, by the phase the user
+ *  came from. A link was dropped on the way out, so only a phase with nothing of
+ *  its own to lose is gone back to. */
+export function phaseAfterFailedOpen(from: PairFlowPhaseKind): "clearFailed" | "join" | "scan" {
+  return from === "clearFailed" || from === "join" ? from : "scan";
 }
 
 /** Where /pair's back button goes: the machine on screen if it can be gone back

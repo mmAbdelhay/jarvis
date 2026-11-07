@@ -2197,3 +2197,84 @@ describe("addAndSwitch", () => {
     expect(logs).not.toContain(tokens.refreshToken);
   });
 });
+
+describe("add", () => {
+  const CREDENTIAL = { deviceId: "b".repeat(32), token: "B".repeat(43) };
+
+  function joinTokens(h: ReturnType<typeof machinesHarness>) {
+    return tokenReply("7", h.clock.now() + ACCESS_TTL_MS);
+  }
+
+  it("stores and seeds, and the machine on screen does not notice", async () => {
+    const h = machinesHarness({ ids: [A_ID] });
+    await h.start();
+    await h.unlockCurrent();
+    const scope = h.sessions.current();
+    const published: unknown[] = [];
+    h.sessions.subscribe((next) => published.push(next));
+    const events = h.events.length;
+
+    const id = await h.sessions.add(recordOf(B_ID), CREDENTIAL, joinTokens(h));
+
+    expect(id).toBe(B_ID);
+    expect(h.store.has(B_ID)).toBe(true);
+    expect(h.refresh.values.get(refreshKeyOf(B_ID))).toBe(tokenReply("7", 0).refreshToken);
+    expect(h.sessions.current()).toBe(scope);
+    expect(scope.client.state()).toBe("open");
+    expect(h.store.activeId()).toBe(A_ID);
+    expect(h.socketsOf(B_ID)).toEqual([]);
+    expect(published).toEqual([]);
+    expect(h.events.slice(events)).toEqual([]);
+  });
+
+  it("a later switch resumes with the kept tokens, with no unlock screen", async () => {
+    const h = machinesHarness({ ids: [A_ID] });
+    await h.start();
+    await h.sessions.add(recordOf(B_ID), CREDENTIAL, joinTokens(h));
+
+    await h.sessions.switchTo(B_ID);
+    const socket = h.socketOf(B_ID);
+    welcome(socket);
+    await settle();
+
+    expect(requestsOn(socket, "auth:resume")).toHaveLength(1);
+    expect(h.device.prompts).toBe(0);
+  });
+
+  it("a QR pairing: nothing to seed, and the machine waits for its unlock screen", async () => {
+    const h = machinesHarness({ ids: [A_ID] });
+    await h.start();
+    const built = h.built.length;
+
+    await h.sessions.add(recordOf(B_ID), CREDENTIAL);
+
+    expect(h.store.has(B_ID)).toBe(true);
+    expect(h.built).toHaveLength(built);
+    expect(h.refresh.values.has(refreshKeyOf(B_ID))).toBe(false);
+    expect(h.sessions.current().id).toBe(A_ID);
+  });
+
+  it("a store that refuses: it rejects, and nothing is seeded", async () => {
+    const h = machinesHarness({ ids: [A_ID] });
+    await h.start();
+    h.secure.failSet = (key) => key.includes(B_ID);
+    const built = h.built.length;
+
+    await expect(h.sessions.add(recordOf(B_ID), CREDENTIAL, joinTokens(h))).rejects.toThrow();
+
+    expect(h.built).toHaveLength(built);
+    expect(h.refresh.values.has(refreshKeyOf(B_ID))).toBe(false);
+  });
+
+  it("no token reaches a log", async () => {
+    const h = machinesHarness({ ids: [A_ID] });
+    await h.start();
+    const tokens = joinTokens(h);
+
+    await h.sessions.add(recordOf(B_ID), CREDENTIAL, tokens);
+
+    const logs = h.logs.join("\n");
+    expect(logs).not.toContain(tokens.accessToken);
+    expect(logs).not.toContain(tokens.refreshToken);
+  });
+});

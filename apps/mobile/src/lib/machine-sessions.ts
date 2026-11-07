@@ -104,6 +104,10 @@ export type MachineSessions = {
     credential: Credential,
     tokens?: AuthTokens,
   ): Promise<MachineId>;
+  /** A pairing or a join that finished after its screen went: stores and seeds it
+   *  as `addAndSwitch` does, and stops there. The machine on screen stays, and the
+   *  new one waits in the switcher. */
+  add(record: PairingRecord, credential: Credential, tokens?: AuthTokens): Promise<MachineId>;
 };
 
 export function createMachineSessions(deps: {
@@ -359,7 +363,7 @@ export function createMachineSessions(deps: {
     return startSwitch(id, false);
   }
 
-  async function addAndSwitch(
+  async function add(
     record: PairingRecord,
     credential: Credential,
     tokens?: AuthTokens,
@@ -374,6 +378,15 @@ export function createMachineSessions(deps: {
       // The machine is held, and its unlock screen is the way in.
       deps.log("machines: seeding a new machine's session failed");
     }
+    return id;
+  }
+
+  async function addAndSwitch(
+    record: PairingRecord,
+    credential: Credential,
+    tokens?: AuthTokens,
+  ): Promise<MachineId> {
+    const id = await add(record, credential, tokens);
     try {
       await startSwitch(id, false);
     } catch {
@@ -483,6 +496,7 @@ export function createMachineSessions(deps: {
     reconnect: connectActive,
     switchTo,
     addAndSwitch,
+    add,
     setAppActive(active) {
       const changed = active !== appActive;
       appActive = active;

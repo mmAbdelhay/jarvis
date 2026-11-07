@@ -9,6 +9,7 @@ import {
   JOINED_FINGERPRINT,
   JOINED_HOST,
   JOIN_WAIT_MS,
+  PAIR_WAIT_MS,
   joinMachine,
   linkRefusedOn,
   needsHost,
@@ -726,5 +727,237 @@ describe("joinMachine", () => {
     expect(outcome).toEqual({ ok: false, reason: "protocol" });
     expect(socket.closedWith).toBeDefined();
     expectNoPassword(outcome);
+  });
+
+  it.each<[string, number]>([
+    ["over capacity", CLOSE.overCapacity],
+    ["going away", CLOSE.goingAway],
+    ["an internal error", CLOSE.internalError],
+  ])("a target that closes for %s answers unreachable, not an update", async (_label, code) => {
+    const { socket, promise } = start();
+    socket.emit({ kind: "open" });
+    socket.emit({ kind: "close", code, reason: "" });
+    await expect(promise).resolves.toEqual({ ok: false, reason: "unreachable" });
+  });
+
+  it("an open after the connect timeout closes the socket, and sends nothing", async () => {
+    const { socket, clock, promise } = start();
+    clock.advance(HANDSHAKE_TIMEOUT_MS);
+    await promise;
+    socket.closedWith = undefined;
+
+    socket.emit({ kind: "open" });
+
+    expect(socket.closedWith).toBeDefined();
+    expect(socket.sent).toEqual([]);
+  });
+
+  it("a settled join closes the socket that was answered during the open itself", async () => {
+    const { deps } = setup();
+    let closed = false;
+    const promise = joinMachine(
+      {
+        ...deps,
+        transport: {
+          open(_url, _trust, onEvent) {
+            onEvent({ kind: "close", code: 1006, reason: "" });
+            return {
+              send() {},
+              sendBinary() {},
+              close() {
+                closed = true;
+              },
+            };
+          },
+        },
+      },
+      ADDRESS,
+      PASSWORD,
+      DEVICE_NAME,
+    );
+    await expect(promise).resolves.toEqual({ ok: false, reason: "unreachable" });
+    expect(closed).toBe(true);
+  });
+
+  describe("a close that throws cannot hang the screen", () => {
+    function throwingClose(socket: FakeSocket): void {
+      socket.close = () => {
+        throw new Error("already gone");
+      };
+    }
+
+    it("at the connect timeout", async () => {
+      const { socket, clock, promise } = start();
+      throwingClose(socket);
+      clock.advance(HANDSHAKE_TIMEOUT_MS);
+      await expect(promise).resolves.toEqual({ ok: false, reason: "unreachable" });
+    });
+
+    it("at the wait's timeout", async () => {
+      const { socket, clock, promise } = start();
+      throwingClose(socket);
+      socket.emit({ kind: "open" });
+      clock.advance(JOIN_WAIT_MS);
+      await expect(promise).resolves.toEqual({ ok: false, reason: "timeout" });
+    });
+
+    it("on a bad frame", async () => {
+      const { socket, promise } = start();
+      throwingClose(socket);
+      socket.emit({ kind: "open" });
+      socket.emit({ kind: "message", text: "nope" });
+      await expect(promise).resolves.toEqual({ ok: false, reason: "protocol" });
+    });
+
+    it("after a send that failed", async () => {
+      const { socket, promise } = start();
+      throwingClose(socket);
+      socket.send = () => {
+        throw new Error("gone");
+      };
+      socket.emit({ kind: "open" });
+      await expect(promise).resolves.toEqual({ ok: false, reason: "unreachable" });
+    });
+
+    it("on the joined frame: the answer is not lost", async () => {
+      const { socket, promise } = start();
+      throwingClose(socket);
+      socket.emit({ kind: "open" });
+      socket.emit({ kind: "message", text: JSON.stringify(JOINED) });
+      await expect(promise).resolves.toMatchObject({ ok: true });
+    });
+  });
+
+  describe("cancelled by the screen going", () => {
+    function startWith(controller: AbortController) {
+      const { transport, deps, clock } = setup();
+      const promise = joinMachine(deps, ADDRESS, PASSWORD, DEVICE_NAME, controller.signal);
+      return { promise, transport, clock };
+    }
+
+    it("before the open: answers abandoned, closes, and the password is never sent", async () => {
+      const controller = new AbortController();
+      const { promise, transport } = startWith(controller);
+      const socket = latestSocket(transport);
+
+      controller.abort();
+
+      await expect(promise).resolves.toEqual({ ok: false, reason: "abandoned" });
+      expect(socket.closedWith).toBeDefined();
+
+      socket.closedWith = undefined;
+      socket.emit({ kind: "open" });
+      expect(socket.sent).toEqual([]);
+      expect(socket.closedWith).toBeDefined();
+    });
+
+    it("before it starts: no socket at all", async () => {
+      const controller = new AbortController();
+      controller.abort();
+      const { promise, transport } = startWith(controller);
+
+      await expect(promise).resolves.toEqual({ ok: false, reason: "abandoned" });
+      expect(transport.sockets).toEqual([]);
+    });
+
+    it("once the frame has gone: too late to cancel, and the answer still comes", async () => {
+      const controller = new AbortController();
+      const { promise, transport } = startWith(controller);
+      const socket = latestSocket(transport);
+      socket.emit({ kind: "open" });
+
+      controller.abort();
+      socket.emit({ kind: "message", text: JSON.stringify(JOINED) });
+
+      await expect(promise).resolves.toMatchObject({ ok: true });
+      expect(socket.sent).toHaveLength(1);
+    });
+
+    it("a cancel after the end changes nothing", async () => {
+      const controller = new AbortController();
+      const { promise, transport } = startWith(controller);
+      const socket = latestSocket(transport);
+      socket.emit({ kind: "close", code: 1006, reason: "" });
+      await promise;
+      socket.closedWith = undefined;
+
+      controller.abort();
+
+      expect(socket.closedWith).toBeUndefined();
+    });
+  });
+});
+
+describe("pair: a socket's late events", () => {
+  it("an open after the connect timeout closes the socket, and sends nothing", async () => {
+    const { transport, deps, clock } = setup();
+    const promise = pair(deps, LINK, DEVICE_NAME);
+    const socket = latestSocket(transport);
+    clock.advance(HANDSHAKE_TIMEOUT_MS);
+    await promise;
+    socket.closedWith = undefined;
+
+    socket.emit({ kind: "open" });
+
+    expect(socket.closedWith).toBeDefined();
+    expect(socket.sent).toEqual([]);
+  });
+
+  it("a settled pairing closes the socket that was answered during the open itself", async () => {
+    const { deps } = setup();
+    let closed = false;
+    const promise = pair(
+      {
+        ...deps,
+        transport: {
+          open(_url, _trust, onEvent) {
+            onEvent({ kind: "close", code: 1006, reason: "" });
+            return {
+              send() {},
+              sendBinary() {},
+              close() {
+                closed = true;
+              },
+            };
+          },
+        },
+      },
+      LINK,
+      DEVICE_NAME,
+    );
+    await expect(promise).resolves.toEqual({ ok: false, reason: "unreachable" });
+    expect(closed).toBe(true);
+  });
+
+  describe("a close that throws cannot hang the screen", () => {
+    function start() {
+      const { transport, deps, clock } = setup();
+      const promise = pair(deps, LINK, DEVICE_NAME);
+      const socket = latestSocket(transport);
+      socket.close = () => {
+        throw new Error("already gone");
+      };
+      return { promise, socket, clock };
+    }
+
+    it("at the connect timeout", async () => {
+      const { promise, clock } = start();
+      clock.advance(HANDSHAKE_TIMEOUT_MS);
+      await expect(promise).resolves.toEqual({ ok: false, reason: "unreachable" });
+    });
+
+    it("at the wait's timeout", async () => {
+      const { promise, socket, clock } = start();
+      socket.emit({ kind: "open" });
+      clock.advance(PAIR_WAIT_MS);
+      await expect(promise).resolves.toEqual({ ok: false, reason: "timeout" });
+    });
+
+    it("on a bad frame", async () => {
+      const { promise, socket } = start();
+      socket.emit({ kind: "open" });
+      socket.emit({ kind: "message", text: "nope" });
+      await expect(promise).resolves.toEqual({ ok: false, reason: "protocol" });
+    });
   });
 });

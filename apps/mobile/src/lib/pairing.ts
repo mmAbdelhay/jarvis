@@ -58,7 +58,7 @@ export type PairDeps = {
 
 // The laptop's own confirmation dialog times out at 60s (M4); this gives
 // the phone's wait UI margin beyond that (global-constraints.md).
-const PAIR_WAIT_MS = 75_000;
+export const PAIR_WAIT_MS = 75_000;
 
 /**
  * `0.0.0.0` / `::` — an unspecified bind the phone cannot dial (ruling 12).
@@ -93,6 +93,16 @@ export function withHost(link: PairingLink, host: string): PairingLink | undefin
  */
 export function linkRefusedOn(link: PairingLink, platform: ClientPlatform): boolean {
   return platform === "web" && link.name === undefined;
+}
+
+/** Only ever closing it: a socket already gone says so by throwing, and that
+ *  must not stop the answer the screen is waiting for. */
+function closeQuietly(socket: TransportSocket | undefined, reason: string): void {
+  try {
+    socket?.close(CLOSE.normal, reason);
+  } catch {
+    // Gone already.
+  }
 }
 
 function closeReason(code: number): "denied" | "expired" | "timeout" | "protocol" {
@@ -168,6 +178,11 @@ export function pair(deps: PairDeps, link: PairingLink, deviceName: string): Pro
       settle({ ok: false, reason: "unreachable" });
       return;
     }
+    // Answered during the open itself: there was no socket to close yet.
+    if (settled) {
+      closeQuietly(socket, "settled");
+      return;
+    }
 
     // A deadline on the connect itself: if the transport never delivers an
     // `open` (a hung TLS connect, a silently dropped SYN), nothing else in
@@ -180,13 +195,19 @@ export function pair(deps: PairDeps, link: PairingLink, deviceName: string): Pro
     if (!opened) {
       timeoutTimer = deps.clock.setTimeout(() => {
         timeoutTimer = undefined;
-        socket?.close(CLOSE.normal, "connect timeout");
+        closeQuietly(socket, "connect timeout");
         settle({ ok: false, reason: "unreachable" });
       }, HANDSHAKE_TIMEOUT_MS);
     }
 
     function onEvent(event: TransportEvent): void {
-      if (settled) return;
+      if (settled) {
+        // React Native on Android drops a close made before the upgrade
+        // finishes, then opens anyway. Left open, the server's handshake timer
+        // counts it as a failed sign-in against this phone.
+        if (event.kind === "open") closeQuietly(socket, "settled");
+        return;
+      }
       switch (event.kind) {
         case "open": {
           opened = true;
@@ -195,7 +216,7 @@ export function pair(deps: PairDeps, link: PairingLink, deviceName: string): Pro
           }
           timeoutTimer = deps.clock.setTimeout(() => {
             timeoutTimer = undefined;
-            socket?.close(CLOSE.normal, "timeout");
+            closeQuietly(socket, "timeout");
             settle({ ok: false, reason: "timeout" });
           }, PAIR_WAIT_MS);
           if (secret === undefined) {
@@ -219,7 +240,7 @@ export function pair(deps: PairDeps, link: PairingLink, deviceName: string): Pro
         case "message": {
           const parsed = parsePairedFrame(event.text);
           if (parsed === undefined) {
-            socket?.close(CLOSE.normal, "protocol violation");
+            closeQuietly(socket, "protocol violation");
             settle({ ok: false, reason: "protocol" });
             return;
           }
@@ -234,7 +255,7 @@ export function pair(deps: PairDeps, link: PairingLink, deviceName: string): Pro
             record.name = name;
           }
           const credential: Credential = { deviceId: parsed.deviceId, token: parsed.token };
-          socket?.close(CLOSE.normal, "paired");
+          closeQuietly(socket, "paired");
           settle({ ok: true, record, credential });
           return;
         }
@@ -274,7 +295,10 @@ const ABNORMAL_CLOSE = 1006;
 
 export type JoinOutcome =
   | { ok: true; record: PairingRecord; credential: Credential; tokens: AuthTokens }
-  | { ok: false; reason: "refused" | "rate-limited" | "unreachable" | "timeout" | "protocol" };
+  | {
+      ok: false;
+      reason: "refused" | "rate-limited" | "unreachable" | "timeout" | "protocol" | "abandoned";
+    };
 
 function joinCloseReason(code: number): "refused" | "rate-limited" | "unreachable" | "protocol" {
   switch (code) {
@@ -282,7 +306,12 @@ function joinCloseReason(code: number): "refused" | "rate-limited" | "unreachabl
       return "refused";
     case CLOSE.tooManyRequests:
       return "rate-limited";
+    // The machine is there and cannot take this now, or the connection went:
+    // nothing an update would change.
     case ABNORMAL_CLOSE:
+    case CLOSE.overCapacity:
+    case CLOSE.goingAway:
+    case CLOSE.internalError:
       return "unreachable";
     default:
       return "protocol";
@@ -311,16 +340,22 @@ function parseJoinedFrame(
 
 /**
  * The owner password in place of a pairing secret, over the same socket. As in
- * `pair()`: the password is copied once into a local, blanked the moment its one
- * frame has gone or the exchange has ended, never put in an outcome, and this
- * module has no log. Nothing an error says is kept, as a send's error could name
- * what it was sending.
+ * `pair()`: this module keeps it in one local, drops that reference the moment
+ * its one frame has gone or the exchange has ended, never puts it in an outcome,
+ * and has no log. Nothing an error says is kept, as a send's error could name
+ * what it was sending. A string cannot be wiped: the engine's copies, and the
+ * encoded frame handed to the socket, last until they are collected.
+ *
+ * `cancel` is the screen going. Before the frame has gone the password stays
+ * here: the socket closes and the answer is `abandoned`. After, it is too late
+ * to take back, so the answer comes as usual.
  */
 export function joinMachine(
   deps: PairDeps,
   address: { name: string; port: number },
   password: string,
   deviceName: string,
+  cancel?: AbortSignal,
 ): Promise<JoinOutcome> {
   const { name, port } = address;
   let secret: string | undefined = password;
@@ -329,11 +364,13 @@ export function joinMachine(
     let settled = false;
     let opened = false;
     let timeoutTimer: unknown;
+    let socket: TransportSocket | undefined;
 
     function settle(outcome: JoinOutcome): void {
       if (settled) return;
       settled = true;
       secret = undefined;
+      cancel?.removeEventListener("abort", onCancel);
       if (timeoutTimer !== undefined) {
         deps.clock.clearTimeout(timeoutTimer);
         timeoutTimer = undefined;
@@ -341,7 +378,18 @@ export function joinMachine(
       resolve(outcome);
     }
 
-    let socket: TransportSocket | undefined;
+    function onCancel(): void {
+      if (secret === undefined) return;
+      closeQuietly(socket, "cancelled");
+      settle({ ok: false, reason: "abandoned" });
+    }
+
+    if (cancel?.aborted === true) {
+      settle({ ok: false, reason: "abandoned" });
+      return;
+    }
+    cancel?.addEventListener("abort", onCancel);
+
     try {
       socket = deps.transport.open(
         socketUrl(name, port, "/pair"),
@@ -352,11 +400,16 @@ export function joinMachine(
       settle({ ok: false, reason: "unreachable" });
       return;
     }
+    // Answered during the open itself: there was no socket to close yet.
+    if (settled) {
+      closeQuietly(socket, "settled");
+      return;
+    }
 
     if (!opened) {
       timeoutTimer = deps.clock.setTimeout(() => {
         timeoutTimer = undefined;
-        socket?.close(CLOSE.normal, "connect timeout");
+        closeQuietly(socket, "connect timeout");
         settle({ ok: false, reason: "unreachable" });
       }, HANDSHAKE_TIMEOUT_MS);
     }
@@ -369,7 +422,7 @@ export function joinMachine(
       if (timeoutTimer !== undefined) deps.clock.clearTimeout(timeoutTimer);
       timeoutTimer = deps.clock.setTimeout(() => {
         timeoutTimer = undefined;
-        socket?.close(CLOSE.normal, "timeout");
+        closeQuietly(socket, "timeout");
         settle({ ok: false, reason: "timeout" });
       }, JOIN_WAIT_MS);
       const frame: PairJoinMessage = {
@@ -382,7 +435,7 @@ export function joinMachine(
       try {
         socket?.send(encodeMessage(frame));
       } catch {
-        socket?.close(CLOSE.normal, "send failed");
+        closeQuietly(socket, "send failed");
         settle({ ok: false, reason: "unreachable" });
         return;
       }
@@ -390,7 +443,12 @@ export function joinMachine(
     }
 
     function onEvent(event: TransportEvent): void {
-      if (settled) return;
+      if (settled) {
+        // As in `pair()`: a close made before the upgrade finished may have been
+        // dropped, and an open left standing counts against this phone.
+        if (event.kind === "open") closeQuietly(socket, "settled");
+        return;
+      }
       switch (event.kind) {
         case "open":
           onOpen();
@@ -398,7 +456,7 @@ export function joinMachine(
         case "message": {
           const parsed = parseJoinedFrame(event.text);
           if (parsed === undefined) {
-            socket?.close(CLOSE.normal, "protocol violation");
+            closeQuietly(socket, "protocol violation");
             settle({ ok: false, reason: "protocol" });
             return;
           }
@@ -412,7 +470,7 @@ export function joinMachine(
             laptopName: name.split(".")[0],
           };
           const credential: Credential = { deviceId: parsed.deviceId, token: parsed.token };
-          socket?.close(CLOSE.normal, "joined");
+          closeQuietly(socket, "joined");
           settle({ ok: true, record, credential, tokens: parsed.tokens });
           return;
         }

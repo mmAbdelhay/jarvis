@@ -12,6 +12,7 @@ import {
   welcome,
 } from "./fake-machines";
 import type { FakeSocket } from "./fake-transport";
+import { t } from "./i18n";
 import type { SwitchOutcome } from "./machine-sessions";
 import {
   afterClearRetry,
@@ -26,11 +27,14 @@ import {
   intakeLink,
   intakeStep,
   joinFailureKey,
+  keepPairing,
+  linkNeedsWarning,
   openHeldMachine,
   pairBackTarget,
   pairStepKey,
   type PairFlowPhaseKind,
   phaseAfterCheck,
+  phaseAfterFailedOpen,
   phaseAfterRead,
   readHeldMachines,
   savePairing,
@@ -115,6 +119,7 @@ function joinDeps(h: MachinesHarness, overrides: Partial<SubmitJoinDeps> = {}) {
       ),
     stillWanted: () => true,
     addAndSwitch: h.sessions.addAndSwitch,
+    add: h.sessions.add,
     ...overrides,
   };
   return { deps, waiting };
@@ -471,7 +476,7 @@ describe("submitJoin", () => {
     expect(h.sessions.current().id).toBe(A_ID);
   });
 
-  it("the screen went while it waited: nothing is added and nothing switches", async () => {
+  it("the screen went while it waited: the machine is kept, its tokens too, and nothing switches", async () => {
     const h = machinesHarness({ ids: [A_ID] });
     await h.start();
     const { deps } = joinDeps(h, { stillWanted: () => false });
@@ -480,9 +485,139 @@ describe("submitJoin", () => {
     answerJoined(newestSocket(h));
     const step = await running;
 
+    expect(step).toEqual({ kind: "success", id: NEW_ID });
+    expect(h.store.has(NEW_ID)).toBe(true);
+    expect(h.refresh.values.get(refreshKeyOf(NEW_ID))).toBe(TOKENS.refreshToken);
+    expect(h.sessions.current().id).toBe(A_ID);
+    expect(h.store.activeId()).toBe(A_ID);
+  });
+
+  it("the screen went before the socket opened: the password is not sent, and nothing is added", async () => {
+    const h = machinesHarness({ ids: [A_ID] });
+    await h.start();
+    const controller = new AbortController();
+    const { deps } = joinDeps(h, {
+      join: (address, password) =>
+        joinMachine(
+          { transport: h.transport, clock: h.clock, client: "jarvis/1", platform: "native" },
+          address,
+          password,
+          "A phone",
+          controller.signal,
+        ),
+      stillWanted: () => false,
+    });
+
+    const running = submitJoin(deps, NEW_NAME, PASSWORD);
+    const socket = newestSocket(h);
+    controller.abort();
+    const step = await running;
+    socket.emit({ kind: "open" });
+
     expect(step).toEqual({ kind: "abandoned" });
+    expect(socket.sent).toEqual([]);
     expect(h.store.has(NEW_ID)).toBe(false);
     expect(h.sessions.current().id).toBe(A_ID);
+  });
+});
+
+describe("keepPairing", () => {
+  const RECORD = {
+    deviceId: JOIN_DEVICE_ID,
+    host: "192.168.1.9",
+    port: 4317,
+    fingerprint: "c".repeat(64),
+    pairedAt: 1,
+  };
+  const CREDENTIAL = { deviceId: JOIN_DEVICE_ID, token: "T".repeat(43) };
+
+  it("with the screen up: adds and switches", async () => {
+    const h = machinesHarness({ ids: [A_ID] });
+    await h.start();
+
+    const step = await keepPairing(
+      { stillWanted: () => true, addAndSwitch: h.sessions.addAndSwitch, add: h.sessions.add },
+      RECORD,
+      CREDENTIAL,
+    );
+
+    expect(step).toEqual({ kind: "success", id: "192.168.1.9_4317" });
+    expect(h.sessions.current().id).toBe("192.168.1.9_4317");
+  });
+
+  it("with the screen gone: a QR approval given on the laptop is not lost, and nothing switches", async () => {
+    const h = machinesHarness({ ids: [A_ID] });
+    await h.start();
+    const scope = h.sessions.current();
+
+    const step = await keepPairing(
+      { stillWanted: () => false, addAndSwitch: h.sessions.addAndSwitch, add: h.sessions.add },
+      RECORD,
+      CREDENTIAL,
+    );
+
+    expect(step).toEqual({ kind: "success", id: "192.168.1.9_4317" });
+    expect(h.store.has("192.168.1.9_4317")).toBe(true);
+    expect(h.sessions.current()).toBe(scope);
+  });
+
+  it("with the screen gone and the store refusing: the same answers as with it up", async () => {
+    const h = machinesHarness({ ids: [A_ID] });
+    await h.start();
+    h.secure.failSet = (key) => key.includes("192.168.1.9");
+
+    const step = await keepPairing(
+      { stillWanted: () => false, addAndSwitch: h.sessions.addAndSwitch, add: h.sessions.add },
+      RECORD,
+      CREDENTIAL,
+    );
+
+    expect(step).toEqual({ kind: "saveFailed" });
+  });
+});
+
+describe("linkNeedsWarning", () => {
+  it("a link with another machine held warns", () => {
+    expect(linkNeedsWarning({ source: "link", heldCount: () => 1 })).toBe(true);
+  });
+
+  it("a link for a phone with no machines stays as it was", () => {
+    expect(linkNeedsWarning({ source: "link", heldCount: () => 0 })).toBe(false);
+  });
+
+  it("a scan does not warn, whatever is held", () => {
+    expect(linkNeedsWarning({ source: "scan", heldCount: () => 3 })).toBe(false);
+  });
+
+  it("a link warns when the count cannot be told", () => {
+    const heldCount = () => {
+      throw new Error("not open");
+    };
+    expect(linkNeedsWarning({ source: "link", heldCount })).toBe(true);
+    expect(linkNeedsWarning({ source: "scan", heldCount })).toBe(false);
+  });
+
+  it("says what was ruled, in both languages", () => {
+    expect(t("en", "pair.linkWarning")).toBe(
+      "Only continue if you started this on your own machine. Never enter a password here unless you recognise this name.",
+    );
+    expect(t("ar", "pair.linkWarning")).not.toBe(t("en", "pair.linkWarning"));
+  });
+});
+
+describe("phaseAfterFailedOpen", () => {
+  it.each([
+    ["clearFailed", "clearFailed"],
+    ["join", "join"],
+    ["scan", "scan"],
+    // Its link was dropped on the way out.
+    ["confirm", "scan"],
+    ["needsHost", "scan"],
+    ["error", "scan"],
+    ["sameMachine", "scan"],
+    ["checking", "scan"],
+  ] as const)("from %s goes to %s", (from, to) => {
+    expect(phaseAfterFailedOpen(from)).toBe(to);
   });
 });
 
@@ -516,12 +651,22 @@ describe("joinFailureKey", () => {
     ["invalid", "pair.joinInvalid"],
     ["refused", "pair.joinRefused"],
     ["rate-limited", "pair.joinRateLimited"],
-    ["unreachable", "pair.unreachable"],
+    ["unreachable", "pair.joinUnreachable"],
     // pair.timeout speaks of an approval and a new code: a join has neither.
-    ["timeout", "pair.unreachable"],
+    ["timeout", "pair.joinUnreachable"],
     ["protocol", "pair.protocol"],
   ] as const)("%s reads as %s", (failure, key) => {
     expect(joinFailureKey(failure)).toBe(key);
+  });
+
+  it("a join's unreachable text does not speak of the same network", () => {
+    expect(t("en", "pair.joinUnreachable")).not.toContain("same network");
+    expect(t("ar", "pair.joinUnreachable")).not.toContain("نفس الشبكة");
+  });
+
+  it("a refusal also tells a locked-out user to wait", () => {
+    expect(t("en", "pair.joinRefused")).toContain("or wait a while");
+    expect(t("ar", "pair.joinRefused")).toContain("أو انتظر");
   });
 });
 

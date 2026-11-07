@@ -80,6 +80,9 @@ export type MachineStore = {
   findByDeviceId(deviceId: string): Promise<MachineId | undefined>;
   /** Whether the index holds this id, with no keychain read. */
   has(id: MachineId): boolean;
+  /** How many the index holds, readable or not, with no keychain read: what
+   *  `add` measures its limit by. */
+  count(): number;
   refreshKey(id: MachineId): string;
   /** A logout or "keep signed in" off with no machine's session to go through:
    *  the active machine's key, none with no machine, and with a store that
@@ -483,6 +486,10 @@ export function createMachineStore(deps: {
     has(id) {
       assertOpen();
       return index.ids.includes(id);
+    },
+    count() {
+      assertOpen();
+      return index.ids.length;
     },
     refreshKey(id) {
       assertOpen();
