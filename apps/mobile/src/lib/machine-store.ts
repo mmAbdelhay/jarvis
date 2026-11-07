@@ -7,10 +7,15 @@
 // - add: token, record, then index. A crash before the index leaves orphan
 //   keys that the next add of that id overwrites.
 // - remove: token, record, refresh, flags, then index. A crash leaves an
-//   entry whose record is gone, which `load` self-heals by removing it.
+//   entry whose record is gone, which `load` self-heals by removing it. For
+//   the legacy machine `open` finishes the job too: nothing else can address
+//   `jarvis.refresh` and the top-level flags once the slot is empty.
 //
 // A read that throws is never taken for a missing machine: it rejects, or
-// answers "failed" from `open`, and changes nothing.
+// answers "failed" from `open`, and changes nothing. Until an open succeeds
+// everything but `open` rejects or throws, because the index says nothing
+// about the disk yet: a failed store must not look like an empty one, and
+// `refreshKey` must not answer a per-machine key for the legacy machine.
 
 import type { RefreshStoredFlag } from "./auth-session";
 import {
@@ -25,6 +30,7 @@ import {
 } from "./machine-index";
 import {
   LEGACY_PAIRING_KEYS,
+  LEGACY_REFRESH_KEY,
   PairingAlreadyExistsError,
   type PairingRecord,
   loadPairing,
@@ -50,13 +56,17 @@ export type MachineStore = {
   list(): Promise<MachineEntry[]>;
   activeId(): MachineId | undefined;
   load(id: MachineId): Promise<{ record: PairingRecord; credential: Credential } | undefined>;
+  loadActive(): Promise<
+    { id: MachineId; record: PairingRecord; credential: Credential } | undefined
+  >;
   add(record: PairingRecord, credential: Credential): Promise<MachineId>;
   setActive(id: MachineId): Promise<void>;
   remove(id: MachineId): Promise<void>;
   nextAfter(id: MachineId): MachineId | undefined;
   findByDeviceId(deviceId: string): Promise<MachineId | undefined>;
-  refreshKey(id: MachineId): string;
-  refreshFlag(id: MachineId): RefreshStoredFlag;
+  /** With no id (no active machine), the legacy key and flag. */
+  refreshKey(id: MachineId | undefined): string;
+  refreshFlag(id: MachineId | undefined): RefreshStoredFlag;
   pushFlag(id: MachineId): { read(): Promise<boolean>; write(v: boolean): Promise<void> };
 };
 
@@ -101,6 +111,10 @@ export function createMachineStore(deps: {
     if (!isOpen) throw new Error("machines: store is not open");
   }
 
+  function activeIdNow(): MachineId | undefined {
+    return index.active ?? index.ids[0];
+  }
+
   async function writeIndex(next: MachineIndex): Promise<void> {
     await secure.set(MACHINE_INDEX_KEY, JSON.stringify(next));
     index = next;
@@ -143,6 +157,10 @@ export function createMachineStore(deps: {
       return;
     }
     if (legacyId === undefined) {
+      // A crash during `remove`, or the old app's unpair. Once the id goes,
+      // nothing can address these: safe to repeat, and before the index.
+      await refresh.delete(LEGACY_REFRESH_KEY);
+      await clearLegacyFlags();
       await writeIndex(indexWithout(stored, stored.legacy as MachineId));
       return;
     }
@@ -189,6 +207,7 @@ export function createMachineStore(deps: {
   async function loadQueued(
     id: MachineId,
   ): Promise<{ record: PairingRecord; credential: Credential } | undefined> {
+    assertOpen();
     if (!index.ids.includes(id)) return undefined;
     const loaded = await loadPairingAt(secure, machineKeys(id, index));
     if (loaded === undefined) await removeHeld(id);
@@ -200,6 +219,9 @@ export function createMachineStore(deps: {
       throw new PairingAlreadyExistsError();
     }
     const id = machineIdOf(record);
+    // Whatever is here belongs to an earlier pairing of the slot.
+    await refresh.delete(LEGACY_REFRESH_KEY);
+    await clearLegacyFlags();
     await savePairingAt(secure, LEGACY_PAIRING_KEYS, record, credential);
     await writeIndex(soleMachineIndex(id));
     return id;
@@ -243,18 +265,20 @@ export function createMachineStore(deps: {
   }
 
   /** The flag is resolved on each call, because an id's slot can change. */
-  function flagOf(id: MachineId, field: keyof MachineFlags) {
+  function flagOf(id: MachineId | undefined, field: keyof MachineFlags) {
     return {
       async read(): Promise<boolean> {
+        assertOpen();
         const current = await loadPrefs(prefs, localeTag);
-        if (id === index.legacy) return current[field];
+        if (id === undefined || id === index.legacy) return current[field];
         return current.machineFlags[id]?.[field] ?? false;
       },
       // Queued: load-change-save from two machines at once would lose one.
       write(value: boolean): Promise<void> {
         return enqueue(async () => {
+          assertOpen();
           const current = await loadPrefs(prefs, localeTag);
-          if (id === index.legacy) {
+          if (id === undefined || id === index.legacy) {
             await savePrefs(prefs, { ...current, [field]: value });
             return;
           }
@@ -275,6 +299,8 @@ export function createMachineStore(deps: {
   }
 
   async function list(): Promise<MachineEntry[]> {
+    // Queued: an open in flight answers first.
+    await enqueue(async () => assertOpen());
     const entries: MachineEntry[] = [];
     for (const id of index.ids) {
       const loaded = await load(id);
@@ -297,9 +323,19 @@ export function createMachineStore(deps: {
     },
     list,
     activeId() {
-      return index.active ?? index.ids[0];
+      assertOpen();
+      return activeIdNow();
     },
     load,
+    loadActive() {
+      return enqueue(async () => {
+        assertOpen();
+        const id = activeIdNow();
+        if (id === undefined) return undefined;
+        const loaded = await loadQueued(id);
+        return loaded === undefined ? undefined : { id, ...loaded };
+      });
+    },
     add(record, credential) {
       return enqueue(() => addQueued(record, credential));
     },
@@ -317,6 +353,7 @@ export function createMachineStore(deps: {
       });
     },
     nextAfter(id) {
+      assertOpen();
       return index.ids.find((other) => other !== id);
     },
     async findByDeviceId(deviceId) {
@@ -324,7 +361,8 @@ export function createMachineStore(deps: {
       return entries.find((entry) => entry.record.deviceId === deviceId)?.id;
     },
     refreshKey(id) {
-      return machineKeys(id, index).refresh;
+      assertOpen();
+      return id === undefined ? LEGACY_REFRESH_KEY : machineKeys(id, index).refresh;
     },
     refreshFlag(id) {
       return flagOf(id, "refreshTokenStored");
@@ -333,4 +371,34 @@ export function createMachineStore(deps: {
       return flagOf(id, "pushRegistered");
     },
   };
+}
+
+/** One `open` at a time, shared by every caller. One that worked is not
+ *  repeated. One that failed is forgotten, so a later attempt can open, for
+ *  instance after first unlock. Callers may ignore the outcome: until an open
+ *  succeeds the store itself refuses everything, and fails them closed. */
+export function createMachineStoreOpener(
+  store: Pick<MachineStore, "open">,
+  log: (line: string) => void,
+): () => Promise<"ok" | "failed"> {
+  let opened: Promise<"ok" | "failed"> | undefined;
+  return () => {
+    opened ??= store.open().then((outcome) => {
+      if (outcome === "failed") {
+        log("machines: open failed");
+        opened = undefined;
+      }
+      return outcome;
+    });
+    return opened;
+  };
+}
+
+/** Settings' Unpair, the unpaired handler and /pair's retry. Rejects when the
+ *  store could not open, so that is never taken for nothing to remove. */
+export async function removeActiveMachine(
+  machines: Pick<MachineStore, "activeId" | "remove">,
+): Promise<void> {
+  const id = machines.activeId();
+  if (id !== undefined) await machines.remove(id);
 }

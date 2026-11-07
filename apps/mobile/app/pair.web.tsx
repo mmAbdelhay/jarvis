@@ -46,14 +46,10 @@ import {
   phaseAfterCheck,
 } from "@/lib/pair-flow";
 import { setPasskeyOfferSignal } from "@/lib/passkey-offer-signal";
+import { removeActiveMachine } from "@/lib/machine-store";
+import { machineStore, openMachineStore } from "@/lib/machine-store-instance";
 import { linkRefusedOn, pair, type PairOutcome } from "@/lib/pairing";
-import {
-  clearPairing,
-  loadPairing,
-  PairingAlreadyExistsError,
-  savePairing,
-} from "@/lib/pairing-record";
-import { expoSecureStore } from "@/lib/secure-store";
+import { PairingAlreadyExistsError } from "@/lib/pairing-record";
 import { systemTransportFor } from "@/lib/system-transport";
 import { theme } from "@/lib/theme";
 import {
@@ -178,10 +174,11 @@ function PairWebScreen() {
     safeSetPhase({ kind: "checking" });
     let check: AlreadyPairedCheck;
     try {
-      const loaded = await loadPairing(expoSecureStore);
-      check = { ok: true, paired: loaded !== undefined };
+      await openMachineStore();
+      const machines = await machineStore.list();
+      check = { ok: true, paired: machines.length > 0 };
     } catch {
-      console.warn("pair: loadPairing failed while checking for an existing pairing");
+      console.warn("pair: reading the machines failed while checking for an existing pairing");
       check = { ok: false };
     }
     const nextKind = phaseAfterCheck(check);
@@ -207,10 +204,11 @@ function PairWebScreen() {
   const retryClear = useCallback(async () => {
     let cleared: boolean;
     try {
-      await clearPairing(expoSecureStore);
+      await openMachineStore();
+      await removeActiveMachine(machineStore);
       cleared = true;
     } catch {
-      console.warn("pair: retrying clearPairing failed");
+      console.warn("pair: retrying the clear failed");
       cleared = false;
     }
     if (afterClearRetry(cleared) === "scan") {
@@ -300,7 +298,7 @@ function PairWebScreen() {
         return;
       }
       try {
-        await savePairing(expoSecureStore, outcome.record, outcome.credential);
+        await machineStore.add(outcome.record, outcome.credential);
       } catch (err) {
         if (err instanceof PairingAlreadyExistsError) {
           alreadyPairedRef.current = true;

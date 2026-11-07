@@ -1,6 +1,6 @@
 import { AUTH_STATE_CHANNEL } from "@jarvis/wire";
 import { describe, expect, it } from "vitest";
-import { REFRESH_TOKEN_KEY, createAuthSession } from "./auth-session";
+import { createAuthSession } from "./auth-session";
 import type { AuthBroadcast, AuthChannel, DeviceAuth, RefreshLock } from "./auth-session";
 import { createFakeClock } from "./clock";
 import { createWebDeviceAuth } from "./web-device-auth";
@@ -10,6 +10,7 @@ import type { SecureStore } from "./secure-store";
 const MIN = 60_000;
 const ACCESS_TTL = 15 * MIN;
 const IDLE = 15 * MIN;
+const REFRESH_TOKEN_KEY = "test.refresh";
 
 let counter = 0;
 function token(): string {
@@ -173,7 +174,12 @@ async function flush(): Promise<void> {
 }
 
 function setup(
-  options: { passcode?: boolean; deviceAuth?: DeviceAuth; storedUnlockAtLaunchOnly?: boolean } = {},
+  options: {
+    passcode?: boolean;
+    deviceAuth?: DeviceAuth;
+    storedUnlockAtLaunchOnly?: boolean;
+    refreshKey?: () => string;
+  } = {},
 ) {
   const clock = createFakeClock();
   const double = createRpcDouble(clock);
@@ -185,6 +191,7 @@ function setup(
     rpc: double.rpc,
     clock,
     refreshStore: store.store,
+    refreshKey: options.refreshKey ?? (() => REFRESH_TOKEN_KEY),
     refreshStoredFlag: flag.flag,
     deviceAuth: options.deviceAuth ?? device.auth,
     storedUnlockAtLaunchOnly: options.storedUnlockAtLaunchOnly,
@@ -202,6 +209,120 @@ function setup(
 function tokenArg(call: Call | undefined, field: string): string | undefined {
   return (call?.args[0] as Record<string, string> | undefined)?.[field];
 }
+
+describe("auth-session: the refresh key it is given", () => {
+  const KEY = "jarvis.m.mac_7717.refresh";
+  const OTHER = "jarvis.m.other_7717.refresh";
+
+  it("login writes under that key and no other", async () => {
+    const { store, session } = setup({ refreshKey: () => KEY });
+    expect(await session.unlockWithPassword("pw")).toBe("unlocked");
+    expect([...store.values.keys()]).toEqual([KEY]);
+  });
+
+  it("a scheduled refresh rotates under that key", async () => {
+    const { store, session, clock } = setup({ refreshKey: () => KEY });
+    await session.unlockWithPassword("pw");
+    const first = store.values.get(KEY);
+    clock.advance(ACCESS_TTL * 0.8);
+    await flush();
+    expect(store.values.get(KEY)).not.toBe(first);
+    expect([...store.values.keys()]).toEqual([KEY]);
+  });
+
+  it("a stored unlock reads that key, and rotates under it", async () => {
+    const { store, session, flag, double } = setup({ refreshKey: () => KEY });
+    const held = token();
+    store.values.set(KEY, held);
+    store.values.set(OTHER, "someone else's");
+    flag.state.stored = true;
+
+    expect(await session.unlockWithStoredRefresh()).toBe("unlocked");
+    expect(tokenArg(double.calls[0], "refreshToken")).toBe(held);
+    expect(store.values.get(KEY)).not.toBe(held);
+    expect(store.values.get(OTHER)).toBe("someone else's");
+  });
+
+  it("logout deletes that key and no other", async () => {
+    const { store, session } = setup({ refreshKey: () => KEY });
+    await session.unlockWithPassword("pw");
+    store.values.set(OTHER, "someone else's");
+
+    await session.logout();
+    expect(store.values.has(KEY)).toBe(false);
+    expect(store.values.get(OTHER)).toBe("someone else's");
+  });
+
+  it("forget deletes that key and no other", async () => {
+    const { store, session } = setup({ refreshKey: () => KEY });
+    await session.unlockWithPassword("pw");
+    store.values.set(OTHER, "someone else's");
+
+    await session.forget();
+    expect(store.values.has(KEY)).toBe(false);
+    expect(store.values.get(OTHER)).toBe("someone else's");
+  });
+
+  it("asks on every use, so it follows the key's answer", async () => {
+    let key = KEY;
+    const { store, session } = setup({ refreshKey: () => key });
+    await session.unlockWithPassword("pw");
+    key = OTHER;
+    await session.forget();
+
+    expect(store.values.has(KEY)).toBe(true);
+    expect(store.values.has(OTHER)).toBe(false);
+  });
+
+  it("two sessions with different keys over one store never touch each other's token", async () => {
+    const a = setup({ refreshKey: () => KEY });
+    const clockB = createFakeClock();
+    const doubleB = createRpcDouble(clockB);
+    const b = createAuthSession({
+      rpc: doubleB.rpc,
+      clock: clockB,
+      refreshStore: a.store.store,
+      refreshKey: () => OTHER,
+      refreshStoredFlag: createStoredFlagDouble().flag,
+      deviceAuth: createDeviceAuthDouble({}).auth,
+      idleMs: IDLE,
+      log: () => {},
+    });
+    await a.session.unlockWithPassword("pw");
+    await b.unlockWithPassword("pw");
+    const tokenOfA = a.store.values.get(KEY);
+    const tokenOfB = a.store.values.get(OTHER);
+    expect(tokenOfA).toBeDefined();
+    expect(tokenOfB).toBeDefined();
+
+    clockB.advance(ACCESS_TTL * 0.8);
+    await flush();
+    expect(a.store.values.get(KEY)).toBe(tokenOfA);
+    expect(a.store.values.get(OTHER)).not.toBe(tokenOfB);
+
+    await a.session.logout();
+    expect(a.store.values.has(KEY)).toBe(false);
+    expect(a.store.values.has(OTHER)).toBe(true);
+
+    await b.forget();
+    expect(a.store.values.has(OTHER)).toBe(false);
+  });
+
+  it("a key it cannot get fails closed: no token is read, stored or sent", async () => {
+    const { store, session, flag, double, logs } = setup({
+      refreshKey: () => {
+        throw new Error("machines: store is not open");
+      },
+    });
+    flag.state.stored = true;
+
+    expect(await session.unlockWithStoredRefresh()).toBe("failed");
+    expect(double.calls).toEqual([]);
+    await session.forget();
+    expect(store.values.size).toBe(0);
+    expect(logs).toContain("auth: deleting the stored refresh token failed");
+  });
+});
 
 describe("auth-session: password login", () => {
   it("logs in, stores the refresh token before unlocking, and never persists the access token", async () => {
@@ -682,6 +803,7 @@ function browserSetup(keep: boolean) {
       rpc: double.rpc,
       clock,
       refreshStore: ctx.store.store,
+      refreshKey: () => REFRESH_TOKEN_KEY,
       refreshStoredFlag: ctx.flag.flag,
       deviceAuth: createWebDeviceAuth(async () => setting.keep),
       storedUnlockAtLaunchOnly: true,
@@ -1062,6 +1184,7 @@ function browserTabs() {
       rpc: double.rpc,
       clock,
       refreshStore: store.store,
+      refreshKey: () => REFRESH_TOKEN_KEY,
       refreshStoredFlag: flag.flag,
       deviceAuth: createWebDeviceAuth(async () => setting.keep),
       storedUnlockAtLaunchOnly: true,

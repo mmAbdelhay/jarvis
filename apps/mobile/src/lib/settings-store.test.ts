@@ -5,6 +5,8 @@ import type { ConnectStoredOutcome } from "./connect-stored";
 import { connectFromStoredPairing } from "./connect-stored";
 import type { ConnectionStore, ConnectionView } from "./connection-store";
 import { createConnectionStore } from "./connection-store";
+import { MACHINE_INDEX_KEY } from "./machine-index";
+import { createMachineStore, removeActiveMachine } from "./machine-store";
 import type { PairingRecord } from "./pairing-record";
 import type { PrefsStore } from "./prefs";
 import { PUSH_REGISTER_TIMEOUT_MS } from "./push-registration";
@@ -899,27 +901,24 @@ describe("createSettingsStore: reconnect (I3, shared connect-stored path)", () =
       // clearing*, which is what the test's own title describes and what
       // the shared `isClearingPairing()` flag (still `true` at that point)
       // is what actually stops the connect now.
-      let resolveRecordRead: (value: string | undefined) => void = () => {};
-      const recordRead = new Promise<string | undefined>((resolve) => {
+      const loaded = {
+        record: JSON.parse(RECORD_JSON) as PairingRecord,
+        credential: { deviceId: "d", token: "secret-token" },
+      };
+      let resolveRecordRead: (value: typeof loaded) => void = () => {};
+      const recordRead = new Promise<typeof loaded>((resolve) => {
         resolveRecordRead = resolve;
       });
       let resolveClear: () => void = () => {};
       const clearing = new Promise<void>((resolve) => {
         resolveClear = resolve;
       });
-      const secureStore: SecureStore = {
-        get: async (key) => {
-          if (key === "jarvis.pairing") return recordRead;
-          return "secret-token";
-        },
-        set: async () => {},
-        delete: async () => {},
-      };
+      const machines = { activeId: () => "m_1", load: () => recordRead };
       const fake = createFakeClient();
       const { deps, navigateCalls } = baseDeps({
         client: fake.client,
         connectFromStored: (shouldConnect) =>
-          connectFromStoredPairing({ secureStore, client: fake.client, shouldConnect }),
+          connectFromStoredPairing({ machines, client: fake.client, shouldConnect }),
         unpair: async () => {
           await clearing;
         },
@@ -937,7 +936,7 @@ describe("createSettingsStore: reconnect (I3, shared connect-stored path)", () =
       // if it had been read moments before the clear, while the clear is
       // still in flight — the guard, checked immediately before
       // `client.connect` inside connect-stored.ts, must still stop it.
-      resolveRecordRead(RECORD_JSON);
+      resolveRecordRead(loaded);
       await flush();
 
       expect(fake.connectCalls).toEqual([]);
@@ -947,6 +946,70 @@ describe("createSettingsStore: reconnect (I3, shared connect-stored path)", () =
       expect(navigateCalls).toEqual([1]);
     },
   );
+
+  it("one migrated machine: unpair removes the legacy keys and the index entry", async () => {
+    const values = new Map<string, string>([
+      ["jarvis.pairing", RECORD_JSON],
+      ["jarvis.token", "secret-token"],
+    ]);
+    const refreshValues = new Map<string, string>([["jarvis.refresh", "R".repeat(43)]]);
+    const over = (map: Map<string, string>): SecureStore => ({
+      get: async (key) => map.get(key),
+      set: async (key, value) => {
+        map.set(key, value);
+      },
+      delete: async (key) => {
+        map.delete(key);
+      },
+    });
+    const machines = createMachineStore({
+      secure: over(values),
+      refresh: over(refreshValues),
+      prefs: { read: async () => undefined, write: async () => {} },
+      localeTag: "en-US",
+      singleSlot: false,
+      log: () => {},
+    });
+    expect(await machines.open()).toBe("ok");
+    expect(machines.activeId()).toBeDefined();
+
+    const { deps, navigateCalls } = baseDeps({ unpair: () => removeActiveMachine(machines) });
+    const store = createSettingsStore(deps);
+    await flush();
+    await store.unpair();
+
+    expect(values.has("jarvis.pairing")).toBe(false);
+    expect(values.has("jarvis.token")).toBe(false);
+    expect(refreshValues.has("jarvis.refresh")).toBe(false);
+    expect(JSON.parse(values.get(MACHINE_INDEX_KEY) ?? "{}")).toEqual({ v: 1, ids: [] });
+    expect(machines.activeId()).toBeUndefined();
+    expect(navigateCalls).toEqual([1]);
+    expect(store.get().unpairError).toBe(false);
+  });
+
+  it("unpair on a store that could not open reports the failure", async () => {
+    const machines = createMachineStore({
+      secure: {
+        get: async () => {
+          throw new Error("keychain unavailable");
+        },
+        set: async () => {},
+        delete: async () => {},
+      },
+      refresh: { get: async () => undefined, set: async () => {}, delete: async () => {} },
+      prefs: { read: async () => undefined, write: async () => {} },
+      localeTag: "en-US",
+      singleSlot: false,
+      log: () => {},
+    });
+    expect(await machines.open()).toBe("failed");
+    const { deps } = baseDeps({ unpair: () => removeActiveMachine(machines) });
+    const store = createSettingsStore(deps);
+    await flush();
+    await store.unpair();
+
+    expect(store.get().unpairError).toBe(true);
+  });
 
   it("clears a previous unpairError once a later reconnect actually succeeds", async () => {
     const { deps } = baseDeps({

@@ -18,11 +18,11 @@ import { connectFromStoredPairing } from "@/lib/connect-stored";
 import { dialogs } from "@/lib/dialog";
 import { platformKey, t } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
-import { clearPairing, loadPairing } from "@/lib/pairing-record";
+import { removeActiveMachine } from "@/lib/machine-store";
+import { loadActiveMachine, machineStore, openMachineStore } from "@/lib/machine-store-instance";
 import { filePrefsStore } from "@/lib/prefs-file";
 import { usePushRegistration } from "@/lib/push-context";
 import { useAuthSession, useConnectionStore, useRpcClient } from "@/lib/rpc-context";
-import { expoSecureStore } from "@/lib/secure-store";
 import { SETTINGS_SCOPES, type SettingsScope, settingsWideLayout } from "@/lib/settings-sections";
 import { createSettingsStore, type SettingsView } from "@/lib/settings-store";
 import { theme } from "@/lib/theme";
@@ -79,17 +79,20 @@ function SettingsScreen() {
       createSettingsStore({
         prefs: filePrefsStore,
         localeTag: Intl.DateTimeFormat().resolvedOptions().locale,
-        loadRecord: async () => (await loadPairing(expoSecureStore))?.record,
+        loadRecord: async () => (await loadActiveMachine())?.record,
         // The same shared read+connect function `_layout.tsx` uses on
-        // entry — one `loadPairing` path in the app.
-        connectFromStored: (shouldConnect) =>
-          connectFromStoredPairing({ secureStore: expoSecureStore, client, shouldConnect }),
+        // entry — one read path for connecting in the app.
+        connectFromStored: async (shouldConnect) => {
+          await openMachineStore();
+          return connectFromStoredPairing({ machines: machineStore, client, shouldConnect });
+        },
         connection,
         client,
         clock: realClock,
         appVersion: APP_VERSION,
         unpair: async () => {
-          await clearPairing(expoSecureStore);
+          await openMachineStore();
+          await removeActiveMachine(machineStore);
           // The stored refresh token belongs to the pairing it was issued under.
           await authSession.forget();
         },

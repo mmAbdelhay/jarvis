@@ -32,15 +32,11 @@ import {
   phaseAfterCheck,
   shouldDrainPairingLink,
 } from "@/lib/pair-flow";
+import { removeActiveMachine } from "@/lib/machine-store";
+import { machineStore, openMachineStore } from "@/lib/machine-store-instance";
 import { pair, type PairOutcome, withHost } from "@/lib/pairing";
 import { subscribePairingLink, takePairingLink } from "@/lib/pairing-link-holder";
-import {
-  clearPairing,
-  loadPairing,
-  PairingAlreadyExistsError,
-  savePairing,
-} from "@/lib/pairing-record";
-import { expoSecureStore } from "@/lib/secure-store";
+import { PairingAlreadyExistsError } from "@/lib/pairing-record";
 import { systemTransportFor } from "@/lib/system-transport";
 import { theme } from "@/lib/theme";
 import { createAppTransport } from "@/lib/trust-routing-transport";
@@ -192,18 +188,20 @@ function PairScreen() {
 
   // C1a / Important-1: while a pairing record already exists, this screen
   // refuses to start any pairing at all — deep link, scan or paste —
-  // until the user has explicitly unpaired. A `loadPairing` failure fails
+  // until the user has explicitly unpaired. A failed read of the machines,
+  // or a machine store that could not open, fails
   // *closed*: `phaseAfterCheck` never routes a failed check to "scan",
   // so a transient keychain error can never unlock scanning.
   const checkAlreadyPaired = useCallback(async () => {
     safeSetPhase({ kind: "checking" });
     let check: AlreadyPairedCheck;
     try {
-      const loaded = await loadPairing(expoSecureStore);
-      check = { ok: true, paired: loaded !== undefined };
+      await openMachineStore();
+      const machines = await machineStore.list();
+      check = { ok: true, paired: machines.length > 0 };
     } catch {
       // Logged without any secret: just the fact that the check failed.
-      console.warn("pair: loadPairing failed while checking for an existing pairing");
+      console.warn("pair: reading the machines failed while checking for an existing pairing");
       check = { ok: false };
     }
     const nextKind = phaseAfterCheck(check);
@@ -246,18 +244,19 @@ function PairScreen() {
     // are otherwise stable.
   }, [checkAlreadyPaired, safeSetPhase]);
 
-  // The clearFailed phase's own retry — calls clearPairing directly (never
+  // The clearFailed phase's own retry — removes the machine directly (never
   // checkAlreadyPaired: a retry that just cleared the record is already
   // known to have nothing left to find) and moves on to "scan" only once
   // it actually succeeds.
   const retryClear = useCallback(async () => {
     let cleared: boolean;
     try {
-      await clearPairing(expoSecureStore);
+      await openMachineStore();
+      await removeActiveMachine(machineStore);
       cleared = true;
     } catch {
       // Logged without any secret: just the fact that the retry failed.
-      console.warn("pair: retrying clearPairing failed");
+      console.warn("pair: retrying the clear failed");
       cleared = false;
     }
     const next = afterClearRetry(cleared);
@@ -287,12 +286,12 @@ function PairScreen() {
         return;
       }
       try {
-        await savePairing(expoSecureStore, outcome.record, outcome.credential);
+        await machineStore.add(outcome.record, outcome.credential);
       } catch (err) {
         if (err instanceof PairingAlreadyExistsError) {
           // Important-1, defence in depth: the mount-time check said "not
           // paired", but a valid record exists by the time this write
-          // happened (e.g. a concurrent pairing elsewhere) — `savePairing`
+          // happened (e.g. a concurrent pairing elsewhere) — `add`
           // itself refused rather than overwrite it.
           alreadyPairedRef.current = true;
           safeSetPhase({ kind: "alreadyPaired" });

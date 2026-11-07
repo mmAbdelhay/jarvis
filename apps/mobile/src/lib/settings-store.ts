@@ -15,11 +15,10 @@
 // `navigateToPair` (unpair's disconnect → clear → navigate sequence is
 // something a test needs to observe the store itself performing) and the
 // shared `connectFromStored` (connect-stored.ts's `connectFromStoredPairing`,
-// partially applied by the caller with the app's real secure store and
-// client) — the same one `_layout.tsx` uses on entry, so there is exactly
-// one `loadPairing` read path in the whole app, not two that could
-// disagree, and a keychain failure becomes a typed outcome instead of an
-// unhandled rejection.
+// partially applied by the caller with the app's machine store and client)
+// — the same one `_layout.tsx` uses on entry, so there is exactly one read
+// path for connecting in the whole app, not two that could disagree, and a
+// keychain failure becomes a typed outcome instead of an unhandled rejection.
 
 import { PUSH_UNREGISTER_CHANNEL } from "@jarvis/wire";
 import type { ConnectStoredOutcome } from "./connect-stored";

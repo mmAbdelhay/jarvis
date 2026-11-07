@@ -12,8 +12,7 @@ import { useCallback, useEffect, useState } from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { t } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
-import { loadPairing } from "@/lib/pairing-record";
-import { expoSecureStore } from "@/lib/secure-store";
+import { loadActiveMachine } from "@/lib/machine-store-instance";
 import { isAllowedSidecarUrl } from "@/lib/sidecar-url";
 import { theme } from "@/lib/theme";
 
@@ -36,7 +35,7 @@ export default function SidecarViewWebScreen() {
     void (async () => {
       let record: { name?: string; port: number } | undefined;
       try {
-        record = (await loadPairing(expoSecureStore))?.record;
+        record = (await loadActiveMachine())?.record;
       } catch {
         record = undefined;
       }

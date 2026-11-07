@@ -4,8 +4,7 @@
 // which machine owns it, so the rotating refresh token never has two copies.
 // This file is the only place the two key layouts meet.
 
-import { REFRESH_TOKEN_KEY } from "./auth-session";
-import { LEGACY_PAIRING_KEYS } from "./pairing-record";
+import { LEGACY_PAIRING_KEYS, LEGACY_REFRESH_KEY } from "./pairing-record";
 
 export type MachineId = string;
 
@@ -39,7 +38,7 @@ export function machineKeys(
   index: MachineIndex,
 ): { record: string; token: string; refresh: string } {
   if (id === index.legacy) {
-    return { ...LEGACY_PAIRING_KEYS, refresh: REFRESH_TOKEN_KEY };
+    return { ...LEGACY_PAIRING_KEYS, refresh: LEGACY_REFRESH_KEY };
   }
   return {
     record: `jarvis.m.${id}.pairing`,

@@ -1,7 +1,6 @@
 import { Redirect } from "expo-router";
 import { useEffect, useState } from "react";
-import { loadPairing } from "@/lib/pairing-record";
-import { expoSecureStore } from "@/lib/secure-store";
+import { loadActiveMachine } from "@/lib/machine-store-instance";
 
 type Target = "/pair" | "/dashboard";
 
@@ -15,14 +14,15 @@ export default function Index() {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      let loaded: Awaited<ReturnType<typeof loadPairing>>;
+      let loaded: Awaited<ReturnType<typeof loadActiveMachine>>;
       try {
-        loaded = await loadPairing(expoSecureStore);
+        loaded = await loadActiveMachine();
       } catch {
-        // I5: a secure-store read failure is treated as "not paired" rather
-        // than leaving the app on a blank screen forever. Logged without
-        // any secret — just the fact that the read failed.
-        console.warn("index: loadPairing failed, routing to /pair");
+        // I5: a secure-store read failure routes to /pair, whose own check
+        // then shows check-failed, rather than leaving the app on a blank
+        // screen forever. Logged without any secret — just the fact that the
+        // read failed.
+        console.warn("index: reading the active machine failed, routing to /pair");
         loaded = undefined;
       }
       if (!cancelled) {

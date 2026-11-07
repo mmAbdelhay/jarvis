@@ -54,6 +54,8 @@ export const LEGACY_PAIRING_KEYS: PairingKeys = {
   record: "jarvis.pairing",
   token: "jarvis.token",
 };
+/** The legacy slot's refresh token, in the refresh store (refresh-store.ts). */
+export const LEGACY_REFRESH_KEY = "jarvis.refresh";
 
 /**
  * Defensive, field-by-field parse — never spreads the parsed JSON into a

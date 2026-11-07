@@ -29,7 +29,6 @@ import type { Clock } from "./clock";
 import type { RpcClient, RpcResult } from "./rpc-client";
 import type { SecureStore } from "./secure-store";
 
-export const REFRESH_TOKEN_KEY = "jarvis.refresh";
 /** Refresh once this fraction of the access token's lifetime has passed. */
 export const REFRESH_AT_FRACTION = 0.8;
 /** An access token this close to expiry is not worth resuming with. */
@@ -118,6 +117,9 @@ export type AuthSessionDeps = {
   /** Plain secure storage (no per-read prompt): rotation writes never
    *  prompt. The device-owner check gates reads instead. */
   refreshStore: SecureStore;
+  /** The key of the refresh token in `refreshStore`, asked on every use. A
+   *  throw is a failed keychain read: no token is read, stored or deleted. */
+  refreshKey: () => string;
   refreshStoredFlag: RefreshStoredFlag;
   deviceAuth: DeviceAuth;
   /** The browser build (controller ruling, 13b fix round 1): the stored
@@ -326,7 +328,7 @@ export function createAuthSession(deps: AuthSessionDeps): AuthSession {
   async function deleteStored(): Promise<void> {
     await setStoredFlag(false);
     try {
-      await deps.refreshStore.delete(REFRESH_TOKEN_KEY);
+      await deps.refreshStore.delete(deps.refreshKey());
     } catch {
       deps.log("auth: deleting the stored refresh token failed");
     }
@@ -362,7 +364,7 @@ export function createAuthSession(deps: AuthSessionDeps): AuthSession {
       return;
     }
     try {
-      await deps.refreshStore.set(REFRESH_TOKEN_KEY, token);
+      await deps.refreshStore.set(deps.refreshKey(), token);
       // The gate may have closed while writing (the browser's "Keep me
       // signed in" switched off): take the token back out.
       if (!(await hasPasscode())) {
@@ -407,7 +409,7 @@ export function createAuthSession(deps: AuthSessionDeps): AuthSession {
 
   async function readStored(): Promise<string | undefined> {
     try {
-      return await deps.refreshStore.get(REFRESH_TOKEN_KEY);
+      return await deps.refreshStore.get(deps.refreshKey());
     } catch {
       return undefined;
     }
@@ -578,7 +580,7 @@ export function createAuthSession(deps: AuthSessionDeps): AuthSession {
     if (refreshing !== undefined) return refreshing;
     let stored: string | undefined;
     try {
-      stored = await deps.refreshStore.get(REFRESH_TOKEN_KEY);
+      stored = await deps.refreshStore.get(deps.refreshKey());
     } catch {
       return "failed";
     }

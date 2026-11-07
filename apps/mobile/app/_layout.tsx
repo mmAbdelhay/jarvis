@@ -20,21 +20,20 @@ import { createConnectionStore } from "@/lib/connection-store";
 import type { Language } from "@/lib/i18n";
 import { isRtl, t } from "@/lib/i18n";
 import { LanguageContext } from "@/lib/language-context";
-import { createMachineStore } from "@/lib/machine-store";
+import { removeActiveMachine } from "@/lib/machine-store";
+import { machineStore, openMachineStore } from "@/lib/machine-store-instance";
 import { nativeTransport } from "@/lib/native-transport";
 import { isClearingPairing } from "@/lib/pairing-guard";
-import { clearPairing } from "@/lib/pairing-record";
 import { filePrefsStore } from "@/lib/prefs-file";
 import { createAppPhoneUpdateStore } from "@/lib/phone-update-app";
 import { PhoneUpdateProvider } from "@/lib/phone-update-context";
-import { createRefreshStoredFlag, DEFAULT_IDLE_LOCK_MINUTES, loadPrefs } from "@/lib/prefs";
+import { DEFAULT_IDLE_LOCK_MINUTES, loadPrefs } from "@/lib/prefs";
 import { PushProvider } from "@/lib/push-context";
 import { createDeviceAuth } from "@/lib/device-auth";
 import { refreshLock } from "@/lib/refresh-lock";
 import { refreshStore } from "@/lib/refresh-store";
 import { createRpcClient } from "@/lib/rpc-client";
 import { RpcContext } from "@/lib/rpc-context";
-import { expoSecureStore } from "@/lib/secure-store";
 import { systemTransportFor } from "@/lib/system-transport";
 import { theme } from "@/lib/theme";
 import { createAppTransport } from "@/lib/trust-routing-transport";
@@ -56,23 +55,6 @@ const transport = createAppTransport(PLATFORM, {
   pin: nativeTransport,
   system: systemTransportFor(PLATFORM),
 });
-// The machine index beside the pairing keys. Opening it migrates an existing
-// pairing, invisibly; every caller still reads the legacy keys for now.
-const machineStore = createMachineStore({
-  secure: expoSecureStore,
-  refresh: refreshStore,
-  prefs: filePrefsStore,
-  localeTag: Intl.DateTimeFormat().resolvedOptions().locale,
-  singleSlot: PLATFORM === "web",
-  log: (line) => console.log(line),
-});
-let machineStoreOpened: Promise<void> | undefined;
-function openMachineStore(): Promise<void> {
-  machineStoreOpened ??= machineStore.open().then((outcome) => {
-    if (outcome === "failed") console.warn("machines: open failed");
-  });
-  return machineStoreOpened;
-}
 
 // Composes the app's two per-app controller providers into the one slot
 // `RootLayout`'s tree already had for `VoiceProvider` alone (fix round 1,
@@ -123,12 +105,15 @@ export default function RootLayout() {
       rpc: client,
       clock: realClock,
       refreshStore,
-      // Load-change-save like every prefs writer; the locale only feeds
-      // loadPrefs's language fallback.
-      refreshStoredFlag: createRefreshStoredFlag(
-        filePrefsStore,
-        Intl.DateTimeFormat().resolvedOptions().locale,
-      ),
+      // The active machine's, asked on each use: a pairing can change under
+      // this one session. With no active machine, the legacy key, harmlessly,
+      // since nothing connects. A store that could not open throws here, and
+      // the session treats that as a failed keychain read.
+      refreshKey: () => machineStore.refreshKey(machineStore.activeId()),
+      refreshStoredFlag: {
+        read: async () => machineStore.refreshFlag(machineStore.activeId()).read(),
+        write: async (stored) => machineStore.refreshFlag(machineStore.activeId()).write(stored),
+      },
       deviceAuth: createDeviceAuth(() => t(languageRef.current ?? "en", "auth.biometricPrompt")),
       // Browser: the stored token only signs in at page load; an idle lock
       // needs a passkey or the password.
@@ -157,7 +142,8 @@ export default function RootLayout() {
   if (unpairedHandlerRef.current === undefined) {
     unpairedHandlerRef.current = createUnpairedHandler({
       clearPairing: async () => {
-        await clearPairing(expoSecureStore);
+        await openMachineStore();
+        await removeActiveMachine(machineStore);
         // The stored refresh token belongs to the pairing it was issued under.
         await authSession.forget();
       },
@@ -328,7 +314,7 @@ export default function RootLayout() {
   const connectFromStoredPairing = useCallback(async () => {
     await openMachineStore();
     const outcome = await connectFromStored({
-      secureStore: expoSecureStore,
+      machines: machineStore,
       client,
       shouldConnect: () => !isClearingPairing(),
     });

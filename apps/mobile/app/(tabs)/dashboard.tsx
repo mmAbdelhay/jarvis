@@ -32,10 +32,9 @@ import { STRINGS, t } from "@/lib/i18n";
 import type { MessageKey } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
 import { loadProjectChoices } from "@/lib/new-session";
-import { loadPairing } from "@/lib/pairing-record";
+import { loadActiveMachine } from "@/lib/machine-store-instance";
 import { createReviewsStore, type ReviewListItem, reviewRoute } from "@/lib/reviews-store";
 import { useConnectionStore, useRpcClient } from "@/lib/rpc-context";
-import { expoSecureStore } from "@/lib/secure-store";
 import { usePhoneUpdateSelect } from "@/lib/phone-update-context";
 import type { PhoneUpdateView } from "@/lib/phone-update-types";
 import { openSession, sessionTarget } from "@/lib/session-nav";
@@ -77,7 +76,7 @@ export default function DashboardScreen() {
   const [awake, setAwake] = useState<{ status?: AwakeStatus; busy: boolean }>({ busy: false });
   const [connection, setConnection] = useState<ConnectionView>(connectionStore.get());
   // The paired computer's display name — read from the same
-  // `loadPairing(expoSecureStore)` source `settings.tsx` uses (item 3):
+  // `loadActiveMachine()` source `settings.tsx` uses (item 3):
   // there is no store dedicated to this, only the Settings screen's own
   // read, so the Dashboard's connection pill reads it directly rather than
   // standing up a second `SettingsStore` just for one field.
@@ -116,9 +115,14 @@ export default function DashboardScreen() {
       setConnection(connectionStore.get());
       const unsubscribeConnection = connectionStore.subscribe(setConnection);
       let cancelled = false;
-      void loadPairing(expoSecureStore).then((loaded) => {
-        if (!cancelled) setLaptopName(loaded?.record.laptopName);
-      });
+      void loadActiveMachine().then(
+        (loaded) => {
+          if (!cancelled) setLaptopName(loaded?.record.laptopName);
+        },
+        // A failed read has its own route, _layout.tsx's connect to /pair:
+        // the pill just stays without a name.
+        () => console.warn("dashboard: reading the active machine failed"),
+      );
       return () => {
         unsubscribe();
         store.blur();

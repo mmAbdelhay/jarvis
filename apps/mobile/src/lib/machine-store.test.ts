@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { MACHINE_INDEX_KEY, parseMachineIndex } from "./machine-index";
-import { type MachineStore, MachineLimitError, createMachineStore } from "./machine-store";
+import {
+  type MachineStore,
+  MachineLimitError,
+  createMachineStore,
+  createMachineStoreOpener,
+  removeActiveMachine,
+} from "./machine-store";
 import { PairingAlreadyExistsError, type PairingRecord } from "./pairing-record";
 import { type PrefsStore, loadPrefs } from "./prefs";
 import type { SecureStore } from "./secure-store";
@@ -19,6 +25,7 @@ class FakeStore implements SecureStore {
   deletes: string[] = [];
   failGet?: (key: string) => boolean;
   failSet?: (key: string) => boolean;
+  failDelete?: (key: string) => boolean;
 
   get(key: string): Promise<string | undefined> {
     if (this.failGet?.(key) === true) return Promise.reject(new Error("keychain read failed"));
@@ -33,6 +40,7 @@ class FakeStore implements SecureStore {
   }
 
   delete(key: string): Promise<void> {
+    if (this.failDelete?.(key) === true) return Promise.reject(new Error("keychain delete failed"));
     this.deletes.push(key);
     this.values.delete(key);
     return Promise.resolve();
@@ -313,6 +321,56 @@ describe("open: reconciling after a downgrade", () => {
     expect(storedIndex(h)).toEqual({ v: 1, ids: [NAME_ID] });
     expect(store.activeId()).toBe(NAME_ID);
     expect(await store.load(NAME_ID)).toBeDefined();
+  });
+
+  it("the legacy slot found empty: its refresh key and top-level flags go before the index", async () => {
+    const order: string[] = [];
+    const h = harness({
+      prefs: JSON.stringify({ refreshTokenStored: true, pushRegistered: true }),
+    });
+    h.refresh.values.set("jarvis.refresh", REFRESH_TOKEN);
+    seedIndex(h, { ids: [LAN_ID], active: LAN_ID, legacy: LAN_ID });
+    const refreshDelete = h.refresh.delete.bind(h.refresh);
+    h.refresh.delete = (key) => {
+      order.push(`refresh.delete ${key}`);
+      return refreshDelete(key);
+    };
+    const prefsWrite = h.prefs.write.bind(h.prefs);
+    h.prefs.write = (text) => {
+      order.push("prefs.write");
+      return prefsWrite(text);
+    };
+    const secureSet = h.secure.set.bind(h.secure);
+    h.secure.set = (key, value) => {
+      order.push(`secure.set ${key}`);
+      return secureSet(key, value);
+    };
+    await opened(h);
+
+    expect(order).toEqual([
+      "refresh.delete jarvis.refresh",
+      "prefs.write",
+      `secure.set ${MACHINE_INDEX_KEY}`,
+    ]);
+    expect(h.refresh.values.has("jarvis.refresh")).toBe(false);
+    const prefs = await loadPrefs(h.prefs, "en-US");
+    expect(prefs.refreshTokenStored).toBe(false);
+    expect(prefs.pushRegistered).toBe(false);
+  });
+
+  it("the legacy slot found empty: a failed refresh delete keeps the id, and the next open finishes", async () => {
+    const h = harness();
+    h.refresh.values.set("jarvis.refresh", REFRESH_TOKEN);
+    seedIndex(h, { ids: [LAN_ID], active: LAN_ID, legacy: LAN_ID });
+    h.refresh.failDelete = (key) => key === "jarvis.refresh";
+
+    expect(await h.build().open()).toBe("failed");
+    expect(storedIndex(h).legacy).toBe(LAN_ID);
+
+    h.refresh.failDelete = undefined;
+    await opened(h);
+    expect(h.refresh.values.has("jarvis.refresh")).toBe(false);
+    expect(storedIndex(h)).toEqual({ v: 1, ids: [] });
   });
 
   it("replaces the legacy machine when the old app paired another, and active follows", async () => {
@@ -692,6 +750,44 @@ describe("remove", () => {
     expect(await store.load(OTHER_ID)).toBeDefined();
   });
 
+  it.each([
+    ["the record delete, with the token gone", "secure", "jarvis.pairing"],
+    ["the refresh delete, with the token and record gone", "refresh", "jarvis.refresh"],
+  ] as const)(
+    "a crash at %s on the legacy machine: the next open leaves nothing behind",
+    async (_label, which, key) => {
+      const h = harness({
+        prefs: JSON.stringify({ refreshTokenStored: true, pushRegistered: true }),
+      });
+      seedLegacy(h);
+      seedMachine(h, NAME_ID, namedRecord("mac.tail.ts.net"), "NAME-REFRESH");
+      seedIndex(h, { ids: [LAN_ID, NAME_ID], active: LAN_ID, legacy: LAN_ID });
+      const first = await opened(h);
+      h[which].failDelete = (candidate) => candidate === key;
+      await expect(first.remove(LAN_ID)).rejects.toThrow();
+      h[which].failDelete = undefined;
+      expect(storedIndex(h).legacy).toBe(LAN_ID);
+
+      const store = await opened(h);
+      expect(storedIndex(h)).toEqual({ v: 1, ids: [NAME_ID] });
+      expect(h.secure.values.has("jarvis.pairing")).toBe(false);
+      expect(h.secure.values.has("jarvis.token")).toBe(false);
+      expect(h.refresh.values.has("jarvis.refresh")).toBe(false);
+      const prefs = await loadPrefs(h.prefs, "en-US");
+      expect(prefs.refreshTokenStored).toBe(false);
+      expect(prefs.pushRegistered).toBe(false);
+      expect(store.activeId()).toBe(NAME_ID);
+      expect(h.refresh.values.get(`jarvis.m.${NAME_ID}.refresh`)).toBe("NAME-REFRESH");
+
+      // Idempotent: done once, a further open writes nothing.
+      h.secure.forgetCalls();
+      h.refresh.forgetCalls();
+      await opened(h);
+      expect(h.secure.sets).toEqual([]);
+      expect(h.refresh.deletes).toEqual([]);
+    },
+  );
+
   it("an id not held is a no-op", async () => {
     const h = harness();
     seedLegacy(h);
@@ -867,6 +963,51 @@ describe("singleSlot (the browser)", () => {
     );
   });
 
+  it("clears a leftover refresh token and top-level flags before saving", async () => {
+    const order: string[] = [];
+    const h = harness({
+      singleSlot: true,
+      prefs: JSON.stringify({ refreshTokenStored: true, pushRegistered: true }),
+    });
+    h.refresh.values.set("jarvis.refresh", "LEFTOVER");
+    const store = await opened(h);
+    const refreshDelete = h.refresh.delete.bind(h.refresh);
+    h.refresh.delete = (key) => {
+      order.push(`refresh.delete ${key}`);
+      return refreshDelete(key);
+    };
+    const secureSet = h.secure.set.bind(h.secure);
+    h.secure.set = (key, value) => {
+      order.push(`secure.set ${key}`);
+      return secureSet(key, value);
+    };
+    const record = namedRecord("mac.tail.ts.net");
+    await store.add(record, credentialOf(record));
+
+    expect(order).toEqual([
+      "refresh.delete jarvis.refresh",
+      "secure.set jarvis.token",
+      "secure.set jarvis.pairing",
+      `secure.set ${MACHINE_INDEX_KEY}`,
+    ]);
+    expect(h.refresh.values.has("jarvis.refresh")).toBe(false);
+    expect(await store.refreshFlag(NAME_ID).read()).toBe(false);
+    expect(await store.pushFlag(NAME_ID).read()).toBe(false);
+  });
+
+  it("refused, it leaves the refresh token and flags of the machine it holds", async () => {
+    const h = harness({ singleSlot: true, prefs: JSON.stringify({ refreshTokenStored: true }) });
+    seedLegacy(h);
+    const store = await opened(h);
+    const record = namedRecord("mac.tail.ts.net");
+
+    await expect(store.add(record, credentialOf(record))).rejects.toBeInstanceOf(
+      PairingAlreadyExistsError,
+    );
+    expect(h.refresh.values.get("jarvis.refresh")).toBe(REFRESH_TOKEN);
+    expect(await store.refreshFlag(LAN_ID).read()).toBe(true);
+  });
+
   it("a crash before the index write is picked up by the next open", async () => {
     const h = harness({ singleSlot: true });
     const first = await opened(h);
@@ -974,6 +1115,221 @@ describe("the queue", () => {
     h.secure.failSet = undefined;
 
     expect(await store.add(a, credentialOf(a))).toBe(NAME_ID);
+  });
+});
+
+describe("until an open succeeds", () => {
+  /** Holds two machines, one legacy, and could not read them. */
+  async function failedOpen(): Promise<{ h: Harness; store: MachineStore }> {
+    const h = harness({ prefs: JSON.stringify({ refreshTokenStored: true }) });
+    seedLegacy(h);
+    seedMachine(h, NAME_ID, namedRecord("mac.tail.ts.net"));
+    seedIndex(h, { ids: [LAN_ID, NAME_ID], active: LAN_ID, legacy: LAN_ID });
+    h.secure.failGet = (key) => key === MACHINE_INDEX_KEY;
+    const store = h.build();
+    expect(await store.open()).toBe("failed");
+    h.secure.failGet = undefined;
+    return { h, store };
+  }
+
+  it("load, loadActive, list and findByDeviceId reject", async () => {
+    const { store } = await failedOpen();
+    await expect(store.load(LAN_ID)).rejects.toThrow("not open");
+    await expect(store.load("nobody_1")).rejects.toThrow("not open");
+    await expect(store.loadActive()).rejects.toThrow("not open");
+    await expect(store.list()).rejects.toThrow("not open");
+    await expect(store.findByDeviceId(DEVICE_A)).rejects.toThrow("not open");
+  });
+
+  it("activeId, nextAfter and refreshKey throw, with or without an id", async () => {
+    const { store } = await failedOpen();
+    expect(() => store.activeId()).toThrow("not open");
+    expect(() => store.nextAfter(LAN_ID)).toThrow("not open");
+    expect(() => store.refreshKey(LAN_ID)).toThrow("not open");
+    expect(() => store.refreshKey(undefined)).toThrow("not open");
+  });
+
+  it("flag reads and writes reject, and no write lands in machineFlags", async () => {
+    const { h, store } = await failedOpen();
+    await expect(store.refreshFlag(LAN_ID).read()).rejects.toThrow("not open");
+    await expect(store.refreshFlag(LAN_ID).write(false)).rejects.toThrow("not open");
+    await expect(store.pushFlag(LAN_ID).read()).rejects.toThrow("not open");
+    await expect(store.pushFlag(LAN_ID).write(true)).rejects.toThrow("not open");
+    expect(h.prefs.writes).toBe(0);
+    expect((await loadPrefs(h.prefs, "en-US")).machineFlags).toEqual({});
+  });
+
+  it("a store never opened answers the same way", async () => {
+    const store = harness().build();
+    expect(() => store.activeId()).toThrow("not open");
+    await expect(store.list()).rejects.toThrow("not open");
+  });
+
+  it("a later open recovers everything", async () => {
+    const { store } = await failedOpen();
+    expect(await store.open()).toBe("ok");
+    expect(store.activeId()).toBe(LAN_ID);
+    expect(store.refreshKey(LAN_ID)).toBe("jarvis.refresh");
+    expect(await store.refreshFlag(LAN_ID).read()).toBe(true);
+    expect((await store.list()).map((entry) => entry.id)).toEqual([LAN_ID, NAME_ID]);
+  });
+});
+
+describe("loadActive", () => {
+  it("answers the active machine with its id, record and credential", async () => {
+    const h = harness();
+    seedLegacy(h);
+    seedMachine(h, NAME_ID, namedRecord("mac.tail.ts.net"));
+    seedIndex(h, { ids: [LAN_ID, NAME_ID], active: NAME_ID, legacy: LAN_ID });
+    const store = await opened(h);
+
+    expect(await store.loadActive()).toEqual({
+      id: NAME_ID,
+      record: namedRecord("mac.tail.ts.net"),
+      credential: credentialOf(namedRecord("mac.tail.ts.net")),
+    });
+  });
+
+  it("falls back to the first id when active is unset", async () => {
+    const h = harness();
+    seedMachine(h, NAME_ID, namedRecord("mac.tail.ts.net"));
+    seedIndex(h, { ids: [NAME_ID] });
+    expect((await (await opened(h)).loadActive())?.id).toBe(NAME_ID);
+  });
+
+  it("answers undefined on an empty phone", async () => {
+    expect(await (await opened(harness())).loadActive()).toBeUndefined();
+  });
+
+  it("answers undefined when the active record is gone, and self-heals", async () => {
+    const h = harness();
+    seedMachine(h, NAME_ID, namedRecord("mac.tail.ts.net"));
+    seedIndex(h, { ids: [NAME_ID], active: NAME_ID });
+    const store = await opened(h);
+    h.secure.values.delete(`jarvis.m.${NAME_ID}.pairing`);
+
+    expect(await store.loadActive()).toBeUndefined();
+    expect(storedIndex(h)).toEqual({ v: 1, ids: [] });
+  });
+
+  it("a throwing read rejects and removes nothing", async () => {
+    const h = harness();
+    seedMachine(h, NAME_ID, namedRecord("mac.tail.ts.net"));
+    seedIndex(h, { ids: [NAME_ID], active: NAME_ID });
+    const store = await opened(h);
+    h.secure.failGet = (key) => key === `jarvis.m.${NAME_ID}.pairing`;
+
+    await expect(store.loadActive()).rejects.toThrow();
+    expect(storedIndex(h).ids).toEqual([NAME_ID]);
+  });
+});
+
+describe("no active id", () => {
+  it("refreshKey reads the legacy key, harmlessly, since nothing connects", async () => {
+    const store = await opened(harness());
+    expect(store.refreshKey(store.activeId())).toBe("jarvis.refresh");
+  });
+
+  it("the flags read and write the top level", async () => {
+    const h = harness({ prefs: JSON.stringify({ refreshTokenStored: true }) });
+    const store = await opened(h);
+    const flag = store.refreshFlag(store.activeId());
+
+    expect(await flag.read()).toBe(true);
+    await flag.write(false);
+    const prefs = await loadPrefs(h.prefs, "en-US");
+    expect(prefs.refreshTokenStored).toBe(false);
+    expect(prefs.machineFlags).toEqual({});
+  });
+});
+
+describe("removeActiveMachine", () => {
+  it("removes the active machine and leaves the other", async () => {
+    const h = harness();
+    seedMachine(h, NAME_ID, namedRecord("mac.tail.ts.net"));
+    seedMachine(h, OTHER_ID, namedRecord("other.tail.ts.net", DEVICE_C));
+    seedIndex(h, { ids: [NAME_ID, OTHER_ID], active: OTHER_ID });
+    await removeActiveMachine(await opened(h));
+
+    expect(storedIndex(h).ids).toEqual([NAME_ID]);
+    expect(h.secure.values.has(`jarvis.m.${NAME_ID}.token`)).toBe(true);
+  });
+
+  it("does nothing with no machine", async () => {
+    const h = harness();
+    const store = await opened(h);
+    h.secure.forgetCalls();
+    await removeActiveMachine(store);
+    expect(h.secure.sets).toEqual([]);
+    expect(h.secure.deletes).toEqual([]);
+  });
+
+  it("rejects on a store that could not open, and deletes nothing", async () => {
+    const h = harness();
+    seedLegacy(h);
+    h.secure.failGet = (key) => key === MACHINE_INDEX_KEY;
+    const store = h.build();
+    expect(await store.open()).toBe("failed");
+
+    await expect(removeActiveMachine(store)).rejects.toThrow("not open");
+    expect(h.secure.deletes).toEqual([]);
+    expect(h.secure.values.has("jarvis.token")).toBe(true);
+  });
+});
+
+describe("createMachineStoreOpener", () => {
+  function fakeStore(outcomes: Array<"ok" | "failed">) {
+    let opens = 0;
+    return {
+      opens: () => opens,
+      store: {
+        open: async (): Promise<"ok" | "failed"> => {
+          opens += 1;
+          return outcomes.shift() ?? "ok";
+        },
+      },
+    };
+  }
+
+  it("an open that worked is not repeated", async () => {
+    const fake = fakeStore(["ok"]);
+    const open = createMachineStoreOpener(fake.store, () => {});
+    expect(await open()).toBe("ok");
+    expect(await open()).toBe("ok");
+    expect(fake.opens()).toBe(1);
+  });
+
+  it("callers during one open share it", async () => {
+    const fake = fakeStore(["ok"]);
+    const open = createMachineStoreOpener(fake.store, () => {});
+    expect(await Promise.all([open(), open(), open()])).toEqual(["ok", "ok", "ok"]);
+    expect(fake.opens()).toBe(1);
+  });
+
+  it("a failed open is forgotten, so a later attempt can open, as after first unlock", async () => {
+    const fake = fakeStore(["failed", "ok"]);
+    const logs: string[] = [];
+    const open = createMachineStoreOpener(fake.store, (line) => logs.push(line));
+
+    expect(await open()).toBe("failed");
+    expect(logs).toEqual(["machines: open failed"]);
+    expect(await open()).toBe("ok");
+    expect(await open()).toBe("ok");
+    expect(fake.opens()).toBe(2);
+  });
+
+  it("recovers a real store whose keychain comes back", async () => {
+    const h = harness();
+    seedLegacy(h);
+    h.secure.failGet = () => true;
+    const store = h.build();
+    const open = createMachineStoreOpener(store, () => {});
+    expect(await open()).toBe("failed");
+    expect(() => store.activeId()).toThrow("not open");
+
+    h.secure.failGet = undefined;
+    expect(await open()).toBe("ok");
+    expect(store.activeId()).toBe(LAN_ID);
   });
 });
 
