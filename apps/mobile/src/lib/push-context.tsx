@@ -89,6 +89,8 @@ export function PushProvider(props: { children: React.ReactNode }): React.JSX.El
     });
     disposedRef.current = false;
     adapter.setForegroundHandler();
+    // A joined machine's first open, and any other, can land before this mounts.
+    registrationRef.current.syncIfOpen();
   }
   const registration = registrationRef.current;
 

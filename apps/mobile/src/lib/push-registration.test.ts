@@ -146,6 +146,74 @@ describe("createPushRegistration: construction", () => {
   );
 });
 
+describe("createPushRegistration: syncIfOpen", () => {
+  test("a connection opened before construction registers once synced, and not before", async () => {
+    const { deps, fakeClient, fakeAdapter, fakePrefs } = baseDeps();
+    await fakePrefs.prefs.set({ notifications: true, pushRegistered: false });
+    fakeAdapter.getPermission = vi.fn(async (): Promise<PushPermission> => "granted");
+    fakeClient.setScripted(async () => ({
+      ok: true,
+      value: { registered: true, laptopEnabled: true },
+    }));
+    fakeClient.setState("open");
+
+    const reg = createPushRegistration(deps);
+    await flush();
+    expect(fakeClient.calls).toEqual([]);
+
+    reg.syncIfOpen();
+    await flush();
+
+    expect(fakeAdapter.requestPermission).not.toHaveBeenCalled();
+    expect(fakeClient.calls.map((call) => call.channel)).toEqual([PUSH_REGISTER_CHANNEL]);
+    expect(reg.get()).toMatchObject({ phase: "on", registered: true });
+    expect(fakePrefs.current().pushRegistered).toBe(true);
+  });
+
+  test("a connection opened before construction unregisters once synced, with the switch off", async () => {
+    const { deps, fakeClient, fakePrefs } = baseDeps();
+    await fakePrefs.prefs.set({ notifications: false, pushRegistered: true });
+    fakeClient.setScripted(async () => ({ ok: true, value: {} }));
+    fakeClient.setState("open");
+
+    const reg = createPushRegistration(deps);
+    reg.syncIfOpen();
+    await flush();
+
+    expect(fakeClient.calls.map((call) => call.channel)).toEqual([PUSH_UNREGISTER_CHANNEL]);
+    expect(fakePrefs.current().pushRegistered).toBe(false);
+  });
+
+  test("syncing with no open connection does nothing", async () => {
+    const { deps, fakeClient, fakeAdapter, fakePrefs } = baseDeps();
+    await fakePrefs.prefs.set({ notifications: true, pushRegistered: true });
+    const reg = createPushRegistration(deps);
+    const before = reg.get();
+
+    reg.syncIfOpen();
+    await flush();
+
+    expect(fakeClient.calls).toEqual([]);
+    expect(fakeAdapter.getPermission).not.toHaveBeenCalled();
+    expect(fakeAdapter.getExpoPushToken).not.toHaveBeenCalled();
+    expect(reg.get()).toEqual(before);
+  });
+
+  test("a disposed registration does nothing when synced", async () => {
+    const { deps, fakeClient, fakeAdapter, fakePrefs } = baseDeps();
+    await fakePrefs.prefs.set({ notifications: true, pushRegistered: true });
+    fakeClient.setState("open");
+    const reg = createPushRegistration(deps);
+    reg.dispose();
+
+    reg.syncIfOpen();
+    await flush();
+
+    expect(fakeClient.calls).toEqual([]);
+    expect(fakeAdapter.getPermission).not.toHaveBeenCalled();
+  });
+});
+
 describe("createPushRegistration: setEnabled(true)", () => {
   test(
     "unavailable on a simulator/emulator (!isDevice) — requestPermission never called " +
