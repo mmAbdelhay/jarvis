@@ -3,8 +3,12 @@ import { parseProxyV2, PROXY_V2_MAX_BYTES } from "./proxy-header.js";
 
 const SIGNATURE = "0d0a0d0a000d0a515549540a";
 
-/** Source 100.79.83.16:51234, destination 127.0.0.1:17717: the spike's shape. */
-const CAPTURED_V4 = Buffer.from(`${SIGNATURE}2111000c644f53107f000001c8224535`, "hex");
+/**
+ * Real bytes, sent by Tailscale 1.102.4 through
+ * `tailscale serve --bg --tcp=17717 --proxy-protocol=2`: source
+ * 100.79.83.16:54154, destination 100.79.83.16:17717.
+ */
+const CAPTURED_V4 = Buffer.from(`${SIGNATURE}2111000c644f5310644f5310d38a4535`, "hex");
 
 /** Source fd7a:115c:a1e0::1, destination ::1, the same ports. */
 const V6_ADDRESSES = "fd7a115ca1e00000000000000000000100000000000000000000000000000001c8224535";

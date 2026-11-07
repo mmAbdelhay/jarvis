@@ -77,14 +77,16 @@ export async function findTailscaleCli(deps: TailscaleCertDeps): Promise<string 
   }
 }
 
-/** `Self` from `status --json`, or `undefined` when it cannot be read or parsed at all. */
+/** `Self` from `status --json`, or `undefined` when it cannot be read or parsed at
+ *  all. Without peers: nothing here reads them, and a large tailnet's list could
+ *  pass the output limit. */
 async function readSelf(
   deps: TailscaleCertDeps,
   cli: string,
 ): Promise<Record<string, unknown> | undefined> {
   let result: { code: number; stdout: string };
   try {
-    result = await deps.exec(cli, ["status", "--json"], STATUS_LIMITS);
+    result = await deps.exec(cli, ["status", "--json", "--peers=false"], STATUS_LIMITS);
   } catch {
     return undefined;
   }

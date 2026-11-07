@@ -160,6 +160,32 @@ describe("tailnetName", () => {
   });
 });
 
+describe("the status read", () => {
+  // Real output of `tailscale status --json --peers=false` keeps both fields
+  // and has `Peer: null`; a large tailnet's peers would pass the 1 MB limit.
+  const STATUS = ["status", "--json", "--peers=false"];
+  const reply = {
+    code: 0,
+    stdout: JSON.stringify({
+      Self: { DNSName: "m.tailnet.ts.net.", TailscaleIPs: ["100.84.17.203"] },
+      Peer: null,
+    }),
+    stderr: "",
+  };
+
+  it("leaves peers out for the addresses", async () => {
+    const exec: TailscaleExec = vi.fn(async () => reply);
+    await expect(readTailscaleIps(fakeDeps({ exec }))).resolves.toEqual(["100.84.17.203"]);
+    expect(exec).toHaveBeenCalledWith(expect.any(String), STATUS, expect.anything());
+  });
+
+  it("leaves peers out for the name", async () => {
+    const exec: TailscaleExec = vi.fn(async () => reply);
+    await expect(tailnetName(fakeDeps({ exec }), "tailscale")).resolves.toBe("m.tailnet.ts.net");
+    expect(exec).toHaveBeenCalledWith("tailscale", STATUS, expect.anything());
+  });
+});
+
 describe("readTailscaleIps", () => {
   const answering = (stdout: string, code = 0) =>
     fakeDeps({ exec: vi.fn(async () => ({ code, stdout, stderr: "" })) });

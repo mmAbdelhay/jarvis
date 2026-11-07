@@ -253,6 +253,10 @@ export function createTailnetGuard(deps: TailnetGuardDeps): TailnetGuard {
   // What the last successful read of `Self.TailscaleIPs` said of the bind, so
   // a failed one decides nothing even when `checkNow` has to send a verdict.
   let bindUnlisted = false;
+  // Whether `bindUnlisted` comes from a read at all. Until one, a failed read
+  // has nothing to keep, and a verdict would pass a bind nobody has checked.
+  let bindRead = false;
+  let selfReadFailureLogged = false;
 
   let started = false;
   let stopped = false;
@@ -276,6 +280,7 @@ export function createTailnetGuard(deps: TailnetGuardDeps): TailnetGuard {
     if (!deps.enabled()) {
       lastSent = UNSENT;
       bindUnlisted = false;
+      bindRead = false;
       return;
     }
     const status = await readServeStatus(deps.tailscale);
@@ -296,11 +301,26 @@ export function createTailnetGuard(deps: TailnetGuardDeps): TailnetGuard {
       verdict = "funnel";
     } else if (deps.relay()) {
       bindUnlisted = false;
+      bindRead = false;
       verdict = relayConfirmed(status, ports) ? undefined : "relay-missing";
     } else {
       const ips = await readTailscaleIps(deps.tailscale);
       if (stopped || !deps.enabled()) return;
-      if (ips !== undefined) bindUnlisted = !listsBind(ips, deps.bindAddress());
+      // A verdict ends the bridge's `unverified`, which then rests on this
+      // read as much as the one above: a failed one cannot end it.
+      if (ips === undefined && (!bindRead || deps.unverified())) {
+        if (!selfReadFailureLogged) {
+          selfReadFailureLogged = true;
+          deps.log("tailnet guard: cannot read Tailscale's own addresses; no verdict yet");
+        }
+        await deps.readFailed();
+        return;
+      }
+      if (ips !== undefined) {
+        selfReadFailureLogged = false;
+        bindRead = true;
+        bindUnlisted = !listsBind(ips, deps.bindAddress());
+      }
       verdict = bindUnlisted ? "bad-bind" : undefined;
     }
     if (verdict === lastSent && !deps.unverified()) return;

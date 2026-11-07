@@ -741,10 +741,63 @@ describe("createTailnetGuard: the bind address", () => {
     expect(h.setTailnetBlock).toHaveBeenLastCalledWith("bad-bind");
   });
 
-  it("a failed read sets nothing either", async () => {
-    const h = harness({ tailscaleIps: undefined });
+  it("a failed read on the first evaluation sends no verdict, and says the read failed", async () => {
+    const h = harness({ tailscaleIps: undefined, unverified: true });
     await h.start();
+    expect(h.setTailnetBlock).not.toHaveBeenCalled();
+    expect(h.readFailed).toHaveBeenCalledTimes(1);
+    expect(h.state.unverified).toBe(true);
+    expect(h.log).toHaveBeenCalledWith(expect.stringContaining("Tailscale's own addresses"));
+  });
+
+  it("the same with the bridge not yet reporting anything, as at boot", async () => {
+    const h = harness({ tailscaleIps: undefined, unverified: false });
+    await h.start();
+    await h.guard.checkNow();
+    expect(h.setTailnetBlock).not.toHaveBeenCalled();
+  });
+
+  it("a later successful read then decides", async () => {
+    const h = harness({ tailscaleIps: undefined, unverified: true });
+    await h.start();
+
+    h.state.tailscaleIps = [BIND];
+    await h.poll();
     expect(h.setTailnetBlock).toHaveBeenLastCalledWith(undefined);
+    expect(h.state.unverified).toBe(false);
+  });
+
+  it("a failed read cannot clear a transition the guard did not see, after a good read", async () => {
+    const h = harness();
+    await h.start();
+    expect(h.setTailnetBlock).toHaveBeenCalledTimes(1);
+
+    h.state.unverified = true;
+    h.state.tailscaleIps = undefined;
+    await h.poll();
+
+    expect(h.setTailnetBlock).toHaveBeenCalledTimes(1);
+    expect(h.state.unverified).toBe(true);
+  });
+
+  it("after the switch went off the bind is unknown again", async () => {
+    const h = harness();
+    await h.start();
+    h.state.enabled = false;
+    await h.poll();
+
+    h.state.enabled = true;
+    h.state.tailscaleIps = undefined;
+    h.setTailnetBlock.mockClear();
+    await h.poll();
+
+    expect(h.setTailnetBlock).not.toHaveBeenCalled();
+  });
+
+  it("a Funnel verdict still applies with that read failing", async () => {
+    const h = harness({ tailscaleIps: undefined, unverified: true, serve: serving(FUNNEL_TCP) });
+    await h.start();
+    expect(h.setTailnetBlock).toHaveBeenLastCalledWith("funnel");
   });
 
   it("relay mode skips it: loopback is no Tailscale address, and it is not asked", async () => {

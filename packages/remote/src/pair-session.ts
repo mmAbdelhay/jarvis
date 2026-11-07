@@ -27,8 +27,9 @@ import {
 /** A refusal `pairing-refused` audits. */
 type AuditedRefusal = "bad-frame" | "timeout" | "version" | "closed" | "mismatch" | "busy";
 
-/** `join-refused`: a join turned away once it got to the password. */
-export type PairRefusal = AuditedRefusal | "join-refused";
+/** `join-refused`: a join turned away once it got to the password.
+ *  `join-closed`: a join turned away before it, audited as `closed`. */
+export type PairRefusal = AuditedRefusal | "join-refused" | "join-closed";
 
 /** Password joins; present only while the tailnet feature is active. */
 export type PairJoinDeps = {
@@ -89,12 +90,12 @@ export function createPairSession(socket: SocketLike, deps: PairSessionDeps): Se
   }
 
   /** A refusal only means anything while still awaiting the one pair frame (rule 4). */
-  function refuse(reason: AuditedRefusal, code: number): void {
+  function refuse(reason: AuditedRefusal, code: number, failure: PairRefusal = reason): void {
     if (phase !== "awaiting-pair") return;
     phase = "done";
     clearHandshakeTimer();
     audit.record({ kind: "pairing-refused", source, reason });
-    onFailure(reason);
+    onFailure(failure);
     // I1: the reason never goes on the wire — an unauthenticated peer must
     // not learn *why* it was refused (bad secret vs. version vs. another
     // window already busy) before it has proven anything at all. The audit
@@ -138,7 +139,7 @@ export function createPairSession(socket: SocketLike, deps: PairSessionDeps): Se
 
     if (isJoin) {
       if (join === undefined || !join.allowed()) {
-        refuse("closed", CLOSE.unauthorized);
+        refuse("closed", CLOSE.unauthorized, "join-closed");
         return;
       }
       // The check may wait its turn behind other scrypt runs: as with

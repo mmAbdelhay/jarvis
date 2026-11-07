@@ -208,7 +208,7 @@ describe("createPairSession: join", () => {
 
     expect(socket.closed).toEqual({ code: 4401, reason: "" });
     expect(h.devices.count()).toBe(0);
-    expect(onFailure).toHaveBeenCalledTimes(1);
+    expect(onFailure.mock.calls).toEqual([["join-closed"]]);
     expect(onSettled).toHaveBeenCalledTimes(1);
   });
 

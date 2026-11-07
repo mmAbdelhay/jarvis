@@ -879,6 +879,67 @@ describe("createBridge: password join", () => {
     expect(rpc.closed).toBeUndefined();
   });
 
+  describe("while the gate is blocked, on a paired device's address", () => {
+    const SOURCE = "100.64.0.9";
+    const CONFIG = {
+      ...ON_127(),
+      bindAddress: "100.64.0.1",
+      tls: { certPath: "/tls/cert.pem", keyPath: "/tls/key.pem" },
+    };
+
+    const send = (h: ReturnType<typeof makeHarness>, frame: string): void => {
+      for (let i = 0; i < 12; i++) {
+        const socket = new FakeSocket();
+        h.listenCalls[0]?.onSocket("pair", socket, SOURCE)?.onText(frame);
+      }
+    };
+    const rpcClose = (h: ReturnType<typeof makeHarness>): number | undefined => {
+      const rpc = new FakeSocket();
+      h.listenCalls[0]?.onSocket("rpc", rpc, SOURCE);
+      return rpc.closed?.code;
+    };
+
+    it.each(["bad-bind", "funnel", "relay-missing"] as const)(
+      "joins refused by %s do not block /rpc",
+      async (reason) => {
+        const { h, bridge } = await listeningWithTailnet({ enabled: true, relay: false });
+        await bridge.setTailnetBlock(reason);
+
+        send(h, joinFrame(OWNER_TEST_PASSWORD));
+
+        expect(rpcClose(h)).toBeUndefined();
+      },
+    );
+
+    it("joins refused while unverified do not block /rpc", async () => {
+      const { h, bridge } = await listeningWithTailnet({ enabled: false, relay: false });
+      await bridge.apply({ ...CONFIG, tailnet: { enabled: true, relay: false } });
+      await bridge.tailnetReadFailed();
+      expect(bridge.status().tailnet).toEqual({ kind: "blocked", reason: "unverified" });
+
+      send(h, joinFrame(OWNER_TEST_PASSWORD));
+
+      expect(rpcClose(h)).toBeUndefined();
+    });
+
+    it("a pair frame refused as closed still counts", async () => {
+      const { h, bridge } = await listeningWithTailnet({ enabled: true, relay: false });
+      await bridge.setTailnetBlock("bad-bind");
+
+      send(h, pairFrame("0".repeat(32), "Phone"));
+
+      expect(rpcClose(h)).toBe(CLOSE.tooManyRequests);
+    });
+
+    it("with the switch off a join refused as closed still counts, as before", async () => {
+      const { h } = await listeningWithTailnet({ enabled: false, relay: false });
+
+      send(h, joinFrame(OWNER_TEST_PASSWORD));
+
+      expect(rpcClose(h)).toBe(CLOSE.tooManyRequests);
+    });
+  });
+
   it("a refused pairing still counts against its source", async () => {
     const { h } = await listeningWithTailnet({ enabled: true, relay: false });
     for (let i = 0; i < 12; i++) {

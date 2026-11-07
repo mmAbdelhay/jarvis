@@ -1300,8 +1300,13 @@ export async function createBridge(deps: BridgeDeps): Promise<Bridge> {
         log: deps.log,
         // A failed join has its own limits (join-limits), and the design is
         // that it does not lock a paired device on the same address out of /rpc.
+        // Nor does one the blocked gate turned away before the password, or
+        // anyone there could shut that device out while Funnel, a bad bind or
+        // the first read holds. With the switch off nothing here changes.
         onFailure: (reason) => {
-          if (reason !== "join-refused") onFailure();
+          if (reason === "join-refused") return;
+          if (reason === "join-closed" && tailnetSwitchedOn()) return;
+          onFailure();
         },
         onSettled() {
           pairSessions -= 1;

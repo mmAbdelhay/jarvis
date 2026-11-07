@@ -69,7 +69,7 @@ async function setup(
     serve: FUNNEL as unknown,
     serveReads: 0,
     failListens: 0,
-    selfIps: undefined as string[] | undefined,
+    selfIps: [initial.bindAddress] as string[] | undefined,
   };
   let heldRead: Promise<ExecResult> | undefined;
   const listeners: { closed: boolean }[] = [];
@@ -374,6 +374,30 @@ describe("the guard and the bridge", () => {
     read.answer({ code: 0, stdout: "{}", stderr: "" });
     await saving;
     expect(h.tailnet()).toEqual({ kind: "on" });
+  });
+
+  it("a persisted bind with Self unreadable: joins stay refused until it can be read", async () => {
+    const h = await setup({ ...ON, bindAddress: "100.64.0.9" });
+    h.state.serve = {};
+    h.state.selfIps = undefined;
+    h.guard.start();
+    await h.settle();
+    expect(h.tailnet()).toEqual({ kind: "blocked", reason: "unverified" });
+    expect(h.openListeners()).toBe(0);
+
+    h.state.selfIps = ["100.79.83.16"];
+    await h.poll();
+
+    expect(h.tailnet()).toEqual({ kind: "blocked", reason: "bad-bind" });
+    expect(h.openListeners()).toBe(0);
+  });
+
+  it("with Self unreadable, Funnel still latches", async () => {
+    const h = await setup(ON);
+    h.state.selfIps = undefined;
+    h.guard.start();
+    await h.settle();
+    expect(h.tailnet()).toEqual({ kind: "blocked", reason: "funnel" });
   });
 
   it("a boot before Tailscale has its address recovers on its own", async () => {
