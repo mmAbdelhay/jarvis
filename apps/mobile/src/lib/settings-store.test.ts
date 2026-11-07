@@ -342,6 +342,7 @@ describe("createSettingsStore: setLanguage", () => {
         refreshTokenStored: false,
         keepSignedIn: false,
         machineFlags: {},
+        machineLinks: [],
       }),
     ]);
   });
@@ -367,6 +368,7 @@ describe("createSettingsStore: setLanguage", () => {
         refreshTokenStored: false,
         keepSignedIn: false,
         machineFlags: {},
+        machineLinks: [],
       }),
       JSON.stringify({
         language: "en",
@@ -379,6 +381,7 @@ describe("createSettingsStore: setLanguage", () => {
         refreshTokenStored: false,
         keepSignedIn: false,
         machineFlags: {},
+        machineLinks: [],
       }),
     ]);
     expect(store.get().speakReplies).toBe(false);
@@ -408,6 +411,7 @@ describe("createSettingsStore: setSpeakReplies (M8 Task 7, rule 17)", () => {
         refreshTokenStored: false,
         keepSignedIn: false,
         machineFlags: {},
+        machineLinks: [],
       }),
     ]);
   });

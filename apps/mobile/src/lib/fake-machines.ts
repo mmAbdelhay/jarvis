@@ -183,7 +183,9 @@ export function tokenReply(fill: string, expiresAt: number) {
 
 export type MachinesHarness = ReturnType<typeof machinesHarness>;
 
-export function machinesHarness(options: { ids?: MachineId[]; active?: MachineId } = {}) {
+export function machinesHarness(
+  options: { ids?: MachineId[]; active?: MachineId; singleSlot?: boolean } = {},
+) {
   const { secure, refresh, prefs } = seedPhone(options.ids, options.active);
   const transport = createFakeTransport();
   const clock = createFakeClock();
@@ -214,7 +216,7 @@ export function machinesHarness(options: { ids?: MachineId[]; active?: MachineId
     refresh,
     prefs,
     localeTag: "en-US",
-    singleSlot: false,
+    singleSlot: options.singleSlot ?? false,
     log,
   });
   const store: MachineStore = {

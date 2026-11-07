@@ -8,6 +8,7 @@ import type { MachineOnline } from "./machine-probe";
 import type { SwitchOutcome } from "./machine-sessions";
 import type { MachineEntry } from "./machine-store";
 import type { PairingRecord } from "./pairing-record";
+import { isMachineLink, machineLinkUrl } from "./web-machines";
 
 /** A machine the tailnet reports and this phone does not hold. Left unfilled
  *  until step 3. */
@@ -51,6 +52,27 @@ export function switcherRows(input: {
   });
 }
 
+export type WebSwitcherRow =
+  | { kind: "self"; label: string }
+  | { kind: "link"; label: string; url: string };
+
+/** The browser's sheet: itself, then its links. No row says whether a machine is
+ *  online, as the CSP forbids asking another origin. */
+export function webSwitcherRows(input: {
+  selfLabel: string;
+  links: readonly { name: string; port: number }[];
+  discovered?: readonly DiscoveredMachine[];
+}): WebSwitcherRow[] {
+  const links = input.links.filter(isMachineLink).map(
+    (link): WebSwitcherRow => ({
+      kind: "link",
+      label: link.name.split(".")[0] as string,
+      url: machineLinkUrl(link),
+    }),
+  );
+  return [{ kind: "self", label: input.selfLabel }, ...links];
+}
+
 /** /unlock's way out: only with a machine to go to. The one on screen may be
  *  the one that could not be read, so this counts the others rather than the
  *  list. */
@@ -61,7 +83,7 @@ export function otherMachinesLinkVisible(
   return entries.some((entry) => entry.id !== activeId);
 }
 
-/** The browser holds one machine per origin: its own list comes with Task 8. */
+/** The browser holds one machine per origin: `webSwitcherRows` is its list. */
 export function addMachineRowVisible(platform: ClientPlatform): boolean {
   return platform !== "web";
 }

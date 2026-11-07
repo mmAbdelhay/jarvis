@@ -7,7 +7,7 @@
 // Rules (task-3-brief.md):
 // - canInstall only on Android; elsewhere update() is a no-op.
 // - canCheck everywhere but web: the bridge serves the web build with a CSP
-//   whose connect-src allows wss only, so a fetch to api.github.com always
+//   whose connect-src allows its own origin and wss, so a fetch to api.github.com always
 //   fails there. Web start()/check() do nothing and the store stays idle.
 //   iOS checks (it can name a newer version) but never installs.
 // - One operation at a time: check() and update() are ignored while a

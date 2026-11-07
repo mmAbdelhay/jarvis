@@ -98,6 +98,7 @@ describe("createPrefsFacade", () => {
       refreshTokenStored: false,
       keepSignedIn: false,
       machineFlags: {},
+      machineLinks: [],
     } satisfies Prefs);
 
     const facade = createPrefsFacade(
@@ -120,6 +121,7 @@ describe("createPrefsFacade", () => {
       refreshTokenStored: false,
       keepSignedIn: false,
       machineFlags: {},
+      machineLinks: [],
     });
     expect(facade.get()).toEqual<PushPrefs>({ notifications: true, pushRegistered: false });
   });

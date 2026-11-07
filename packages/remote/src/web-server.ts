@@ -60,7 +60,7 @@ function securityHeaders(options: {
   // response, index.html included, still refuses to be framed at all.
   const frameAncestors = options.path === TERMINAL_PATH ? "'self'" : "'none'";
   return {
-    "Content-Security-Policy": `default-src 'self'; script-src 'self'; connect-src wss://${options.name}:${options.bridgePort}; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; frame-src 'self'; frame-ancestors ${frameAncestors}; base-uri 'none'; form-action 'none'`,
+    "Content-Security-Policy": `default-src 'self'; script-src 'self'; connect-src 'self' wss://${options.name}:${options.bridgePort}; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; frame-src 'self'; frame-ancestors ${frameAncestors}; base-uri 'none'; form-action 'none'`,
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
   };

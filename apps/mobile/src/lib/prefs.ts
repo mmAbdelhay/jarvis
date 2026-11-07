@@ -1,6 +1,7 @@
 import { type Language, languageFromLocale } from "./i18n";
 import { MACHINE_ID_PATTERN, type MachineId } from "./machine-index";
 import { SIDECAR_ZOOM_MAX, SIDECAR_ZOOM_MIN } from "./sidecar-webview-config";
+import { type MachineLink, parseMachineLinks } from "./web-machines";
 
 // The three sidecar kinds the "Editor"/"Database"/"Cluster" rows on
 // sidecars/[project].tsx open — the same set `resolveTitle` in
@@ -55,6 +56,9 @@ export type Prefs = {
   // machine keeps using the top-level pair. Defaults to `{}`; a bad entry is
   // dropped alone, and a lost one costs one password entry, never a prompt.
   machineFlags: Record<MachineId, MachineFlags>;
+  // The browser's other machines, as links (web-machines.ts). At most 16, and a
+  // bad entry is dropped alone. The native app ignores it.
+  machineLinks: MachineLink[];
 };
 
 export type MachineFlags = { refreshTokenStored: boolean; pushRegistered: boolean };
@@ -147,6 +151,7 @@ export async function loadPrefs(store: PrefsStore, localeTag: string): Promise<P
     refreshTokenStored: false,
     keepSignedIn: false,
     machineFlags: {},
+    machineLinks: [],
   };
 
   let text: string | undefined;
@@ -204,6 +209,7 @@ export async function loadPrefs(store: PrefsStore, localeTag: string): Promise<P
     refreshTokenStored,
     keepSignedIn,
     machineFlags: parseMachineFlags(raw.machineFlags),
+    machineLinks: parseMachineLinks(raw.machineLinks),
   };
 }
 
@@ -220,6 +226,16 @@ export async function setKeepSignedIn(
 ): Promise<void> {
   const current = await loadPrefs(store, localeTag);
   await savePrefs(store, { ...current, keepSignedIn });
+}
+
+/** Saves the browser's links to other machines (load, change one key, save). */
+export async function setMachineLinks(
+  store: PrefsStore,
+  localeTag: string,
+  machineLinks: MachineLink[],
+): Promise<void> {
+  const current = await loadPrefs(store, localeTag);
+  await savePrefs(store, { ...current, machineLinks });
 }
 
 /** The saved diff layout for wide Changes ("unified" when none is saved). */

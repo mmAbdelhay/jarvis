@@ -249,7 +249,7 @@ describe("webHeaders", () => {
       webHeaders({ name: "jarvis.test", bridgePort: 9443, path: "/app.json", asset: SCRIPT }),
     ).toEqual({
       "Content-Security-Policy":
-        "default-src 'self'; script-src 'self'; connect-src wss://jarvis.test:9443; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; frame-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+        "default-src 'self'; script-src 'self'; connect-src 'self' wss://jarvis.test:9443; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; frame-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
       "X-Content-Type-Options": "nosniff",
       "Referrer-Policy": "no-referrer",
       "Content-Type": "text/javascript; charset=utf-8",
@@ -267,7 +267,7 @@ describe("webHeaders", () => {
         asset: TERMINAL,
       })["Content-Security-Policy"],
     ).toBe(
-      "default-src 'self'; script-src 'self'; connect-src wss://jarvis.test:9443; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; frame-src 'self'; frame-ancestors 'self'; base-uri 'none'; form-action 'none'",
+      "default-src 'self'; script-src 'self'; connect-src 'self' wss://jarvis.test:9443; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; frame-src 'self'; frame-ancestors 'self'; base-uri 'none'; form-action 'none'",
     );
   });
 
@@ -284,7 +284,7 @@ describe("webHeaders", () => {
         "Content-Security-Policy"
       ],
     ).toBe(
-      "default-src 'self'; script-src 'self'; connect-src wss://jarvis.test:9443; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; frame-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+      "default-src 'self'; script-src 'self'; connect-src 'self' wss://jarvis.test:9443; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; frame-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
     );
   });
 
@@ -552,7 +552,7 @@ describe("listenWeb over real TLS", () => {
     const reply = await get("/projects/alpha", `jarvis.test:${listener.port}`);
     expect(reply.startsWith("HTTP/1.1 200")).toBe(true);
     expect(reply).toContain(
-      "Content-Security-Policy: default-src 'self'; script-src 'self'; connect-src wss://jarvis.test:9443;",
+      "Content-Security-Policy: default-src 'self'; script-src 'self'; connect-src 'self' wss://jarvis.test:9443;",
     );
     expect(reply.endsWith("<main>Jarvis</main>")).toBe(true);
   });

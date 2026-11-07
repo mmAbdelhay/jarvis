@@ -17,7 +17,11 @@
 //
 // The login/unlock step after pairing arrives with Task 13b; until then a
 // successful pairing goes to the Dashboard exactly as on native.
-import type { PairingLink } from "@jarvis/wire";
+//
+// With nothing paired, a page served by a machine that describes itself at
+// `/jarvis-peer.json` also offers joining that machine with the owner password.
+// No passkey offer follows a join.
+import type { PairingLink, PeerInfo } from "@jarvis/wire";
 import Constants from "expo-constants";
 import { useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -42,17 +46,23 @@ import {
   type ConfirmStep,
   entryPhaseKind,
   intakeStep,
+  type JoinFailure,
+  joinFailureKey,
+  type JoinStep,
   phaseAfterCheck,
+  submitJoin,
 } from "@/lib/pair-flow";
 import { setPasskeyOfferSignal } from "@/lib/passkey-offer-signal";
-import { useMachineSessions } from "@/lib/machine-context";
-import type { MachineId } from "@/lib/machine-index";
-import { retryClear as retryClearOf } from "@/lib/machine-sessions";
+import { useMachineSessions, useNavigatorGate } from "@/lib/machine-context";
+import { type MachineId, MAX_MACHINES } from "@/lib/machine-index";
+import { prepareSwitchRoute, retryClear as retryClearOf } from "@/lib/machine-sessions";
 import { machineStore, openMachineStore } from "@/lib/machine-store-instance";
-import { linkRefusedOn, pair, type PairOutcome } from "@/lib/pairing";
+import { joinMachine, linkRefusedOn, pair, type PairOutcome } from "@/lib/pairing";
 import { PairingAlreadyExistsError } from "@/lib/pairing-record";
+import { leavePairScreen } from "@/lib/scope-routing";
 import { systemTransportFor } from "@/lib/system-transport";
 import { theme } from "@/lib/theme";
+import { OWN_PEER_TIMEOUT_MS, readOwnPeer } from "@/lib/web-machines";
 import {
   CLEARED_HASH_PARAM,
   deviceNameFromUserAgent,
@@ -74,7 +84,7 @@ type Phase =
   | { kind: "clearFailed" }
   | { kind: "scan" }
   | ConfirmStep
-  | { kind: "waiting" }
+  | { kind: "waiting"; join?: boolean }
   | { kind: "error"; failure: ScreenFailure }
   | { kind: "success" };
 
@@ -126,10 +136,52 @@ export default function PairWebScreenRoute() {
   );
 }
 
+/** The owner password for the machine serving this page. The field keeps it only
+ *  until submit, as on app/pair.tsx. */
+function JoinHereForm(props: {
+  name: string;
+  failure: JoinFailure | undefined;
+  onSubmit(password: string): void;
+}) {
+  const language = useLanguage();
+  const [password, setPassword] = useState("");
+
+  function submit(): void {
+    const read = password;
+    setPassword("");
+    if (read.length === 0) return;
+    props.onSubmit(read);
+  }
+
+  return (
+    <>
+      <Text style={styles.label}>{t(language, "pair.joinHere")}</Text>
+      <Text style={styles.label}>{props.name}</Text>
+      <Text style={styles.label}>{t(language, "pair.joinPassword")}</Text>
+      <TextInput
+        style={styles.input}
+        value={password}
+        onChangeText={setPassword}
+        onSubmitEditing={submit}
+        secureTextEntry
+        autoCapitalize="none"
+        autoCorrect={false}
+      />
+      {props.failure !== undefined && (
+        <Text style={styles.errorText}>{t(language, joinFailureKey(props.failure))}</Text>
+      )}
+      <TouchableOpacity style={styles.button} onPress={submit}>
+        <Text style={styles.buttonText}>{t(language, "pair.joinHere")}</Text>
+      </TouchableOpacity>
+    </>
+  );
+}
+
 function PairWebScreen() {
   const cardRoot = useAuthCardRootStyle();
   const language = useLanguage();
   const router = useRouter();
+  const gate = useNavigatorGate();
   const sessions = useMachineSessions();
   const clearFailedIdRef = useRef<MachineId | null>(null);
   const [phase, setPhase] = useState<Phase>({ kind: "checking" });
@@ -147,6 +199,10 @@ function PairWebScreen() {
   // to `pair()` or dropped. Neither is ever rendered.
   const hashRef = useRef<string | null>(null);
   const pendingLinkRef = useRef<PairingLink | null>(null);
+  const joinCancelRef = useRef<AbortController | null>(null);
+  const peerAskedRef = useRef(false);
+  const [ownPeer, setOwnPeer] = useState<PeerInfo | undefined>(undefined);
+  const [joinFailure, setJoinFailure] = useState<JoinFailure | undefined>(undefined);
 
   if (hashRef.current === null) {
     // Captured during the first render, before anything else touches it.
@@ -170,6 +226,7 @@ function PairWebScreen() {
       clearTimeout(timer);
       mountedRef.current = false;
       pendingLinkRef.current = null;
+      joinCancelRef.current?.abort();
     };
   }, [router]);
 
@@ -255,6 +312,16 @@ function PairWebScreen() {
     if (hash.length > 1) intake(pairingLinkFromHash(hash));
   }, [phase, intake]);
 
+  // Asked once, at the entry step: anything but this machine's own answer leaves
+  // the screen as it was.
+  useEffect(() => {
+    if (phase.kind !== "scan" || peerAskedRef.current) return;
+    peerAskedRef.current = true;
+    void readOwnPeer(fetch, window.location, OWN_PEER_TIMEOUT_MS).then((peer) => {
+      if (mountedRef.current) setOwnPeer(peer);
+    });
+  }, [phase]);
+
   // D6b: a `/pair#…` link entered while this screen is already open is a
   // hashchange, not a load — read it, clear it from the address bar the
   // same way, and act on it like a fresh load would.
@@ -315,6 +382,75 @@ function PairWebScreen() {
     [router, safeSetPhase],
   );
 
+  const applyJoinStep = useCallback(
+    (step: JoinStep) => {
+      switch (step.kind) {
+        case "success":
+          safeSetPhase({ kind: "success" });
+          // Through the gate: the switch's remount may have taken the navigator.
+          leavePairScreen({
+            gate,
+            screenUp: () => mountedRef.current,
+            toDashboard: () => prepareSwitchRoute(router, gate, (line) => console.warn(line)),
+          });
+          return;
+        // This browser's one place was taken while the password was on its way.
+        case "sameMachine":
+        case "limit":
+          alreadyPairedRef.current = true;
+          safeSetPhase({ kind: "alreadyPaired" });
+          return;
+        case "saveFailed":
+          safeSetPhase({ kind: "error", failure: "save-failed" });
+          return;
+        case "checkFailed":
+          safeSetPhase({ kind: "error", failure: "check-failed" });
+          return;
+        case "join":
+          setJoinFailure(step.failure);
+          safeSetPhase({ kind: "scan" });
+          return;
+        case "abandoned":
+          return;
+      }
+    },
+    [gate, router, safeSetPhase],
+  );
+
+  const startJoin = useCallback(
+    async (peer: PeerInfo, password: string): Promise<void> => {
+      if (phaseRef.current.kind !== "scan" || alreadyPairedRef.current) return;
+      const name = deviceNameRef.current.trim() || deviceNameFromUserAgent(navigator.userAgent);
+      const cancel = new AbortController();
+      joinCancelRef.current = cancel;
+      setJoinFailure(undefined);
+      const running = submitJoin(
+        {
+          isHeld: (id) => machineStore.has(id),
+          atLimit: () => machineStore.count() >= MAX_MACHINES,
+          waiting: () => safeSetPhase({ kind: "waiting", join: true }),
+          join: (address, secret) =>
+            joinMachine(
+              { transport, clock: realClock, client: CLIENT_STRING, platform: PLATFORM },
+              address,
+              secret,
+              name,
+              cancel.signal,
+            ),
+          stillWanted: () => mountedRef.current,
+          addAndSwitch: sessions.addAndSwitch,
+          add: sessions.add,
+        },
+        `${peer.name}:${peer.bridgePort}`,
+        password,
+      );
+      // This frame lasts through the wait, and has no more use for it.
+      password = "";
+      applyJoinStep(await running);
+    },
+    [applyJoinStep, safeSetPhase, sessions],
+  );
+
   function handlePasteSubmit(): void {
     const text = pastedLink;
     // Cleared at once: the field never keeps a rendered copy of the secret.
@@ -364,6 +500,13 @@ function PairWebScreen() {
 
       {phase.kind === "scan" && (
         <>
+          {ownPeer !== undefined && (
+            <JoinHereForm
+              name={ownPeer.name}
+              failure={joinFailure}
+              onSubmit={(password) => void startJoin(ownPeer, password)}
+            />
+          )}
           <Text style={styles.label}>{t(language, "pair.pasteLink")}</Text>
           <TextInput
             style={styles.input}
@@ -423,7 +566,9 @@ function PairWebScreen() {
       {phase.kind === "waiting" && (
         <>
           <ActivityIndicator color={theme.colors.primary} />
-          <Text style={styles.label}>{t(language, "pair.waitingApproval")}</Text>
+          {phase.join !== true && (
+            <Text style={styles.label}>{t(language, "pair.waitingApproval")}</Text>
+          )}
         </>
       )}
 

@@ -11,6 +11,7 @@ import {
   shouldProbe,
   switcherRows,
   tapSwitcherRow,
+  webSwitcherRows,
 } from "./machine-switcher";
 import type { PairingRecord } from "./pairing-record";
 
@@ -132,6 +133,51 @@ describe("the add row", () => {
   it("shows on a phone, and not in the browser", () => {
     expect(addMachineRowVisible("native")).toBe(true);
     expect(addMachineRowVisible("web")).toBe(false);
+  });
+});
+
+describe("webSwitcherRows", () => {
+  const NAME = "mac.tail1234.ts.net";
+
+  it("is the browser's own row, then a link per machine, by name", () => {
+    expect(
+      webSwitcherRows({
+        selfLabel: "Studio",
+        links: [
+          { name: NAME, port: 7718 },
+          { name: "mini.tail1234.ts.net", port: 9000 },
+        ],
+      }),
+    ).toEqual([
+      { kind: "self", label: "Studio" },
+      { kind: "link", label: "mac", url: `https://${NAME}:7718/` },
+      { kind: "link", label: "mini", url: "https://mini.tail1234.ts.net:9000/" },
+    ]);
+  });
+
+  it("carries no online state, as the CSP forbids asking", () => {
+    for (const row of webSwitcherRows({ selfLabel: "x", links: [{ name: NAME, port: 7718 }] })) {
+      expect(row).not.toHaveProperty("online");
+    }
+  });
+
+  it("a link failing validation yields no row", () => {
+    expect(
+      webSwitcherRows({
+        selfLabel: "x",
+        links: [
+          { name: "evil.example.com", port: 7718 },
+          { name: `${NAME}/evil`, port: 7718 },
+          { name: NAME, port: 70000 },
+        ],
+      }),
+    ).toEqual([{ kind: "self", label: "x" }]);
+  });
+
+  it("leaves the tailnet's list alone until step 3", () => {
+    expect(
+      webSwitcherRows({ selfLabel: "x", links: [], discovered: [{ name: NAME, label: "mac" }] }),
+    ).toEqual([{ kind: "self", label: "x" }]);
   });
 });
 
