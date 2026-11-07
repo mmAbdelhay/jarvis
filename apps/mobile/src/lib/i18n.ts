@@ -365,10 +365,6 @@ export const STRINGS = {
     en: "Not paired.",
     ar: "غير مقترن.",
   },
-  "settings.unpairFailed": {
-    en: "Couldn't unpair this phone. Try again.",
-    ar: "تعذّر إلغاء اقتران هذا الهاتف. حاول مرة أخرى.",
-  },
   "settings.reconnectFailed": {
     en: "Couldn't reconnect. Try again.",
     ar: "تعذّرت إعادة الاتصال. حاول مرة أخرى.",
@@ -1495,10 +1491,6 @@ export const STRINGS = {
   "settings.unpairConfirm.web": {
     en: "Remove this pairing from this browser? You'll need a new pairing link to pair again. To fully revoke access, also remove this device in the computer's Settings.",
     ar: "هل تريد إزالة هذا الاقتران من هذا المتصفح؟ ستحتاج إلى رابط اقتران جديد للاقتران مرة أخرى. لإلغاء الوصول بالكامل، احذف هذا الجهاز أيضًا من إعدادات الكمبيوتر.",
-  },
-  "settings.unpairFailed.web": {
-    en: "Couldn't unpair this browser. Try again.",
-    ar: "تعذّر إلغاء اقتران هذا المتصفح. حاول مرة أخرى.",
   },
   "pair.alreadyPaired.web": {
     en: "This browser is already paired. Unpair in Settings first.",

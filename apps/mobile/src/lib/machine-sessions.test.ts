@@ -1,5 +1,6 @@
 import { CLOSE, encodeMessage } from "@jarvis/wire";
 import { describe, expect, it, vi } from "vitest";
+import { bannerModel } from "./banner-model";
 import { setClearFailedSignal, takeClearFailedSignal } from "./clear-failed-signal";
 import {
   A_ID,
@@ -31,6 +32,7 @@ import {
 } from "./machine-sessions";
 import { isClearingPairing, setClearingPairing } from "./pairing-guard";
 import { handleNotificationTap } from "./push-context-support";
+import { takeRevokedSignal } from "./revoked-signal";
 import { createNavigatorGate } from "./scope-routing";
 import { createTopBarStore } from "./top-bar-store";
 
@@ -1065,6 +1067,104 @@ describe("forget", () => {
 
       h.secure.failDelete = undefined;
       expect((await h.sessions.forget(A_ID, "unpair")).kind).toBe("none");
+    });
+  });
+
+  describe("a store that rejects where it never should", () => {
+    it("forget still answers clearFailed, so nothing needs an inline error", async () => {
+      const h = machinesHarness({ ids: [A_ID, B_ID] });
+      await h.start();
+      takeClearFailedSignal();
+      h.store.open = () => Promise.reject(new Error("no"));
+
+      expect(await h.sessions.forget(A_ID, "unpair")).toEqual({ kind: "clearFailed" });
+
+      expect(takeClearFailedSignal()).toEqual({ id: A_ID });
+      expect(isClearingPairing(A_ID)).toBe(false);
+    });
+  });
+
+  describe("the reason on /pair", () => {
+    /** The layout: each publish takes the signal, for the banner of the tree it
+     *  brings. Returns what the banner on screen decides. */
+    function watched(h: ReturnType<typeof machinesHarness>) {
+      takeRevokedSignal();
+      let revoked = false;
+      h.sessions.subscribe(() => {
+        revoked = takeRevokedSignal();
+      });
+      return () => bannerModel(h.sessions.current().connectionStore.get(), revoked);
+    }
+
+    it("revoked alone: the banner says why", async () => {
+      const h = machinesHarness({ ids: [A_ID] });
+      await h.start();
+      const banner = watched(h);
+      welcome(h.socketOf(A_ID));
+      revoke(h, A_ID);
+      await settle();
+
+      expect(h.routes).toEqual(["/pair"]);
+      expect(banner()?.key).toBe("conn.unpaired");
+    });
+
+    it.each(["unpair", "pair-again"] as const)("%s alone: nothing", async (cause) => {
+      const h = machinesHarness({ ids: [A_ID] });
+      await h.start();
+      const banner = watched(h);
+
+      expect(await h.sessions.forget(A_ID, cause)).toEqual({ kind: "none" });
+
+      expect(h.sessions.current().id).toBeNull();
+      expect(banner()).toBeUndefined();
+    });
+
+    it("revoked with another machine: that one's notice, no signal", async () => {
+      const h = machinesHarness({ ids: [A_ID, B_ID] });
+      await h.start();
+      takeRevokedSignal();
+      welcome(h.socketOf(A_ID));
+      revoke(h, A_ID);
+      await settle();
+
+      expect(h.notices).toHaveLength(1);
+      expect(takeRevokedSignal()).toBe(false);
+    });
+
+    it("a revoked clear that failed: its own phase, no signal", async () => {
+      const h = machinesHarness({ ids: [A_ID] });
+      await h.start();
+      takeRevokedSignal();
+      takeClearFailedSignal();
+      h.secure.failDelete = () => true;
+      welcome(h.socketOf(A_ID));
+      revoke(h, A_ID);
+      await settle();
+
+      expect(takeRevokedSignal()).toBe(false);
+      takeClearFailedSignal();
+    });
+
+    it("the last of two revoked says why, and pairing again ends it", async () => {
+      const h = machinesHarness({ ids: [A_ID, B_ID] });
+      await h.start();
+      const banner = watched(h);
+      welcome(h.socketOf(A_ID));
+      revoke(h, A_ID);
+      await settle();
+      expect(banner()).not.toEqual({ key: "conn.unpaired", pairAgain: false });
+
+      welcome(h.socketOf(B_ID));
+      revoke(h, B_ID);
+      await settle();
+      expect(banner()?.key).toBe("conn.unpaired");
+
+      await h.store.add(recordOf(B_ID), {
+        deviceId: recordOf(B_ID).deviceId,
+        token: "N".repeat(43),
+      });
+      expect(await h.sessions.reconnect()).toBe("connected");
+      expect(banner()?.key).not.toBe("conn.unpaired");
     });
   });
 

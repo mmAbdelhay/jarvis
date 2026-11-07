@@ -21,17 +21,19 @@ export function ConnectionBanner({
   store,
   onRetry,
   onPairAgain,
+  revoked,
 }: {
   store: ConnectionStore;
   onRetry: () => void;
   onPairAgain: () => void;
+  revoked: boolean;
 }) {
   const language = useLanguage();
   const [view, setView] = useState<ConnectionView>(store.get());
 
   useEffect(() => store.subscribe(setView), [store]);
 
-  const model = bannerModel(view);
+  const model = bannerModel(view, revoked);
   if (model === undefined) {
     return null;
   }

@@ -304,11 +304,6 @@ export function SettingsSections(props: Props): React.JSX.Element {
               {t(props.language, platformKey("settings.unpair", props.platform))}
             </Text>
           </TouchableOpacity>
-          {props.view.unpairError && (
-            <Text style={styles.errorText}>
-              {t(props.language, platformKey("settings.unpairFailed", props.platform))}
-            </Text>
-          )}
           <Text style={styles.version}>
             {t(props.language, "settings.appVersion", { version: props.view.appVersion })}
           </Text>

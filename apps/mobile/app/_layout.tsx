@@ -47,6 +47,7 @@ import { PushProvider } from "@/lib/push-context";
 import { createDeviceAuth } from "@/lib/device-auth";
 import { refreshLock } from "@/lib/refresh-lock";
 import { refreshStore } from "@/lib/refresh-store";
+import { takeRevokedSignal } from "@/lib/revoked-signal";
 import { RpcContext } from "@/lib/rpc-context";
 import {
   type NavigatorGate,
@@ -156,6 +157,9 @@ export default function RootLayout() {
   const sessions = sessionsRef.current;
 
   const [scope, setScope] = useState<MachineScope>(sessions.current());
+  // Lives as long as the tree its publish brought: /pair may be routed to twice
+  // on the way there, and a screen's mount could take the signal once only.
+  const [revoked, setRevoked] = useState(false);
   useEffect(() => {
     setScope(sessions.current());
     return sessions.subscribe((next) => {
@@ -163,6 +167,7 @@ export default function RootLayout() {
       // The key below changes, so the tree on screen is on its way out from
       // here: a route asked for now waits for the next one to mount.
       gate.setMounted(false);
+      setRevoked(takeRevokedSignal());
       setScope(next);
     });
   }, [sessions, gate]);
@@ -273,6 +278,7 @@ export default function RootLayout() {
                 handledIds={handledIdsRef.current}
                 switchingRef={switchingRef}
                 gate={gate}
+                revoked={revoked}
               />
             </Fragment>
           </PhoneUpdateProvider>
@@ -292,8 +298,9 @@ function ScopedTree(props: {
   handledIds: Set<string>;
   switchingRef: React.RefObject<boolean>;
   gate: NavigatorGate;
+  revoked: boolean;
 }): React.JSX.Element {
-  const { scope, sessions, language, handledIds, switchingRef, gate } = props;
+  const { scope, sessions, language, handledIds, switchingRef, gate, revoked } = props;
   const { client, connectionStore, authSession } = scope;
   const router = useRouter();
   const layout = useLayoutClass();
@@ -359,6 +366,7 @@ function ScopedTree(props: {
                   void reconnect();
                 }}
                 onPairAgain={handlePairAgain}
+                revoked={revoked}
               />
               <Stack screenOptions={{ headerShown: false }}>
                 <Stack.Screen name="(tabs)" />

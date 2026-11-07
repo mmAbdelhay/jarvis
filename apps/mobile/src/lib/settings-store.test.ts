@@ -581,7 +581,6 @@ describe("createSettingsStore: unpair (I1)", () => {
     // that slipped in some other way between the first disconnect and the
     // clear finishing.
     expect(order).toEqual(["disconnect", "clear", "disconnect", "navigate"]);
-    expect(store.get().unpairError).toBe(false);
   });
 
   it(
@@ -601,63 +600,23 @@ describe("createSettingsStore: unpair (I1)", () => {
     },
   );
 
-  it(
-    "fix round 1 (Minor): a throwing subscriber never makes unpair() reject " +
-      "[bite-proof: call setView directly instead of safeSetView; this rejects]",
-    async () => {
-      const { deps, logs } = baseDeps();
-      const store = createSettingsStore(deps);
-      await flush();
-      let notifyCount = 0;
-      store.subscribe(() => {
-        notifyCount += 1;
-        // The first notification is `subscribe()`'s own immediate
-        // computation, outside unpair() entirely — only the ones unpair()
-        // itself triggers should throw.
-        if (notifyCount > 1) throw new Error("a bad subscriber");
-      });
-
-      await expect(store.unpair()).resolves.toBeUndefined();
-      expect(logs).toContain("settings-store: a subscriber threw while unpairing");
-    },
-  );
-
-  it("sets unpairError and does not navigate when the keychain clear throws", async () => {
-    const { deps, fake, navigateCalls } = baseDeps({
+  it("a deps.unpair that rejects all the same takes the failed clear's way, and never rejects", async () => {
+    const outcomes: ForgetOutcome[] = [];
+    const { deps, fake, logs } = baseDeps({
       unpair: async () => {
         throw new Error("keychain delete failed");
       },
+      afterForget: (outcome) => outcomes.push(outcome),
     });
     const store = createSettingsStore(deps);
     await flush();
 
-    await store.unpair();
+    await expect(store.unpair()).resolves.toBeUndefined();
 
-    expect(store.get().unpairError).toBe(true);
-    expect(navigateCalls).toEqual([]);
-    // The client is still left disconnected — the safer state (I1).
-    expect(fake.disconnectCalls).toHaveLength(1);
-  });
-
-  it("retrying unpair after a failure clears unpairError on success", async () => {
-    let shouldFail = true;
-    const { deps, navigateCalls } = baseDeps({
-      unpair: async () => {
-        if (shouldFail) throw new Error("keychain delete failed");
-        return NONE;
-      },
-    });
-    const store = createSettingsStore(deps);
-    await flush();
-
-    await store.unpair();
-    expect(store.get().unpairError).toBe(true);
-
-    shouldFail = false;
-    await store.unpair();
-
-    expect(store.get().unpairError).toBe(false);
-    expect(navigateCalls).toEqual([1]);
+    expect(outcomes).toEqual([{ kind: "clearFailed" }]);
+    expect(logs).toContain("settings-store: unpair() threw; taking the failed clear's way");
+    // The client is left disconnected — the safer state (I1).
+    expect(fake.disconnectCalls.length).toBeGreaterThan(0);
   });
 
   it(
@@ -751,7 +710,6 @@ describe("createSettingsStore: unpair (I1)", () => {
       await expect(store.unpair()).resolves.toBeUndefined();
 
       expect(navigateCalls).toEqual([1]);
-      expect(store.get().unpairError).toBe(false);
     },
   );
 
@@ -1015,10 +973,9 @@ describe("createSettingsStore: reconnect (I3, shared connect-stored path)", () =
     expect(JSON.parse(values.get(MACHINE_INDEX_KEY) ?? "{}")).toEqual({ v: 1, ids: [] });
     expect(machines.activeId()).toBeUndefined();
     expect(navigateCalls).toEqual([1]);
-    expect(store.get().unpairError).toBe(false);
   });
 
-  it("unpair on a store that could not open reports the failure", async () => {
+  it("unpair on a store that could not open takes the failed clear's way", async () => {
     const machines = createMachineStore({
       secure: {
         get: async () => {
@@ -1034,35 +991,19 @@ describe("createSettingsStore: reconnect (I3, shared connect-stored path)", () =
       log: () => {},
     });
     expect(await machines.open()).toBe("failed");
+    const outcomes: ForgetOutcome[] = [];
     const { deps } = baseDeps({
       unpair: async () => {
         await machines.remove(machines.activeId() as string);
         return NONE;
       },
+      afterForget: (outcome) => outcomes.push(outcome),
     });
     const store = createSettingsStore(deps);
     await flush();
     await store.unpair();
 
-    expect(store.get().unpairError).toBe(true);
-  });
-
-  it("clears a previous unpairError once a later reconnect actually succeeds", async () => {
-    const { deps } = baseDeps({
-      unpair: async () => {
-        throw new Error("keychain delete failed");
-      },
-    });
-    const store = createSettingsStore(deps);
-    await flush();
-
-    await store.unpair();
-    expect(store.get().unpairError).toBe(true);
-
-    store.reconnect();
-    await flush();
-
-    expect(store.get().unpairError).toBe(false);
+    expect(outcomes).toEqual([{ kind: "clearFailed" }]);
   });
 });
 
@@ -1315,7 +1256,6 @@ describe("settings-store: unpair with more than one machine", () => {
     const store = createSettingsStore(realDeps(h, a).deps);
     await store.unpair();
 
-    expect(store.get().unpairError).toBe(false);
     expect(h.routes).toEqual([]);
     expect(h.notices).toEqual([]);
     expect(h.sessions.current().id).toBe(B_ID);
@@ -1366,7 +1306,6 @@ describe("settings-store: unpair with more than one machine", () => {
 
     expect(h.routes).toEqual(["/pair"]);
     expect(takeClearFailedSignal()).toEqual({ id: A_ID });
-    expect(store.get().unpairError).toBe(false);
     expect(h.store.has(A_ID)).toBe(true);
   });
 

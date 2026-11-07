@@ -74,15 +74,8 @@ export type SettingsView = {
   connection: ConnectionView;
   lastFrameAgoMs?: number;
   appVersion: string;
-  // Set when `deps.unpair()` itself threw — a clear the store could not do
-  // answers an outcome instead, and goes to /pair's own phase. The screen shows
-  // `settings.unpairFailed` and the Unpair button stays available to
-  // retry, instead of the failure being a silent, unhandled rejection.
-  unpairError: boolean;
   // Set when `reconnect()`'s shared read failed — `settings.reconnectFailed`,
-  // similarly retryable. Cleared, along with `unpairError` (a stale "couldn't
-  // unpair" would otherwise sit next to a working connection), the next time
-  // a reconnect actually succeeds.
+  // retryable. Cleared the next time a reconnect actually succeeds.
   reconnectError: boolean;
 };
 
@@ -187,7 +180,6 @@ export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
     notifications: deps.push.get(),
     connection: deps.connection.get(),
     appVersion: deps.appVersion,
-    unpairError: false,
     reconnectError: false,
   };
 
@@ -368,18 +360,6 @@ export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
   // second call while one is already running — meaningful now that the
   // reset is guaranteed to happen, so a second tap after a first one
   // actually runs rather than being refused forever by a stuck flag.
-  // Fix round 1 (Minor): every `setView` call risks a throw from a
-  // subscriber the store doesn't control — swallowed here (and logged with
-  // one fixed string) rather than left to propagate, so nothing downstream
-  // of a bad listener can turn `unpair()`'s promise into a rejection.
-  function safeSetView(patch: Partial<SettingsView>): void {
-    try {
-      setView(patch);
-    } catch {
-      deps.log("settings-store: a subscriber threw while unpairing");
-    }
-  }
-
   async function unpair(): Promise<void> {
     if (unpairing) return;
     unpairing = true;
@@ -390,7 +370,6 @@ export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
     // about to be cleared.
     setClearingPairing(deps.machineId, true);
     try {
-      safeSetView({ unpairError: false });
       // Rule 10: a phone can register and clear only its own push token
       // (global-constraints.md) — this is that clear, attempted before the
       // pairing itself is torn down so the laptop still has a live
@@ -414,8 +393,10 @@ export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
       try {
         outcome = await deps.unpair();
       } catch {
-        safeSetView({ unpairError: true });
-        return;
+        // `forget` answers a failed clear, and /pair has the phase for it. A
+        // dep that rejects all the same must not strand the user here.
+        deps.log("settings-store: unpair() threw; taking the failed clear's way");
+        outcome = { kind: "clearFailed" };
       }
       // Disconnects again after the clear resolves: covers a connect that
       // slipped in through some path other than this store's own
@@ -473,9 +454,7 @@ export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
         setView({ reconnectError: true });
         return;
       }
-      // "connected": a stale unpair failure from an earlier attempt no
-      // longer applies once a reconnect actually succeeds.
-      setView({ unpairError: false, reconnectError: false });
+      setView({ reconnectError: false });
     })();
   }
 

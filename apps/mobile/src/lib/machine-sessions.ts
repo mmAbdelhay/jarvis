@@ -39,6 +39,7 @@ import { isClearingPairing, setClearingPairing } from "./pairing-guard";
 import type { PairingRecord } from "./pairing-record";
 import type { Credential, Endpoint, RpcClient } from "./rpc-client";
 import { createRpcClient } from "./rpc-client";
+import { setRevokedSignal } from "./revoked-signal";
 import type { NavigatorGate } from "./scope-routing";
 import type { SecureStore } from "./secure-store";
 import type { Transport } from "./transport";
@@ -108,9 +109,8 @@ export function createMachineSessions(deps: {
   /** The pairing each kept scope last connected with. */
   const scopeCredentials = new Map<MachineId, Credential>();
   const forgetting = new Map<MachineId | null, Promise<ForgetOutcome>>();
-  const nullScope = deps.buildScope(null);
   let generation = 0;
-  let scope: MachineScope = { ...nullScope, generation };
+  let scope: MachineScope = { ...deps.buildScope(null), generation };
   let appActive = true;
   let idleMs: number | undefined;
   let latestAttempt = 0;
@@ -203,7 +203,9 @@ export function createMachineSessions(deps: {
         deps.log("machines: a listener threw");
       }
     }
-    const oldIsKept = old.id === null || scopes.get(old.id)?.client === old.client;
+    // A null scope is never used again: the disconnect above has closed its
+    // client, and its banner would say offline. Each publish of one is new.
+    const oldIsKept = old.id !== null && scopes.get(old.id)?.client === old.client;
     if (!oldIsKept && old.client !== built.client) retire(old);
     applyAppActive(scope);
     return scope;
@@ -337,7 +339,7 @@ export function createMachineSessions(deps: {
   }
 
   /** The machine has gone: whatever was on screen for it moves on. */
-  async function moveOff(id: MachineId): Promise<ForgetOutcome> {
+  async function moveOff(id: MachineId, cause: ForgetCause): Promise<ForgetOutcome> {
     // A switch in flight decides what is on screen.
     while (switchesInFlight > 0) await lastSwitch;
     if (scope.id !== id && scope.id !== null) return { kind: "next", id: scope.id };
@@ -350,7 +352,11 @@ export function createMachineSessions(deps: {
       next = store.nextAfter(id);
     }
     latestAttempt += 1;
-    if (scope.id !== null) publish(nullScope);
+    if (scope.id !== null) {
+      // Before the publish: the listener that brings the new tree takes it.
+      if (cause === "revoked") setRevokedSignal();
+      publish(deps.buildScope(null));
+    }
     return { kind: "none" };
   }
 
@@ -382,7 +388,7 @@ export function createMachineSessions(deps: {
       setClearingPairing(id, false);
     }
     try {
-      return await moveOff(id);
+      return await moveOff(id, cause);
     } catch {
       // The store closed under the move. /pair says so, as `check-failed`.
       deps.log("machines: moving off a forgotten machine failed");
@@ -433,9 +439,16 @@ export function createMachineSessions(deps: {
     forget(id, cause) {
       const running = forgetting.get(id);
       if (running !== undefined) return running;
-      const run = (id === null ? forgetNullScope() : runForget(id, cause)).finally(() => {
-        forgetting.delete(id);
-      });
+      const run = (id === null ? forgetNullScope() : runForget(id, cause))
+        .catch((): ForgetOutcome => {
+          // Nothing above should reject: the promise to every caller is kept.
+          deps.log("machines: forgetting a machine failed");
+          setClearFailedSignal(id);
+          return { kind: "clearFailed" };
+        })
+        .finally(() => {
+          forgetting.delete(id);
+        });
       forgetting.set(id, run);
       return run;
     },
