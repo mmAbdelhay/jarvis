@@ -32,11 +32,11 @@ import {
   phaseAfterCheck,
   shouldDrainPairingLink,
 } from "@/lib/pair-flow";
-import { removeActiveMachine } from "@/lib/machine-store";
+import { useMachineSessions } from "@/lib/machine-context";
+import type { MachineId } from "@/lib/machine-index";
 import { machineStore, openMachineStore } from "@/lib/machine-store-instance";
 import { pair, type PairOutcome, withHost } from "@/lib/pairing";
 import { subscribePairingLink, takePairingLink } from "@/lib/pairing-link-holder";
-import { useAuthSession } from "@/lib/rpc-context";
 import { PairingAlreadyExistsError } from "@/lib/pairing-record";
 import { systemTransportFor } from "@/lib/system-transport";
 import { theme } from "@/lib/theme";
@@ -127,7 +127,8 @@ function PairScreen() {
   const insets = useSafeAreaInsets();
   const language = useLanguage();
   const router = useRouter();
-  const authSession = useAuthSession();
+  const sessions = useMachineSessions();
+  const clearFailedIdRef = useRef<MachineId | null>(null);
   const [permission, requestPermission] = useCameraPermissions();
   const [phase, setPhase] = useState<Phase>({ kind: "checking" });
   const [hostText, setHostText] = useState("");
@@ -229,7 +230,9 @@ function PairScreen() {
     // that phase — never through `checkAlreadyPaired`, which would find
     // the still-present record and show the contradictory "already
     // paired" screen instead.
-    const entryKind = entryPhaseKind(takeClearFailedSignal());
+    const signal = takeClearFailedSignal();
+    clearFailedIdRef.current = signal?.id ?? null;
+    const entryKind = entryPhaseKind(signal !== undefined);
     if (entryKind === "clearFailed") {
       alreadyPairedRef.current = true;
       // R-M1: same reasoning as the checkAlreadyPaired branch above.
@@ -246,18 +249,14 @@ function PairScreen() {
     // are otherwise stable.
   }, [checkAlreadyPaired, safeSetPhase]);
 
-  // The clearFailed phase's own retry — removes the machine directly (never
-  // checkAlreadyPaired: a retry that just cleared the record is already
-  // known to have nothing left to find) and moves on to "scan" only once
-  // it actually succeeds.
+  // The clearFailed phase's own retry — removes the machine the signal named,
+  // with its session's memory of the stored token (never checkAlreadyPaired:
+  // a retry that just cleared the record is already known to have nothing
+  // left to find) and moves on to "scan" only once it actually succeeds.
   const retryClear = useCallback(async () => {
     let cleared: boolean;
     try {
-      await openMachineStore();
-      await removeActiveMachine(machineStore);
-      // The session's memory of the stored token goes too, as in the other
-      // two callers: left true, the next login would not record its own.
-      await authSession.forget();
+      await sessions.removeMachine(clearFailedIdRef.current);
       cleared = true;
     } catch {
       // Logged without any secret: just the fact that the retry failed.
@@ -271,7 +270,7 @@ function PairScreen() {
       return;
     }
     safeSetPhase({ kind: "clearFailed" });
-  }, [authSession, safeSetPhase]);
+  }, [sessions, safeSetPhase]);
 
   const startPairing = useCallback(
     async (link: PairingLink): Promise<void> => {

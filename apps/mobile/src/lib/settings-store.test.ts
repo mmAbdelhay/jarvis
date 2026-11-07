@@ -6,7 +6,8 @@ import { connectFromStoredPairing } from "./connect-stored";
 import type { ConnectionStore, ConnectionView } from "./connection-store";
 import { createConnectionStore } from "./connection-store";
 import { MACHINE_INDEX_KEY } from "./machine-index";
-import { createMachineStore, removeActiveMachine } from "./machine-store";
+import { A_ID, B_ID, machinesHarness, refreshKeyOf, refreshTokenOf } from "./fake-machines";
+import { createMachineStore } from "./machine-store";
 import type { PairingRecord } from "./pairing-record";
 import type { PrefsStore } from "./prefs";
 import { PUSH_REGISTER_TIMEOUT_MS } from "./push-registration";
@@ -22,6 +23,8 @@ import type {
 import type { SecureStore } from "./secure-store";
 import type { SettingsStoreDeps, SettingsView } from "./settings-store";
 import { connectionStateKey, createSettingsStore } from "./settings-store";
+
+const MACHINE_ID = "m_1";
 
 type StateDetail = { closeCode?: number; lastFrameAt?: number; pinMismatch?: true };
 type StateHandler = (state: ClientState, detail: StateDetail) => void;
@@ -218,6 +221,7 @@ function baseDeps(overrides: Partial<SettingsStoreDeps> = {}): {
   const deps: SettingsStoreDeps = {
     prefs,
     localeTag: "en-US",
+    machineId: MACHINE_ID,
     loadRecord: async () => RECORD,
     connectFromStored: async (_shouldConnect: () => boolean): Promise<ConnectStoredOutcome> => {
       connectFromStoredCalls.push(1);
@@ -667,9 +671,9 @@ describe("createSettingsStore: unpair (I1)", () => {
       const store = createSettingsStore(deps);
       await flush();
 
-      expect(isClearingPairing()).toBe(false);
+      expect(isClearingPairing(MACHINE_ID)).toBe(false);
       await expect(store.unpair()).resolves.toBeUndefined();
-      expect(isClearingPairing()).toBe(false);
+      expect(isClearingPairing(MACHINE_ID)).toBe(false);
       expect(clearCallCount).toBe(1);
       expect(navigateCalls).toHaveLength(1);
       // Fix round 1 (Minor): the disconnect-threw log line is a fixed
@@ -802,8 +806,8 @@ describe("createSettingsStore: reconnect (I3, shared connect-stored path)", () =
   it(
     "R-M2 bite-proof: the shouldConnect passed to the shared connectFromStored " +
       "refuses while the automatic unpaired handler's clear is in flight " +
-      "(isClearingPairing()), not only this store's own unpairing " +
-      "[bite-proof: drop the isClearingPairing() check from the callback and " +
+      "(isClearingPairing(MACHINE_ID)), not only this store's own unpairing " +
+      "[bite-proof: drop the isClearingPairing(MACHINE_ID) check from the callback and " +
       "shouldConnect() reads true here]",
     async () => {
       const { setClearingPairing, isClearingPairing } = await import("./pairing-guard");
@@ -817,7 +821,7 @@ describe("createSettingsStore: reconnect (I3, shared connect-stored path)", () =
       const store = createSettingsStore(deps);
       await flush();
 
-      setClearingPairing(true);
+      setClearingPairing(MACHINE_ID, true);
       try {
         store.reconnect();
         await flush();
@@ -825,10 +829,10 @@ describe("createSettingsStore: reconnect (I3, shared connect-stored path)", () =
         expect(observedShouldConnect).toBeDefined();
         expect(observedShouldConnect?.()).toBe(false);
       } finally {
-        setClearingPairing(false);
+        setClearingPairing(MACHINE_ID, false);
       }
 
-      expect(isClearingPairing()).toBe(false);
+      expect(isClearingPairing(MACHINE_ID)).toBe(false);
     },
   );
 
@@ -899,7 +903,7 @@ describe("createSettingsStore: reconnect (I3, shared connect-stored path)", () =
       // so this test parks `deps.unpair()` on its own controllable promise
       // and resolves the deferred keychain read *while `unpair()` is still
       // clearing*, which is what the test's own title describes and what
-      // the shared `isClearingPairing()` flag (still `true` at that point)
+      // the shared `isClearingPairing(MACHINE_ID)` flag (still `true` at that point)
       // is what actually stops the connect now.
       const loaded = {
         record: JSON.parse(RECORD_JSON) as PairingRecord,
@@ -913,12 +917,12 @@ describe("createSettingsStore: reconnect (I3, shared connect-stored path)", () =
       const clearing = new Promise<void>((resolve) => {
         resolveClear = resolve;
       });
-      const machines = { activeId: () => "m_1", load: () => recordRead };
+      const machines = { load: () => recordRead };
       const fake = createFakeClient();
       const { deps, navigateCalls } = baseDeps({
         client: fake.client,
         connectFromStored: (shouldConnect) =>
-          connectFromStoredPairing({ machines, client: fake.client, shouldConnect }),
+          connectFromStoredPairing({ machines, id: "m_1", client: fake.client, shouldConnect }),
         unpair: async () => {
           await clearing;
         },
@@ -973,7 +977,9 @@ describe("createSettingsStore: reconnect (I3, shared connect-stored path)", () =
     expect(await machines.open()).toBe("ok");
     expect(machines.activeId()).toBeDefined();
 
-    const { deps, navigateCalls } = baseDeps({ unpair: () => removeActiveMachine(machines) });
+    const { deps, navigateCalls } = baseDeps({
+      unpair: async () => machines.remove(machines.activeId() as string),
+    });
     const store = createSettingsStore(deps);
     await flush();
     await store.unpair();
@@ -1003,7 +1009,9 @@ describe("createSettingsStore: reconnect (I3, shared connect-stored path)", () =
       log: () => {},
     });
     expect(await machines.open()).toBe("failed");
-    const { deps } = baseDeps({ unpair: () => removeActiveMachine(machines) });
+    const { deps } = baseDeps({
+      unpair: async () => machines.remove(machines.activeId() as string),
+    });
     const store = createSettingsStore(deps);
     await flush();
     await store.unpair();
@@ -1250,5 +1258,78 @@ describe("createSettingsStore: owner login (Phase 0)", () => {
 
   it("maps the locked state to its own key", () => {
     expect(connectionStateKey({ state: "locked", stale: true })).toBe("conn.locked");
+  });
+});
+
+describe("settings-store: unpair with more than one machine", () => {
+  it("unpair of A leaves B's refresh token and flag intact", async () => {
+    const h = machinesHarness();
+    const a = await h.start();
+    const { deps, navigateCalls } = baseDeps({
+      machineId: a.id,
+      client: a.client,
+      connection: a.connectionStore,
+      unpair: () => h.sessions.removeMachine(a.id),
+    });
+    const store = createSettingsStore(deps);
+    await store.unpair();
+
+    expect(store.get().unpairError).toBe(false);
+    expect(navigateCalls).toEqual([1]);
+    expect(h.refresh.values.has(refreshKeyOf(A_ID))).toBe(false);
+    expect(h.refresh.values.get(refreshKeyOf(B_ID))).toBe(refreshTokenOf(B_ID));
+    const prefs = JSON.parse(h.prefs.text ?? "{}");
+    expect(prefs.refreshTokenStored).toBe(false);
+    expect(prefs.machineFlags[B_ID].refreshTokenStored).toBe(true);
+  });
+
+  it("unpair started on A and ending after a switch still removes A, never the new active machine", async () => {
+    const h = machinesHarness();
+    const a = await h.start();
+    let clear: () => void = () => {};
+    const held = new Promise<void>((resolve) => {
+      clear = resolve;
+    });
+    const { deps } = baseDeps({
+      machineId: a.id,
+      client: a.client,
+      connection: a.connectionStore,
+      unpair: async () => {
+        await held;
+        await h.sessions.removeMachine(a.id);
+      },
+    });
+    const store = createSettingsStore(deps);
+
+    const unpairing = store.unpair();
+    await h.sessions.switchTo(B_ID);
+    clear();
+    await unpairing;
+
+    expect(h.store.has(A_ID)).toBe(false);
+    expect(h.store.has(B_ID)).toBe(true);
+    expect(h.refresh.values.get(refreshKeyOf(B_ID))).toBe(refreshTokenOf(B_ID));
+  });
+
+  it("clearing another machine does not refuse this one's reconnect", async () => {
+    const { setClearingPairing } = await import("./pairing-guard");
+    let observed: (() => boolean) | undefined;
+    const { deps } = baseDeps({
+      connectFromStored: async (shouldConnect) => {
+        observed = shouldConnect;
+        return "connected";
+      },
+    });
+    const store = createSettingsStore(deps);
+    await flush();
+
+    setClearingPairing("other_1", true);
+    try {
+      store.reconnect();
+      await flush();
+      expect(observed?.()).toBe(true);
+    } finally {
+      setClearingPairing("other_1", false);
+    }
   });
 });

@@ -3,12 +3,14 @@ import { takeClearFailedSignal } from "./clear-failed-signal";
 import { isClearingPairing } from "./pairing-guard";
 import { createUnpairedHandler } from "./unpaired-handler";
 
+const MACHINE = "a_1";
+
 describe("createUnpairedHandler", () => {
   it("clears the pairing, navigates to /pair as 'cleared', and resolves 'cleared'", async () => {
     const clearPairing = vi.fn(async () => {});
     const navigateToPair = vi.fn();
     const log = vi.fn();
-    const handler = createUnpairedHandler({ clearPairing, navigateToPair, log });
+    const handler = createUnpairedHandler({ id: MACHINE, clearPairing, navigateToPair, log });
 
     await expect(handler()).resolves.toBe("cleared");
 
@@ -26,7 +28,7 @@ describe("createUnpairedHandler", () => {
     });
     const navigateToPair = vi.fn();
     const log = vi.fn();
-    const handler = createUnpairedHandler({ clearPairing, navigateToPair, log });
+    const handler = createUnpairedHandler({ id: MACHINE, clearPairing, navigateToPair, log });
 
     await handler();
 
@@ -42,7 +44,7 @@ describe("createUnpairedHandler", () => {
       });
       const navigateToPair = vi.fn();
       const log = vi.fn();
-      const handler = createUnpairedHandler({ clearPairing, navigateToPair, log });
+      const handler = createUnpairedHandler({ id: MACHINE, clearPairing, navigateToPair, log });
 
       await expect(handler()).resolves.toBe("clearFailed");
 
@@ -56,7 +58,7 @@ describe("createUnpairedHandler", () => {
     });
     const navigateToPair = vi.fn();
     const log = vi.fn();
-    const handler = createUnpairedHandler({ clearPairing, navigateToPair, log });
+    const handler = createUnpairedHandler({ id: MACHINE, clearPairing, navigateToPair, log });
 
     await expect(handler()).resolves.toBe("clearFailed");
 
@@ -71,6 +73,7 @@ describe("createUnpairedHandler", () => {
     async () => {
       takeClearFailedSignal(); // drain any leftover from another test in this file
       const failingHandler = createUnpairedHandler({
+        id: MACHINE,
         clearPairing: vi.fn(async () => {
           throw new Error("keychain unavailable");
         }),
@@ -78,17 +81,18 @@ describe("createUnpairedHandler", () => {
         log: vi.fn(),
       });
       await failingHandler();
-      expect(takeClearFailedSignal()).toBe(true);
+      expect(takeClearFailedSignal()).toEqual({ id: MACHINE });
       // One-shot: reading it again sees nothing.
-      expect(takeClearFailedSignal()).toBe(false);
+      expect(takeClearFailedSignal()).toBeUndefined();
 
       const succeedingHandler = createUnpairedHandler({
+        id: MACHINE,
         clearPairing: vi.fn(async () => {}),
         navigateToPair: vi.fn(),
         log: vi.fn(),
       });
       await succeedingHandler();
-      expect(takeClearFailedSignal()).toBe(false);
+      expect(takeClearFailedSignal()).toBeUndefined();
     },
   );
 
@@ -99,22 +103,24 @@ describe("createUnpairedHandler", () => {
     async () => {
       let sawGuardDuringClear = false;
       const handler = createUnpairedHandler({
+        id: MACHINE,
         clearPairing: async () => {
-          sawGuardDuringClear = isClearingPairing();
+          sawGuardDuringClear = isClearingPairing(MACHINE);
         },
         navigateToPair: vi.fn(),
         log: vi.fn(),
       });
 
-      expect(isClearingPairing()).toBe(false);
+      expect(isClearingPairing(MACHINE)).toBe(false);
       await handler();
       expect(sawGuardDuringClear).toBe(true);
-      expect(isClearingPairing()).toBe(false);
+      expect(isClearingPairing(MACHINE)).toBe(false);
     },
   );
 
   it("resets the app-wide clearing guard even when clearPairing throws", async () => {
     const handler = createUnpairedHandler({
+      id: MACHINE,
       clearPairing: vi.fn(async () => {
         throw new Error("keychain unavailable");
       }),
@@ -123,6 +129,6 @@ describe("createUnpairedHandler", () => {
     });
 
     await handler();
-    expect(isClearingPairing()).toBe(false);
+    expect(isClearingPairing(MACHINE)).toBe(false);
   });
 });

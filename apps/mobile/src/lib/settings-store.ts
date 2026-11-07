@@ -26,6 +26,7 @@ import type { Clock } from "./clock";
 import type { ConnectionStore, ConnectionView } from "./connection-store";
 import { languageFromLocale } from "./i18n";
 import type { Language, MessageKey } from "./i18n";
+import type { MachineId } from "./machine-index";
 import { fingerprintTail as computeFingerprintTail } from "./pair-flow";
 import { isClearingPairing, setClearingPairing } from "./pairing-guard";
 import type { PairingRecord } from "./pairing-record";
@@ -131,15 +132,17 @@ export type SettingsStore = {
 export type SettingsStoreDeps = {
   prefs: PrefsStore;
   localeTag: string;
+  // The machine this store's screen was mounted for, fixed for its lifetime.
+  machineId: MachineId | null;
   loadRecord(): Promise<PairingRecord | undefined>;
   // The one shared "read the stored pairing and connect" function — also
   // used by `_layout.tsx` on entry. `shouldConnect` is threaded through to
   // `connectFromStoredPairing`'s own guard (see connect-stored.ts): this
-  // store passes `() => !unpairing && !isClearingPairing()`, checked
+  // store passes `() => !unpairing && !isClearingPairing(machineId)`, checked
   // immediately before the shared function would call `client.connect`, so
   // a reconnect whose keychain read finishes after either this store's own
   // `unpair()` *or* the automatic unpaired handler's clear (final review
-  // R-M2 — unpaired-handler.ts now sets the same app-wide flag) has
+  // R-M2 — unpaired-handler.ts now sets the same per-machine flag) has
   // started can never connect with a pairing that is (or is about to be)
   // cleared.
   connectFromStored(shouldConnect: () => boolean): Promise<ConnectStoredOutcome>;
@@ -159,7 +162,7 @@ export type SettingsStoreDeps = {
   // flow, token handling and registration retries all live in
   // push-registration.ts, not here.
   push: Pick<PushRegistration, "get" | "subscribe" | "setEnabled">;
-  // Phase 0 owner login: the app's one auth session (built in _layout.tsx).
+  // Phase 0 owner login: this machine's auth session (machine-sessions.ts).
   auth: Pick<AuthSession, "logout" | "setIdleMs" | "storagePolicyChanged">;
 };
 
@@ -373,12 +376,12 @@ export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
   async function unpair(): Promise<void> {
     if (unpairing) return;
     unpairing = true;
-    // Shared app-wide flag (pairing-guard.ts): closes the same race for
+    // Shared per-machine flag (pairing-guard.ts): closes the same race for
     // `_layout.tsx`'s /dashboard entry as `unpairing` closes for this
     // store's own `reconnect()` — a back gesture to /dashboard while this
     // clear is still in flight must not reconnect with a pairing that's
     // about to be cleared.
-    setClearingPairing(true);
+    setClearingPairing(deps.machineId, true);
     try {
       safeSetView({ unpairError: false });
       // Rule 10: a phone can register and clear only its own push token
@@ -426,7 +429,7 @@ export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
       }
     } finally {
       unpairing = false;
-      setClearingPairing(false);
+      setClearingPairing(deps.machineId, false);
     }
   }
 
@@ -442,7 +445,9 @@ export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
         // only this store's own `unpairing` — a Reconnect tap during that
         // window must not connect with a token that's about to be, or has
         // just been, invalidated.
-        outcome = await deps.connectFromStored(() => !unpairing && !isClearingPairing());
+        outcome = await deps.connectFromStored(
+          () => !unpairing && !isClearingPairing(deps.machineId),
+        );
       } catch {
         // connectFromStoredPairing never throws by contract, but this is a
         // second line of defence so a change there can never turn into an

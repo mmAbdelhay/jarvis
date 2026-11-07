@@ -22,33 +22,36 @@
 // the *only* place that ever calls `setClearFailedSignal()`; `/pair` reads
 // it back with `takeClearFailedSignal()`, never from a link or a param.
 //
-// The clear itself is also wrapped in the same app-wide `pairing-guard.ts`
+// The clear itself is also wrapped in the same per-machine `pairing-guard.ts`
 // flag Settings' manual unpair uses, closing the window where a Settings
 // "Reconnect" during this automatic clear could still read the
 // not-yet-removed record and reconnect with a token that's about to be
-// invalidated.
+// invalidated. `id` is fixed when the handler is built, so a clear always
+// concerns the machine that was revoked, whichever is active by then.
 
 import { setClearFailedSignal } from "./clear-failed-signal";
+import type { MachineId } from "./machine-index";
 import { setClearingPairing } from "./pairing-guard";
 
 export type UnpairedOutcome = "cleared" | "clearFailed";
 
 export function createUnpairedHandler(deps: {
+  id: MachineId | null;
   clearPairing(): Promise<void>;
   navigateToPair(outcome: UnpairedOutcome): void;
   log(line: string): void;
 }): () => Promise<UnpairedOutcome> {
   return async () => {
-    setClearingPairing(true);
+    setClearingPairing(deps.id, true);
     try {
       await deps.clearPairing();
     } catch {
       deps.log("onUnpaired: clearPairing failed; routing to /pair's clearFailed phase");
-      setClearFailedSignal();
+      setClearFailedSignal(deps.id);
       deps.navigateToPair("clearFailed");
       return "clearFailed";
     } finally {
-      setClearingPairing(false);
+      setClearingPairing(deps.id, false);
     }
     deps.navigateToPair("cleared");
     return "cleared";

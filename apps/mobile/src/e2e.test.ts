@@ -149,6 +149,7 @@ describe("the pairing-to-revocation scenario, end to end", () => {
     });
     const dashboardStore = createDashboardStore({ client });
     const unpairedHandler = createUnpairedHandler({
+      id: null,
       clearPairing: () => clearPairingAt(secureStore, LEGACY_PAIRING_KEYS),
       navigateToPair: (outcome) => navigated.push(outcome),
       log: (line) => logs.push(line),

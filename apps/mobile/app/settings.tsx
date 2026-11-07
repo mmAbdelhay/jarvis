@@ -14,15 +14,14 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { WideShell } from "@/components/WideShell";
 import { realClock } from "@/lib/clock";
 import { clientPlatformFor } from "@/lib/client-platform";
-import { connectFromStoredPairing } from "@/lib/connect-stored";
 import { dialogs } from "@/lib/dialog";
 import { platformKey, t } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
-import { removeActiveMachine } from "@/lib/machine-store";
-import { loadActiveMachine, machineStore, openMachineStore } from "@/lib/machine-store-instance";
+import { useMachineSessions } from "@/lib/machine-context";
+import { machineStore, openMachineStore } from "@/lib/machine-store-instance";
 import { filePrefsStore } from "@/lib/prefs-file";
 import { usePushRegistration } from "@/lib/push-context";
-import { useAuthSession, useConnectionStore, useRpcClient } from "@/lib/rpc-context";
+import { useAuthSession, useConnectionStore, useMachineId, useRpcClient } from "@/lib/rpc-context";
 import { SETTINGS_SCOPES, type SettingsScope, settingsWideLayout } from "@/lib/settings-sections";
 import { createSettingsStore, type SettingsView } from "@/lib/settings-store";
 import { theme } from "@/lib/theme";
@@ -54,6 +53,8 @@ function SettingsScreen() {
   const voiceController = useVoiceController();
   const push = usePushRegistration();
   const authSession = useAuthSession();
+  const sessions = useMachineSessions();
+  const machineId = useMachineId();
   const [scope, setScope] = useState<SettingsScope>("browser");
   // Home's update banner opens /settings?section=updates: scroll there once
   // both the sections and the Updates section have been laid out.
@@ -79,35 +80,33 @@ function SettingsScreen() {
       createSettingsStore({
         prefs: filePrefsStore,
         localeTag: Intl.DateTimeFormat().resolvedOptions().locale,
-        loadRecord: async () => (await loadActiveMachine())?.record,
-        // The same shared read+connect function `_layout.tsx` uses on
-        // entry — one read path for connecting in the app.
-        connectFromStored: async (shouldConnect) => {
+        machineId,
+        // This screen's machine, fixed at mount, whichever is active by then.
+        loadRecord: async () => {
           await openMachineStore();
-          return connectFromStoredPairing({ machines: machineStore, client, shouldConnect });
+          return machineId === null ? undefined : (await machineStore.load(machineId))?.record;
         },
+        // The same shared read+connect `_layout.tsx` uses on entry — one read
+        // path for connecting in the app.
+        connectFromStored: (shouldConnect) => sessions.reconnect(shouldConnect),
         connection,
         client,
         clock: realClock,
         appVersion: APP_VERSION,
-        unpair: async () => {
-          await openMachineStore();
-          await removeActiveMachine(machineStore);
-          // The stored refresh token belongs to the pairing it was issued under.
-          await authSession.forget();
-        },
+        unpair: () => sessions.removeMachine(machineId),
         navigateToPair: () => {
-          router.replace("/pair");
+          // An unpair that ends after a switch leaves the new machine's screen.
+          if (sessions.current().id === machineId) router.replace("/pair");
         },
         log: console.log,
         // M10 Task 6, rule 10 of settings-store.ts: this store only relays
         // `push`'s own view and forwards `setNotifications` to it — the
-        // one `PushRegistration` `PushProvider` built for the whole app
+        // one `PushRegistration` `PushProvider` built for this machine's scope
         // (push-context.tsx), never a second instance built here.
         push,
         auth: authSession,
       }),
-    [client, connection, router, push, authSession],
+    [machineId, sessions, client, connection, router, push, authSession],
   );
 
   const [view, setView] = useState<SettingsView>(store.get());

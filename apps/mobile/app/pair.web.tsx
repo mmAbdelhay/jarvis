@@ -46,11 +46,11 @@ import {
   phaseAfterCheck,
 } from "@/lib/pair-flow";
 import { setPasskeyOfferSignal } from "@/lib/passkey-offer-signal";
-import { removeActiveMachine } from "@/lib/machine-store";
+import { useMachineSessions } from "@/lib/machine-context";
+import type { MachineId } from "@/lib/machine-index";
 import { machineStore, openMachineStore } from "@/lib/machine-store-instance";
 import { linkRefusedOn, pair, type PairOutcome } from "@/lib/pairing";
 import { PairingAlreadyExistsError } from "@/lib/pairing-record";
-import { useAuthSession } from "@/lib/rpc-context";
 import { systemTransportFor } from "@/lib/system-transport";
 import { theme } from "@/lib/theme";
 import {
@@ -130,7 +130,8 @@ function PairWebScreen() {
   const cardRoot = useAuthCardRootStyle();
   const language = useLanguage();
   const router = useRouter();
-  const authSession = useAuthSession();
+  const sessions = useMachineSessions();
+  const clearFailedIdRef = useRef<MachineId | null>(null);
   const [phase, setPhase] = useState<Phase>({ kind: "checking" });
   const [pastedLink, setPastedLink] = useState("");
   const [deviceName, setDeviceName] = useState(() =>
@@ -194,7 +195,9 @@ function PairWebScreen() {
   }, [safeSetPhase]);
 
   useEffect(() => {
-    if (entryPhaseKind(takeClearFailedSignal()) === "clearFailed") {
+    const signal = takeClearFailedSignal();
+    clearFailedIdRef.current = signal?.id ?? null;
+    if (entryPhaseKind(signal !== undefined) === "clearFailed") {
       alreadyPairedRef.current = true;
       hashRef.current = "";
       safeSetPhase({ kind: "clearFailed" });
@@ -206,11 +209,8 @@ function PairWebScreen() {
   const retryClear = useCallback(async () => {
     let cleared: boolean;
     try {
-      await openMachineStore();
-      await removeActiveMachine(machineStore);
-      // The session's memory of the stored token goes too, as in the other
-      // two callers: left true, the next login would not record its own.
-      await authSession.forget();
+      // The machine the signal named, with its session's memory of the token.
+      await sessions.removeMachine(clearFailedIdRef.current);
       cleared = true;
     } catch {
       console.warn("pair: retrying the clear failed");
@@ -222,7 +222,7 @@ function PairWebScreen() {
       return;
     }
     safeSetPhase({ kind: "clearFailed" });
-  }, [authSession, safeSetPhase]);
+  }, [sessions, safeSetPhase]);
 
   const intake = useCallback(
     (link: PairingLink | undefined) => {

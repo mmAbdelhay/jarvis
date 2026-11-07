@@ -32,7 +32,7 @@ function machineStoreOver(secure: SecureStore): MachineStore {
   });
 }
 
-type Machines = Pick<MachineStore, "activeId" | "load">;
+type Machines = Pick<MachineStore, "load">;
 
 function createFakeClient() {
   const connectCalls: { endpoint: Endpoint; credential: Credential }[] = [];
@@ -75,7 +75,6 @@ function machinesHolding(record: PairingRecord = RECORD): Machines & { loads: st
   const loads: string[] = [];
   return {
     loads,
-    activeId: () => ACTIVE_ID,
     load: async (id) => {
       loads.push(id);
       return id === ACTIVE_ID ? { record, credential: CREDENTIAL } : undefined;
@@ -88,7 +87,7 @@ describe("connectFromStoredPairing", () => {
     const machines = machinesHolding();
     const { client, connectCalls } = createFakeClient();
 
-    const outcome = await connectFromStoredPairing({ machines, client });
+    const outcome = await connectFromStoredPairing({ machines, id: ACTIVE_ID, client });
 
     expect(outcome).toBe("connected");
     expect(machines.loads).toEqual([ACTIVE_ID]);
@@ -104,7 +103,7 @@ describe("connectFromStoredPairing", () => {
     const machines = machinesHolding({ ...RECORD, name: "mac.tail.ts.net" });
     const { client, connectCalls } = createFakeClient();
 
-    const outcome = await connectFromStoredPairing({ machines, client });
+    const outcome = await connectFromStoredPairing({ machines, id: ACTIVE_ID, client });
 
     expect(outcome).toBe("connected");
     expect(connectCalls[0]?.endpoint).toEqual({
@@ -115,40 +114,32 @@ describe("connectFromStoredPairing", () => {
     });
   });
 
-  it('no active id answers "unpaired", reads nothing and never connects', async () => {
-    const loads: string[] = [];
-    const machines: Machines = {
-      activeId: () => undefined,
-      load: async (id) => {
-        loads.push(id);
-        return undefined;
-      },
-    };
+  it("reads the machine it is told to, not whichever is active", async () => {
+    const machines = machinesHolding();
     const { client, connectCalls } = createFakeClient();
 
-    expect(await connectFromStoredPairing({ machines, client })).toBe("unpaired");
-    expect(loads).toEqual([]);
+    expect(await connectFromStoredPairing({ machines, id: "other_1", client })).toBe("unpaired");
+    expect(machines.loads).toEqual(["other_1"]);
     expect(connectCalls).toEqual([]);
   });
 
-  it('an active id whose record is gone answers "unpaired"', async () => {
-    const machines: Machines = { activeId: () => ACTIVE_ID, load: async () => undefined };
+  it('an id whose record is gone answers "unpaired"', async () => {
+    const machines: Machines = { load: async () => undefined };
     const { client, connectCalls } = createFakeClient();
 
-    expect(await connectFromStoredPairing({ machines, client })).toBe("unpaired");
+    expect(await connectFromStoredPairing({ machines, id: ACTIVE_ID, client })).toBe("unpaired");
     expect(connectCalls).toEqual([]);
   });
 
   it('a throwing load answers "failed", never a rejection', async () => {
     const machines: Machines = {
-      activeId: () => ACTIVE_ID,
       load: async () => {
         throw new Error("keychain unavailable");
       },
     };
     const { client, connectCalls } = createFakeClient();
 
-    expect(await connectFromStoredPairing({ machines, client })).toBe("failed");
+    expect(await connectFromStoredPairing({ machines, id: ACTIVE_ID, client })).toBe("failed");
     expect(connectCalls).toEqual([]);
   });
 
@@ -164,7 +155,7 @@ describe("connectFromStoredPairing", () => {
     expect(await machines.open()).toBe("failed");
     const { client, connectCalls } = createFakeClient();
 
-    expect(await connectFromStoredPairing({ machines, client })).toBe("failed");
+    expect(await connectFromStoredPairing({ machines, id: ACTIVE_ID, client })).toBe("failed");
     expect(connectCalls).toEqual([]);
   });
 
@@ -178,7 +169,7 @@ describe("connectFromStoredPairing", () => {
     expect(await machines.open()).toBe("ok");
     const { client, connectCalls } = createFakeClient();
 
-    expect(await connectFromStoredPairing({ machines, client })).toBe("connected");
+    expect(await connectFromStoredPairing({ machines, id: ACTIVE_ID, client })).toBe("connected");
     expect(connectCalls[0]?.credential).toEqual(CREDENTIAL);
   });
 
@@ -192,7 +183,7 @@ describe("connectFromStoredPairing", () => {
     await secure.delete("jarvis.token");
     const { client, connectCalls } = createFakeClient();
 
-    expect(await connectFromStoredPairing({ machines, client })).toBe("unpaired");
+    expect(await connectFromStoredPairing({ machines, id: ACTIVE_ID, client })).toBe("unpaired");
     expect(connectCalls).toEqual([]);
     expect(await secure.get("jarvis.pairing")).toBeUndefined();
   });
@@ -204,6 +195,7 @@ describe("connectFromStoredPairing", () => {
 
       const outcome = await connectFromStoredPairing({
         machines,
+        id: ACTIVE_ID,
         client,
         shouldConnect: () => false,
       });
@@ -222,6 +214,7 @@ describe("connectFromStoredPairing", () => {
       // guard isn't just permanently blocking connect outright.
       const outcome = await connectFromStoredPairing({
         machines: machinesHolding(),
+        id: ACTIVE_ID,
         client,
         shouldConnect: () => true,
       });

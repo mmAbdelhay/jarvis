@@ -1,7 +1,7 @@
-// One `PushRegistration` per app (task-6-brief.md, rule 1) — built here
-// and handed down through context, the same shape `voice-context.tsx` uses
+// One `PushRegistration` per machine's scope (task-6-brief.md, rule 1) — built
+// here and handed down through context, the same shape `voice-context.tsx` uses
 // for `VoiceController`: this file only wires the controller's
-// dependencies to the real app (the shared `RpcClient`, the native
+// dependencies to the real app (the scope's `RpcClient`, the native
 // notifications adapter, a small prefs facade, the current language and
 // the channel's display name) and owns the notification-tap subscription
 // (rule 2). Every *decision* about permission/registration state lives in
@@ -30,7 +30,14 @@ import { useRpcClient } from "./rpc-context";
 
 const PushContext = createContext<PushRegistration | undefined>(undefined);
 
-export function PushProvider(props: { children: React.ReactNode }): React.JSX.Element | null {
+export function PushProvider(props: {
+  children: React.ReactNode;
+  // Rule 2: each response id is handled at most once. Owned above the key in
+  // `_layout.tsx`: this provider remounts on a switch, and `lastResponse()`
+  // would replay the last tap on every machine switched to.
+  handledIds: Set<string>;
+}): React.JSX.Element | null {
+  const { handledIds } = props;
   const client = useRpcClient();
   const language = useLanguage();
   const router = useRouter();
@@ -72,8 +79,8 @@ export function PushProvider(props: { children: React.ReactNode }): React.JSX.El
   }
   const adapter = adapterRef.current;
 
-  // Built exactly once `prefsSeed` is known, for the app's whole
-  // lifetime — same lazy-ref pattern voice-context.tsx uses for its
+  // Built exactly once `prefsSeed` is known, for this scope's whole
+  // mount — same lazy-ref pattern voice-context.tsx uses for its
   // controller. `push-registration.ts` doesn't expose its own
   // `isDisposed()` (unlike VoiceController), so this file tracks
   // disposal itself in `disposedRef`, checked the same way, to rebuild
@@ -107,17 +114,13 @@ export function PushProvider(props: { children: React.ReactNode }): React.JSX.El
     };
   }, [registration]);
 
-  // Rule 2: each response id is handled at most once. Kept in a ref, not
-  // state — this bookkeeping never drives a render.
-  const handledIdsRef = useRef<Set<string>>(new Set());
-
   useEffect(() => {
     const unsubscribe = adapter.onResponse((response) => {
       void handleNotificationTap(
         {
           client,
           router: tapRouter,
-          handledIds: handledIdsRef.current,
+          handledIds,
           waitForOpen: (tapClient) => waitForOpen(tapClient, NOTIFICATION_NAV_WAIT_MS),
         },
         response,
@@ -131,7 +134,7 @@ export function PushProvider(props: { children: React.ReactNode }): React.JSX.El
           {
             client,
             router: tapRouter,
-            handledIds: handledIdsRef.current,
+            handledIds,
             waitForOpen: (tapClient) => waitForOpen(tapClient, NOTIFICATION_NAV_WAIT_MS),
           },
           response,
@@ -143,7 +146,7 @@ export function PushProvider(props: { children: React.ReactNode }): React.JSX.El
       cancelled = true;
       unsubscribe();
     };
-  }, [adapter, client, tapRouter]);
+  }, [adapter, client, tapRouter, handledIds]);
 
   if (registration === undefined) {
     return null;

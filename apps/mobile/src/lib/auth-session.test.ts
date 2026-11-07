@@ -210,6 +210,82 @@ function tokenArg(call: Call | undefined, field: string): string | undefined {
   return (call?.args[0] as Record<string, string> | undefined)?.[field];
 }
 
+describe("auth-session: quiesce", () => {
+  it("answers at once with no refresh in flight", async () => {
+    const { session } = setup();
+    await session.quiesce(3_000);
+  });
+
+  it("waits for a refresh in flight, and the rotated token is stored by then", async () => {
+    const { session, double, store, clock } = setup();
+    await session.unlockWithPassword("pw");
+    let reply: (result: RpcResult) => void = () => {};
+    double.reply(
+      "auth:refresh",
+      new Promise<RpcResult>((resolve) => {
+        reply = resolve;
+      }),
+    );
+    clock.advance(ACCESS_TTL * 0.8);
+    await flush();
+
+    let settled = false;
+    const quiet = session.quiesce(3_000).then(() => {
+      settled = true;
+    });
+    await flush();
+    expect(settled).toBe(false);
+
+    const tokens = double.tokensFor();
+    reply(tokens);
+    await quiet;
+    const value = tokens as { ok: true; value: { refreshToken: string } };
+    expect(store.values.get(REFRESH_TOKEN_KEY)).toBe(value.value.refreshToken);
+  });
+
+  it("gives up at the limit, never longer", async () => {
+    const { session, double, clock } = setup();
+    await session.unlockWithPassword("pw");
+    double.reply("auth:refresh", new Promise<RpcResult>(() => {}));
+    clock.advance(ACCESS_TTL * 0.8);
+    await flush();
+
+    let settled = false;
+    const quiet = session.quiesce(3_000).then(() => {
+      settled = true;
+    });
+    clock.advance(2_999);
+    await flush();
+    expect(settled).toBe(false);
+    clock.advance(1);
+    await quiet;
+  });
+
+  it("leaves no timer behind once the refresh ends", async () => {
+    const { session, double, clock } = setup();
+    await session.unlockWithPassword("pw");
+    let reply: (result: RpcResult) => void = () => {};
+    double.reply(
+      "auth:refresh",
+      new Promise<RpcResult>((resolve) => {
+        reply = resolve;
+      }),
+    );
+    clock.advance(ACCESS_TTL * 0.8);
+    await flush();
+    const { clearTimeout: clear } = clock;
+    let cleared = 0;
+    clock.clearTimeout = (timer) => {
+      cleared += 1;
+      clear(timer);
+    };
+    const quiet = session.quiesce(3_000);
+    reply({ ok: false, error: { kind: "offline" } });
+    await quiet;
+    expect(cleared).toBe(1);
+  });
+});
+
 describe("auth-session: the refresh key it is given", () => {
   const KEY = "jarvis.m.mac_7717.refresh";
   const OTHER = "jarvis.m.other_7717.refresh";

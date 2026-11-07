@@ -2,7 +2,7 @@ import Constants from "expo-constants";
 import { useFonts } from "expo-font";
 import { Stack, usePathname, useRouter } from "expo-router";
 import * as ScreenOrientation from "expo-screen-orientation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
 import { AppState, I18nManager, Platform, View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -11,19 +11,23 @@ import { APP_FONTS } from "@/lib/app-fonts";
 import { appActivityFor } from "@/lib/app-lifecycle";
 import { deviceOrientationPolicy } from "@/lib/app-orientation";
 import { authChannel } from "@/lib/auth-channel";
-import { createAuthSession } from "@/lib/auth-session";
 import { clientPlatformFor, clientStringFor } from "@/lib/client-platform";
 import { realClock } from "@/lib/clock";
-import { connectFromStoredPairing as connectFromStored } from "@/lib/connect-stored";
 import { shouldConnectOnRoute } from "@/lib/dashboard-entry";
-import { createConnectionStore } from "@/lib/connection-store";
 import type { Language } from "@/lib/i18n";
 import { isRtl, t } from "@/lib/i18n";
 import { LanguageContext } from "@/lib/language-context";
-import { removeActiveMachine } from "@/lib/machine-store";
+import { MachinesContext } from "@/lib/machine-context";
+import {
+  type MachineScope,
+  type MachineSessions,
+  createMachineScopeBuilder,
+  createMachineSessions,
+  prepareSwitchRoute,
+  unpairedHandlerFor,
+} from "@/lib/machine-sessions";
 import { machineStore, openMachineStore } from "@/lib/machine-store-instance";
 import { nativeTransport } from "@/lib/native-transport";
-import { isClearingPairing } from "@/lib/pairing-guard";
 import { filePrefsStore } from "@/lib/prefs-file";
 import { createAppPhoneUpdateStore } from "@/lib/phone-update-app";
 import { PhoneUpdateProvider } from "@/lib/phone-update-context";
@@ -32,12 +36,10 @@ import { PushProvider } from "@/lib/push-context";
 import { createDeviceAuth } from "@/lib/device-auth";
 import { refreshLock } from "@/lib/refresh-lock";
 import { refreshStore } from "@/lib/refresh-store";
-import { createRpcClient } from "@/lib/rpc-client";
 import { RpcContext } from "@/lib/rpc-context";
 import { systemTransportFor } from "@/lib/system-transport";
 import { theme } from "@/lib/theme";
 import { createAppTransport } from "@/lib/trust-routing-transport";
-import { createUnpairedHandler } from "@/lib/unpaired-handler";
 import { shouldShowUnlock } from "@/lib/unlock-screen";
 import { useLayoutClass } from "@/lib/use-layout-class";
 import { VoiceProvider } from "@/lib/voice-context";
@@ -56,173 +58,116 @@ const transport = createAppTransport(PLATFORM, {
   system: systemTransportFor(PLATFORM),
 });
 
-// Composes the app's two per-app controller providers into the one slot
-// `RootLayout`'s tree already had for `VoiceProvider` alone (fix round 1,
-// Minor) — nesting `PushProvider` directly in the return tree below would
-// add a level to every line under it, sizing the diff at "everything
-// inside VoiceProvider" for what is otherwise a one-line change to two
-// providers' order.
-function Providers(props: { children: React.ReactNode }): React.JSX.Element {
-  return (
-    <PhoneUpdateProvider store={phoneUpdateStore}>
-      <PushProvider>
-        <VoiceProvider>{props.children}</VoiceProvider>
-      </PushProvider>
-    </PhoneUpdateProvider>
-  );
-}
+const log = (line: string): void => console.log(line);
 
 export default function RootLayout() {
   const [fontsLoaded] = useFonts(APP_FONTS);
   const [language, setLanguage] = useState<Language | null>(null);
   const router = useRouter();
-  const pathname = usePathname();
-  const layout = useLayoutClass();
-  const wide = layout.kind === "wide";
 
-  // Built exactly once, for the app's whole lifetime — this is "the one
-  // RpcClient" every screen shares through RpcContext.
-  const clientRef = useRef<ReturnType<typeof createRpcClient> | undefined>(undefined);
-  if (clientRef.current === undefined) {
-    clientRef.current = createRpcClient({
-      transport,
-      clock: realClock,
-      random: Math.random,
-      client: CLIENT_STRING,
-      log: (line) => console.log(line),
-    });
-  }
-  const client = clientRef.current;
-
-  // Phase 0 owner login: the app's one auth session over the shared client.
-  // The biometric prompt reads the language when it is shown, so it is
-  // right even though prefs load after this runs.
+  // The biometric prompt reads the language when it is shown, so it is right
+  // even though prefs load after the sessions are built.
   const languageRef = useRef<Language | null>(null);
   languageRef.current = language;
-  const authSessionRef = useRef<ReturnType<typeof createAuthSession> | undefined>(undefined);
-  if (authSessionRef.current === undefined) {
-    authSessionRef.current = createAuthSession({
-      rpc: client,
-      clock: realClock,
-      refreshStore,
-      // The active machine's, asked on each use: a pairing can change under
-      // this one session. With no active machine, the legacy key, harmlessly,
-      // since nothing connects. A store that could not open throws here, and
-      // the session treats that as a failed keychain read.
-      refreshKey: () => machineStore.refreshKey(machineStore.activeId()),
-      refreshStoredFlag: {
-        read: async () => machineStore.refreshFlag(machineStore.activeId()).read(),
-        write: async (stored) => machineStore.refreshFlag(machineStore.activeId()).write(stored),
+  const routerRef = useRef(router);
+  routerRef.current = router;
+  // From prepareSwitch until the next scope is published: the tree on screen
+  // belongs to the machine being left, and raises no unlock screen of its own.
+  const switchingRef = useRef(false);
+  // Rule 2 of push-context.tsx: above the key, or `lastResponse()` would
+  // replay a tap after each switch.
+  const handledIdsRef = useRef<Set<string>>(new Set());
+
+  // Built exactly once, for the app's whole lifetime. Each machine's client,
+  // connection store and auth session live in its scope, and nowhere here.
+  const sessionsRef = useRef<MachineSessions | undefined>(undefined);
+  if (sessionsRef.current === undefined) {
+    const store = { ...machineStore, open: openMachineStore };
+    const sessions: MachineSessions = createMachineSessions({
+      store,
+      buildScope: createMachineScopeBuilder({
+        store,
+        refreshStore,
+        transport,
+        clock: realClock,
+        random: Math.random,
+        client: CLIENT_STRING,
+        deviceAuth: createDeviceAuth(() => t(languageRef.current ?? "en", "auth.biometricPrompt")),
+        // Browser: the stored token only signs in at page load; an idle lock
+        // needs a passkey or the password.
+        storedUnlockAtLaunchOnly: PLATFORM === "web",
+        // Browser: tabs share the stored token, so rotations take turns.
+        refreshLock,
+        // Browser: keep-signed-in off and logout lock every other tab too.
+        authChannel,
+        idleMs: DEFAULT_IDLE_LOCK_MINUTES * 60_000,
+        onUnpaired: (id) =>
+          unpairedHandlerFor({
+            id,
+            sessions,
+            navigateToPair: () => routerRef.current.replace("/pair"),
+            log: (line) => console.warn(line),
+          })(),
+        log,
+      }),
+      prepareSwitch: () => {
+        switchingRef.current = true;
+        prepareSwitchRoute(routerRef.current, log);
       },
-      deviceAuth: createDeviceAuth(() => t(languageRef.current ?? "en", "auth.biometricPrompt")),
-      // Browser: the stored token only signs in at page load; an idle lock
-      // needs a passkey or the password.
-      storedUnlockAtLaunchOnly: PLATFORM === "web",
-      // Browser: tabs share the stored token, so rotations take turns.
-      refreshLock,
-      // Browser: keep-signed-in off and logout lock every other tab too.
-      authChannel,
-      idleMs: DEFAULT_IDLE_LOCK_MINUTES * 60_000,
-      log: (line) => console.log(line),
+      log,
     });
+    sessionsRef.current = sessions;
   }
-  const authSession = authSessionRef.current;
+  const sessions = sessionsRef.current;
 
-  // The decision — clear the pairing, log without secrets if that fails,
-  // navigate to /pair either way — is a plain, tested function
-  // (unpaired-handler.ts); this component only wires its two effectful
-  // dependencies. Built once and shared by both `connectionStore`'s
-  // automatic reaction to an "unpaired" state (a close code the server
-  // sent) and the banner's one-tap "Pair again" below (M11 rule 5) — one
-  // clearer, two callers, per the brief: never a third copy of "clear +
-  // navigate".
-  const unpairedHandlerRef = useRef<ReturnType<typeof createUnpairedHandler> | undefined>(
-    undefined,
-  );
-  if (unpairedHandlerRef.current === undefined) {
-    unpairedHandlerRef.current = createUnpairedHandler({
-      clearPairing: async () => {
-        await openMachineStore();
-        await removeActiveMachine(machineStore);
-        // The stored refresh token belongs to the pairing it was issued under.
-        await authSession.forget();
-      },
-      // The distinct "clearFailed" phase itself is now signalled to
-      // /pair via the one-shot clear-failed-signal.ts flag (set by
-      // createUnpairedHandler itself, never from a route param — a
-      // forged `jarvis://pair?...&clearFailed=1` link could otherwise
-      // reach it), so this callback only ever routes there.
-      navigateToPair: () => {
-        router.replace("/pair");
-      },
-      log: (line) => console.warn(line),
-    });
-  }
-
-  const connectionStoreRef = useRef<ReturnType<typeof createConnectionStore> | undefined>(
-    undefined,
-  );
-  // Also rebuild if the cached ref holds an already-disposed store — under
-  // React StrictMode's dev-only double-invoked effects, the cleanup below
-  // runs once more than the effect itself, which would otherwise leave
-  // this ref pointing at a torn-down store for the rest of the
-  // component's life.
-  if (connectionStoreRef.current === undefined || connectionStoreRef.current.isDisposed()) {
-    connectionStoreRef.current = createConnectionStore({
-      client,
-      clock: realClock,
-      // Runs asynchronously off the store's onState reaction, never
-      // synchronously from inside it.
-      onUnpaired: unpairedHandlerRef.current,
-    });
-  }
-  const connectionStore = connectionStoreRef.current;
-
-  // M11 rule 5: the banner's "Pair again" button, confirmed there, ends up
-  // here. Unlike the automatic path above (whose socket the server has
-  // already closed by the time onUnpaired runs), a pin mismatch keeps
-  // reconnecting — this disconnects first so the phone stops retrying the
-  // old pairing before reusing the exact same clear-and-navigate function.
-  const handlePairAgain = useCallback(() => {
-    client.disconnect();
-    void unpairedHandlerRef.current?.();
-  }, [client]);
-
+  const [scope, setScope] = useState<MachineScope>(sessions.current());
   useEffect(() => {
+    setScope(sessions.current());
+    return sessions.subscribe((next) => {
+      switchingRef.current = false;
+      setScope(next);
+    });
+  }, [sessions]);
+
+  // Nothing mounts until the machine to start on is known: a screen on the
+  // null scope would remount at once, and a tap's handler would have spent its
+  // once-per-id on a client that never opens. `start` answers once the store
+  // has opened, or failed to; the tree's own launch connect routes on that.
+  const [started, setStarted] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    void sessions.start().then(() => {
+      if (!cancelled) setStarted(true);
+    });
     return () => {
-      connectionStore.dispose();
+      cancelled = true;
     };
-  }, [connectionStore]);
+  }, [sessions]);
 
   // M12 Task 5 (M10 ruling d): the app's one `AppState` listener, mapped
-  // through `appActivityFor` straight onto the shared client's
-  // `setAppActive` — drops every subscription the moment the app
-  // backgrounds and re-attaches them (via the client's own resumed `open`
+  // through `appActivityFor` onto the active machine (the sessions apply it to
+  // whichever is activated later) — drops every subscription the moment the
+  // app backgrounds and re-attaches them (via the client's own resumed `open`
   // notification, which every existing `onState("open")` consumer already
   // reacts to — rule 8) the moment it returns. On mount, a launch that is
   // already backgrounded (e.g. a background push delivery) suspends at
   // once, before the first `change` event ever fires.
   useEffect(() => {
     if (appActivityFor(AppState.currentState) === "suspend") {
-      client.setAppActive(false);
-      authSession.setAppActive(false);
+      sessions.setAppActive(false);
     }
     const subscription = AppState.addEventListener("change", (next) => {
       const activity = appActivityFor(next);
       if (activity === "activate") {
-        // The idle check first: an app back after the idle window locks
-        // before its subscriptions resume.
-        authSession.setAppActive(true);
-        client.setAppActive(true);
+        sessions.setAppActive(true);
       } else if (activity === "suspend") {
-        client.setAppActive(false);
-        authSession.setAppActive(false);
+        sessions.setAppActive(false);
       }
     });
     return () => {
       subscription.remove();
     };
-  }, [client, authSession]);
+  }, [sessions]);
 
   // Sidecar landscape fix: app.config.ts's own `orientation` is "default"
   // now (not "portrait"), so the sidecar WebView screen can unlock to
@@ -256,7 +201,6 @@ export default function RootLayout() {
       I18nManager.allowRTL(true);
       I18nManager.forceRTL(isRtl(prefs.language));
 
-      authSession.setIdleMs(prefs.idleLockMinutes * 60_000);
       if (!cancelled) {
         setLanguage(prefs.language);
       }
@@ -264,7 +208,77 @@ export default function RootLayout() {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  if (language === null || !fontsLoaded || !started) {
+    return null;
+  }
+
+  return (
+    <LanguageContext.Provider value={language}>
+      <MachinesContext.Provider value={sessions}>
+        <PhoneUpdateProvider store={phoneUpdateStore}>
+          <Fragment key={scope.generation}>
+            <ScopedTree
+              scope={scope}
+              sessions={sessions}
+              language={language}
+              handledIds={handledIdsRef.current}
+              switchingRef={switchingRef}
+            />
+          </Fragment>
+        </PhoneUpdateProvider>
+      </MachinesContext.Provider>
+    </LanguageContext.Provider>
+  );
+}
+
+// Everything that belongs to one machine, mounted once per published scope:
+// the key above drops every store, every piece of screen state and these
+// effects' refs when the scope changes.
+function ScopedTree(props: {
+  scope: MachineScope;
+  sessions: MachineSessions;
+  language: Language;
+  handledIds: Set<string>;
+  switchingRef: React.RefObject<boolean>;
+}): React.JSX.Element {
+  const { scope, sessions, language, handledIds, switchingRef } = props;
+  const { client, connectionStore, authSession } = scope;
+  const router = useRouter();
+  const pathname = usePathname();
+  const layout = useLayoutClass();
+  const wide = layout.kind === "wide";
+
+  // This machine's idle window. Saved prefs apply on every mount, since a
+  // change in Settings reached only the machine on screen then.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const localeTag = Intl.DateTimeFormat().resolvedOptions().locale;
+      const prefs = await loadPrefs(filePrefsStore, localeTag);
+      if (!cancelled) authSession.setIdleMs(prefs.idleLockMinutes * 60_000);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [authSession]);
+
+  // M11 rule 5: the banner's "Pair again" button, confirmed there, ends up
+  // here. Unlike the automatic path (whose socket the server has already
+  // closed by the time onUnpaired runs), a pin mismatch keeps reconnecting —
+  // this disconnects first so the phone stops retrying the old pairing before
+  // reusing the exact same clear-and-navigate function: one clearer, two
+  // callers, never a third copy of "clear + navigate".
+  const handlePairAgain = useCallback(() => {
+    client.disconnect();
+    void unpairedHandlerFor({
+      id: scope.id,
+      sessions,
+      navigateToPair: () => router.replace("/pair"),
+      log: (line) => console.warn(line),
+    })();
+  }, [client, scope.id, sessions, router]);
 
   // Phase 0 owner login: whenever the connection is locked (or the phone
   // locked itself), the unlock screen goes on top of wherever the owner was.
@@ -278,7 +292,6 @@ export default function RootLayout() {
     setAuthView(authSession.get());
     return authSession.subscribe(setAuthView);
   }, [authSession]);
-  const ready = language !== null && fontsLoaded;
   // Set between a push and the route actually reaching /unlock, so a
   // second state change in that window can't stack a second unlock screen.
   const unlockPushPending = useRef(false);
@@ -288,40 +301,32 @@ export default function RootLayout() {
     if (connectionState !== "locked") unlockPushPending.current = false;
   }, [connectionState]);
   useEffect(() => {
-    if (!ready) return;
     if (pathname === "/unlock") {
       unlockPushPending.current = false;
       return;
     }
-    if (unlockPushPending.current) return;
+    if (unlockPushPending.current || switchingRef.current) return;
     if (shouldShowUnlock(connectionState, authView, pathname)) {
       unlockPushPending.current = true;
       router.push("/unlock");
     }
-  }, [ready, connectionState, authView, pathname, router]);
+  }, [connectionState, authView, pathname, router, switchingRef]);
 
-  // Connects the shared client from whatever pairing is on disk — the same
-  // function Settings' reconnect() uses — or routes to /pair when the read
-  // failed or found nothing, instead of leaving the client `idle` with an
-  // empty Dashboard, no banner (bannerKey("idle") is undefined) and no way
-  // forward. `connectFromStored` (connect-stored.ts) performs the one read
-  // and, via `dashboardEntryAction`, decides between the two effects — this
-  // callback only routes on its outcome. `shouldConnect` refuses to connect
-  // while a pairing clear (pairing-guard.ts) is in flight: Settings is
-  // pushed over the Dashboard, so a back gesture from /pair can land here
-  // directly, and without this guard it would reconnect with a token that
-  // is (or is about to be) invalidated by that clear.
-  const connectFromStoredPairing = useCallback(async () => {
-    await openMachineStore();
-    const outcome = await connectFromStored({
-      machines: machineStore,
-      client,
-      shouldConnect: () => !isClearingPairing(),
-    });
-    if (outcome !== "connected") {
+  // Connects from whatever pairing is on disk — the same path Settings'
+  // reconnect() uses — or routes to /pair when the read failed or found
+  // nothing, instead of leaving the client `idle` with an empty Dashboard, no
+  // banner (bannerKey("idle") is undefined) and no way forward. The sessions
+  // refuse to connect while a clear of that machine (pairing-guard.ts) is in
+  // flight: Settings is pushed over the Dashboard, so a back gesture from /pair
+  // can land here directly, and without that it would reconnect with a token
+  // that is (or is about to be) invalidated by that clear. A tree no longer on
+  // screen routes nowhere.
+  const reconnect = useCallback(async () => {
+    const outcome = await sessions.reconnect();
+    if (outcome !== "connected" && sessions.current().client === client) {
       router.replace("/pair");
     }
-  }, [client, router]);
+  }, [sessions, client, router]);
 
   // Once at launch on whatever route loaded (D3: a browser reload on
   // /unlock, /voice or /settings never connected), and again whenever the
@@ -333,33 +338,29 @@ export default function RootLayout() {
   useEffect(() => {
     const connect = shouldConnectOnRoute(pathname, launchConnectHandled.current);
     launchConnectHandled.current = true;
-    if (connect) void connectFromStoredPairing();
-  }, [pathname, connectFromStoredPairing]);
+    if (connect) void reconnect();
+  }, [pathname, reconnect]);
 
   // `{ client, connectionStore }` is otherwise a
   // fresh object every render, re-rendering every RpcContext consumer
   // (Dashboard, Settings) even when neither value actually changed —
-  // both are already stable across renders (refs), so memoise on them.
+  // all are stable for this mount, so memoise on them.
   const rpcContextValue = useMemo(
-    () => ({ client, connectionStore, authSession, reconnect: connectFromStoredPairing }),
-    [client, connectionStore, authSession, connectFromStoredPairing],
+    () => ({ machineId: scope.id, client, connectionStore, authSession, reconnect }),
+    [scope.id, client, connectionStore, authSession, reconnect],
   );
 
-  if (language === null || !fontsLoaded) {
-    return null;
-  }
-
   return (
-    <LanguageContext.Provider value={language}>
-      <RpcContext.Provider value={rpcContextValue}>
-        <Providers>
+    <RpcContext.Provider value={rpcContextValue}>
+      <PushProvider handledIds={handledIds}>
+        <VoiceProvider>
           <SafeAreaProvider>
             {/* Every touch anywhere restarts the idle-lock window. */}
             <View style={{ flex: 1 }} onTouchStart={() => authSession.touch()}>
               <ConnectionBanner
                 store={connectionStore}
                 onRetry={() => {
-                  void connectFromStoredPairing();
+                  void reconnect();
                 }}
                 onPairAgain={handlePairAgain}
               />
@@ -502,8 +503,8 @@ export default function RootLayout() {
               </Stack>
             </View>
           </SafeAreaProvider>
-        </Providers>
-      </RpcContext.Provider>
-    </LanguageContext.Provider>
+        </VoiceProvider>
+      </PushProvider>
+    </RpcContext.Provider>
   );
 }

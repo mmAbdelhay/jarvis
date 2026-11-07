@@ -6,7 +6,6 @@ import {
   MachineLimitError,
   createMachineStore,
   createMachineStoreOpener,
-  removeActiveMachine,
 } from "./machine-store";
 import { phaseAfterCheck } from "./pair-flow";
 import { PairingAlreadyExistsError, type PairingRecord } from "./pairing-record";
@@ -140,6 +139,14 @@ async function opened(h: Harness): Promise<MachineStore> {
   const store = h.build();
   expect(await store.open()).toBe("ok");
   return store;
+}
+
+async function twoMachines(): Promise<{ h: Harness; store: MachineStore }> {
+  const h = harness();
+  seedLegacy(h);
+  seedMachine(h, NAME_ID, namedRecord("mac.tail.ts.net"));
+  seedIndex(h, { ids: [LAN_ID, NAME_ID], active: LAN_ID, legacy: LAN_ID });
+  return { h, store: await opened(h) };
 }
 
 describe("open: migrating an existing pairing", () => {
@@ -906,14 +913,6 @@ describe("load", () => {
 });
 
 describe("list, active and lookups", () => {
-  async function twoMachines(): Promise<{ h: Harness; store: MachineStore }> {
-    const h = harness();
-    seedLegacy(h);
-    seedMachine(h, NAME_ID, namedRecord("mac.tail.ts.net"));
-    seedIndex(h, { ids: [LAN_ID, NAME_ID], active: LAN_ID, legacy: LAN_ID });
-    return { h, store: await opened(h) };
-  }
-
   it("list answers each machine with its record", async () => {
     const { store } = await twoMachines();
     expect(await store.list()).toEqual([
@@ -941,13 +940,6 @@ describe("list, active and lookups", () => {
     h.secure.forgetCalls();
     await expect(store.setActive("nobody_1")).rejects.toThrow();
     expect(h.secure.sets).toEqual([]);
-    expect(store.activeId()).toBe(LAN_ID);
-  });
-
-  it("a failed setActive keeps the old active", async () => {
-    const { h, store } = await twoMachines();
-    h.secure.failSet = (key) => key === MACHINE_INDEX_KEY;
-    await expect(store.setActive(NAME_ID)).rejects.toThrow();
     expect(store.activeId()).toBe(LAN_ID);
   });
 
@@ -1327,7 +1319,8 @@ describe("a failed clean-up never locks the user out", () => {
       const revoked = await opened(h);
       const routes: string[] = [];
       const onUnpaired = createUnpairedHandler({
-        clearPairing: () => removeActiveMachine(revoked),
+        id: LAN_ID,
+        clearPairing: () => revoked.remove(LAN_ID),
         navigateToPair: (outcome) => routes.push(outcome),
         log: () => {},
       });
@@ -1349,13 +1342,14 @@ describe("a failed clean-up never locks the user out", () => {
     h.secure.failDelete = () => true;
     const revoked = await opened(h);
     const onUnpaired = createUnpairedHandler({
-      clearPairing: () => removeActiveMachine(revoked),
+      id: LAN_ID,
+      clearPairing: () => revoked.remove(LAN_ID),
       navigateToPair: () => {},
       log: () => {},
     });
 
     expect(await onUnpaired()).toBe("clearFailed");
-    expect(takeClearFailedSignal()).toBe(true);
+    expect(takeClearFailedSignal()).toEqual({ id: LAN_ID });
     expect(revoked.activeId()).toBe(LAN_ID);
   });
 
@@ -1537,12 +1531,12 @@ describe("until an open succeeds", () => {
     await expect(store.findByDeviceId(DEVICE_A)).rejects.toThrow("not open");
   });
 
-  it("activeId, nextAfter and refreshKey throw, with or without an id", async () => {
+  it("activeId, nextAfter, has and refreshKey throw", async () => {
     const { store } = await failedOpen();
     expect(() => store.activeId()).toThrow("not open");
     expect(() => store.nextAfter(LAN_ID)).toThrow("not open");
+    expect(() => store.has(LAN_ID)).toThrow("not open");
     expect(() => store.refreshKey(LAN_ID)).toThrow("not open");
-    expect(() => store.refreshKey(undefined)).toThrow("not open");
   });
 
   it("flag reads and writes reject, and no write lands in machineFlags", async () => {
@@ -1620,56 +1614,90 @@ describe("loadActive", () => {
   });
 });
 
-describe("no active id", () => {
-  it("refreshKey reads the legacy key, harmlessly, since nothing connects", async () => {
-    const store = await opened(harness());
-    expect(store.refreshKey(store.activeId())).toBe("jarvis.refresh");
+describe("refreshKeyWithNoScope", () => {
+  it("answers the active machine's key", async () => {
+    const { store } = await twoMachines();
+    expect(store.refreshKeyWithNoScope()).toBe("jarvis.refresh");
+    await store.setActive(NAME_ID);
+    expect(store.refreshKeyWithNoScope()).toBe(`jarvis.m.${NAME_ID}.refresh`);
   });
 
-  it("the flags read and write the top level", async () => {
-    const h = harness({ prefs: JSON.stringify({ refreshTokenStored: true }) });
-    const store = await opened(h);
-    const flag = store.refreshFlag(store.activeId());
-
-    expect(await flag.read()).toBe(true);
-    await flag.write(false);
-    const prefs = await loadPrefs(h.prefs, "en-US");
-    expect(prefs.refreshTokenStored).toBe(false);
-    expect(prefs.machineFlags).toEqual({});
-  });
-});
-
-describe("removeActiveMachine", () => {
-  it("removes the active machine and leaves the other", async () => {
-    const h = harness();
-    seedMachine(h, NAME_ID, namedRecord("mac.tail.ts.net"));
-    seedMachine(h, OTHER_ID, namedRecord("other.tail.ts.net", DEVICE_C));
-    seedIndex(h, { ids: [NAME_ID, OTHER_ID], active: OTHER_ID });
-    await removeActiveMachine(await opened(h));
-
-    expect(storedIndex(h).ids).toEqual([NAME_ID]);
-    expect(h.secure.values.has(`jarvis.m.${NAME_ID}.token`)).toBe(true);
+  it("answers none with no machine", async () => {
+    expect((await opened(harness())).refreshKeyWithNoScope()).toBeUndefined();
   });
 
-  it("does nothing with no machine", async () => {
-    const h = harness();
-    const store = await opened(h);
-    h.secure.forgetCalls();
-    await removeActiveMachine(store);
-    expect(h.secure.sets).toEqual([]);
-    expect(h.secure.deletes).toEqual([]);
-  });
-
-  it("rejects on a store that could not open, and deletes nothing", async () => {
+  it("answers the legacy key on a store that could not open", async () => {
     const h = harness();
     seedLegacy(h);
     h.secure.failGet = (key) => key === MACHINE_INDEX_KEY;
     const store = h.build();
     expect(await store.open()).toBe("failed");
+    expect(store.refreshKeyWithNoScope()).toBe("jarvis.refresh");
+  });
+});
 
-    await expect(removeActiveMachine(store)).rejects.toThrow("not open");
-    expect(h.secure.deletes).toEqual([]);
-    expect(h.secure.values.has("jarvis.token")).toBe(true);
+describe("has", () => {
+  it("answers for what the index holds, with no read", async () => {
+    const { h, store } = await twoMachines();
+    h.secure.failGet = () => true;
+    expect(store.has(NAME_ID)).toBe(true);
+    expect(store.has("nobody_1")).toBe(false);
+  });
+});
+
+describe("a failing index write in setActive", () => {
+  it("does not reject: memory follows, a fixed line is logged, the disk keeps the old one", async () => {
+    const { h, store } = await twoMachines();
+    h.secure.failSet = (key) => key === MACHINE_INDEX_KEY;
+
+    await store.setActive(NAME_ID);
+
+    expect(store.activeId()).toBe(NAME_ID);
+    expect(h.logs).toContain("machines: writing the index failed, retrying at the next open");
+    expect(storedIndex(h).active).toBe(LAN_ID);
+  });
+});
+
+describe("the flags, through the store's queue", () => {
+  it("a read waits for an open in flight", async () => {
+    const h = harness({ prefs: JSON.stringify({ refreshTokenStored: true }) });
+    seedLegacy(h);
+    const store = h.build();
+    const opening = store.open();
+    expect(await store.refreshFlag(LAN_ID).read()).toBe(true);
+    expect(await opening).toBe("ok");
+  });
+
+  it("a read waits for a write queued before it", async () => {
+    const { store } = await twoMachines();
+    const flag = store.refreshFlag(NAME_ID);
+    const writing = flag.write(true);
+    expect(await flag.read()).toBe(true);
+    await writing;
+  });
+
+  it("a write for a machine no longer held lands nowhere", async () => {
+    const { h, store } = await twoMachines();
+    const flag = store.refreshFlag(NAME_ID);
+    await store.remove(NAME_ID);
+    const before = h.prefs.text;
+
+    await flag.write(true);
+
+    expect(h.prefs.text).toBe(before);
+    expect((await loadPrefs(h.prefs, "en-US")).machineFlags[NAME_ID]).toBeUndefined();
+  });
+
+  it("a write for the legacy machine once removed leaves the top-level flag alone", async () => {
+    const { h, store } = await twoMachines();
+    const flag = store.refreshFlag(LAN_ID);
+    await store.remove(LAN_ID);
+
+    await flag.write(true);
+
+    const prefs = await loadPrefs(h.prefs, "en-US");
+    expect(prefs.refreshTokenStored).toBe(false);
+    expect(prefs.machineFlags[LAN_ID]).toBeUndefined();
   });
 });
 

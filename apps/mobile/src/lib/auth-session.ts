@@ -117,8 +117,10 @@ export type AuthSessionDeps = {
   /** Plain secure storage (no per-read prompt): rotation writes never
    *  prompt. The device-owner check gates reads instead. */
   refreshStore: SecureStore;
-  /** The key of the refresh token in `refreshStore`, asked on every use. A
-   *  throw is a failed keychain read: no token is read, stored or deleted. */
+  /** The key of the refresh token in `refreshStore`. The app gives each
+   *  machine's session a fixed answer (machine-sessions.ts), so a late write
+   *  lands under that machine. A throw is a failed keychain read: no token is
+   *  read, stored or deleted. */
   refreshKey: () => string;
   refreshStoredFlag: RefreshStoredFlag;
   deviceAuth: DeviceAuth;
@@ -157,6 +159,9 @@ export type AuthSession = {
   logout(): Promise<void>;
   /** Unpair: drop every token, memory and disk, without any request. */
   forget(): Promise<void>;
+  /** Before this session's connection closes: waits for an `auth:refresh` in
+   *  flight, so its rotated token is stored, never longer than `timeoutMs`. */
+  quiesce(timeoutMs: number): Promise<void>;
   /** A user interaction: restarts the idle window. */
   touch(): void;
   setAppActive(active: boolean): void;
@@ -674,6 +679,19 @@ export function createAuthSession(deps: AuthSessionDeps): AuthSession {
     setView({ lockedLocally: false, lockCause: undefined });
   }
 
+  function quiesce(timeoutMs: number): Promise<void> {
+    const inFlight = refreshing;
+    if (inFlight === undefined) return Promise.resolve();
+    return new Promise((resolve) => {
+      const timer = deps.clock.setTimeout(resolve, timeoutMs);
+      const finish = (): void => {
+        deps.clock.clearTimeout(timer);
+        resolve();
+      };
+      inFlight.then(finish, finish);
+    });
+  }
+
   function touch(): void {
     lastActivityAt = deps.clock.now();
   }
@@ -723,6 +741,7 @@ export function createAuthSession(deps: AuthSessionDeps): AuthSession {
     storagePolicyChanged,
     logout,
     forget,
+    quiesce,
     touch,
     setAppActive,
     setIdleMs,

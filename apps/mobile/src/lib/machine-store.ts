@@ -73,9 +73,14 @@ export type MachineStore = {
   remove(id: MachineId): Promise<void>;
   nextAfter(id: MachineId): MachineId | undefined;
   findByDeviceId(deviceId: string): Promise<MachineId | undefined>;
-  /** With no id (no active machine), the legacy key and flag. */
-  refreshKey(id: MachineId | undefined): string;
-  refreshFlag(id: MachineId | undefined): RefreshStoredFlag;
+  /** Whether the index holds this id, with no keychain read. */
+  has(id: MachineId): boolean;
+  refreshKey(id: MachineId): string;
+  /** A logout or "keep signed in" off with no machine's session to go through:
+   *  the active machine's key, none with no machine, and with a store that
+   *  could not open the one key reachable without the index. */
+  refreshKeyWithNoScope(): string | undefined;
+  refreshFlag(id: MachineId): RefreshStoredFlag;
   pushFlag(id: MachineId): { read(): Promise<boolean>; write(v: boolean): Promise<void> };
 };
 
@@ -334,21 +339,29 @@ export function createMachineStore(deps: {
     return id;
   }
 
-  /** The flag is resolved on each call, because an id's slot can change. */
-  function flagOf(id: MachineId | undefined, field: keyof MachineFlags) {
+  /** The flag is resolved on each call, because an id's slot can change. Once
+   *  the machine is gone a write lands nowhere: a late session must not bring
+   *  its flags back, nor touch the slot's top level. */
+  function flagOf(id: MachineId, field: keyof MachineFlags) {
     return {
-      async read(): Promise<boolean> {
-        assertOpen();
-        const current = await loadPrefs(prefs, localeTag);
-        if (id === undefined || id === index.legacy) return current[field];
-        return current.machineFlags[id]?.[field] ?? false;
-      },
-      // Queued: load-change-save from two machines at once would lose one.
-      write(value: boolean): Promise<void> {
+      read(): Promise<boolean> {
         return enqueue(async () => {
           assertOpen();
           const current = await loadPrefs(prefs, localeTag);
-          if (id === undefined || id === index.legacy) {
+          if (id === index.legacy) return current[field];
+          return current.machineFlags[id]?.[field] ?? false;
+        });
+      },
+      // Queued against this store's other flag writes and its removes: two
+      // machines' load-change-save at once would lose one. Other prefs writers
+      // (settings-store.ts, the push facade) are not in this queue, and can
+      // still lose a write that lands between its load and save.
+      write(value: boolean): Promise<void> {
+        return enqueue(async () => {
+          assertOpen();
+          if (!index.ids.includes(id)) return;
+          const current = await loadPrefs(prefs, localeTag);
+          if (id === index.legacy) {
             await savePrefs(prefs, { ...current, [field]: value });
             return;
           }
@@ -415,7 +428,9 @@ export function createMachineStore(deps: {
       return enqueue(async () => {
         assertOpen();
         if (!index.ids.includes(id)) throw new Error("machines: no such machine");
-        if (index.active !== id) await writeIndex({ ...index, active: id });
+        // A failed write is logged, and memory follows: the switch goes on,
+        // and only the next launch starts on the machine before it.
+        if (index.active !== id) await adoptIndex({ ...index, active: id });
       });
     },
     remove(id) {
@@ -432,9 +447,18 @@ export function createMachineStore(deps: {
       const entries = await list();
       return entries.find((entry) => entry.record.deviceId === deviceId)?.id;
     },
+    has(id) {
+      assertOpen();
+      return index.ids.includes(id);
+    },
     refreshKey(id) {
       assertOpen();
-      return id === undefined ? LEGACY_REFRESH_KEY : machineKeys(id, index).refresh;
+      return machineKeys(id, index).refresh;
+    },
+    refreshKeyWithNoScope() {
+      if (!isOpen) return LEGACY_REFRESH_KEY;
+      const id = activeIdNow();
+      return id === undefined ? undefined : machineKeys(id, index).refresh;
     },
     refreshFlag(id) {
       return flagOf(id, "refreshTokenStored");
@@ -466,13 +490,4 @@ export function createMachineStoreOpener(
     });
     return opened;
   };
-}
-
-/** Settings' Unpair, the unpaired handler and /pair's retry. Rejects when the
- *  store could not open, so that is never taken for nothing to remove. */
-export async function removeActiveMachine(
-  machines: Pick<MachineStore, "activeId" | "remove">,
-): Promise<void> {
-  const id = machines.activeId();
-  if (id !== undefined) await machines.remove(id);
 }
