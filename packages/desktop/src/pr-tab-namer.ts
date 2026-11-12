@@ -64,8 +64,10 @@ export type PrTabNamer = {
    *  namer (session-tab-name.ts) leaves the tab alone. */
   isPrNamedTab(tabId: string): boolean;
   /** A PR named in the user's own prompt in this pane: no freshness limit.
-   *  The same PR reported again for the pane is not looked up again. */
-  fromPrompt(paneKey: string, ref: PrRef): void;
+   *  The same PR reported again for the pane is not looked up again (unless
+   *  gh could not say). `predatesRun`: the session was running before this
+   *  run, so a tab name the user typed is kept. */
+  fromPrompt(paneKey: string, ref: PrRef, opts?: { predatesRun?: boolean }): void;
   /** Resolves once every PR seen so far has been handled. */
   whenIdle(): Promise<void>;
 };
@@ -80,13 +82,21 @@ export function prTabTitle(number: number, title: string | undefined): string {
     : `${full.slice(0, PR_TAB_TITLE_MAX - 1).trimEnd()}…`;
 }
 
-/** A PR to handle, and whether it came from the user's prompt. */
-type Seen = { ref: PrRef; fromPrompt: boolean };
+/** A PR to handle, whether it came from the user's prompt, and whether that
+ *  session was already running when this run started. */
+type Seen = { ref: PrRef; fromPrompt: boolean; predatesRun?: boolean };
+
+function promptKey(ref: PrRef): string {
+  return prKey(ref.repo, ref.number).toLowerCase();
+}
 
 export function createPrTabNamer(deps: PrTabNamerDeps): PrTabNamer {
   const scanner = createPrUrlScanner();
   /** Pane → the PR its tab is named after. */
   const named = new Map<string, string>();
+  /** Pane → the PR it was last matched to, named after or not (a typed
+   *  name kept): the one a link in flight must still be. */
+  const current = new Map<string, string>();
   /** Pane → the last prompt PR handed in, lower-cased: handled once. */
   const prompted = new Map<string, string>();
   /** Pane → the newest PR of each source seen while one was being handled,
@@ -106,16 +116,36 @@ export function createPrTabNamer(deps: PrTabNamerDeps): PrTabNamer {
     }
   }
 
-  async function apply(paneKey: string, { ref, fromPrompt }: Seen): Promise<void> {
+  async function apply(paneKey: string, seen: Seen): Promise<void> {
+    const { ref, fromPrompt } = seen;
     const info = await infoOf(ref);
-    if (stopped || info === undefined) return;
+    if (stopped) return;
+    if (info === undefined) {
+      // gh could not say (offline, logged out): the next check asks again.
+      if (fromPrompt && prompted.get(paneKey) === promptKey(ref)) prompted.delete(paneKey);
+      return;
+    }
     if (info.state.toUpperCase() !== "OPEN") return;
     if (!fromPrompt && deps.now() - info.createdAt > PR_FRESH_MS) return;
 
     const key = prKey(info.repo, info.number);
-    named.set(paneKey, key);
-    const tabId = tabOf(deps.tabs.state(), paneKey);
-    if (tabId !== undefined) deps.tabs.rename(tabId, prTabTitle(info.number, info.title));
+    current.set(paneKey, key);
+    const state = deps.tabs.state();
+    const tabId = tabOf(state, paneKey);
+    const title = prTabTitle(info.number, info.title);
+    const customTitle = state.tabs.find((tab) => tab.id === tabId)?.customTitle;
+    // A session already running when Jarvis (re)started, in a tab the user
+    // named: the name stands, as session-tab-name.ts does for its names.
+    // The PR is still handled, and linked below.
+    const keepTyped =
+      seen.predatesRun === true &&
+      !named.has(paneKey) &&
+      customTitle !== undefined &&
+      customTitle !== title;
+    if (!keepTyped) {
+      named.set(paneKey, key);
+      if (tabId !== undefined) deps.tabs.rename(tabId, title);
+    }
 
     const cfg = deps.reviewsConfig();
     if (!cfg.enabled || !cfg.autoLink) return;
@@ -124,7 +154,7 @@ export function createPrTabNamer(deps: PrTabNamerDeps): PrTabNamer {
       // Polled first, so Reviews knows the PR by its canonical key.
       deps.reviews.trackRepo(info.repo);
       await deps.reviews.pollNow();
-      if (stopped || named.get(paneKey) !== key) return;
+      if (stopped || current.get(paneKey) !== key) return;
       await deps.reviews.link(key, paneKey);
     } catch {
       // gh logged out or the store busy: the tab name stands, Reviews shows why.
@@ -162,17 +192,18 @@ export function createPrTabNamer(deps: PrTabNamerDeps): PrTabNamer {
         deps.shells.onShellExit(({ paneKey }) => {
           scanner.forget(paneKey);
           named.delete(paneKey);
+          current.delete(paneKey);
           prompted.delete(paneKey);
           waiting.delete(paneKey);
         }),
       );
     },
-    fromPrompt(paneKey, ref) {
+    fromPrompt(paneKey, ref, opts) {
       if (stopped) return;
-      const key = prKey(ref.repo, ref.number).toLowerCase();
+      const key = promptKey(ref);
       if (prompted.get(paneKey) === key) return;
       prompted.set(paneKey, key);
-      enqueue(paneKey, { ref, fromPrompt: true });
+      enqueue(paneKey, { ref, fromPrompt: true, predatesRun: opts?.predatesRun === true });
     },
     stop() {
       stopped = true;

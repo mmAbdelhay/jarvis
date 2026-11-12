@@ -99,6 +99,7 @@ function world(
   namer.start();
   return {
     namer,
+    state,
     renames,
     links,
     tracked,
@@ -341,6 +342,51 @@ describe("PR tab namer, from the user's prompt", () => {
     w.namer.fromPrompt("t1", PR_42);
     w.print("t1", "https://github.com/acme/app/pull/7\n");
     release();
+    await w.namer.whenIdle();
+    expect(w.renames).toEqual([["t1", "PR #42 · Fix the header"]]);
+  });
+
+  it("keeps a name the user typed for a session that predates this run, and still links", async () => {
+    const w = old();
+    w.state.tabs = w.state.tabs.map((t) => (t.id === "t1" ? { ...t, customTitle: "my work" } : t));
+    w.namer.fromPrompt("t1", PR_42, { predatesRun: true });
+    await w.namer.whenIdle();
+    expect(w.renames).toEqual([]);
+    expect(w.namer.isPrNamedTab("t1")).toBe(false);
+    expect(w.links).toEqual([["Acme/App#42", "t1"]]);
+    w.namer.fromPrompt("t1", PR_42, { predatesRun: true });
+    await w.namer.whenIdle();
+    expect(w.lookups()).toBe(1); // handled: not asked again
+  });
+
+  it("renames a session that predates this run when the tab has no typed name", async () => {
+    const w = old();
+    w.namer.fromPrompt("t1", PR_42, { predatesRun: true });
+    await w.namer.whenIdle();
+    expect(w.renames).toEqual([["t1", "PR #42 · Fix the header"]]);
+  });
+
+  it("renames over a typed name for a session started in this run", async () => {
+    const w = old();
+    w.state.tabs = w.state.tabs.map((t) => (t.id === "t1" ? { ...t, customTitle: "my work" } : t));
+    w.namer.fromPrompt("t1", PR_42);
+    await w.namer.whenIdle();
+    expect(w.renames).toEqual([["t1", "PR #42 · Fix the header"]]);
+  });
+
+  it("retries a prompt PR on the next check when gh could not say", async () => {
+    let fail = true;
+    const w = world({
+      prInfo: async (_r, n) => {
+        if (fail) throw new Error("gh: offline");
+        return info(n, { createdAt: OLD });
+      },
+    });
+    w.namer.fromPrompt("t1", PR_42);
+    await w.namer.whenIdle();
+    expect(w.renames).toEqual([]);
+    fail = false;
+    w.namer.fromPrompt("t1", PR_42);
     await w.namer.whenIdle();
     expect(w.renames).toEqual([["t1", "PR #42 · Fix the header"]]);
   });

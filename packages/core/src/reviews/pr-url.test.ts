@@ -154,6 +154,16 @@ describe("firstPrRef", () => {
     });
   });
 
+  it.each(["http://github.com", "https://www.github.com", "http://www.github.com"])(
+    "reads a PR link on %s",
+    (host) => {
+      expect(firstPrRef(`review ${host}/acme/widgets/pull/123`)).toEqual({
+        repo: "acme/widgets",
+        number: 123,
+      });
+    },
+  );
+
   it("does not read a longer number or an issue as the PR", () => {
     expect(firstPrRef("https://github.com/acme/widgets/pull/123abc")).toBeUndefined();
     expect(firstPrRef("https://github.com/acme/widgets/issues/123")).toBeUndefined();

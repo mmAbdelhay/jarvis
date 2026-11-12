@@ -1438,7 +1438,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     },
     isPrNamedTab: (tabId) => prTabNamer.isPrNamedTab(tabId),
     // A PR the user asked about in the session's prompt names the tab too.
-    onPromptPr: (paneKey, ref) => prTabNamer.fromPrompt(paneKey, ref),
+    onPromptPr: (paneKey, ref, opts) => prTabNamer.fromPrompt(paneKey, ref, opts),
     statFile: async (path) => {
       const info = await stat(path);
       return { size: info.size, mtime: info.mtimeMs };

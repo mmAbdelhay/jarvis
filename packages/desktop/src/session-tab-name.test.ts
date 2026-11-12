@@ -666,6 +666,58 @@ describe("session tab namer, PRs in the user's prompts", () => {
     expect(seen.at(-1)).toEqual(["t1", { repo: "acme/app", number: 2 }]);
   });
 
+  it.each([
+    [
+      "a /compact summary",
+      JSON.stringify({
+        type: "user",
+        isCompactSummary: true,
+        isVisibleInTranscriptOnly: true,
+        message: { role: "user", content: `Summary: we reviewed ${pr(9)}` },
+      }),
+    ],
+    [
+      "a transcript-only record",
+      JSON.stringify({
+        type: "user",
+        isVisibleInTranscriptOnly: true,
+        message: { role: "user", content: `see ${pr(9)}` },
+      }),
+    ],
+    [
+      "a task notification",
+      JSON.stringify({
+        type: "user",
+        origin: { kind: "task-notification" },
+        message: {
+          role: "user",
+          content: `<task-notification><result>Opened ${pr(9)}</result></task-notification>`,
+        },
+      }),
+    ],
+    [
+      "task-notification text with no origin",
+      userSays([{ type: "text", text: `<task-notification>done: ${pr(9)}</task-notification>` }]),
+    ],
+  ])("ignores a PR URL in %s", async (_label, record) => {
+    const { w, seen } = session([userSays(`review ${pr(1)}`), record]);
+    await createSessionTabNamer(w.deps).check();
+    expect(seen).toEqual([["t1", { repo: "acme/app", number: 1 }]]);
+  });
+
+  it("says whether the session predates this run", async () => {
+    const { w } = session([userSays(`review ${pr(1)}`)]);
+    const calls: boolean[] = [];
+    w.deps.onPromptPr = (_pane, _ref, opts) => {
+      calls.push(opts.predatesRun);
+    };
+    w.setProcesses([{ ...w.claudeIn("t1", 101), startedAt: NOW - 1_000 }]);
+    await createSessionTabNamer(w.deps).check();
+    w.setProcesses([w.claudeIn("t1", 101)]);
+    await createSessionTabNamer(w.deps).check();
+    expect(calls).toEqual([true, false]);
+  });
+
   it("reports nothing for a session with no PR prompt", async () => {
     const { w, seen } = session([userSays("hello")]);
     await createSessionTabNamer(w.deps).check();

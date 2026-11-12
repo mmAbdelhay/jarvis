@@ -55,18 +55,61 @@ export type SessionTabNameDeps = {
   /** The PR named in the user's latest prompt that names one, on every
    *  check (pr-tab-namer.ts fromPrompt, which handles each once). When set,
    *  the transcript is read even if the pid file names the session. */
-  onPromptPr?(paneKey: string, ref: PrRef): void;
+  onPromptPr?(paneKey: string, ref: PrRef, opts: { predatesRun: boolean }): void;
   /** A transcript's size and mtime: one that has not changed since the
    *  last read is not read again. Without it, reads are cached for
    *  SESSION_TAB_RECHECK_MS. */
   statFile?(path: string): Promise<{ size: number; mtime: number }>;
 };
 
+/** Whether a transcript line is a "user" record Claude Code wrote itself,
+ *  not something the user typed: a /compact summary, a transcript-only
+ *  record, anything with an `origin` (a task notification), or text that
+ *  opens with `<task-notification>`. parseTranscript keeps these, rightly
+ *  for a chat view; a prompt PR must not come from them. */
+function isWrittenByCli(line: string): boolean {
+  let record: unknown;
+  try {
+    record = JSON.parse(line);
+  } catch {
+    return false; // parseTranscript skips it anyway.
+  }
+  if (typeof record !== "object" || record === null) return false;
+  const fields = record as Record<string, unknown>;
+  if (fields["type"] !== "user") return false;
+  if (fields["isCompactSummary"] === true || fields["isVisibleInTranscriptOnly"] === true) {
+    return true;
+  }
+  if (fields["origin"] !== undefined) return true;
+  const message = fields["message"];
+  const content =
+    typeof message === "object" && message !== null
+      ? (message as Record<string, unknown>)["content"]
+      : undefined;
+  const texts =
+    typeof content === "string"
+      ? [content]
+      : Array.isArray(content)
+        ? content.map((block) =>
+            typeof block === "object" && block !== null
+              ? (block as Record<string, unknown>)["text"]
+              : undefined,
+          )
+        : [];
+  return texts.some(
+    (t) => typeof t === "string" && t.trimStart().startsWith("<task-notification>"),
+  );
+}
+
 /** The PR of the last user prompt in a stretch of transcript that names
  *  one — its first PR URL. Only what the user typed counts: tool results,
  *  assistant text and the CLI's own injections are not prompts. */
 export function lastPromptPr(text: string): PrRef | undefined {
-  const turns = parseTranscript(text);
+  const typed = text
+    .split("\n")
+    .filter((line) => !isWrittenByCli(line))
+    .join("\n");
+  const turns = parseTranscript(typed);
   for (let i = turns.length - 1; i >= 0; i--) {
     const turn = turns[i];
     if (turn?.role !== "user") continue;
@@ -203,7 +246,11 @@ export function createSessionTabNamer(deps: SessionTabNameDeps): SessionTabNamer
         ? await readTranscript(paths, record.sessionId)
         : undefined;
     if (stopped) return;
-    if (transcript?.prompt !== undefined) deps.onPromptPr?.(paneKey, transcript.prompt);
+    if (transcript?.prompt !== undefined) {
+      // A session that predates this run keeps a tab name the user typed
+      // (the same rule as below): pr-tab-namer.ts applies it.
+      deps.onPromptPr?.(paneKey, transcript.prompt, { predatesRun: process.startedAt < createdAt });
+    }
     const name = record.name ?? transcript?.name;
     if (name === undefined) return;
 

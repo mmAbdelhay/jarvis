@@ -104,7 +104,8 @@ const PR_PROMPT_PATH =
 /** The first PR link in plain text such as a user's prompt. A prompt is
  *  whole, so a URL at its very end counts. */
 export function firstPrRef(text: string): PrRef | undefined {
-  const padded = `${text} `;
+  // A pasted link may be http:// or on www.github.com: same PR.
+  const padded = `${text.replace(/\bhttps?:\/\/(?:www\.)?github\.com\//gi, PREFIX)} `;
   for (let at = padded.indexOf(PREFIX); at !== -1; at = padded.indexOf(PREFIX, at + 1)) {
     const ref = prRefAt(padded, at, PR_PROMPT_PATH);
     if (ref !== undefined) return ref;
