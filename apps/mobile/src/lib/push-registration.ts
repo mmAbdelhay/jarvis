@@ -45,6 +45,9 @@ export type PushView = {
   language?: Language;
 };
 
+// `notifications` is the phone's one switch. `pushRegistered` is this machine's
+// own (`createPrefsFacade`), which is how a machine learns at its next open that
+// the switch went off while it was not on screen.
 export type PushPrefs = { notifications: boolean; pushRegistered: boolean };
 
 export type PushRegistrationDeps = {
@@ -63,6 +66,8 @@ export type PushRegistration = {
   get(): PushView;
   subscribe(cb: (view: PushView) => void): () => void;
   setEnabled(on: boolean): Promise<void>;
+  /** What an "open" would do, for a socket that opened before this was built. */
+  syncIfOpen(): void;
   dispose(): void;
 };
 
@@ -217,23 +222,7 @@ export function createPushRegistration(deps: PushRegistrationDeps): PushRegistra
     }
   }
 
-  // Rule 4: registered once, for this controller's whole lifetime — never
-  // torn down and re-armed per attempt, so a reconnect any time later
-  // still drives registration/unregistration without anything else
-  // prompting it. Purely reactive to a real "open" notification (never
-  // checked synchronously against the current state here) — this, plus
-  // never calling anything below before a subscription fires, is what
-  // keeps construction itself a no-op (bite-proof: "register at
-  // construction").
-  const unsubscribeState = deps.client.onState((state, detail) => {
-    if (state !== "open") return;
-    // Task 5 (M12 background/foreground): an "open" that only marks a
-    // return from the background (rpc-client.ts's `setAppActive(true)`)
-    // never re-registers — the laptop still holds this device's token;
-    // nothing about the pairing or the socket changed underneath it. Only
-    // a real welcome (no `resumed` detail — a fresh connect or a
-    // reconnect) reaches the rest of this handler.
-    if (detail.resumed === true) return;
+  function onOpen(): void {
     const prefsNow = deps.prefs.get();
     if (prefsNow.notifications) {
       // No token yet in this instance (the restart gap above) needs its own
@@ -247,7 +236,32 @@ export function createPushRegistration(deps: PushRegistrationDeps): PushRegistra
     } else if (prefsNow.pushRegistered) {
       void unregisterOnce();
     }
+  }
+
+  // Rule 4: registered once, for this controller's whole lifetime — never
+  // torn down and re-armed per attempt, so a reconnect any time later
+  // still drives registration/unregistration without anything else
+  // prompting it. Purely reactive to a real "open" notification (never
+  // checked synchronously against the current state here) — this, plus
+  // never calling anything below before a subscription fires or the owner
+  // asks through `syncIfOpen`, is what keeps construction itself a no-op
+  // (bite-proof: "register at construction").
+  const unsubscribeState = deps.client.onState((state, detail) => {
+    if (state !== "open") return;
+    // Task 5 (M12 background/foreground): an "open" that only marks a
+    // return from the background (rpc-client.ts's `setAppActive(true)`)
+    // never re-registers — the laptop still holds this device's token;
+    // nothing about the pairing or the socket changed underneath it. Only
+    // a real welcome (no `resumed` detail — a fresh connect or a
+    // reconnect) reaches the rest of this handler.
+    if (detail.resumed === true) return;
+    onOpen();
   });
+
+  function syncIfOpen(): void {
+    if (disposed || deps.client.state() !== "open") return;
+    onOpen();
+  }
 
   // Rule 6: token rotation. A native token event is only a rotation after a
   // consented fetch has established this controller's token, and events
@@ -433,6 +447,7 @@ export function createPushRegistration(deps: PushRegistrationDeps): PushRegistra
       };
     },
     setEnabled,
+    syncIfOpen,
     dispose,
   };
 }

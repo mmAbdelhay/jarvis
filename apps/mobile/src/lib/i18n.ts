@@ -365,10 +365,6 @@ export const STRINGS = {
     en: "Not paired.",
     ar: "غير مقترن.",
   },
-  "settings.unpairFailed": {
-    en: "Couldn't unpair this phone. Try again.",
-    ar: "تعذّر إلغاء اقتران هذا الهاتف. حاول مرة أخرى.",
-  },
   "settings.reconnectFailed": {
     en: "Couldn't reconnect. Try again.",
     ar: "تعذّرت إعادة الاتصال. حاول مرة أخرى.",
@@ -567,9 +563,10 @@ export const STRINGS = {
     en: "Camera access is needed to scan the QR code.",
     ar: "الوصول إلى الكاميرا مطلوب لمسح رمز QR.",
   },
+  // Only the browser build refuses a held machine: a phone holds many.
   "pair.alreadyPaired": {
-    en: "This phone is already paired. Unpair in Settings first.",
-    ar: "هذا الهاتف مقترن بالفعل. ألغِ الاقتران من الإعدادات أولًا.",
+    en: "This browser is already paired. Unpair in Settings first.",
+    ar: "هذا المتصفح مقترن بالفعل. ألغِ الاقتران من الإعدادات أولًا.",
   },
   "pair.confirm": {
     en: "Pair with {host}:{port}? Certificate ends in …{tail}.",
@@ -1496,14 +1493,6 @@ export const STRINGS = {
     en: "Remove this pairing from this browser? You'll need a new pairing link to pair again. To fully revoke access, also remove this device in the computer's Settings.",
     ar: "هل تريد إزالة هذا الاقتران من هذا المتصفح؟ ستحتاج إلى رابط اقتران جديد للاقتران مرة أخرى. لإلغاء الوصول بالكامل، احذف هذا الجهاز أيضًا من إعدادات الكمبيوتر.",
   },
-  "settings.unpairFailed.web": {
-    en: "Couldn't unpair this browser. Try again.",
-    ar: "تعذّر إلغاء اقتران هذا المتصفح. حاول مرة أخرى.",
-  },
-  "pair.alreadyPaired.web": {
-    en: "This browser is already paired. Unpair in Settings first.",
-    ar: "هذا المتصفح مقترن بالفعل. ألغِ الاقتران من الإعدادات أولًا.",
-  },
   "pair.saveFailed.web": {
     en: "Couldn't save the pairing in this browser. Try again.",
     ar: "تعذّر حفظ الاقتران في هذا المتصفح. حاول مرة أخرى.",
@@ -1717,6 +1706,62 @@ export const STRINGS = {
   "claude.upload.offline": { en: "Not connected", ar: "غير متصل" },
   "claude.upload.failed": { en: "Upload failed", ar: "فشل الرفع" },
   "claude.upload.attach": { en: "Couldn't add it to the project", ar: "تعذّرت إضافته إلى المشروع" },
+  "machines.removedNotice": {
+    en: "{name} no longer accepts this phone. You can add it again.",
+    ar: "لم يعد {name} يقبل هذا الهاتف. يمكنك إضافته مرة أخرى.",
+  },
+  "machines.tapGone": {
+    en: "That machine is no longer on this phone",
+    ar: "لم يعد ذلك الجهاز موجودًا على هذا الهاتف",
+  },
+  "settings.pushOtherMachines": {
+    en: "Other machines update when you next open them",
+    ar: "تتحدّث الأجهزة الأخرى عندما تفتحها في المرة القادمة",
+  },
+  "machines.title": { en: "Machines", ar: "الأجهزة" },
+  "machines.online": { en: "Online", ar: "متصل" },
+  "machines.offline": { en: "Offline", ar: "غير متصل" },
+  "machines.checking": { en: "Checking", ar: "جارٍ التحقق" },
+  "machines.other": { en: "Other machines", ar: "أجهزة أخرى" },
+  "machines.current": { en: "This one", ar: "هذا الجهاز" },
+  "machines.openFailed": { en: "That machine could not be opened", ar: "تعذّر فتح ذلك الجهاز" },
+  "machines.add": { en: "Add machine", ar: "إضافة جهاز" },
+  "machines.addLink": { en: "Add a machine's address", ar: "أضف عنوان جهاز" },
+  "machines.removeLink": { en: "Remove", ar: "إزالة" },
+  "pair.joinHere": { en: "Join with the owner password", ar: "انضم باستخدام كلمة مرور المالك" },
+  "pair.joinTitle": { en: "Add by name", ar: "إضافة بالاسم" },
+  "pair.joinName": {
+    en: "Full name, like mac.tail1234.ts.net",
+    ar: "الاسم الكامل، مثل mac.tail1234.ts.net",
+  },
+  "pair.joinPassword": { en: "Owner password", ar: "كلمة مرور المالك" },
+  "pair.joinShortName": {
+    en: "Use the full name ending in .ts.net",
+    ar: "استخدم الاسم الكامل المنتهي بـ .ts.net",
+  },
+  "pair.joinInvalid": { en: "That name is not valid", ar: "هذا الاسم غير صالح" },
+  "pair.joinRefused": {
+    en: "Not accepted. Check the password, and that Tailscale access is on at that machine, or wait a while and try again",
+    ar: "لم يُقبل الطلب. تحقق من كلمة المرور، ومن تفعيل الوصول عبر Tailscale على ذلك الجهاز، أو انتظر قليلًا ثم حاول مرة أخرى",
+  },
+  "pair.joinUnreachable": {
+    en: "Couldn't reach that machine. Check the name, and that it's on and in your Tailscale network",
+    ar: "تعذّر الوصول إلى ذلك الجهاز. تحقق من الاسم، ومن أنه يعمل وموجود في شبكة Tailscale الخاصة بك",
+  },
+  "pair.linkWarning": {
+    en: "Only continue if you started this on your own machine. Never enter a password here unless you recognise this name.",
+    ar: "لا تتابع إلا إذا بدأت هذا بنفسك على جهازك. لا تُدخل كلمة مرور هنا أبدًا ما لم تتعرّف على هذا الاسم.",
+  },
+  "pair.joinRateLimited": {
+    en: "Too many attempts. Wait and try again",
+    ar: "محاولات كثيرة جدًا. انتظر ثم حاول مرة أخرى",
+  },
+  "pair.sameMachine": { en: "This machine is already added", ar: "هذا الجهاز مضاف بالفعل" },
+  "pair.openMachine": { en: "Open it", ar: "افتحه" },
+  "pair.limit": {
+    en: "This phone holds 16 machines. Unpair one first",
+    ar: "يحمل هذا الهاتف 16 جهازًا. ألغِ اقتران أحدها أولًا",
+  },
 } as const satisfies Record<string, Record<Language, string>>;
 
 export type MessageKey = keyof typeof STRINGS;

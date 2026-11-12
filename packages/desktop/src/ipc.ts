@@ -102,6 +102,7 @@ import { MESSAGES } from "./messages.js";
 import type { SnippetLanguage } from "@jarvis/platform";
 import type { RunningCounts, UpdateState } from "./updater.js";
 import type { UsageHistory } from "./usage-history.js";
+import type { TailnetSwitchResult } from "./tailnet-switch.js";
 import type { TailscaleCertResult } from "./tailscale-cert.js";
 import type { IpLocateResult } from "./ip-locate.js";
 import type {
@@ -1077,6 +1078,10 @@ export type RendererApi = {
    *  click calls this exact same channel — `tailscale cert` renews an
    *  existing name in place. */
   tailscaleCert(): Promise<TailscaleCertResult>;
+  /** Turns Tailscale access on or off (tailnet-switch.ts). Desktop-only by
+   *  policy. */
+  tailnetEnable(options: { relay: boolean }): Promise<TailnetSwitchResult>;
+  tailnetDisable(): Promise<TailnetSwitchResult>;
   /** Phase 1: opens the browser client in the system browser (never inside
    *  Jarvis) — the pairing link while a pairing window is open, otherwise
    *  the root. Takes no URL: main reads it from the bridge's own status.

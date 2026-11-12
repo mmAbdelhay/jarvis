@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
 import type { Duplex } from "node:stream";
+import type { PeerInfo } from "@jarvis/wire";
+import { listenProxyFront, PROXY_HEADER_TIMEOUT_MS, type ProxyFront } from "./proxy-front.js";
 
 const HANDSHAKE_TIMEOUT_MS = 5_000;
 const REQUEST_TIMEOUT_MS = 5_000;
@@ -9,6 +11,7 @@ const HEADERS_TIMEOUT_MS = 5_000;
 const MAX_CONNECTIONS = 64;
 const ETAG_PREFIX_LENGTH = 16;
 const TERMINAL_PATH = "/terminal.html";
+const PEER_PATH = "/jarvis-peer.json";
 
 export type WebAsset = { bytes: Buffer; type: string; etag: string };
 export type WebManifest = ReadonlyMap<string, WebAsset>;
@@ -47,6 +50,22 @@ export function buildWebManifest(files: Iterable<{ path: string; bytes: Buffer }
   return manifest;
 }
 
+function securityHeaders(options: {
+  name: string;
+  bridgePort: number;
+  path: string;
+}): Record<string, string> {
+  // The app renders its terminal in a sandboxed <iframe src="/terminal.html">,
+  // so that one exact path may be framed by the app's own origin. Every other
+  // response, index.html included, still refuses to be framed at all.
+  const frameAncestors = options.path === TERMINAL_PATH ? "'self'" : "'none'";
+  return {
+    "Content-Security-Policy": `default-src 'self'; script-src 'self'; connect-src 'self' wss://${options.name}:${options.bridgePort}; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; frame-src 'self'; frame-ancestors ${frameAncestors}; base-uri 'none'; form-action 'none'`,
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+  };
+}
+
 export function webHeaders(options: {
   name: string;
   bridgePort: number;
@@ -56,14 +75,8 @@ export function webHeaders(options: {
   const cacheControl = options.path.startsWith("/_expo/static/")
     ? "public, max-age=31536000, immutable"
     : "no-cache";
-  // The app renders its terminal in a sandboxed <iframe src="/terminal.html">,
-  // so that one exact path may be framed by the app's own origin. Every other
-  // response, index.html included, still refuses to be framed at all.
-  const frameAncestors = options.path === TERMINAL_PATH ? "'self'" : "'none'";
   return {
-    "Content-Security-Policy": `default-src 'self'; script-src 'self'; connect-src wss://${options.name}:${options.bridgePort}; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; frame-src 'self'; frame-ancestors ${frameAncestors}; base-uri 'none'; form-action 'none'`,
-    "X-Content-Type-Options": "nosniff",
-    "Referrer-Policy": "no-referrer",
+    ...securityHeaders(options),
     "Content-Type": options.asset.type,
     ETag: options.asset.etag,
     "Cache-Control": cacheControl,
@@ -75,6 +88,9 @@ type RequestHandlerOptions = {
   port: number;
   bridgePort: number;
   manifest: WebManifest;
+  /** What `/jarvis-peer.json` answers, read per request. Absent, `undefined`
+   *  or a throw: the socket is destroyed, as for a path that does not exist. */
+  peer?: () => PeerInfo | undefined;
 };
 
 /**
@@ -109,6 +125,32 @@ export function createWebRequestHandler(
   options: RequestHandlerOptions,
 ): (request: IncomingMessage, response: ServerResponse) => void {
   const expectedHost = options.port === 443 ? options.name : `${options.name}:${options.port}`;
+
+  function servePeer(request: IncomingMessage, response: ServerResponse): void {
+    let body: Buffer;
+    try {
+      const peer = options.peer?.();
+      if (peer === undefined) {
+        request.socket.destroy();
+        return;
+      }
+      body = Buffer.from(JSON.stringify(peer));
+    } catch {
+      request.socket.destroy();
+      return;
+    }
+    for (const [name, value] of Object.entries(
+      securityHeaders({ name: options.name, bridgePort: options.bridgePort, path: PEER_PATH }),
+    )) {
+      response.setHeader(name, value);
+    }
+    response.setHeader("Content-Type", "application/json; charset=utf-8");
+    response.setHeader("Cache-Control", "no-store");
+    response.setHeader("Content-Length", String(body.length));
+    response.statusCode = 200;
+    response.end(request.method === "HEAD" ? undefined : body);
+  }
+
   return (request, response) => {
     // Any Upgrade header is refused here too: Node only raises 'upgrade'
     // when Connection also says upgrade, so this closes the other half.
@@ -125,6 +167,11 @@ export function createWebRequestHandler(
     const requestedPath = safePath(request.url ?? "");
     if (requestedPath === undefined) {
       request.socket.destroy();
+      return;
+    }
+
+    if (requestedPath === PEER_PATH) {
+      servePeer(request, response);
       return;
     }
 
@@ -169,6 +216,7 @@ type WebServer = {
   on(event: string, listener: (...args: never[]) => void): WebServer;
   once(event: string, listener: (...args: never[]) => void): WebServer;
   off(event: string, listener: (...args: never[]) => void): WebServer;
+  emit(event: string, ...args: unknown[]): boolean;
   listen(port: number, host: string): WebServer;
   address(): string | { port: number } | null;
   close(callback: (error?: Error) => void): WebServer;
@@ -179,6 +227,8 @@ export type ListenWebOptions = RequestHandlerOptions & {
   cert: string | Buffer;
   key: string | Buffer;
   createServer?: (options: Record<string, unknown>) => unknown;
+  /** Relay mode: a PROXY v2 front owns the port (proxy-front.ts). Loopback hosts only. */
+  proxyProtocol?: boolean;
 };
 
 export function listenWeb(
@@ -228,6 +278,9 @@ export function listenWeb(
       socket.on("close", () => sockets.delete(socket));
     }) as (...args: never[]) => void);
 
+    // Relay mode only: owns the port, so `server` itself never binds one.
+    let front: ProxyFront | undefined;
+
     function onListenError(error: Error): void {
       server.off("listening", onListening as (...args: never[]) => void);
       reject(error);
@@ -237,15 +290,19 @@ export function listenWeb(
       server.off("error", onListenError as (...args: never[]) => void);
       server.on("error", (() => {}) as (...args: never[]) => void);
       const address = server.address();
-      const port = typeof address === "object" && address !== null ? address.port : options.port;
+      const port =
+        front?.port ??
+        (typeof address === "object" && address !== null ? address.port : options.port);
       handleRequest = createWebRequestHandler({ ...options, port });
       resolve({
         port,
-        close() {
-          return new Promise<void>((resolveClose, rejectClose) => {
-            for (const socket of sockets) socket.destroy();
+        async close() {
+          for (const socket of sockets) socket.destroy();
+          await front?.close();
+          await new Promise<void>((resolveClose, rejectClose) => {
             server.close((error) => {
-              if (error) rejectClose(error);
+              // Behind a front, "not running" is all this can say: it never bound.
+              if (error && front === undefined) rejectClose(error);
               else resolveClose();
             });
           });
@@ -255,6 +312,20 @@ export function listenWeb(
 
     server.once("error", onListenError as (...args: never[]) => void);
     server.once("listening", onListening as (...args: never[]) => void);
-    server.listen(options.port, options.host);
+    if (options.proxyProtocol === true) {
+      listenProxyFront({
+        host: options.host,
+        port: options.port,
+        target: server,
+        timeoutMs: PROXY_HEADER_TIMEOUT_MS,
+      }).then((started) => {
+        front = started;
+        // Never bound, so Node would never say this itself, and its request
+        // and header timeouts only start checking once it has been said.
+        server.emit("listening");
+      }, reject);
+    } else {
+      server.listen(options.port, options.host);
+    }
   });
 }

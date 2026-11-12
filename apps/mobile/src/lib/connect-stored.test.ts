@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { connectFromStoredPairing } from "./connect-stored";
+import { type MachineStore, createMachineStore } from "./machine-store";
+import type { PairingRecord } from "./pairing-record";
 import type { Credential, Endpoint, RpcClient } from "./rpc-client";
 import type { SecureStore } from "./secure-store";
 
@@ -17,6 +19,20 @@ function createFakeSecureStore(initial: Record<string, string> = {}): SecureStor
     },
   };
 }
+
+/** The real store, over fake keychains and no prefs on disk. */
+function machineStoreOver(secure: SecureStore): MachineStore {
+  return createMachineStore({
+    secure,
+    refresh: createFakeSecureStore(),
+    prefs: { read: async () => undefined, write: async () => {} },
+    localeTag: "en-US",
+    singleSlot: false,
+    log: () => {},
+  });
+}
+
+type Machines = Pick<MachineStore, "load">;
 
 function createFakeClient() {
   const connectCalls: { endpoint: Endpoint; credential: Credential }[] = [];
@@ -42,135 +58,163 @@ function createFakeClient() {
   return { client, connectCalls };
 }
 
-const RECORD_JSON = JSON.stringify({
-  deviceId: "d1234567890123456789012345678901",
+const DEVICE_ID = "d1234567890123456789012345678901";
+const FINGERPRINT = `${"a".repeat(60)}beef`;
+const RECORD: PairingRecord = {
+  deviceId: DEVICE_ID,
   host: "192.168.1.5",
   port: 4317,
-  fingerprint: `${"a".repeat(60)}beef`,
+  fingerprint: FINGERPRINT,
   pairedAt: 1_000,
-});
+};
+const CREDENTIAL: Credential = { deviceId: DEVICE_ID, token: "secret-token" };
+const ACTIVE_ID = "192.168.1.5_4317";
+
+/** One active machine. Answers `load` only for the id it holds. */
+function machinesHolding(record: PairingRecord = RECORD): Machines & { loads: string[] } {
+  const loads: string[] = [];
+  return {
+    loads,
+    load: async (id) => {
+      loads.push(id);
+      return id === ACTIVE_ID ? { record, credential: CREDENTIAL } : undefined;
+    },
+  };
+}
 
 describe("connectFromStoredPairing", () => {
-  it('returns "connected" and calls client.connect with the stored endpoint+credential', async () => {
-    const secureStore = createFakeSecureStore({
-      "jarvis.pairing": RECORD_JSON,
-      "jarvis.token": "secret-token",
-    });
+  it("connects with the active machine's endpoint and credential", async () => {
+    const machines = machinesHolding();
     const { client, connectCalls } = createFakeClient();
 
-    const outcome = await connectFromStoredPairing({ secureStore, client });
+    const outcome = await connectFromStoredPairing({ machines, id: ACTIVE_ID, client });
 
     expect(outcome).toBe("connected");
+    expect(machines.loads).toEqual([ACTIVE_ID]);
     expect(connectCalls).toEqual([
       {
-        endpoint: {
-          host: "192.168.1.5",
-          port: 4317,
-          fingerprint: `${"a".repeat(60)}beef`,
-        },
-        credential: { deviceId: "d1234567890123456789012345678901", token: "secret-token" },
+        endpoint: { host: "192.168.1.5", port: 4317, fingerprint: FINGERPRINT },
+        credential: CREDENTIAL,
       },
     ]);
   });
 
   it("passes the stored `name` through to client.connect (M11 system-trust mode)", async () => {
-    const namedRecordJson = JSON.stringify({
-      deviceId: "d1234567890123456789012345678901",
-      host: "192.168.1.5",
-      port: 4317,
-      fingerprint: `${"a".repeat(60)}beef`,
-      name: "mac.tail.ts.net",
-      pairedAt: 1_000,
-    });
-    const secureStore = createFakeSecureStore({
-      "jarvis.pairing": namedRecordJson,
-      "jarvis.token": "secret-token",
-    });
+    const machines = machinesHolding({ ...RECORD, name: "mac.tail.ts.net" });
     const { client, connectCalls } = createFakeClient();
 
-    const outcome = await connectFromStoredPairing({ secureStore, client });
+    const outcome = await connectFromStoredPairing({ machines, id: ACTIVE_ID, client });
 
     expect(outcome).toBe("connected");
     expect(connectCalls[0]?.endpoint).toEqual({
       host: "192.168.1.5",
       port: 4317,
-      fingerprint: `${"a".repeat(60)}beef`,
+      fingerprint: FINGERPRINT,
       name: "mac.tail.ts.net",
     });
   });
 
-  it('returns "unpaired" and never connects when there is no stored pairing', async () => {
-    const secureStore = createFakeSecureStore();
+  it("reads the machine it is told to, not whichever is active", async () => {
+    const machines = machinesHolding();
     const { client, connectCalls } = createFakeClient();
 
-    const outcome = await connectFromStoredPairing({ secureStore, client });
-
-    expect(outcome).toBe("unpaired");
+    expect(await connectFromStoredPairing({ machines, id: "other_1", client })).toBe("unpaired");
+    expect(machines.loads).toEqual(["other_1"]);
     expect(connectCalls).toEqual([]);
   });
 
-  it('returns "failed" (never throws) when the keychain read itself throws', async () => {
-    const secureStore: SecureStore = {
+  it('an id whose record is gone answers "unpaired"', async () => {
+    const machines: Machines = { load: async () => undefined };
+    const { client, connectCalls } = createFakeClient();
+
+    expect(await connectFromStoredPairing({ machines, id: ACTIVE_ID, client })).toBe("unpaired");
+    expect(connectCalls).toEqual([]);
+  });
+
+  it('a throwing load answers "failed", never a rejection', async () => {
+    const machines: Machines = {
+      load: async () => {
+        throw new Error("keychain unavailable");
+      },
+    };
+    const { client, connectCalls } = createFakeClient();
+
+    expect(await connectFromStoredPairing({ machines, id: ACTIVE_ID, client })).toBe("failed");
+    expect(connectCalls).toEqual([]);
+  });
+
+  it('a store whose open failed answers "failed", not "unpaired"', async () => {
+    const failing: SecureStore = {
       get: async () => {
         throw new Error("keychain unavailable");
       },
       set: async () => {},
       delete: async () => {},
     };
+    const machines = machineStoreOver(failing);
+    expect(await machines.open()).toBe("failed");
     const { client, connectCalls } = createFakeClient();
 
-    const outcome = await connectFromStoredPairing({ secureStore, client });
-
-    expect(outcome).toBe("failed");
+    expect(await connectFromStoredPairing({ machines, id: ACTIVE_ID, client })).toBe("failed");
     expect(connectCalls).toEqual([]);
   });
 
-  it('returns "unpaired" and clears the orphaned record when the record is present but the token is missing', async () => {
-    // The "missing credential" path the ruling names: loadPairing (see
-    // pairing-record.ts) treats a record with no matching token as
-    // unusable and deletes it, rather than handing back a record with an
-    // empty/undefined credential.
-    const secureStore = createFakeSecureStore({ "jarvis.pairing": RECORD_JSON });
+  it("connects through the real store, from a migrated pairing", async () => {
+    const machines = machineStoreOver(
+      createFakeSecureStore({
+        "jarvis.pairing": JSON.stringify(RECORD),
+        "jarvis.token": "secret-token",
+      }),
+    );
+    expect(await machines.open()).toBe("ok");
     const { client, connectCalls } = createFakeClient();
 
-    const outcome = await connectFromStoredPairing({ secureStore, client });
+    expect(await connectFromStoredPairing({ machines, id: ACTIVE_ID, client })).toBe("connected");
+    expect(connectCalls[0]?.credential).toEqual(CREDENTIAL);
+  });
 
-    expect(outcome).toBe("unpaired");
+  it('answers "unpaired" and clears the orphaned record when the record is there and the token is not', async () => {
+    const secure = createFakeSecureStore({
+      "jarvis.pairing": JSON.stringify(RECORD),
+      "jarvis.token": "secret-token",
+    });
+    const machines = machineStoreOver(secure);
+    expect(await machines.open()).toBe("ok");
+    await secure.delete("jarvis.token");
+    const { client, connectCalls } = createFakeClient();
+
+    expect(await connectFromStoredPairing({ machines, id: ACTIVE_ID, client })).toBe("unpaired");
     expect(connectCalls).toEqual([]);
-    expect(await secureStore.get("jarvis.pairing")).toBeUndefined();
+    expect(await secure.get("jarvis.pairing")).toBeUndefined();
   });
 
   describe("shouldConnect", () => {
-    it("never calls client.connect when shouldConnect() returns false, even with a valid stored pairing", async () => {
-      const secureStore = createFakeSecureStore({
-        "jarvis.pairing": RECORD_JSON,
-        "jarvis.token": "secret-token",
-      });
+    it('false answers "unpaired" after the read, with no connect', async () => {
+      const machines = machinesHolding();
       const { client, connectCalls } = createFakeClient();
 
       const outcome = await connectFromStoredPairing({
-        secureStore,
+        machines,
+        id: ACTIVE_ID,
         client,
         shouldConnect: () => false,
       });
 
       expect(outcome).toBe("unpaired");
+      expect(machines.loads).toEqual([ACTIVE_ID]);
       expect(connectCalls).toEqual([]);
     });
 
-    it("[I-A bite-proof] calls client.connect when shouldConnect is omitted, or returns true", async () => {
-      const secureStore = createFakeSecureStore({
-        "jarvis.pairing": RECORD_JSON,
-        "jarvis.token": "secret-token",
-      });
+    it("[I-A bite-proof] calls client.connect when shouldConnect returns true", async () => {
       const { client, connectCalls } = createFakeClient();
 
       // Dropping the `shouldConnect`/`!deps.shouldConnect()` check in
-      // connect-stored.ts would make the "returns false" test above fail
-      // (connect would be called anyway) — this test is the control that
-      // proves the guard isn't just permanently blocking connect outright.
+      // connect-stored.ts would make the "false" test above fail (connect
+      // would be called anyway) — this test is the control that proves the
+      // guard isn't just permanently blocking connect outright.
       const outcome = await connectFromStoredPairing({
-        secureStore,
+        machines: machinesHolding(),
+        id: ACTIVE_ID,
         client,
         shouldConnect: () => true,
       });

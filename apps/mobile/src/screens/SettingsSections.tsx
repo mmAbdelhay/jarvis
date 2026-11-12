@@ -155,6 +155,9 @@ export function SettingsSections(props: Props): React.JSX.Element {
               {notificationsText}
             </Text>
           )}
+          {props.view.hasOtherMachines && (
+            <Text style={styles.cardLine}>{t(props.language, "settings.pushOtherMachines")}</Text>
+          )}
           {props.view.notifications.phase === "blocked" && (
             <TouchableOpacity style={styles.button} onPress={() => void Linking.openSettings()}>
               <Text style={styles.buttonText}>
@@ -304,11 +307,6 @@ export function SettingsSections(props: Props): React.JSX.Element {
               {t(props.language, platformKey("settings.unpair", props.platform))}
             </Text>
           </TouchableOpacity>
-          {props.view.unpairError && (
-            <Text style={styles.errorText}>
-              {t(props.language, platformKey("settings.unpairFailed", props.platform))}
-            </Text>
-          )}
           <Text style={styles.version}>
             {t(props.language, "settings.appVersion", { version: props.view.appVersion })}
           </Text>

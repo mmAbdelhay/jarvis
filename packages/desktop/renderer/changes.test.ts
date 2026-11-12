@@ -223,6 +223,7 @@ function stubJarvis(overrides: Partial<RendererApi>): RendererApi {
       problem: undefined,
       // M11 Task 2 minimal compile fix (Task 4 owns the real desktop wiring).
       sidecarProxy: "off" as const,
+      tailnet: { kind: "off" as const },
     })),
     openRemotePairing: vi.fn(async () => ({ ok: true as const, value: undefined })),
     cancelRemotePairing: vi.fn(async () => {}),
@@ -242,6 +243,8 @@ function stubJarvis(overrides: Partial<RendererApi>): RendererApi {
       kind: "failed" as const,
       detail: "not stubbed in this test",
     })),
+    tailnetEnable: vi.fn(async () => ({ ok: true as const, commands: [] })),
+    tailnetDisable: vi.fn(async () => ({ ok: true as const, commands: [] })),
     plansList: vi.fn(async () => ({ session: undefined, planMode: [], repo: [] })),
     plansRead: vi.fn(async () => ({ ok: false as const, reason: "not-found" as const })),
     plansWriteBlock: vi.fn(async () => ({ ok: false as const, reason: "not-found" as const })),

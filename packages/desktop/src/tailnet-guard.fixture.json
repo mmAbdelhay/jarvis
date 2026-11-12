@@ -1,0 +1,29 @@
+{
+  "TCP": {
+    "17717": {
+      "TCPForward": "127.0.0.1:17717",
+      "ProxyProtocol": 2
+    },
+    "443": {
+      "HTTPS": true
+    },
+    "7717": {
+      "TCPForward": "127.0.0.1:7717"
+    },
+    "7718": {
+      "TCPForward": "127.0.0.1:7718"
+    }
+  },
+  "Web": {
+    "machine.tailnet.ts.net:443": {
+      "Handlers": {
+        "/": {
+          "Proxy": "http://127.0.0.1:8765"
+        }
+      }
+    }
+  },
+  "AllowFunnel": {
+    "machine.tailnet.ts.net:443": true
+  }
+}

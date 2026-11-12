@@ -5,8 +5,9 @@ import { createDeviceStore } from "./devices.js";
 import { memoryFs } from "./fs-double.js";
 import type { RandomBytes } from "./io.js";
 import { createPairing, type Pairing, type PairingOutcome } from "./pairing.js";
-import { type PairRefusal, createPairSession } from "./pair-session.js";
+import { type PairRefusal, type PairSessionDeps, createPairSession } from "./pair-session.js";
 import { HANDSHAKE_TIMEOUT_MS, PROTOCOL_VERSION } from "./protocol.js";
+import { MAX_PASSWORD_LENGTH } from "@jarvis/wire";
 import { FakeSocket } from "./socket-double.js";
 
 /** A RandomBytes double that fills each call's buffer with an incrementing byte, so successive mints never collide. */
@@ -52,7 +53,7 @@ function makeHarness(overrides: { random?: RandomBytes } = {}) {
     onChange: () => undefined,
   });
 
-  function makeSession(): {
+  function makeSession(join?: PairSessionDeps["join"]): {
     socket: FakeSocket;
     session: ReturnType<typeof createPairSession>;
     onFailure: ReturnType<typeof vi.fn<(reason: PairRefusal) => void>>;
@@ -72,6 +73,7 @@ function makeHarness(overrides: { random?: RandomBytes } = {}) {
       log,
       onFailure,
       onSettled,
+      ...(join !== undefined ? { join } : {}),
     });
     return { socket, session, onFailure, onSettled, log };
   }
@@ -107,6 +109,478 @@ function pairFrame(
 ): string {
   return JSON.stringify({ t: "pair", v, secret, deviceName, client });
 }
+
+const JOIN_PASSWORD = "correct horse battery";
+const JOIN_TOKENS = { accessToken: "access", refreshToken: "refresh", accessExpiresAt: 123 };
+
+function joinFrame(overrides: Record<string, unknown> = {}): string {
+  return JSON.stringify({
+    t: "join",
+    v: PROTOCOL_VERSION,
+    password: JOIN_PASSWORD,
+    deviceName: "Laptop",
+    client: "web",
+    ...overrides,
+  });
+}
+
+/** A `join` whose password check is the plain comparison and whose issue answers fixed tokens. */
+function joinDeps(overrides: Partial<NonNullable<PairSessionDeps["join"]>> = {}) {
+  return {
+    allowed: vi.fn(() => true),
+    checkPassword: vi.fn(async (password: string) =>
+      password === JOIN_PASSWORD ? ("ok" as const) : ("refused" as const),
+    ),
+    issue: vi.fn(async (_deviceId: string) => JOIN_TOKENS),
+    onJoined: vi.fn(),
+    ...overrides,
+  };
+}
+
+/** A promise settled by hand, to hold a session inside one of its awaits. */
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+describe("createPairSession: join", () => {
+  it("a correct password adds the device with its client kind and sends one joined frame with tokens", async () => {
+    const h = makeHarness();
+    const join = joinDeps();
+    const { socket, session, onFailure, onSettled } = h.makeSession(join);
+
+    session.onText(joinFrame());
+    await flush();
+
+    const [device] = h.devices.list();
+    expect(device?.name).toBe("Laptop");
+    expect(device?.client).toBe("web");
+    expect(socket.sent).toHaveLength(1);
+    const [frame] = socket.sent;
+    expect(frame?.t).toBe("joined");
+    expect(frame?.v).toBe(PROTOCOL_VERSION);
+    expect(frame?.deviceId).toBe(device?.id);
+    expect(frame?.tokens).toEqual(JOIN_TOKENS);
+    expect(h.devices.authenticate(device?.id ?? "", frame?.token as string)?.id).toBe(device?.id);
+    expect(join.issue).toHaveBeenCalledExactlyOnceWith(device?.id);
+    expect(join.onJoined).toHaveBeenCalledExactlyOnceWith("Laptop", device?.id);
+    expect(socket.closed).toEqual({ code: 1000, reason: "joined" });
+    expect(onFailure).not.toHaveBeenCalled();
+    expect(onSettled).toHaveBeenCalledTimes(1);
+  });
+
+  it("an app client's join stores an app device", async () => {
+    const h = makeHarness();
+    const { session } = h.makeSession(joinDeps());
+
+    session.onText(joinFrame({ client: "jarvis-desktop/1.0" }));
+    await flush();
+
+    expect(h.devices.list()[0]?.client).toBeUndefined();
+    expect(h.devices.count()).toBe(1);
+  });
+
+  it("a wrong password closes 4401 with no reason, adds no device and reports the failure", async () => {
+    const h = makeHarness();
+    const { socket, session, onFailure, onSettled } = h.makeSession(joinDeps());
+
+    session.onText(joinFrame({ password: "wrong" }));
+    await flush();
+
+    expect(socket.closed).toEqual({ code: 4401, reason: "" });
+    expect(socket.sent).toEqual([]);
+    expect(h.devices.count()).toBe(0);
+    expect(onFailure).toHaveBeenCalledTimes(1);
+    expect(onSettled).toHaveBeenCalledTimes(1);
+  });
+
+  it("with join absent a join frame closes 4401 and no password is checked", async () => {
+    const h = makeHarness();
+    const { socket, session, onFailure, onSettled } = h.makeSession();
+
+    session.onText(joinFrame());
+    await flush();
+
+    expect(socket.closed).toEqual({ code: 4401, reason: "" });
+    expect(h.devices.count()).toBe(0);
+    expect(onFailure.mock.calls).toEqual([["join-closed"]]);
+    expect(onSettled).toHaveBeenCalledTimes(1);
+  });
+
+  it("a switch turned off after the socket opened closes 4401 without checking the password", async () => {
+    const h = makeHarness();
+    const join = joinDeps({ allowed: vi.fn(() => false) });
+    const { socket, session } = h.makeSession(join);
+
+    session.onText(joinFrame());
+    await flush();
+
+    expect(socket.closed).toEqual({ code: 4401, reason: "" });
+    expect(join.checkPassword).not.toHaveBeenCalled();
+  });
+
+  it("a switch turned off during the password check adds no device", async () => {
+    const h = makeHarness();
+    const allowed = vi.fn(() => true);
+    const check = deferred<"ok" | "refused">();
+    const join = joinDeps({ allowed, checkPassword: vi.fn(() => check.promise) });
+    const { socket, session } = h.makeSession(join);
+
+    session.onText(joinFrame());
+    allowed.mockReturnValue(false);
+    check.resolve("ok");
+    await flush();
+
+    expect(socket.closed).toEqual({ code: 4401, reason: "" });
+    expect(h.devices.count()).toBe(0);
+    expect(join.issue).not.toHaveBeenCalled();
+  });
+
+  it("a wrong protocol version closes 4401 before the password check", async () => {
+    const h = makeHarness();
+    const join = joinDeps();
+    const { socket, session, onFailure } = h.makeSession(join);
+
+    session.onText(joinFrame({ v: PROTOCOL_VERSION + 1 }));
+    await flush();
+
+    expect(socket.closed).toEqual({ code: 4401, reason: "" });
+    expect(join.checkPassword).not.toHaveBeenCalled();
+    expect(onFailure).toHaveBeenCalledTimes(1);
+  });
+
+  it("a device name that sanitizes to nothing closes 4401 before the password check", async () => {
+    const h = makeHarness();
+    const join = joinDeps();
+    const { socket, session } = h.makeSession(join);
+
+    session.onText(joinFrame({ deviceName: "\u0000\u0001" }));
+    await flush();
+
+    expect(socket.closed).toEqual({ code: 4401, reason: "" });
+    expect(join.checkPassword).not.toHaveBeenCalled();
+  });
+
+  it("a pair frame's refusal codes are unchanged while join is present", () => {
+    const h = makeHarness();
+    const { socket, session } = h.makeSession(joinDeps());
+
+    session.onText(pairFrame(WRONG_SECRET, "Phone", PROTOCOL_VERSION + 1));
+
+    expect(socket.closed?.code).toBe(4426);
+  });
+
+  describe.each([
+    ["join present", () => joinDeps()],
+    ["join absent", () => undefined],
+  ])("a malformed join frame, %s", (_label, makeJoin) => {
+    it.each<[string, Record<string, unknown>]>([
+      ["an empty password", { password: "" }],
+      ["an over-long password", { password: "p".repeat(MAX_PASSWORD_LENGTH + 1) }],
+      ["a non-string password", { password: 1234 }],
+      ["a missing password", { password: undefined }],
+      ["a string v", { v: "2" }],
+      ["a non-integer v", { v: 2.5 }],
+      ["a negative v", { v: -1 }],
+      ["a missing v", { v: undefined }],
+      ["an empty device name", { deviceName: "" }],
+      ["an over-long device name", { deviceName: "a".repeat(257) }],
+      ["a non-string device name", { deviceName: 7 }],
+      ["a missing device name", { deviceName: undefined }],
+      ["an over-long client", { client: "c".repeat(129) }],
+      ["a non-string client", { client: 7 }],
+      ["a missing client", { client: undefined }],
+    ])("with %s closes 4401 like any other refusal, unchecked", async (_field, patch) => {
+      const h = makeHarness();
+      const join = makeJoin();
+      const { socket, session, onFailure, onSettled } = h.makeSession(join);
+
+      session.onText(joinFrame(patch));
+      await flush();
+
+      expect(socket.closed).toEqual({ code: 4401, reason: "" });
+      expect(socket.sent).toEqual([]);
+      expect(h.devices.count()).toBe(0);
+      if (join !== undefined) expect(join.checkPassword).not.toHaveBeenCalled();
+      expect(onFailure).toHaveBeenCalledTimes(1);
+      expect(onSettled).toHaveBeenCalledTimes(1);
+      expect((await h.auditLines()).join("\n")).toContain('reason="bad-frame"');
+    });
+  });
+
+  it.each<[string, string]>([
+    ["invalid JSON", '{"t":"join"'],
+    [
+      "a frame over the size limit",
+      joinFrame({
+        password: "€".repeat(MAX_PASSWORD_LENGTH),
+        deviceName: "€".repeat(256),
+        client: "€".repeat(128),
+      }),
+    ],
+    ["a malformed pair frame", JSON.stringify({ t: "pair", v: PROTOCOL_VERSION, secret: "short" })],
+    ["an unknown frame type", JSON.stringify({ t: "joined", v: PROTOCOL_VERSION })],
+  ])("%s cannot be classified as a join and still closes 4400", (_label, text) => {
+    const h = makeHarness();
+    const { socket, session } = h.makeSession(joinDeps());
+
+    session.onText(text);
+
+    expect(socket.closed).toEqual({ code: 4400, reason: "" });
+  });
+
+  it("the audit line names the device and the source and never the password", async () => {
+    const h = makeHarness();
+    const { session } = h.makeSession(joinDeps());
+
+    session.onText(joinFrame());
+    await flush();
+
+    const lines = await h.auditLines();
+    const line = lines.find((entry) => entry.includes("joined-by-password"));
+    expect(line).toContain('deviceName="Laptop"');
+    expect(line).toContain(`source="${SOURCE}"`);
+    expect(line).toContain(`deviceId="${h.devices.list()[0]?.id}"`);
+    expect(lines.join("\n")).not.toContain(JOIN_PASSWORD);
+  });
+
+  it("a refused join writes no pairing-refused line, so a lockout's coalescing is not undone", async () => {
+    const h = makeHarness();
+    const { session } = h.makeSession(joinDeps());
+
+    session.onText(joinFrame({ password: "wrong-password" }));
+    await flush();
+
+    const lines = await h.auditLines();
+    expect(lines.filter((line) => line.includes("pairing-refused"))).toEqual([]);
+    expect(lines.join("\n")).not.toContain("wrong-password");
+  });
+
+  it("a socket closed during the password check adds no device and still settles", async () => {
+    const h = makeHarness();
+    const check = deferred<"ok" | "refused">();
+    const join = joinDeps({ checkPassword: vi.fn(() => check.promise) });
+    const { socket, session, onSettled } = h.makeSession(join);
+
+    session.onText(joinFrame());
+    session.onClose(1006);
+    expect(onSettled).not.toHaveBeenCalled();
+
+    check.resolve("ok");
+    await flush();
+
+    expect(h.devices.count()).toBe(0);
+    expect(join.issue).not.toHaveBeenCalled();
+    expect(socket.sent).toEqual([]);
+    expect(socket.closed).toBeUndefined();
+    expect(onSettled).toHaveBeenCalledTimes(1);
+  });
+
+  it("a wrong password on a socket that already closed still reports the failure", async () => {
+    const h = makeHarness();
+    const check = deferred<"ok" | "refused">();
+    const { socket, session, onFailure, onSettled } = h.makeSession(
+      joinDeps({ checkPassword: vi.fn(() => check.promise) }),
+    );
+
+    session.onText(joinFrame());
+    session.onClose(1006);
+    check.resolve("refused");
+    await flush();
+
+    expect(onFailure).toHaveBeenCalledTimes(1);
+    expect(socket.closed).toBeUndefined();
+    expect(onSettled).toHaveBeenCalledTimes(1);
+  });
+
+  it("a socket closed while the device is minted revokes it and issues nothing", async () => {
+    const h = makeHarness();
+    const join = joinDeps();
+    const add = h.devices.add;
+    const minting = deferred<void>();
+    h.devices.add = vi.fn(async (name, client) => {
+      await minting.promise;
+      return add(name, client);
+    });
+    const { socket, session, onSettled } = h.makeSession(join);
+
+    session.onText(joinFrame());
+    await flush();
+    expect(h.devices.add).toHaveBeenCalledTimes(1);
+    session.onClose(1006);
+    minting.resolve();
+    await flush();
+
+    expect(h.devices.count()).toBe(0);
+    expect(join.issue).not.toHaveBeenCalled();
+    expect(socket.sent).toEqual([]);
+    expect(onSettled).toHaveBeenCalledTimes(1);
+  });
+
+  it("a socket closed during the issue revokes the device and sends nothing", async () => {
+    const h = makeHarness();
+    const issue = deferred<typeof JOIN_TOKENS>();
+    const join = joinDeps({ issue: vi.fn(() => issue.promise) });
+    const { socket, session, onSettled } = h.makeSession(join);
+
+    session.onText(joinFrame());
+    await flush();
+    expect(h.devices.count()).toBe(1);
+    session.onClose(1006);
+    issue.resolve(JOIN_TOKENS);
+    await flush();
+
+    expect(h.devices.count()).toBe(0);
+    expect(socket.sent).toEqual([]);
+    expect(join.onJoined).not.toHaveBeenCalled();
+    expect(onSettled).toHaveBeenCalledTimes(1);
+  });
+
+  it("allowed turning false during the issue revokes the device and closes 4401, sending nothing", async () => {
+    const h = makeHarness();
+    const allowed = vi.fn(() => true);
+    const issue = deferred<typeof JOIN_TOKENS>();
+    const join = joinDeps({ allowed, issue: vi.fn(() => issue.promise) });
+    const { socket, session, onSettled } = h.makeSession(join);
+
+    session.onText(joinFrame());
+    await flush();
+    expect(h.devices.count()).toBe(1);
+    allowed.mockReturnValue(false);
+    issue.resolve(JOIN_TOKENS);
+    await flush();
+
+    expect(h.devices.count()).toBe(0);
+    expect(socket.sent).toEqual([]);
+    expect(socket.closed).toEqual({ code: 4401, reason: "" });
+    expect(join.onJoined).not.toHaveBeenCalled();
+    expect(onSettled).toHaveBeenCalledTimes(1);
+    const lines = await h.auditLines();
+    expect(lines.join("\n")).not.toContain("joined-by-password");
+    expect(lines.join("\n")).toContain('reason="abandoned"');
+  });
+
+  it("allowed turning false during the device add also ends at the same check", async () => {
+    const h = makeHarness();
+    const allowed = vi.fn(() => true);
+    const join = joinDeps({
+      allowed,
+      issue: vi.fn(async () => {
+        allowed.mockReturnValue(false);
+        return JOIN_TOKENS;
+      }),
+    });
+    const { socket, session, onSettled } = h.makeSession(join);
+
+    session.onText(joinFrame());
+    await flush();
+
+    expect(h.devices.count()).toBe(0);
+    expect(socket.sent).toEqual([]);
+    expect(socket.closed).toEqual({ code: 4401, reason: "" });
+    expect(onSettled).toHaveBeenCalledTimes(1);
+  });
+
+  it("an issue that fails after the device is added revokes it and closes 4401", async () => {
+    const h = makeHarness();
+    const join = joinDeps({ issue: vi.fn(async () => Promise.reject(new Error("no session"))) });
+    const { socket, session, onFailure, onSettled } = h.makeSession(join);
+
+    session.onText(joinFrame());
+    await flush();
+
+    expect(join.issue).toHaveBeenCalledTimes(1);
+    expect(h.devices.count()).toBe(0);
+    expect(socket.sent).toEqual([]);
+    expect(socket.closed).toEqual({ code: 4401, reason: "" });
+    expect(onFailure).toHaveBeenCalledTimes(1);
+    expect(onSettled).toHaveBeenCalledTimes(1);
+  });
+
+  it("a devices.add failure closes 4401 and issues nothing", async () => {
+    const h = makeHarness();
+    h.devices.add = vi.fn(async () => Promise.reject(new Error("disk full")));
+    const join = joinDeps();
+    const { socket, session, onSettled } = h.makeSession(join);
+
+    session.onText(joinFrame());
+    await flush();
+
+    expect(socket.closed).toEqual({ code: 4401, reason: "" });
+    expect(join.issue).not.toHaveBeenCalled();
+    expect(onSettled).toHaveBeenCalledTimes(1);
+  });
+
+  it("a password check that rejects closes 4401 and logs no password", async () => {
+    const h = makeHarness();
+    const join = joinDeps({
+      checkPassword: vi.fn(async (password: string) => Promise.reject(new Error(password))),
+    });
+    const { socket, session, log, onSettled } = h.makeSession(join);
+
+    session.onText(joinFrame());
+    await flush();
+
+    expect(socket.closed).toEqual({ code: 4401, reason: "" });
+    expect(JSON.stringify(log.mock.calls)).not.toContain(JOIN_PASSWORD);
+    expect((await h.auditLines()).join("\n")).not.toContain(JOIN_PASSWORD);
+    expect(onSettled).toHaveBeenCalledTimes(1);
+  });
+
+  it("a password check still running when the handshake timer would fire is not cut off", async () => {
+    const h = makeHarness();
+    const check = deferred<"ok" | "refused">();
+    const { socket, session } = h.makeSession(
+      joinDeps({ checkPassword: vi.fn(() => check.promise) }),
+    );
+
+    session.onText(joinFrame());
+    h.clock.advance(HANDSHAKE_TIMEOUT_MS * 2);
+    expect(socket.closed).toBeUndefined();
+
+    check.resolve("ok");
+    await flush();
+
+    expect(socket.sent[0]?.t).toBe("joined");
+  });
+
+  it("frames after the join frame are ignored", async () => {
+    const h = makeHarness();
+    const join = joinDeps();
+    const { socket, session } = h.makeSession(join);
+
+    session.onText(joinFrame());
+    session.onText(joinFrame());
+    session.onBinary(new Uint8Array(1));
+    await flush();
+
+    expect(join.checkPassword).toHaveBeenCalledTimes(1);
+    expect(h.devices.count()).toBe(1);
+    expect(socket.sent).toHaveLength(1);
+  });
+
+  it("an onJoined that throws does not undo the join", async () => {
+    const h = makeHarness();
+    const join = joinDeps({
+      onJoined: vi.fn(() => {
+        throw new Error("alert failed");
+      }),
+    });
+    const { socket, session, onSettled } = h.makeSession(join);
+
+    session.onText(joinFrame());
+    await flush();
+
+    expect(socket.sent[0]?.t).toBe("joined");
+    expect(h.devices.count()).toBe(1);
+    expect(onSettled).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe("createPairSession", () => {
   it("a valid pair frame sends nothing, closes nothing, adds no device, and reaches confirming with the name", () => {

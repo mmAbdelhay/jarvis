@@ -2,6 +2,9 @@ import type { AuthenticatedDevice, Bridge, BridgeDeps, RemoteStatus } from "@jar
 import { VOICE_UPLOAD_CHANNEL, type PushRegistration } from "@jarvis/wire";
 import { describe, expect, it, vi } from "vitest";
 import { createBroadcaster } from "./broadcast.js";
+import { createHostLink, type DesktopHost } from "./core/host-link.js";
+import { createDaemonHost } from "./daemon/daemon-host.js";
+import { DAEMON_PUSHES } from "./daemon/protocol.js";
 import { createDispatchTable, type DispatchTable } from "./dispatch.js";
 import { MESSAGES } from "./messages.js";
 import { fakeDeps } from "./dispatch.test.js";
@@ -25,6 +28,7 @@ const CLOSED_STATUS: RemoteStatus = {
   problem: undefined,
   // M11 Task 2 minimal compile fix (Task 4 owns the real desktop wiring).
   sidecarProxy: "off",
+  tailnet: { kind: "off" },
 };
 
 describe("remoteRequestHandler", () => {
@@ -201,6 +205,11 @@ function fakeBridge(): { bridge: Bridge; push: ReturnType<typeof vi.fn> } {
     setOwnerPassword: vi.fn(async () => ({ ok: true as const })),
     deletePasskey: vi.fn(async () => true),
     signOutEverywhere: vi.fn(async () => {}),
+    setTailnetBlock: vi.fn(async () => true),
+    tailnetReadFailed: vi.fn(async () => {}),
+    retryListener: vi.fn(async () => {}),
+    rearmTailnet: vi.fn(async () => {}),
+    reloadCertificate: vi.fn(async () => {}),
     stop: vi.fn(async () => {}),
   };
   return { bridge, push };
@@ -238,6 +247,7 @@ function harness(overrides: Partial<RemoteAccessDeps> = {}) {
       // M11 Task 2 minimal compile fix (Task 4 owns the real desktop wiring).
       createProxy: () => undefined,
       enforceFileModes: false,
+      hostname: () => "test-host",
       log: vi.fn(),
     },
     streams: {
@@ -249,6 +259,7 @@ function harness(overrides: Partial<RemoteAccessDeps> = {}) {
     onDeviceRevoked: vi.fn(),
     onIdleDisabled: vi.fn(),
     showNotification: vi.fn(),
+    onDeviceJoined: vi.fn(),
     fetch: vi.fn(async () => ({ status: 200, json: async () => ({ data: [] }) })),
     ...overrides,
   };
@@ -296,8 +307,46 @@ const REMOTE_CONFIG = {
   tls: {},
   push: { enabled: false, includeProjectNames: false },
   web: { enabled: false },
+  tailnet: { enabled: false, relay: false },
   idleDisableMinutes: 0,
 };
+
+describe("createRemoteAccess: the Tailscale guard's calls", () => {
+  it("wait for start's own apply, so a verdict is never lost or overwritten", async () => {
+    const { remoteAccess, bridge } = harness();
+    const order: string[] = [];
+    vi.mocked(bridge.apply).mockImplementation(async () => {
+      order.push("apply");
+    });
+    vi.mocked(bridge.setTailnetBlock).mockImplementation(async () => {
+      order.push("block");
+      return false;
+    });
+    vi.mocked(bridge.reloadCertificate).mockImplementation(async () => {
+      order.push("reload");
+    });
+
+    const block = remoteAccess.setTailnetBlock("funnel");
+    const reload = remoteAccess.reloadCertificate();
+    await remoteAccess.start(REMOTE_CONFIG);
+    await Promise.all([block, reload]);
+
+    expect(await block).toBe(false);
+    expect(order).toEqual(["apply", "block", "reload"]);
+    expect(bridge.setTailnetBlock).toHaveBeenCalledWith("funnel");
+  });
+
+  it("do nothing after stop, and a call waiting on start wakes", async () => {
+    const { remoteAccess, bridge } = harness();
+    const waiting = remoteAccess.setTailnetBlock("funnel");
+    await remoteAccess.stop();
+    expect(await waiting).toBe(false);
+    expect(await remoteAccess.setTailnetBlock("funnel")).toBe(false);
+    await remoteAccess.reloadCertificate();
+    expect(bridge.setTailnetBlock).not.toHaveBeenCalled();
+    expect(bridge.reloadCertificate).not.toHaveBeenCalled();
+  });
+});
 
 describe("createRemoteAccess: desktop notifications (Phase 0)", () => {
   it("shows the bridge's security notices as bilingual OS notifications in the configured language", async () => {
@@ -318,6 +367,117 @@ describe("createRemoteAccess: desktop notifications (Phase 0)", () => {
       [device.title, device.body],
     ]);
   });
+
+  describe("a device joining", () => {
+    async function joinNotice(deps: Partial<RemoteAccessDeps>) {
+      const { remoteAccess, createBridge } = harness(deps);
+      await remoteAccess.start(REMOTE_CONFIG);
+      return createBridge.mock.calls[0]?.[0].notifyDesktop;
+    }
+
+    it("alerts on the desktop with the device's name, and sends the push", async () => {
+      const showNotification = vi.fn<(title: string, body: string) => void>();
+      const onDeviceJoined = vi.fn();
+      const notifyDesktop = await joinNotice({ showNotification, onDeviceJoined });
+
+      notifyDesktop?.("device-joined", "Other Mac");
+
+      const notice = MESSAGES.remoteSecurityNotice("device-joined", "en", "Other Mac");
+      expect(notice.body).toContain("Other Mac");
+      // The daemon logs the title of a queued alert, and never the body.
+      expect(notice.title).not.toContain("Other Mac");
+      expect(showNotification.mock.calls).toEqual([[notice.title, notice.body]]);
+      expect(onDeviceJoined).toHaveBeenCalledTimes(1);
+    });
+
+    it("no other notice sends the push", async () => {
+      const onDeviceJoined = vi.fn();
+      const notifyDesktop = await joinNotice({ onDeviceJoined });
+
+      notifyDesktop?.("locked-out-global");
+      notifyDesktop?.("refresh-reuse");
+      notifyDesktop?.("locked-out-device", "Pixel 8");
+
+      expect(onDeviceJoined).not.toHaveBeenCalled();
+    });
+
+    it("a desktop notification that throws does not lose the push", async () => {
+      const onDeviceJoined = vi.fn();
+      const notifyDesktop = await joinNotice({
+        onDeviceJoined,
+        showNotification: () => {
+          throw new Error("no window");
+        },
+      });
+
+      expect(() => notifyDesktop?.("device-joined", "Other Mac")).toThrow("no window");
+      expect(onDeviceJoined).toHaveBeenCalledTimes(1);
+    });
+
+    it("with no app attached the daemon queues it, and the next app to attach gets it", async () => {
+      const push = vi.fn();
+      const daemonHost = createDaemonHost({
+        push,
+        pushTo: vi.fn(),
+        initiator: () => undefined,
+        log: vi.fn(),
+        now: () => 5,
+      });
+      const link = createHostLink();
+      link.attach(daemonHost.host);
+      const notifyDesktop = await joinNotice({
+        showNotification: (title, body) => link.host.showNotification(title, body),
+      });
+
+      notifyDesktop?.("device-joined", "Other Mac");
+
+      const notice = MESSAGES.remoteSecurityNotice("device-joined", "en", "Other Mac");
+      const alert = { title: notice.title, body: notice.body, at: 5 };
+      expect(daemonHost.queuedAlerts()).toEqual([alert]);
+      expect(push).not.toHaveBeenCalled();
+
+      daemonHost.attach(1, { focused: false, awake: true });
+
+      expect(push).toHaveBeenCalledWith(DAEMON_PUSHES.alert, alert);
+      expect(daemonHost.queuedAlerts()).toEqual([]);
+    });
+
+    it("in-process, the attached app shows it at once", async () => {
+      const showNotification = vi.fn();
+      const link = createHostLink();
+      link.attach({ showNotification } as unknown as DesktopHost);
+      const notifyDesktop = await joinNotice({
+        showNotification: (title, body) => link.host.showNotification(title, body),
+      });
+
+      notifyDesktop?.("device-joined", "Other Mac");
+
+      const notice = MESSAGES.remoteSecurityNotice("device-joined", "en", "Other Mac");
+      expect(showNotification).toHaveBeenCalledWith(notice.title, notice.body);
+    });
+  });
+});
+
+describe("createRemoteAccess: rearmTailnet", () => {
+  it("waits for start's own apply, and does nothing after stop", async () => {
+    const { remoteAccess, bridge } = harness();
+    const order: string[] = [];
+    vi.mocked(bridge.apply).mockImplementation(async () => {
+      order.push("apply");
+    });
+    vi.mocked(bridge.rearmTailnet).mockImplementation(async () => {
+      order.push("rearm");
+    });
+
+    const rearm = remoteAccess.rearmTailnet();
+    await remoteAccess.start(REMOTE_CONFIG);
+    await rearm;
+    expect(order).toEqual(["apply", "rearm"]);
+
+    await remoteAccess.stop();
+    await remoteAccess.rearmTailnet();
+    expect(order).toEqual(["apply", "rearm"]);
+  });
 });
 
 describe("createRemoteAccess: bridge creation", () => {
@@ -333,7 +493,16 @@ describe("createRemoteAccess: bridge creation", () => {
       idleDisableMinutes: 0,
       web: { enabled: false, port: 1 },
       tls: {},
+      tailnet: { enabled: false, relay: false },
     });
+  });
+
+  it("passes remote.tailnet through", async () => {
+    const { remoteAccess, bridge } = harness();
+    await remoteAccess.start({ ...REMOTE_CONFIG, tailnet: { enabled: true, relay: true } });
+    expect(bridge.apply).toHaveBeenCalledWith(
+      expect.objectContaining({ tailnet: { enabled: true, relay: true } }),
+    );
   });
 
   it("passes remote.web through: the flag, and the explicit port or the bridge port + 1", async () => {
@@ -389,6 +558,7 @@ describe("createRemoteAccess: bridge creation", () => {
       idleDisableMinutes: 0,
       web: { enabled: false, port: 4201 },
       tls: {},
+      tailnet: { enabled: false, relay: false },
     });
   });
 });
@@ -1054,6 +1224,7 @@ describe("createRemoteAccess: sendPush", () => {
         }),
         createProxy: () => undefined,
         enforceFileModes: false,
+        hostname: () => "test-host",
         log: vi.fn(),
       },
     });
@@ -1090,6 +1261,7 @@ describe("createRemoteAccess: sendPush", () => {
         }),
         createProxy: () => undefined,
         enforceFileModes: false,
+        hostname: () => "test-host",
         log: vi.fn(),
       },
     });
@@ -1134,6 +1306,7 @@ describe("createRemoteAccess: sendPush", () => {
         }),
         createProxy: () => undefined,
         enforceFileModes: false,
+        hostname: () => "test-host",
         log,
       },
     });
@@ -1178,6 +1351,7 @@ describe("createRemoteAccess: sendPush", () => {
         }),
         createProxy: () => undefined,
         enforceFileModes: false,
+        hostname: () => "test-host",
         log: vi.fn(),
       },
     });

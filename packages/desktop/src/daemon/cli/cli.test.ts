@@ -77,6 +77,7 @@ function remoteStatus(overrides: Partial<RemoteStatus> = {}): RemoteStatus {
     devices: [],
     problem: undefined,
     sidecarProxy: "off",
+    tailnet: { kind: "off" },
     web: { kind: "off" },
     ...overrides,
   };

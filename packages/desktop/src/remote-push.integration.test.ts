@@ -219,11 +219,17 @@ function createFakePushBridge(): {
       devices: [],
       problem: undefined,
       sidecarProxy: "off",
+      tailnet: { kind: "off" },
     }),
     ownerStatus: () => ({ hasPassword: true, passkeys: [] }),
     setOwnerPassword: async () => ({ ok: true as const }),
     deletePasskey: async () => true,
     signOutEverywhere: async () => {},
+    setTailnetBlock: async () => true,
+    tailnetReadFailed: async () => {},
+    retryListener: async () => {},
+    rearmTailnet: async () => {},
+    reloadCertificate: async () => {},
     stop: async () => {},
   };
 
@@ -239,6 +245,7 @@ function remoteConfig(push: { enabled: boolean; includeProjectNames: boolean }):
     tls: {},
     push,
     web: { enabled: false },
+    tailnet: { enabled: false, relay: false },
     idleDisableMinutes: 0,
   };
 }
@@ -333,6 +340,7 @@ describe("remote-push.integration: laptop, everything real but the socket, the E
         }),
         createProxy: () => undefined,
         enforceFileModes: false,
+        hostname: () => "test-host",
         log: (line: string) => ioLogLines.push(line),
       },
       streams,
@@ -340,6 +348,7 @@ describe("remote-push.integration: laptop, everything real but the socket, the E
       onDeviceRevoked: vi.fn(),
       onIdleDisabled: vi.fn(),
       showNotification: vi.fn(),
+      onDeviceJoined: vi.fn(),
       fetch: fetchLike,
     });
 
@@ -465,7 +474,7 @@ describe("remote-push.integration: laptop, everything real but the socket, the E
         to: EXPO_TOKEN,
         title: MESSAGES.pushTitle("ar"),
         body: MESSAGES.pushBody("session-done", undefined, "ar"),
-        data: { kind: "session-done", sessionId: "s1" },
+        data: { kind: "session-done", sessionId: "s1", device: D1.id },
         sound: "default",
         priority: "high",
         channelId: "jarvis",
@@ -585,6 +594,13 @@ describe("remote-push.integration: laptop, everything real but the socket, the E
     await vi.advanceTimersByTimeAsync(PUSH_FLUSH_MS);
     sent += 1;
     expect(fetchCalls).toHaveLength(sent);
+    // Each phone's message names that phone's own device, as the phone knows it.
+    const batch = JSON.parse(fetchCalls.at(-1)?.body ?? "[]") as {
+      to: string;
+      data: { device: string };
+    }[];
+    expect(batch.find((m) => m.to === EXPO_TOKEN)?.data.device).toBe(D1.id);
+    expect(batch.find((m) => m.to === EXPO_TOKEN_2)?.data.device).toBe(D2.id);
     expect(remoteAccess.pushTargets()).toEqual([
       { deviceId: D2.id, token: EXPO_TOKEN_2, platform: "android", language: "en" },
     ]);

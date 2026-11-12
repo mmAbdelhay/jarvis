@@ -1,5 +1,7 @@
 import { type Language, languageFromLocale } from "./i18n";
+import { MACHINE_ID_PATTERN, type MachineId } from "./machine-index";
 import { SIDECAR_ZOOM_MAX, SIDECAR_ZOOM_MIN } from "./sidecar-webview-config";
+import { type MachineLink, parseMachineLinks } from "./web-machines";
 
 // The three sidecar kinds the "Editor"/"Database"/"Cluster" rows on
 // sidecars/[project].tsx open — the same set `resolveTitle` in
@@ -49,7 +51,17 @@ export type Prefs = {
   // Wide Changes: the diff's layout. Absent until the viewer picks one
   // (read as "unified"); anything but a known value is dropped.
   changesDiffMode?: DiffMode;
+  // The same two flags as `refreshTokenStored` and `pushRegistered`, for each
+  // machine held beside the legacy slot (machine-store.ts). The legacy
+  // machine keeps using the top-level pair. Defaults to `{}`; a bad entry is
+  // dropped alone, and a lost one costs one password entry, never a prompt.
+  machineFlags: Record<MachineId, MachineFlags>;
+  // The browser's other machines, as links (web-machines.ts). At most 16, and a
+  // bad entry is dropped alone. The native app ignores it.
+  machineLinks: MachineLink[];
 };
+
+export type MachineFlags = { refreshTokenStored: boolean; pushRegistered: boolean };
 
 export type DiffMode = "unified" | "split";
 export function isDiffMode(value: unknown): value is DiffMode {
@@ -108,6 +120,22 @@ function parseSidecarZoom(value: unknown): SidecarZoomPrefs {
   return result;
 }
 
+const MAX_MACHINE_FLAGS = 32;
+
+function parseMachineFlags(value: unknown): Record<MachineId, MachineFlags> {
+  if (typeof value !== "object" || value === null) return {};
+  const kept: [MachineId, MachineFlags][] = [];
+  for (const [id, flags] of Object.entries(value)) {
+    if (kept.length === MAX_MACHINE_FLAGS) break;
+    if (!MACHINE_ID_PATTERN.test(id) || typeof flags !== "object" || flags === null) continue;
+    const { refreshTokenStored, pushRegistered } = flags as Record<string, unknown>;
+    if (typeof refreshTokenStored !== "boolean" || typeof pushRegistered !== "boolean") continue;
+    kept.push([id, { refreshTokenStored, pushRegistered }]);
+  }
+  // `fromEntries`, never assignment: `__proto__` passes the id pattern.
+  return Object.fromEntries(kept);
+}
+
 export async function loadPrefs(store: PrefsStore, localeTag: string): Promise<Prefs> {
   // Rule 16: an invalid/missing `language` still falls back to the locale
   // default independently of `speakReplies` — the two fields never affect
@@ -122,6 +150,8 @@ export async function loadPrefs(store: PrefsStore, localeTag: string): Promise<P
     idleLockMinutes: DEFAULT_IDLE_LOCK_MINUTES,
     refreshTokenStored: false,
     keepSignedIn: false,
+    machineFlags: {},
+    machineLinks: [],
   };
 
   let text: string | undefined;
@@ -178,28 +208,13 @@ export async function loadPrefs(store: PrefsStore, localeTag: string): Promise<P
     idleLockMinutes,
     refreshTokenStored,
     keepSignedIn,
+    machineFlags: parseMachineFlags(raw.machineFlags),
+    machineLinks: parseMachineLinks(raw.machineLinks),
   };
 }
 
 export async function savePrefs(store: PrefsStore, prefs: Prefs): Promise<void> {
   await store.write(JSON.stringify(prefs));
-}
-
-/** auth-session.ts's RefreshStoredFlag over prefs.json (load, change one
- *  key, save — the same pattern as every other prefs writer). */
-export function createRefreshStoredFlag(
-  store: PrefsStore,
-  localeTag: string,
-): { read(): Promise<boolean>; write(stored: boolean): Promise<void> } {
-  return {
-    async read() {
-      return (await loadPrefs(store, localeTag)).refreshTokenStored;
-    },
-    async write(stored) {
-      const current = await loadPrefs(store, localeTag);
-      await savePrefs(store, { ...current, refreshTokenStored: stored });
-    },
-  };
 }
 
 /** Saves the browser's "Keep me signed in" choice (load, change one key,
@@ -211,6 +226,16 @@ export async function setKeepSignedIn(
 ): Promise<void> {
   const current = await loadPrefs(store, localeTag);
   await savePrefs(store, { ...current, keepSignedIn });
+}
+
+/** Saves the browser's links to other machines (load, change one key, save). */
+export async function setMachineLinks(
+  store: PrefsStore,
+  localeTag: string,
+  machineLinks: MachineLink[],
+): Promise<void> {
+  const current = await loadPrefs(store, localeTag);
+  await savePrefs(store, { ...current, machineLinks });
 }
 
 /** The saved diff layout for wide Changes ("unified" when none is saved). */

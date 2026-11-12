@@ -1,15 +1,17 @@
 import { AUTH_STATE_CHANNEL } from "@jarvis/wire";
 import { describe, expect, it } from "vitest";
-import { REFRESH_TOKEN_KEY, createAuthSession } from "./auth-session";
+import { createAuthSession } from "./auth-session";
 import type { AuthBroadcast, AuthChannel, DeviceAuth, RefreshLock } from "./auth-session";
 import { createFakeClock } from "./clock";
 import { createWebDeviceAuth } from "./web-device-auth";
 import type { ClientState, RpcResult } from "./rpc-client";
 import type { SecureStore } from "./secure-store";
+import { shouldShowUnlock } from "./unlock-screen";
 
 const MIN = 60_000;
 const ACCESS_TTL = 15 * MIN;
 const IDLE = 15 * MIN;
+const REFRESH_TOKEN_KEY = "test.refresh";
 
 let counter = 0;
 function token(): string {
@@ -173,7 +175,12 @@ async function flush(): Promise<void> {
 }
 
 function setup(
-  options: { passcode?: boolean; deviceAuth?: DeviceAuth; storedUnlockAtLaunchOnly?: boolean } = {},
+  options: {
+    passcode?: boolean;
+    deviceAuth?: DeviceAuth;
+    storedUnlockAtLaunchOnly?: boolean;
+    refreshKey?: () => string;
+  } = {},
 ) {
   const clock = createFakeClock();
   const double = createRpcDouble(clock);
@@ -185,6 +192,7 @@ function setup(
     rpc: double.rpc,
     clock,
     refreshStore: store.store,
+    refreshKey: options.refreshKey ?? (() => REFRESH_TOKEN_KEY),
     refreshStoredFlag: flag.flag,
     deviceAuth: options.deviceAuth ?? device.auth,
     storedUnlockAtLaunchOnly: options.storedUnlockAtLaunchOnly,
@@ -202,6 +210,304 @@ function setup(
 function tokenArg(call: Call | undefined, field: string): string | undefined {
   return (call?.args[0] as Record<string, string> | undefined)?.[field];
 }
+
+describe("auth-session: adoptJoinTokens", () => {
+  function joinTokens(clock: ReturnType<typeof createFakeClock>) {
+    return {
+      accessToken: "a".repeat(64),
+      refreshToken: "b".repeat(64),
+      accessExpiresAt: clock.now() + ACCESS_TTL,
+    };
+  }
+
+  /** A scope nothing has connected yet. */
+  function fresh(options: { passcode?: boolean } = {}) {
+    const context = setup(options);
+    context.double.setState("idle");
+    context.double.events.length = 0;
+    return context;
+  }
+
+  it("stores the refresh token first and asks nothing of the connection", async () => {
+    const { session, clock, double, store, flag } = fresh();
+    await expect(session.adoptJoinTokens(joinTokens(clock))).resolves.toBe(true);
+
+    expect(double.events).toEqual(["store.set"]);
+    expect(store.values.get(REFRESH_TOKEN_KEY)).toBe("b".repeat(64));
+    expect(flag.state.stored).toBe(true);
+    expect(double.calls).toEqual([]);
+    expect(session.get().lockedLocally).toBe(false);
+  });
+
+  it("no passcode: nothing on disk, and the refresh token stays in memory", async () => {
+    const { session, clock, double, store } = fresh({ passcode: false });
+    await expect(session.adoptJoinTokens(joinTokens(clock))).resolves.toBe(true);
+    expect(store.writes).toEqual([]);
+
+    // Past the access token, so only the refresh token can answer.
+    clock.advance(ACCESS_TTL);
+    double.setState("locked");
+    await flush();
+    const refresh = double.calls.find((call) => call.channel === "auth:refresh");
+    expect(tokenArg(refresh, "refreshToken")).toBe("b".repeat(64));
+    expect(store.writes).toEqual([]);
+  });
+
+  it("a write that fails leaves nothing stale, and the session in memory", async () => {
+    const { session, clock, double, store, flag } = fresh();
+    flag.state.stored = true;
+    store.values.set(REFRESH_TOKEN_KEY, "stale");
+    store.failNextSet();
+
+    await expect(session.adoptJoinTokens(joinTokens(clock))).resolves.toBe(true);
+
+    expect(store.values.has(REFRESH_TOKEN_KEY)).toBe(false);
+    double.setState("locked");
+    await flush();
+    expect(tokenArg(double.calls[0], "accessToken")).toBe("a".repeat(64));
+  });
+
+  it("the first locked welcome resumes, and the unlock screen never shows", async () => {
+    const { session, clock, double, device } = fresh();
+    await session.adoptJoinTokens(joinTokens(clock));
+
+    const shown: boolean[] = [];
+    session.subscribe((view) => {
+      shown.push(shouldShowUnlock(double.rpc.state(), view, "/dashboard"));
+    });
+    double.setState("locked");
+    await flush();
+
+    expect(double.calls.map((call) => call.channel)).toEqual(["auth:resume"]);
+    expect(tokenArg(double.calls[0], "accessToken")).toBe("a".repeat(64));
+    expect(double.rpc.state()).toBe("open");
+    expect(shown.length).toBeGreaterThan(0);
+    expect(shown).not.toContain(true);
+    expect(shouldShowUnlock(double.rpc.state(), session.get(), "/dashboard")).toBe(false);
+    expect(device.state.prompts).toBe(0);
+  });
+
+  it("already locked: it resumes, and never unlocks a connection the laptop has not", async () => {
+    const { session, clock, double } = setup();
+    double.reply("auth:resume", { ok: false, error: { kind: "offline" } });
+
+    await session.adoptJoinTokens(joinTokens(clock));
+    await flush();
+
+    expect(double.calls.map((call) => call.channel)).toEqual(["auth:resume"]);
+    expect(double.events).not.toContain("unlock");
+  });
+
+  it("the idle window starts at the join, not when the scope was built", async () => {
+    const { session, clock, double } = fresh();
+    clock.advance(IDLE - 1);
+    await session.adoptJoinTokens(joinTokens(clock));
+
+    clock.advance(1_000);
+
+    expect(session.get().lockedLocally).toBe(false);
+    expect(double.events).not.toContain("lock");
+  });
+
+  it("logs no token", async () => {
+    const { session, clock, double, logs } = fresh();
+    await session.adoptJoinTokens(joinTokens(clock));
+    double.setState("locked");
+    await flush();
+    expect(logs.join("\n")).not.toContain("a".repeat(64));
+    expect(logs.join("\n")).not.toContain("b".repeat(64));
+  });
+});
+
+describe("auth-session: quiesce", () => {
+  it("answers at once with no refresh in flight", async () => {
+    const { session } = setup();
+    await session.quiesce(3_000);
+  });
+
+  it("waits for a refresh in flight, and the rotated token is stored by then", async () => {
+    const { session, double, store, clock } = setup();
+    await session.unlockWithPassword("pw");
+    let reply: (result: RpcResult) => void = () => {};
+    double.reply(
+      "auth:refresh",
+      new Promise<RpcResult>((resolve) => {
+        reply = resolve;
+      }),
+    );
+    clock.advance(ACCESS_TTL * 0.8);
+    await flush();
+
+    let settled = false;
+    const quiet = session.quiesce(3_000).then(() => {
+      settled = true;
+    });
+    await flush();
+    expect(settled).toBe(false);
+
+    const tokens = double.tokensFor();
+    reply(tokens);
+    await quiet;
+    const value = tokens as { ok: true; value: { refreshToken: string } };
+    expect(store.values.get(REFRESH_TOKEN_KEY)).toBe(value.value.refreshToken);
+  });
+
+  it("gives up at the limit, never longer", async () => {
+    const { session, double, clock } = setup();
+    await session.unlockWithPassword("pw");
+    double.reply("auth:refresh", new Promise<RpcResult>(() => {}));
+    clock.advance(ACCESS_TTL * 0.8);
+    await flush();
+
+    let settled = false;
+    const quiet = session.quiesce(3_000).then(() => {
+      settled = true;
+    });
+    clock.advance(2_999);
+    await flush();
+    expect(settled).toBe(false);
+    clock.advance(1);
+    await quiet;
+  });
+
+  it("leaves no timer behind once the refresh ends", async () => {
+    const { session, double, clock } = setup();
+    await session.unlockWithPassword("pw");
+    let reply: (result: RpcResult) => void = () => {};
+    double.reply(
+      "auth:refresh",
+      new Promise<RpcResult>((resolve) => {
+        reply = resolve;
+      }),
+    );
+    clock.advance(ACCESS_TTL * 0.8);
+    await flush();
+    const { clearTimeout: clear } = clock;
+    let cleared = 0;
+    clock.clearTimeout = (timer) => {
+      cleared += 1;
+      clear(timer);
+    };
+    const quiet = session.quiesce(3_000);
+    reply({ ok: false, error: { kind: "offline" } });
+    await quiet;
+    expect(cleared).toBe(1);
+  });
+});
+
+describe("auth-session: the refresh key it is given", () => {
+  const KEY = "jarvis.m.mac_7717.refresh";
+  const OTHER = "jarvis.m.other_7717.refresh";
+
+  it("login writes under that key and no other", async () => {
+    const { store, session } = setup({ refreshKey: () => KEY });
+    expect(await session.unlockWithPassword("pw")).toBe("unlocked");
+    expect([...store.values.keys()]).toEqual([KEY]);
+  });
+
+  it("a scheduled refresh rotates under that key", async () => {
+    const { store, session, clock } = setup({ refreshKey: () => KEY });
+    await session.unlockWithPassword("pw");
+    const first = store.values.get(KEY);
+    clock.advance(ACCESS_TTL * 0.8);
+    await flush();
+    expect(store.values.get(KEY)).not.toBe(first);
+    expect([...store.values.keys()]).toEqual([KEY]);
+  });
+
+  it("a stored unlock reads that key, and rotates under it", async () => {
+    const { store, session, flag, double } = setup({ refreshKey: () => KEY });
+    const held = token();
+    store.values.set(KEY, held);
+    store.values.set(OTHER, "someone else's");
+    flag.state.stored = true;
+
+    expect(await session.unlockWithStoredRefresh()).toBe("unlocked");
+    expect(tokenArg(double.calls[0], "refreshToken")).toBe(held);
+    expect(store.values.get(KEY)).not.toBe(held);
+    expect(store.values.get(OTHER)).toBe("someone else's");
+  });
+
+  it("logout deletes that key and no other", async () => {
+    const { store, session } = setup({ refreshKey: () => KEY });
+    await session.unlockWithPassword("pw");
+    store.values.set(OTHER, "someone else's");
+
+    await session.logout();
+    expect(store.values.has(KEY)).toBe(false);
+    expect(store.values.get(OTHER)).toBe("someone else's");
+  });
+
+  it("forget deletes that key and no other", async () => {
+    const { store, session } = setup({ refreshKey: () => KEY });
+    await session.unlockWithPassword("pw");
+    store.values.set(OTHER, "someone else's");
+
+    await session.forget();
+    expect(store.values.has(KEY)).toBe(false);
+    expect(store.values.get(OTHER)).toBe("someone else's");
+  });
+
+  it("asks on every use, so it follows the key's answer", async () => {
+    let key = KEY;
+    const { store, session } = setup({ refreshKey: () => key });
+    await session.unlockWithPassword("pw");
+    key = OTHER;
+    await session.forget();
+
+    expect(store.values.has(KEY)).toBe(true);
+    expect(store.values.has(OTHER)).toBe(false);
+  });
+
+  it("two sessions with different keys over one store never touch each other's token", async () => {
+    const a = setup({ refreshKey: () => KEY });
+    const clockB = createFakeClock();
+    const doubleB = createRpcDouble(clockB);
+    const b = createAuthSession({
+      rpc: doubleB.rpc,
+      clock: clockB,
+      refreshStore: a.store.store,
+      refreshKey: () => OTHER,
+      refreshStoredFlag: createStoredFlagDouble().flag,
+      deviceAuth: createDeviceAuthDouble({}).auth,
+      idleMs: IDLE,
+      log: () => {},
+    });
+    await a.session.unlockWithPassword("pw");
+    await b.unlockWithPassword("pw");
+    const tokenOfA = a.store.values.get(KEY);
+    const tokenOfB = a.store.values.get(OTHER);
+    expect(tokenOfA).toBeDefined();
+    expect(tokenOfB).toBeDefined();
+
+    clockB.advance(ACCESS_TTL * 0.8);
+    await flush();
+    expect(a.store.values.get(KEY)).toBe(tokenOfA);
+    expect(a.store.values.get(OTHER)).not.toBe(tokenOfB);
+
+    await a.session.logout();
+    expect(a.store.values.has(KEY)).toBe(false);
+    expect(a.store.values.has(OTHER)).toBe(true);
+
+    await b.forget();
+    expect(a.store.values.has(OTHER)).toBe(false);
+  });
+
+  it("a key it cannot get fails closed: no token is read, stored or sent", async () => {
+    const { store, session, flag, double, logs } = setup({
+      refreshKey: () => {
+        throw new Error("machines: store is not open");
+      },
+    });
+    flag.state.stored = true;
+
+    expect(await session.unlockWithStoredRefresh()).toBe("failed");
+    expect(double.calls).toEqual([]);
+    await session.forget();
+    expect(store.values.size).toBe(0);
+    expect(logs).toContain("auth: deleting the stored refresh token failed");
+  });
+});
 
 describe("auth-session: password login", () => {
   it("logs in, stores the refresh token before unlocking, and never persists the access token", async () => {
@@ -682,6 +988,7 @@ function browserSetup(keep: boolean) {
       rpc: double.rpc,
       clock,
       refreshStore: ctx.store.store,
+      refreshKey: () => REFRESH_TOKEN_KEY,
       refreshStoredFlag: ctx.flag.flag,
       deviceAuth: createWebDeviceAuth(async () => setting.keep),
       storedUnlockAtLaunchOnly: true,
@@ -1062,6 +1369,7 @@ function browserTabs() {
       rpc: double.rpc,
       clock,
       refreshStore: store.store,
+      refreshKey: () => REFRESH_TOKEN_KEY,
       refreshStoredFlag: flag.flag,
       deviceAuth: createWebDeviceAuth(async () => setting.keep),
       storedUnlockAtLaunchOnly: true,

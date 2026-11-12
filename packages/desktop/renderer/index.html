@@ -1082,6 +1082,36 @@
           <canvas id="settings-remote-web-qr" class="settings-remote-pair-qr" aria-hidden="true"></canvas>
           <div id="settings-remote-web-qr-note" class="settings-note"></div>
         </div>
+        <!-- Tailscale access. Unlike the switches above, this one acts at once
+             rather than with Save (settings.ts, tailnet-switch.ts); its state
+             line comes from the bridge's own status. -->
+        <div class="settings-field">
+          <!-- biome-ignore lint/a11y/noLabelWithoutControl: bilingual text is set by settings.ts (renderRemote), not baked into markup -->
+          <label id="settings-remote-tailnet-label" for="settings-remote-tailnet"></label>
+          <span class="settings-switch">
+            <input id="settings-remote-tailnet" type="checkbox" />
+            <span class="settings-switch-track" aria-hidden="true"></span>
+          </span>
+        </div>
+        <div id="settings-remote-tailnet-note" class="settings-note"></div>
+        <div id="settings-remote-tailnet-state" class="settings-note"></div>
+        <div id="settings-remote-tailnet-background" class="settings-note settings-note--warning" hidden></div>
+        <div id="settings-remote-tailnet-confirm" hidden>
+          <div id="settings-remote-tailnet-confirm-text" class="settings-note settings-note--warning"></div>
+          <button id="settings-remote-tailnet-confirm-yes" class="settings-add" type="button"></button>
+          <button id="settings-remote-tailnet-confirm-no" class="settings-add" type="button"></button>
+        </div>
+        <div id="settings-remote-tailnet-result" class="settings-note settings-note--warning" hidden></div>
+        <div id="settings-remote-tailnet-command" class="mono settings-remote-pair-code" dir="ltr" hidden></div>
+        <div class="settings-field">
+          <!-- biome-ignore lint/a11y/noLabelWithoutControl: bilingual text is set by settings.ts (renderRemote), not baked into markup -->
+          <label id="settings-remote-tailnet-relay-label" for="settings-remote-tailnet-relay"></label>
+          <span class="settings-switch">
+            <input id="settings-remote-tailnet-relay" type="checkbox" />
+            <span class="settings-switch-track" aria-hidden="true"></span>
+          </span>
+        </div>
+        <div id="settings-remote-tailnet-relay-note" class="settings-note"></div>
         <div id="settings-remote-problem" class="settings-note settings-note--warning" hidden></div>
         <div class="settings-section-head">
           <div id="settings-remote-pair-title" class="lbl"></div>

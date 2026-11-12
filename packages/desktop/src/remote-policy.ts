@@ -276,6 +276,10 @@ export const CHANNEL_POLICY = {
   // exactly the class of persistent, laptop-controlled-tool config change
   // settings:save and settings:testAgent are already desktop-only for.
   "remote:tailscaleCert": "desktop-only",
+  // Desktop-only: whether this machine accepts the owner password from its
+  // Tailscale network is decided on the machine, never by a joined device.
+  "remote:tailnetEnable": "desktop-only",
+  "remote:tailnetDisable": "desktop-only",
   // Remote, all eight (Task 5, plan panel spec): the same "parity of
   // content, not of the tab model" rule this file's header states for
   // sessions/git/bookmarks applies to a plan and its comments — a paired

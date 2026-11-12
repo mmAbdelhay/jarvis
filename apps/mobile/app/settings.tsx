@@ -14,15 +14,15 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { WideShell } from "@/components/WideShell";
 import { realClock } from "@/lib/clock";
 import { clientPlatformFor } from "@/lib/client-platform";
-import { connectFromStoredPairing } from "@/lib/connect-stored";
 import { dialogs } from "@/lib/dialog";
 import { platformKey, t } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
-import { clearPairing, loadPairing } from "@/lib/pairing-record";
+import { useMachineSessions, useNavigatorGate } from "@/lib/machine-context";
+import { applyForgetOutcome } from "@/lib/machine-sessions";
+import { loadScreenMachine, machineStore } from "@/lib/machine-store-instance";
 import { filePrefsStore } from "@/lib/prefs-file";
 import { usePushRegistration } from "@/lib/push-context";
-import { useAuthSession, useConnectionStore, useRpcClient } from "@/lib/rpc-context";
-import { expoSecureStore } from "@/lib/secure-store";
+import { useAuthSession, useConnectionStore, useMachineId, useRpcClient } from "@/lib/rpc-context";
 import { SETTINGS_SCOPES, type SettingsScope, settingsWideLayout } from "@/lib/settings-sections";
 import { createSettingsStore, type SettingsView } from "@/lib/settings-store";
 import { theme } from "@/lib/theme";
@@ -54,6 +54,9 @@ function SettingsScreen() {
   const voiceController = useVoiceController();
   const push = usePushRegistration();
   const authSession = useAuthSession();
+  const sessions = useMachineSessions();
+  const gate = useNavigatorGate();
+  const machineId = useMachineId();
   const [scope, setScope] = useState<SettingsScope>("browser");
   // Home's update banner opens /settings?section=updates: scroll there once
   // both the sections and the Updates section have been laid out.
@@ -79,32 +82,45 @@ function SettingsScreen() {
       createSettingsStore({
         prefs: filePrefsStore,
         localeTag: Intl.DateTimeFormat().resolvedOptions().locale,
-        loadRecord: async () => (await loadPairing(expoSecureStore))?.record,
-        // The same shared read+connect function `_layout.tsx` uses on
-        // entry — one `loadPairing` path in the app.
-        connectFromStored: (shouldConnect) =>
-          connectFromStoredPairing({ secureStore: expoSecureStore, client, shouldConnect }),
+        machineId,
+        // This screen's machine, fixed at mount, whichever is active by then.
+        loadRecord: async () => {
+          return (await loadScreenMachine(machineId))?.record;
+        },
+        // The same shared read+connect `_layout.tsx` uses on entry — one read
+        // path for connecting in the app.
+        connectFromStored: (shouldConnect) => sessions.reconnect(shouldConnect),
         connection,
         client,
         clock: realClock,
         appVersion: APP_VERSION,
-        unpair: async () => {
-          await clearPairing(expoSecureStore);
-          // The stored refresh token belongs to the pairing it was issued under.
-          await authSession.forget();
-        },
+        machineCount: () => machineStore.count(),
+        unpair: () => sessions.forget(machineId, "unpair"),
+        afterForget: (outcome) =>
+          applyForgetOutcome({
+            id: machineId,
+            cause: "unpair",
+            outcome,
+            sessions,
+            gate,
+            navigateToPair: () => router.replace("/pair"),
+          }),
         navigateToPair: () => {
-          router.replace("/pair");
+          gate.navigate(() => {
+            // A reconnect that ends after a switch leaves the new machine's screen.
+            if (sessions.current().id === machineId) router.replace("/pair");
+          });
         },
         log: console.log,
         // M10 Task 6, rule 10 of settings-store.ts: this store only relays
         // `push`'s own view and forwards `setNotifications` to it — the
-        // one `PushRegistration` `PushProvider` built for the whole app
+        // one `PushRegistration` `PushProvider` built for this machine's scope
         // (push-context.tsx), never a second instance built here.
         push,
         auth: authSession,
+        setIdleMs: sessions.setIdleMs,
       }),
-    [client, connection, router, push, authSession],
+    [machineId, sessions, gate, client, connection, router, push, authSession],
   );
 
   const [view, setView] = useState<SettingsView>(store.get());

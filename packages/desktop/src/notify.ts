@@ -1,5 +1,6 @@
 // M10 Task 3: the push decision, the notifier and its notification kinds
-// (the five generic ones, plus Reviews' three review-* kinds). This is the
+// (the five generic ones, Reviews' three review-* kinds and the Tailscale
+// join alert). This is the
 // one place that decides what text is allowed to leave the laptop as a push
 // notification — every string comes from messages.ts's `pushTitle`/
 // `pushBody`, whose only interpolated values are the project name and a
@@ -40,7 +41,9 @@ export type NotifyEvent =
   | { kind: "reply"; replyTo: string }
   // Reviews (review-service.ts's onNotify): only the PR's own key — never
   // a comment's author or text.
-  | ReviewNotifyEvent;
+  | ReviewNotifyEvent
+  // A device joined over Tailscale. Carries nothing: the push never names it.
+  | { kind: "device-joined" };
 
 export type ReviewNotifyEvent = {
   kind: "review-comment" | "review-queued" | "review-requested";
@@ -77,12 +80,19 @@ function eventKeyOf(event: NotifyEvent): string {
     case "command-finished":
       return event.paneKey;
     case "reply":
+    case "device-joined":
       return "";
     case "review-comment":
     case "review-queued":
     case "review-requested":
       return event.pr;
   }
+}
+
+/** A security alert: what the login lockout notices are on the desktop, so
+ *  neither a focused window nor an earlier alert holds it back. */
+function isSecurityAlert(event: NotifyEvent): boolean {
+  return event.kind === "device-joined";
 }
 
 /** The project name an event carries, or `null` for the two kinds that
@@ -99,6 +109,7 @@ function projectOf(event: NotifyEvent): string | null {
     case "review-comment":
     case "review-queued":
     case "review-requested":
+    case "device-joined":
       return null;
   }
 }
@@ -120,6 +131,7 @@ function sessionIdOf(event: NotifyEvent): string | undefined {
     case "review-comment":
     case "review-queued":
     case "review-requested":
+    case "device-joined":
       return undefined;
   }
 }
@@ -141,6 +153,8 @@ export function relevantChannels(event: NotifyEvent): { channel: string; key?: s
     case "review-queued":
     case "review-requested":
       return [{ channel: "reviews:changed" }];
+    case "device-joined":
+      return [];
   }
 }
 
@@ -156,9 +170,9 @@ function watchingDevicesFor(context: NotifyContext, event: NotifyEvent): Set<str
  * The pure push decision (behaviour rule 2): nothing when `!enabled` or
  * `focused`; per target, nothing when that device is watching a relevant
  * channel or was already sent this exact (device, kind, key) within
- * NOTIFY_COALESCE_MS. Never mutates `state` or `context` — every returned
- * state is a fresh value, capped at NOTIFY_STATE_MAX entries (oldest by
- * recorded time evicted first).
+ * NOTIFY_COALESCE_MS. A security alert follows only `enabled`. Never mutates
+ * `state` or `context` — every returned state is a fresh value, capped at
+ * NOTIFY_STATE_MAX entries (oldest by recorded time evicted first).
  */
 export function shouldNotify(
   state: NotifyState,
@@ -167,6 +181,7 @@ export function shouldNotify(
   now: number,
 ): { targets: PushTarget[]; state: NotifyState } {
   if (!context.enabled) return { targets: [], state };
+  if (isSecurityAlert(event)) return { targets: [...context.targets], state };
   if (context.focused) return { targets: [], state };
 
   const watchingDevices = watchingDevicesFor(context, event);
@@ -200,8 +215,10 @@ export function shouldNotify(
  * The payload for one target — behaviour rule 3. `project` reaches the
  * message only when `includeProjectNames` is true and the event carries
  * one, truncated to MAX_PUSH_PROJECT_CHARS; `data` never carries anything
- * else beyond `kind`, a validated `sessionId` (session-* kinds only) and
- * that same `project`.
+ * else beyond `kind`, the target's own `device` id (a phone holding many
+ * machines finds which one sent this by it; an old phone drops the key), a
+ * validated `sessionId` (session-* kinds only), that same `project`, and a
+ * review's `pr` under the same switch.
  */
 export function buildPushMessage(
   target: PushTarget,
@@ -226,7 +243,7 @@ export function buildPushMessage(
           ...(includeProjectNames ? { repo: pr.slice(0, hash) } : {}),
         };
 
-  const data: Record<string, string> = { kind: event.kind };
+  const data: Record<string, string> = { kind: event.kind, device: target.deviceId };
   if (sessionId !== undefined) data.sessionId = sessionId;
   if (project !== undefined) data.project = project;
   // Gated exactly like `project`: `owner/name` is a repo name, and with
@@ -263,6 +280,8 @@ export type Notifier = {
   commandFinished(paneKey: string, seconds: number, ok: boolean): void;
   /** Reviews: review-service.ts's onNotify, routed here by compose.ts. */
   review(event: ReviewNotifyEvent): void;
+  /** A device joined over Tailscale: remote-access.ts's onDeviceJoined. */
+  deviceJoined(): void;
   dispose(): void;
 };
 
@@ -288,6 +307,7 @@ function suppressReason(
   sentTargets: readonly PushTarget[],
 ): "off" | "focused" | "watching" | "coalesced" | "none" {
   if (!context.enabled) return "off";
+  if (isSecurityAlert(event)) return "none";
   if (context.focused) return "focused";
   if (sentTargets.length > 0) return "none";
   if (context.targets.length === 0) return "none";
@@ -420,6 +440,11 @@ export function createNotifier(deps: NotifierDeps): Notifier {
     emit({ kind: event.kind, pr: event.pr });
   }
 
+  function deviceJoined(): void {
+    if (disposed) return;
+    emit({ kind: "device-joined" });
+  }
+
   function dispose(): void {
     disposed = true;
     unsubscribeChange();
@@ -430,5 +455,5 @@ export function createNotifier(deps: NotifierDeps): Notifier {
     waitingFlagged.clear();
   }
 
-  return { commandFinished, review, dispose };
+  return { commandFinished, review, deviceJoined, dispose };
 }

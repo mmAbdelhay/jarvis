@@ -3,11 +3,13 @@ import { languageFromLocale } from "./i18n";
 import {
   type Prefs,
   type PrefsStore,
-  createRefreshStoredFlag,
   loadPrefs,
   savePrefs,
+  setDiffMode,
   setKeepSignedIn,
+  setMachineLinks,
 } from "./prefs";
+import { createPrefsFacade } from "./push-context-support";
 
 class FakeStore implements PrefsStore {
   private text: string | undefined;
@@ -40,6 +42,8 @@ describe("loadPrefs", () => {
       idleLockMinutes: 15,
       refreshTokenStored: false,
       keepSignedIn: false,
+      machineFlags: {},
+      machineLinks: [],
     });
   });
 
@@ -56,6 +60,8 @@ describe("loadPrefs", () => {
       idleLockMinutes: 15,
       refreshTokenStored: false,
       keepSignedIn: false,
+      machineFlags: {},
+      machineLinks: [],
     });
   });
 
@@ -72,6 +78,8 @@ describe("loadPrefs", () => {
       idleLockMinutes: 15,
       refreshTokenStored: false,
       keepSignedIn: false,
+      machineFlags: {},
+      machineLinks: [],
     });
   });
 
@@ -87,6 +95,8 @@ describe("loadPrefs", () => {
       idleLockMinutes: 15,
       refreshTokenStored: false,
       keepSignedIn: false,
+      machineFlags: {},
+      machineLinks: [],
     });
     const prefs = await loadPrefs(store, "en-US");
     expect(prefs).toEqual<Prefs>({
@@ -99,6 +109,8 @@ describe("loadPrefs", () => {
       idleLockMinutes: 15,
       refreshTokenStored: false,
       keepSignedIn: false,
+      machineFlags: {},
+      machineLinks: [],
     });
   });
 
@@ -114,6 +126,8 @@ describe("loadPrefs", () => {
       idleLockMinutes: 15,
       refreshTokenStored: false,
       keepSignedIn: false,
+      machineFlags: {},
+      machineLinks: [],
     });
   });
 
@@ -131,6 +145,8 @@ describe("loadPrefs", () => {
         idleLockMinutes: 15,
         refreshTokenStored: false,
         keepSignedIn: false,
+        machineFlags: {},
+        machineLinks: [],
       });
     });
 
@@ -147,6 +163,8 @@ describe("loadPrefs", () => {
         idleLockMinutes: 15,
         refreshTokenStored: false,
         keepSignedIn: false,
+        machineFlags: {},
+        machineLinks: [],
       });
     });
 
@@ -162,6 +180,8 @@ describe("loadPrefs", () => {
         idleLockMinutes: 15,
         refreshTokenStored: false,
         keepSignedIn: false,
+        machineFlags: {},
+        machineLinks: [],
       });
       const prefs = await loadPrefs(store, "en-US");
       expect(prefs).toEqual<Prefs>({
@@ -174,6 +194,8 @@ describe("loadPrefs", () => {
         idleLockMinutes: 15,
         refreshTokenStored: false,
         keepSignedIn: false,
+        machineFlags: {},
+        machineLinks: [],
       });
     });
 
@@ -190,6 +212,8 @@ describe("loadPrefs", () => {
         idleLockMinutes: 15,
         refreshTokenStored: false,
         keepSignedIn: false,
+        machineFlags: {},
+        machineLinks: [],
       });
     });
   });
@@ -227,6 +251,8 @@ describe("loadPrefs", () => {
         idleLockMinutes: 15,
         refreshTokenStored: false,
         keepSignedIn: false,
+        machineFlags: {},
+        machineLinks: [],
       });
       const prefs = await loadPrefs(store, "en-US");
       expect(prefs).toEqual<Prefs>({
@@ -239,6 +265,8 @@ describe("loadPrefs", () => {
         idleLockMinutes: 15,
         refreshTokenStored: false,
         keepSignedIn: false,
+        machineFlags: {},
+        machineLinks: [],
       });
     });
 
@@ -255,6 +283,8 @@ describe("loadPrefs", () => {
         idleLockMinutes: 15,
         refreshTokenStored: false,
         keepSignedIn: false,
+        machineFlags: {},
+        machineLinks: [],
       });
     });
   });
@@ -294,6 +324,8 @@ describe("loadPrefs", () => {
         idleLockMinutes: 15,
         refreshTokenStored: false,
         keepSignedIn: false,
+        machineFlags: {},
+        machineLinks: [],
       });
       const prefs = await loadPrefs(store, "en-US");
       expect(prefs).toEqual<Prefs>({
@@ -306,6 +338,8 @@ describe("loadPrefs", () => {
         idleLockMinutes: 15,
         refreshTokenStored: false,
         keepSignedIn: false,
+        machineFlags: {},
+        machineLinks: [],
       });
     });
 
@@ -322,6 +356,8 @@ describe("loadPrefs", () => {
         idleLockMinutes: 15,
         refreshTokenStored: false,
         keepSignedIn: false,
+        machineFlags: {},
+        machineLinks: [],
       });
     });
   });
@@ -367,6 +403,8 @@ describe("loadPrefs", () => {
         idleLockMinutes: 15,
         refreshTokenStored: false,
         keepSignedIn: false,
+        machineFlags: {},
+        machineLinks: [],
       });
       const prefs = await loadPrefs(store, "en-US");
       expect(prefs).toEqual<Prefs>({
@@ -379,6 +417,8 @@ describe("loadPrefs", () => {
         idleLockMinutes: 15,
         refreshTokenStored: false,
         keepSignedIn: false,
+        machineFlags: {},
+        machineLinks: [],
       });
     });
 
@@ -394,6 +434,8 @@ describe("loadPrefs", () => {
         idleLockMinutes: 15,
         refreshTokenStored: false,
         keepSignedIn: false,
+        machineFlags: {},
+        machineLinks: [],
       });
       const prefs = await loadPrefs(store, "en-US");
       expect(prefs.sidecarZoom).toEqual({ database: 110 });
@@ -440,6 +482,8 @@ describe("loadPrefs", () => {
         idleLockMinutes: 15,
         refreshTokenStored: false,
         keepSignedIn: false,
+        machineFlags: {},
+        machineLinks: [],
       });
     });
 
@@ -513,6 +557,117 @@ describe("loadPrefs", () => {
     expect((await loadPrefs(store, "en-US")).keepSignedIn).toBe(false);
   });
 
+  describe("machineLinks", () => {
+    const LINK = { name: "mac.tail1234.ts.net", port: 7718 };
+
+    it("defaults to none, for a missing or malformed value", async () => {
+      for (const text of [undefined, "{}", '{"machineLinks":"x"}', '{"machineLinks":null}']) {
+        expect((await loadPrefs(new FakeStore(text), "en-US")).machineLinks).toEqual([]);
+      }
+    });
+
+    it("drops a stored link failing validation, keeping the rest", async () => {
+      const store = new FakeStore(
+        JSON.stringify({
+          machineLinks: [{ name: "evil.example.com", port: 7718 }, LINK, { name: LINK.name }],
+        }),
+      );
+      expect((await loadPrefs(store, "en-US")).machineLinks).toEqual([LINK]);
+    });
+
+    it("loads at most 16", async () => {
+      const machineLinks = Array.from({ length: 20 }, (_, i) => ({
+        name: `m${i}.tail1234.ts.net`,
+        port: 7718,
+      }));
+      const store = new FakeStore(JSON.stringify({ machineLinks }));
+      expect((await loadPrefs(store, "en-US")).machineLinks).toEqual(machineLinks.slice(0, 16));
+    });
+
+    it("setMachineLinks saves them, changing no other key", async () => {
+      const store = new FakeStore(JSON.stringify({ language: "ar", keepSignedIn: true }));
+      await setMachineLinks(store, "en-US", [LINK]);
+      const prefs = await loadPrefs(store, "en-US");
+      expect(prefs.machineLinks).toEqual([LINK]);
+      expect(prefs.language).toBe("ar");
+      expect(prefs.keepSignedIn).toBe(true);
+    });
+  });
+
+  describe("machineFlags", () => {
+    const ID = "mac.tail.ts.net_7717";
+    const FLAGS = { refreshTokenStored: true, pushRegistered: false };
+
+    it("defaults to {} when missing or not an object", async () => {
+      for (const text of [undefined, "{}", '{"machineFlags":"x"}', '{"machineFlags":null}']) {
+        expect((await loadPrefs(new FakeStore(text), "en-US")).machineFlags).toEqual({});
+      }
+    });
+
+    it("keeps valid entries and drops invalid ones one by one", async () => {
+      const store = new FakeStore(
+        JSON.stringify({
+          machineFlags: {
+            [ID]: FLAGS,
+            "BAD ID": FLAGS,
+            "no-push_1": { refreshTokenStored: true },
+            "string-flag_1": { refreshTokenStored: "true", pushRegistered: false },
+            "not-an-object_1": true,
+            null_1: null,
+          },
+        }),
+      );
+      expect((await loadPrefs(store, "en-US")).machineFlags).toEqual({ [ID]: FLAGS });
+    });
+
+    it("never carries a field it does not know", async () => {
+      const store = new FakeStore(
+        JSON.stringify({ machineFlags: { [ID]: { ...FLAGS, token: "secret" } } }),
+      );
+      expect((await loadPrefs(store, "en-US")).machineFlags).toEqual({ [ID]: FLAGS });
+    });
+
+    it("holds at most 32 entries", async () => {
+      const machineFlags: Record<string, typeof FLAGS> = {};
+      for (let i = 0; i < 40; i += 1) machineFlags[`m${i}_7717`] = FLAGS;
+      const prefs = await loadPrefs(new FakeStore(JSON.stringify({ machineFlags })), "en-US");
+      expect(Object.keys(prefs.machineFlags)).toHaveLength(32);
+    });
+
+    it("a machine id of __proto__ cannot reach the prototype", async () => {
+      const prefs = await loadPrefs(
+        new FakeStore(
+          `{"machineFlags":{"__proto__":{"refreshTokenStored":true,"pushRegistered":true}}}`,
+        ),
+        "en-US",
+      );
+      expect(Object.getPrototypeOf(prefs.machineFlags)).toBe(Object.prototype);
+      expect((prefs.machineFlags as { refreshTokenStored?: boolean }).refreshTokenStored).toBe(
+        undefined,
+      );
+    });
+
+    it("a save by every writer in this module and the push facade keeps them", async () => {
+      const store = new FakeStore(JSON.stringify({ machineFlags: { [ID]: FLAGS } }));
+      await setKeepSignedIn(store, "en-US", true);
+      await setDiffMode(store, "en-US", "split");
+      await createPrefsFacade(
+        store,
+        "en-US",
+        { notifications: false, pushRegistered: false },
+        { read: async () => false, write: async () => {} },
+      ).set({ notifications: true });
+      await savePrefs(store, await loadPrefs(store, "en-US"));
+      const prefs = await loadPrefs(store, "en-US");
+      expect(prefs.machineFlags).toEqual({ [ID]: FLAGS });
+      expect(prefs).toMatchObject({
+        keepSignedIn: true,
+        changesDiffMode: "split",
+        notifications: true,
+      });
+    });
+  });
+
   describe("refreshTokenStored", () => {
     it("is true only for a stored true", async () => {
       for (const [value, expected] of [
@@ -527,20 +682,6 @@ describe("loadPrefs", () => {
         );
         expect(prefs.refreshTokenStored).toBe(expected);
       }
-    });
-
-    it("the flag adapter changes only its own key", async () => {
-      const store = new FakeStore(JSON.stringify({ language: "ar", idleLockMinutes: 30 }));
-      const flag = createRefreshStoredFlag(store, "en-US");
-      expect(await flag.read()).toBe(false);
-      await flag.write(true);
-      expect(await flag.read()).toBe(true);
-      const prefs = await loadPrefs(store, "en-US");
-      expect(prefs).toMatchObject({
-        language: "ar",
-        idleLockMinutes: 30,
-        refreshTokenStored: true,
-      });
     });
   });
 });

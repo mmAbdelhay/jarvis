@@ -4,7 +4,7 @@
 // offers the owner password as the fallback. It closes itself once the
 // connection is open again. The decisions live in unlock-screen.ts and
 // auth-session.ts; this file is layout and wiring.
-import { useRouter } from "expo-router";
+import { useIsFocused, useRouter } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -19,6 +19,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { UnlockOutcome } from "@/lib/auth-session";
+import { MachineSwitcherButton } from "@/components/MachineSwitcher";
 import { AuthCard, useAuthCardContentTop, useAuthCardRootStyle } from "@/components/WidePanel";
 import { t } from "@/lib/i18n";
 import type { MessageKey } from "@/lib/i18n";
@@ -26,7 +27,12 @@ import { useLanguage } from "@/lib/language-context";
 import { useAuthSession, useConnectionStore, useReconnect } from "@/lib/rpc-context";
 import { connectionStateKey } from "@/lib/settings-store";
 import { theme } from "@/lib/theme";
-import { lockCauseKey, unlockCanRetryConnection, unlockMessageKey } from "@/lib/unlock-screen";
+import {
+  lockCauseKey,
+  shouldCloseUnlock,
+  unlockCanRetryConnection,
+  unlockMessageKey,
+} from "@/lib/unlock-screen";
 
 // Wide layout: a centred card instead of a full-screen page (the logic
 // below is the same on every screen size).
@@ -44,6 +50,7 @@ function UnlockScreen() {
   const contentTop = useAuthCardContentTop(insets.top + 48);
   const language = useLanguage();
   const router = useRouter();
+  const focused = useIsFocused();
   const auth = useAuthSession();
   const connection = useConnectionStore();
   const reconnect = useReconnect();
@@ -67,10 +74,10 @@ function UnlockScreen() {
 
   // Unlocked: close, back to wherever the owner was.
   useEffect(() => {
-    if (connectionView.state !== "open" || authView.lockedLocally) return;
+    if (!shouldCloseUnlock(connectionView.state, authView.lockedLocally, focused)) return;
     if (router.canGoBack()) router.back();
     else router.replace("/dashboard");
-  }, [connectionView.state, authView.lockedLocally, router]);
+  }, [connectionView.state, authView.lockedLocally, focused, router]);
 
   const finish = useCallback((outcome: UnlockOutcome) => {
     setMessage(unlockMessageKey(outcome));
@@ -165,6 +172,10 @@ function UnlockScreen() {
         )}
 
         {message !== undefined && <Text style={styles.error}>{t(language, message)}</Text>}
+
+        {/* Never disabled: an owner who cannot unlock this machine, or a prompt
+            that is up, must not trap them on it. */}
+        <MachineSwitcherButton variant="link" />
       </View>
     </KeyboardAvoidingView>
   );

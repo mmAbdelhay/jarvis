@@ -186,6 +186,88 @@ describe("listenTls: sidecar proxy routing", () => {
     await listener.close();
   });
 
+  describe("a socket with no recorded PROXY source", () => {
+    const REFUSAL = "remote server: refused a relay connection with no recorded source";
+
+    /** Well-formed and from an allowed origin, so only the missing record can refuse it. */
+    function unrecordedUpgrade(url: string) {
+      const { req, socket } = fakeRequest(url);
+      req.headers = {
+        upgrade: "websocket",
+        "sec-websocket-version": "13",
+        "sec-websocket-key": Buffer.alloc(16, 7).toString("base64"),
+      };
+      // What a broken link to the raw socket leaves: only the relay's loopback.
+      Object.assign(socket, { remoteAddress: "127.0.0.1" });
+      return { req, socket };
+    }
+
+    async function startWith(proxyProtocol: boolean, proxy?: ReturnType<typeof fakeProxy>) {
+      createdServers.length = 0;
+      createdWssInstances.length = 0;
+      const log = vi.fn();
+      const onSocket = vi.fn(() => ({ onText: () => {}, onBinary: () => {}, onClose: () => {} }));
+      const listener = await listenTls({
+        host: "127.0.0.1",
+        port: 0,
+        cert: "cert",
+        key: "key",
+        proxy,
+        webOrigin: () => undefined,
+        onSocket,
+        log,
+        proxyProtocol,
+      });
+      const server = createdServers[0];
+      if (server === undefined) throw new Error("no https server created");
+      return { listener, server, log, onSocket };
+    }
+
+    it.each(["/rpc", "/pair"])(
+      "relay on: %s is destroyed with no response, and logged",
+      async (url) => {
+        const { listener, server, log, onSocket } = await startWith(true);
+        const { req, socket } = unrecordedUpgrade(url);
+
+        server.emit("upgrade", req, socket, Buffer.alloc(0));
+
+        expect(socket.destroy).toHaveBeenCalledOnce();
+        expect(createdWssInstances.at(-1)?.handleUpgrade).not.toHaveBeenCalled();
+        expect(onSocket).not.toHaveBeenCalled();
+        expect(log.mock.calls).toEqual([[REFUSAL]]);
+
+        await listener.close();
+      },
+    );
+
+    it("relay on: a sidecar upgrade is refused the same way", async () => {
+      const proxy = fakeProxy();
+      const { listener, server, log } = await startWith(true, proxy);
+      const { req, socket } = unrecordedUpgrade(`/s/${HANDLE}/x`);
+
+      server.emit("upgrade", req, socket, Buffer.alloc(0));
+
+      expect(socket.destroy).toHaveBeenCalledOnce();
+      expect(proxy.handleUpgrade).not.toHaveBeenCalled();
+      expect(log.mock.calls).toEqual([[REFUSAL]]);
+
+      await listener.close();
+    });
+
+    it("relay off: the same socket proceeds, and nothing is logged", async () => {
+      const { listener, server, log } = await startWith(false);
+      const { req, socket } = unrecordedUpgrade("/rpc");
+
+      server.emit("upgrade", req, socket, Buffer.alloc(0));
+
+      expect(socket.destroy).not.toHaveBeenCalled();
+      expect(createdWssInstances.at(-1)?.handleUpgrade).toHaveBeenCalledOnce();
+      expect(log).not.toHaveBeenCalled();
+
+      await listener.close();
+    });
+  });
+
   it("an /rpc upgrade still reaches ws's handleUpgrade even when a proxy is defined", async () => {
     const proxy = fakeProxy();
     const { server, listener } = await startListener(proxy);

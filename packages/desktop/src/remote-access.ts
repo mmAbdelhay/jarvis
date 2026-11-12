@@ -62,6 +62,7 @@ const CLOSED_STATUS: RemoteStatus = {
   // M11 Task 2 minimal compile fix: the real gate value is Task 4's to
   // wire; "off" is the correct closed-bridge default regardless.
   sidecarProxy: "off",
+  tailnet: { kind: "off" },
 };
 
 /**
@@ -167,6 +168,9 @@ export type RemoteAccessDeps = {
   // `Notification`). This file picks the bilingual text for the bridge's
   // notice kind; main.ts only displays it.
   showNotification(title: string, body: string): void;
+  // A device joined with the owner password: the generic push, on top of
+  // the notification above that names it (notify.ts's deviceJoined).
+  onDeviceJoined(): void;
   // M10 Task 4: the Expo push sender's own outbound HTTP client — injected
   // exactly like `io`, so a test drives the whole send lifecycle with a
   // fake `fetch` and never a real socket.
@@ -202,6 +206,14 @@ export type RemoteAccess = RemoteControls & {
    *  the bridge exists (nothing was queued if there is nowhere to queue
    *  it). */
   recordPushQueued(deviceId: string, pushKind: string): void;
+  /** The Tailscale guard's verdict and renewal. Both wait for `start`'s own
+   *  apply, like `apply` does: a verdict sent before it would be dropped. */
+  setTailnetBlock(reason: "funnel" | "relay-missing" | "bad-bind" | undefined): Promise<boolean>;
+  tailnetReadFailed(): Promise<void>;
+  retryListener(): Promise<void>;
+  reloadCertificate(): Promise<void>;
+  /** The Settings switch turned on: drops the bridge's Funnel latch. */
+  rearmTailnet(): Promise<void>;
 };
 
 function toBridgeConfig(config: RemoteConfig): BridgeConfig {
@@ -218,6 +230,7 @@ function toBridgeConfig(config: RemoteConfig): BridgeConfig {
       ...(config.tls.certPath !== undefined ? { certPath: config.tls.certPath } : {}),
       ...(config.tls.keyPath !== undefined ? { keyPath: config.tls.keyPath } : {}),
     },
+    tailnet: { enabled: config.tailnet.enabled, relay: config.tailnet.relay },
   };
 }
 
@@ -291,7 +304,11 @@ export function createRemoteAccess(deps: RemoteAccessDeps): RemoteAccess {
           onIdleDisabled: deps.onIdleDisabled,
           notifyDesktop: (kind, deviceName) => {
             const { title, body } = MESSAGES.remoteSecurityNotice(kind, deps.language, deviceName);
-            deps.showNotification(title, body);
+            try {
+              deps.showNotification(title, body);
+            } finally {
+              if (kind === "device-joined") deps.onDeviceJoined();
+            }
           },
         })
         .then((created) => {
@@ -485,6 +502,27 @@ export function createRemoteAccess(deps: RemoteAccessDeps): RemoteAccess {
     async unregisterPush(deviceId: string): Promise<void> {
       if (bridge === undefined) return;
       await bridge.clearPushToken(deviceId, "unregistered");
+    },
+    async setTailnetBlock(reason): Promise<boolean> {
+      await started;
+      if (stopped || bridge === undefined) return false;
+      return bridge.setTailnetBlock(reason);
+    },
+    async tailnetReadFailed(): Promise<void> {
+      await started;
+      if (!stopped) await bridge?.tailnetReadFailed();
+    },
+    async retryListener(): Promise<void> {
+      await started;
+      if (!stopped) await bridge?.retryListener();
+    },
+    async reloadCertificate(): Promise<void> {
+      await started;
+      if (!stopped) await bridge?.reloadCertificate();
+    },
+    async rearmTailnet(): Promise<void> {
+      await started;
+      if (!stopped) await bridge?.rearmTailnet();
     },
     start,
     apply: applyConfig,

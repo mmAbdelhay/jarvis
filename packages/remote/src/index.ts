@@ -24,6 +24,7 @@ export type {
   RemotePairingStatus,
   RemoteProblem,
   RemoteStatus,
+  RemoteTailnetStatus,
   RemoteWebStatus,
   SetOwnerPasswordResult,
   WebListenOptions,

@@ -4,7 +4,7 @@ import { parseConfig, type JarvisConfig } from "../src/config.js";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 import { PERSONAL_PROJECT } from "../src/personal.js";
 import type { BindChoice, RemoteStatus } from "@jarvis/remote";
-import { initSettings, openSettings, savePrayerSettings } from "./settings.js";
+import { initSettings, openSettings, savePrayerSettings, saveSettings } from "./settings.js";
 import { initKeepAwake } from "./keep-awake.js";
 import { setTerminalFontBase, terminalFontSize } from "./terminal-font.js";
 import { encodeQr, qrToCanvas } from "./vendor/qr.js";
@@ -92,6 +92,7 @@ function sample(): JarvisConfig {
       tls: {},
       push: { enabled: false, includeProjectNames: false },
       web: { enabled: false },
+      tailnet: { enabled: false, relay: false },
       idleDisableMinutes: 0,
     },
     daemon: { enabled: false },
@@ -182,6 +183,21 @@ function harness(config: JarvisConfig = sample()): { calls: Recorded[]; config: 
     <input id="settings-remote-web" type="checkbox" />
     <div id="settings-remote-web-note"></div>
     <div id="settings-remote-web-state"></div>
+    <label id="settings-remote-tailnet-label"></label>
+    <input id="settings-remote-tailnet" type="checkbox" />
+    <div id="settings-remote-tailnet-note"></div>
+    <div id="settings-remote-tailnet-state"></div>
+    <label id="settings-remote-tailnet-relay-label"></label>
+    <input id="settings-remote-tailnet-relay" type="checkbox" />
+    <div id="settings-remote-tailnet-relay-note"></div>
+    <div id="settings-remote-tailnet-background" hidden></div>
+    <div id="settings-remote-tailnet-confirm" hidden>
+      <div id="settings-remote-tailnet-confirm-text"></div>
+      <button id="settings-remote-tailnet-confirm-yes"></button>
+      <button id="settings-remote-tailnet-confirm-no"></button>
+    </div>
+    <div id="settings-remote-tailnet-result" hidden></div>
+    <div id="settings-remote-tailnet-command" hidden></div>
     <div id="settings-remote-web-access" hidden>
       <div id="settings-remote-web-url"></div>
       <button id="settings-remote-web-open"></button>
@@ -279,6 +295,14 @@ function harness(config: JarvisConfig = sample()): { calls: Recorded[]; config: 
         keyPath: "/x/.config/jarvis/tls/m1.tailnet.ts.net.key",
         name: "m1.tailnet.ts.net",
       });
+    },
+    tailnetEnable: (...args: unknown[]) => {
+      calls.push({ call: "tailnetEnable", args });
+      return Promise.resolve({ ok: true, commands: [] });
+    },
+    tailnetDisable: () => {
+      calls.push({ call: "tailnetDisable", args: [] });
+      return Promise.resolve({ ok: true, commands: [] });
     },
     openTab: (...args: unknown[]) => {
       calls.push({ call: "openTab", args });
@@ -2022,6 +2046,7 @@ describe("remote access section", () => {
       devices: patch.devices ?? [],
       problem: patch.problem,
       sidecarProxy: patch.sidecarProxy ?? ("off" as const),
+      tailnet: { kind: "off" as const },
       idle: patch.idle,
       ...(patch.web !== undefined ? { web: patch.web } : {}),
     };
@@ -3232,6 +3257,7 @@ describe("Settings: owner account (Phase 0)", () => {
       devices: [],
       problem: undefined,
       sidecarProxy: "off",
+      tailnet: { kind: "off" },
       ownerVersion,
     });
     push?.(status(101));
@@ -3560,5 +3586,585 @@ describe("keep awake section", () => {
     expect(document.getElementById("settings-awake")?.textContent).toContain(
       MESSAGES.awakeSettingsMacOnly(PRIMARY_LANGUAGE),
     );
+  });
+});
+
+describe("Tailscale access", () => {
+  const jarvis = () => (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
+  const el = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
+  const toggle = () => el<HTMLInputElement>("settings-remote-tailnet");
+  const relay = () => el<HTMLInputElement>("settings-remote-tailnet-relay");
+  const CERT = { certPath: "/x/tls/m.crt", keyPath: "/x/tls/m.key" };
+  const PAIRED = [
+    { id: "d1", name: "Phone", pairedAt: 1, lastSeenAt: undefined, connected: false },
+  ];
+  const CLOSED: RemoteStatus = {
+    enabled: true,
+    listening: undefined,
+    pairing: { kind: "closed" },
+    devices: [],
+    problem: undefined,
+    sidecarProxy: "off",
+    tailnet: { kind: "off" },
+  };
+  const LISTENING = (source: "self-signed" | "configured"): RemoteStatus["listening"] => ({
+    host: "100.84.17.203",
+    port: 7717,
+    fingerprint: "ab",
+    certificate: { source, hostname: source === "configured" ? "m.ts.net" : undefined },
+  });
+
+  function configWith(patch: Partial<JarvisConfig["remote"]>, daemon = true): JarvisConfig {
+    const config = sample();
+    config.remote = { ...config.remote, ...patch };
+    config.daemon = { enabled: daemon };
+    return config;
+  }
+
+  async function open(
+    config: JarvisConfig = configWith({}),
+    status: Partial<RemoteStatus> = {},
+  ): Promise<Recorded[]> {
+    const { calls } = harness(config);
+    jarvis()["remoteStatus"] = () => Promise.resolve({ ...CLOSED, ...status });
+    initSettings();
+    await openSettings();
+    await flush();
+    return calls;
+  }
+
+  function flip(on: boolean): void {
+    toggle().checked = on;
+    change(toggle());
+  }
+
+  describe("what it says", () => {
+    const STATES: RemoteStatus["tailnet"][] = [
+      { kind: "off" },
+      { kind: "on" },
+      { kind: "blocked", reason: "no-owner-password" },
+      { kind: "blocked", reason: "no-certificate" },
+      { kind: "blocked", reason: "bad-bind" },
+      { kind: "blocked", reason: "funnel" },
+      { kind: "blocked", reason: "relay-missing" },
+      { kind: "blocked", reason: "unverified" },
+    ];
+
+    it.each(STATES)("shows the bridge's state %j", async (tailnet) => {
+      await open(configWith({ tailnet: { enabled: true, relay: false } }), { tailnet });
+      expect(el("settings-remote-tailnet-state").textContent).toBe(
+        MESSAGES.remoteTailnetState(tailnet, PRIMARY_LANGUAGE),
+      );
+    });
+
+    it.each(["ar", "en"] as const)(
+      "the background note names General as Settings does, in %s",
+      (language) => {
+        const words = MESSAGES.remoteTailnetBackgroundOff(language).split(/[\s.،]+/);
+        expect(words).toContain(MESSAGES.daemonGeneral(language));
+      },
+    );
+
+    it.each(["ar", "en"] as const)("every state has its own text in %s", (language) => {
+      const texts = STATES.map((state) => MESSAGES.remoteTailnetState(state, language));
+      expect(texts.every((text) => text.length > 0)).toBe(true);
+      expect(new Set(texts).size).toBe(STATES.length);
+    });
+
+    it("every state differs between Arabic and English", () => {
+      for (const state of STATES) {
+        expect(MESSAGES.remoteTailnetState(state, "ar")).not.toBe(
+          MESSAGES.remoteTailnetState(state, "en"),
+        );
+      }
+    });
+
+    it("a status from a daemon older than the switch reads as off", async () => {
+      const { tailnet: _none, ...older } = CLOSED;
+      harness(configWith({}));
+      jarvis()["remoteStatus"] = () => Promise.resolve(older);
+      initSettings();
+      await openSettings();
+      await flush();
+      expect(el("settings-remote-tailnet-state").textContent).toBe(
+        MESSAGES.remoteTailnetState({ kind: "off" }, PRIMARY_LANGUAGE),
+      );
+    });
+
+    it("says plainly who can try the password, in both languages", async () => {
+      await open();
+      expect(el("settings-remote-tailnet-note").textContent).toBe(
+        MESSAGES.remoteTailnetNote(PRIMARY_LANGUAGE),
+      );
+      expect(MESSAGES.remoteTailnetNote("en")).toMatch(/any device.*Tailscale network.*password/i);
+      expect(MESSAGES.remoteTailnetNote("en")).toMatch(/limited/);
+      expect(MESSAGES.remoteTailnetNote("en")).toMatch(/alert/);
+      expect(MESSAGES.remoteTailnetNote("ar")).toContain("Tailscale");
+    });
+
+    it("the relay note says a USB phone over adb reverse is dropped, in both languages", async () => {
+      await open();
+      expect(el("settings-remote-tailnet-relay-note").textContent).toBe(
+        MESSAGES.remoteTailnetRelayNote(PRIMARY_LANGUAGE),
+      );
+      expect(MESSAGES.remoteTailnetRelayNote("en")).toContain("adb reverse");
+      expect(MESSAGES.remoteTailnetRelayNote("ar")).toContain("adb reverse");
+    });
+
+    it("notes when the background service is off, and only then", async () => {
+      await open(configWith({}, false));
+      expect(el("settings-remote-tailnet-background").hidden).toBe(false);
+      expect(el("settings-remote-tailnet-background").textContent).toBe(
+        MESSAGES.remoteTailnetBackgroundOff(PRIMARY_LANGUAGE),
+      );
+
+      await open(configWith({}, true));
+      expect(el("settings-remote-tailnet-background").hidden).toBe(true);
+    });
+
+    it("the switch and the relay choice read the config", async () => {
+      await open(configWith({ tailnet: { enabled: true, relay: true } }));
+      expect(toggle().checked).toBe(true);
+      expect(relay().checked).toBe(true);
+      // The relay is chosen before enabling; while on it is not a live choice.
+      expect(relay().disabled).toBe(true);
+    });
+
+    it("cannot be turned on with no owner password, but can be turned off", async () => {
+      harness(configWith({}));
+      jarvis()["ownerStatus"] = () => Promise.resolve({ hasPassword: false, passkeys: [] });
+      initSettings();
+      await openSettings();
+      await flush();
+      expect(toggle().disabled).toBe(true);
+
+      harness(configWith({ tailnet: { enabled: true, relay: false } }));
+      jarvis()["ownerStatus"] = () => Promise.resolve({ hasPassword: false, passkeys: [] });
+      initSettings();
+      await openSettings();
+      await flush();
+      expect(toggle().disabled).toBe(false);
+    });
+  });
+
+  describe("turning it on", () => {
+    it("with no paired device goes straight to the channel, with the relay choice", async () => {
+      const calls = await open();
+      relay().checked = true;
+      change(relay());
+
+      flip(true);
+      await flush();
+
+      expect(calls.filter((c) => c.call === "tailnetEnable")).toEqual([
+        { call: "tailnetEnable", args: [{ relay: true }] },
+      ]);
+      expect(el("settings-remote-tailnet-confirm").hidden).toBe(true);
+    });
+
+    it("never writes the relay choice into the draft a Save would send", async () => {
+      const calls = await open();
+      relay().checked = true;
+      change(relay());
+
+      el("settings-save").click();
+      await flush();
+
+      const saved = savedConfig(calls.find((c) => c.call === "saveSettings"));
+      expect(saved.remote.tailnet).toEqual({ enabled: false, relay: false });
+    });
+
+    it.each<[string, Partial<JarvisConfig["remote"]>, RemoteStatus["listening"]]>([
+      ["a pinned, self-signed pairing", { bindAddress: "100.84.17.203" }, LISTENING("self-signed")],
+      ["no certificate configured", { bindAddress: "100.84.17.203", tls: {} }, undefined],
+      ["a LAN pairing", { bindAddress: "192.168.100.69", tls: CERT }, LISTENING("configured")],
+    ])("warns first when a device is paired over %s", async (_name, remote, listening) => {
+      const calls = await open(configWith(remote), { devices: PAIRED, listening });
+
+      flip(true);
+      await flush();
+
+      expect(calls.some((c) => c.call === "tailnetEnable")).toBe(false);
+      expect(toggle().checked).toBe(false);
+      expect(el("settings-remote-tailnet-confirm").hidden).toBe(false);
+      expect(el("settings-remote-tailnet-confirm-text").textContent).toBe(
+        MESSAGES.remoteTailnetPairAgain(PRIMARY_LANGUAGE),
+      );
+    });
+
+    it("warns when relay would move the bind away from a Tailscale address", async () => {
+      const calls = await open(configWith({ bindAddress: "100.84.17.203", tls: CERT }), {
+        devices: PAIRED,
+        listening: LISTENING("configured"),
+      });
+      relay().checked = true;
+      change(relay());
+
+      flip(true);
+      await flush();
+
+      expect(calls.some((c) => c.call === "tailnetEnable")).toBe(false);
+      expect(el("settings-remote-tailnet-confirm").hidden).toBe(false);
+    });
+
+    it("does not warn when neither the certificate nor the bind changes", async () => {
+      const calls = await open(configWith({ bindAddress: "100.84.17.203", tls: CERT }), {
+        devices: PAIRED,
+        listening: LISTENING("configured"),
+      });
+
+      flip(true);
+      await flush();
+
+      expect(calls.some((c) => c.call === "tailnetEnable")).toBe(true);
+      expect(el("settings-remote-tailnet-confirm").hidden).toBe(true);
+    });
+
+    it("the warning's Confirm enables, its Cancel leaves everything", async () => {
+      const calls = await open(configWith({ bindAddress: "192.168.100.69" }), { devices: PAIRED });
+
+      flip(true);
+      await flush();
+      el("settings-remote-tailnet-confirm-no").click();
+      await flush();
+      expect(calls.some((c) => c.call === "tailnetEnable")).toBe(false);
+      expect(el("settings-remote-tailnet-confirm").hidden).toBe(true);
+      expect(toggle().checked).toBe(false);
+
+      flip(true);
+      await flush();
+      el("settings-remote-tailnet-confirm-yes").click();
+      await flush();
+      expect(calls.filter((c) => c.call === "tailnetEnable")).toHaveLength(1);
+      expect(el("settings-remote-tailnet-confirm").hidden).toBe(true);
+    });
+
+    it("the warning's text exists in both languages", () => {
+      expect(MESSAGES.remoteTailnetPairAgain("en")).toMatch(/pair again/i);
+      expect(MESSAGES.remoteTailnetPairAgain("ar")).not.toBe(MESSAGES.remoteTailnetPairAgain("en"));
+    });
+
+    it("a refusal shows its text and command, and the switch stays off", async () => {
+      await open();
+      jarvis()["tailnetEnable"] = () =>
+        Promise.resolve({
+          ok: false,
+          text: "Refused here",
+          language: "en",
+          commands: ["tailscale serve --tcp=7718 off"],
+        });
+
+      flip(true);
+      await flush();
+
+      expect(toggle().checked).toBe(false);
+      expect(toggle().disabled).toBe(false);
+      expect(el("settings-remote-tailnet-result").textContent).toBe("Refused here");
+      expect(el("settings-remote-tailnet-result").hidden).toBe(false);
+      expect(el("settings-remote-tailnet-command").textContent).toBe(
+        "tailscale serve --tcp=7718 off",
+      );
+      expect(el("settings-remote-tailnet-command").hidden).toBe(false);
+    });
+
+    it("is disabled for the round trip", async () => {
+      await open();
+      let finish: (value: unknown) => void = () => {};
+      jarvis()["tailnetEnable"] = () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        });
+
+      flip(true);
+
+      expect(toggle().disabled).toBe(true);
+      expect(relay().disabled).toBe(true);
+      finish({ ok: true, commands: [] });
+      await flush();
+      await flush();
+      expect(toggle().disabled).toBe(false);
+    });
+
+    it("a rejected call says so, and leaves the switch where it was", async () => {
+      await open();
+      vi.spyOn(console, "error").mockImplementationOnce(() => {});
+      jarvis()["tailnetEnable"] = () => Promise.reject(new Error("socket gone"));
+
+      flip(true);
+      await flush();
+
+      expect(toggle().checked).toBe(false);
+      expect(toggle().disabled).toBe(false);
+      expect(el("settings-remote-tailnet-result").textContent).toBe(
+        MESSAGES.remoteTailnetFailed(PRIMARY_LANGUAGE),
+      );
+    });
+
+    it("on success re-reads remote from the file, and keeps other unsaved edits", async () => {
+      const config = configWith({});
+      const after = configWith({
+        enabled: true,
+        bindAddress: "100.84.17.203",
+        web: { enabled: true },
+        tls: CERT,
+        tailnet: { enabled: true, relay: false },
+      });
+      const calls = await open(config);
+      jarvis()["getSettings"] = () => Promise.resolve(after);
+      const brain = el<HTMLTextAreaElement>("settings-brain-prompt");
+      brain.value = "typed, not saved";
+      change(brain);
+
+      flip(true);
+      await flush();
+      await flush();
+
+      expect(toggle().checked).toBe(true);
+      expect(el<HTMLInputElement>("settings-remote-enabled").checked).toBe(true);
+      expect(el<HTMLInputElement>("settings-remote-web").checked).toBe(true);
+
+      el("settings-save").click();
+      await flush();
+      const saved = savedConfig(calls.find((c) => c.call === "saveSettings"));
+      expect(saved.remote.tailnet).toEqual({ enabled: true, relay: false });
+      expect(saved.remote.bindAddress).toBe("100.84.17.203");
+      expect(saved.brain.systemPrompt).toBe("typed, not saved");
+    });
+  });
+
+  describe("Save, while a change is in flight", () => {
+    const save = () => el<HTMLButtonElement>("settings-save");
+
+    it.each([
+      ["disable", "tailnetDisable", true],
+      ["enable", "tailnetEnable", false],
+    ] as const)("during a %s, sends nothing", async (_name, channel, on) => {
+      const calls = await open(configWith({ tailnet: { enabled: on, relay: false } }));
+      let finish: (value: unknown) => void = () => {};
+      jarvis()[channel] = () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        });
+
+      flip(!on);
+
+      expect(save().disabled).toBe(true);
+      // Not only the button: any other route to the same function.
+      await saveSettings();
+      expect(calls.some((c) => c.call === "saveSettings")).toBe(false);
+
+      finish({ ok: true, commands: [] });
+      await flush();
+      await flush();
+      expect(save().disabled).toBe(false);
+    });
+
+    it("stays disabled until the re-read has answered", async () => {
+      await open(configWith({ tailnet: { enabled: true, relay: false } }));
+      let answer: (value: JarvisConfig) => void = () => {};
+      jarvis()["getSettings"] = () =>
+        new Promise((resolve) => {
+          answer = resolve;
+        });
+
+      flip(false);
+      await flush();
+
+      expect(save().disabled).toBe(true);
+      answer(configWith({ tailnet: { enabled: false, relay: false } }));
+      await flush();
+      expect(save().disabled).toBe(false);
+    });
+
+    it("comes back after a refusal", async () => {
+      await open();
+      jarvis()["tailnetEnable"] = () =>
+        Promise.resolve({ ok: false, text: "No", language: "en", commands: [] });
+
+      flip(true);
+      await flush();
+
+      expect(save().disabled).toBe(false);
+    });
+  });
+
+  describe("a change that took, whose re-read failed", () => {
+    function rereadFails(): void {
+      vi.spyOn(console, "error").mockImplementationOnce(() => {});
+      jarvis()["getSettings"] = () => Promise.reject(new Error("socket gone"));
+    }
+
+    it("a disable does not claim failure, and shows the commands", async () => {
+      await open(configWith({ tailnet: { enabled: true, relay: true } }));
+      rereadFails();
+      jarvis()["tailnetDisable"] = () =>
+        Promise.resolve({ ok: true, commands: ["tailscale serve --tcp=7717 off"] });
+
+      flip(false);
+      await flush();
+      await flush();
+
+      expect(toggle().checked).toBe(false);
+      expect(toggle().disabled).toBe(false);
+      const result = el("settings-remote-tailnet-result").textContent;
+      expect(result).toContain(MESSAGES.remoteTailnetForwardLeft(PRIMARY_LANGUAGE));
+      expect(result).toContain(MESSAGES.remoteTailnetNotRefreshed(PRIMARY_LANGUAGE));
+      expect(result).not.toContain(MESSAGES.remoteTailnetFailed(PRIMARY_LANGUAGE));
+      expect(el("settings-remote-tailnet-command").textContent).toBe(
+        "tailscale serve --tcp=7717 off",
+      );
+    });
+
+    it("Save stays off until a re-read succeeds: the draft's address and certificate are old", async () => {
+      const calls = await open();
+      rereadFails();
+
+      flip(true);
+      await flush();
+      await flush();
+
+      const save = el<HTMLButtonElement>("settings-save");
+      expect(save.disabled).toBe(true);
+      await saveSettings();
+      expect(calls.some((c) => c.call === "saveSettings")).toBe(false);
+
+      const after = configWith({ bindAddress: "100.84.17.203", tls: CERT });
+      jarvis()["getSettings"] = () => Promise.resolve(after);
+      await openSettings();
+      await flush();
+
+      expect(save.disabled).toBe(false);
+      save.click();
+      await flush();
+      const saved = savedConfig(calls.find((c) => c.call === "saveSettings"));
+      expect(saved.remote.bindAddress).toBe("100.84.17.203");
+    });
+
+    it("a later change whose re-read succeeds gives Save back too", async () => {
+      await open();
+      rereadFails();
+      flip(true);
+      await flush();
+      await flush();
+
+      jarvis()["getSettings"] = () =>
+        Promise.resolve(configWith({ tailnet: { enabled: false, relay: false } }));
+      flip(false);
+      await flush();
+      await flush();
+
+      expect(el<HTMLButtonElement>("settings-save").disabled).toBe(false);
+    });
+
+    it("a reopen whose read fails too keeps Save off", async () => {
+      await open();
+      rereadFails();
+      flip(true);
+      await flush();
+      await flush();
+
+      await openSettings().catch(() => {});
+      await flush();
+
+      expect(el<HTMLButtonElement>("settings-save").disabled).toBe(true);
+
+      jarvis()["getSettings"] = () => Promise.resolve(configWith({}));
+      await openSettings();
+      await flush();
+    });
+
+    it("an enable shows on, with the relay it asked for", async () => {
+      await open();
+      rereadFails();
+      relay().checked = true;
+      change(relay());
+
+      flip(true);
+      await flush();
+      await flush();
+
+      expect(toggle().checked).toBe(true);
+      expect(relay().checked).toBe(true);
+      expect(el("settings-remote-tailnet-result").textContent).toBe(
+        MESSAGES.remoteTailnetNotRefreshed(PRIMARY_LANGUAGE),
+      );
+      expect(el("settings-remote-tailnet-command").hidden).toBe(true);
+    });
+  });
+
+  describe("turning it off", () => {
+    const ON = () => configWith({ tailnet: { enabled: true, relay: true } });
+
+    it("calls the channel at once, with no warning", async () => {
+      const calls = await open(ON(), { devices: PAIRED });
+
+      flip(false);
+      await flush();
+
+      expect(calls.filter((c) => c.call === "tailnetDisable")).toHaveLength(1);
+      expect(el("settings-remote-tailnet-confirm").hidden).toBe(true);
+    });
+
+    it("a restore that was not confirmed has its own text, not the one about removing", async () => {
+      await open(ON());
+      jarvis()["getSettings"] = () =>
+        Promise.resolve(configWith({ tailnet: { enabled: false, relay: true } }));
+      jarvis()["tailnetDisable"] = () =>
+        Promise.resolve({
+          ok: true,
+          commands: ["tailscale serve --bg --tcp=7717 tcp://127.0.0.1:7717"],
+          restoring: true,
+        });
+
+      flip(false);
+      await flush();
+      await flush();
+
+      const text = MESSAGES.remoteTailnetRestoreLeft(PRIMARY_LANGUAGE);
+      expect(el("settings-remote-tailnet-result").textContent).toBe(text);
+      expect(text).not.toBe(MESSAGES.remoteTailnetForwardLeft(PRIMARY_LANGUAGE));
+      expect(MESSAGES.remoteTailnetRestoreLeft("ar")).not.toBe(
+        MESSAGES.remoteTailnetRestoreLeft("en"),
+      );
+      expect(el("settings-remote-tailnet-command").textContent).toContain("--tcp=7717");
+    });
+
+    it("shows the warning when the running bridge did not take the change", async () => {
+      await open(ON());
+      const warning = MESSAGES.remoteTailnetNotApplied("off", PRIMARY_LANGUAGE);
+      jarvis()["getSettings"] = () =>
+        Promise.resolve(configWith({ tailnet: { enabled: false, relay: true } }));
+      jarvis()["tailnetDisable"] = () => Promise.resolve({ ok: true, commands: [], warning });
+
+      flip(false);
+      await flush();
+      await flush();
+
+      expect(el("settings-remote-tailnet-result").hidden).toBe(false);
+      expect(el("settings-remote-tailnet-result").textContent).toBe(warning);
+    });
+
+    it("shows the exact command for a forward Tailscale did not confirm removing", async () => {
+      await open(ON());
+      jarvis()["getSettings"] = () =>
+        Promise.resolve(configWith({ tailnet: { enabled: false, relay: true } }));
+      jarvis()["tailnetDisable"] = () =>
+        Promise.resolve({
+          ok: true,
+          commands: ["tailscale serve --tcp=7717 off", "tailscale serve --tcp=7718 off"],
+        });
+
+      flip(false);
+      await flush();
+      await flush();
+
+      expect(toggle().checked).toBe(false);
+      expect(el("settings-remote-tailnet-result").textContent).toBe(
+        MESSAGES.remoteTailnetForwardLeft(PRIMARY_LANGUAGE),
+      );
+      expect(
+        [...el("settings-remote-tailnet-command").children].map((row) => row.textContent),
+      ).toEqual(["tailscale serve --tcp=7717 off", "tailscale serve --tcp=7718 off"]);
+    });
   });
 });

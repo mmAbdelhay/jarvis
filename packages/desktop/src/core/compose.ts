@@ -41,7 +41,7 @@ import {
   symlink,
   writeFile,
 } from "node:fs/promises";
-import { homedir, networkInterfaces, tmpdir } from "node:os";
+import { homedir, hostname, networkInterfaces, tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import { createBroadcaster, type Broadcaster, type PushSink } from "../broadcast.js";
 import { createHostLink, type DesktopHost } from "./host-link.js";
@@ -72,7 +72,14 @@ import {
 import { createRemoteAccess, type RemoteAccess } from "../remote-access.js";
 import { createWebManifestLoader, nodeWebExportFs } from "../web-export.js";
 import { disableRemoteOnDisk } from "../remote-idle.js";
-import { obtainCertificate, type TailscaleCertDeps } from "../tailscale-cert.js";
+import {
+  certificateExpiry,
+  obtainCertificate,
+  readTailscaleIps,
+  type TailscaleCertDeps,
+} from "../tailscale-cert.js";
+import { disableRelay, enableRelay, readServeStatus, restoreForward } from "../tailnet-guard.js";
+import { applyRemoteFromFile, createRemoteTailnetGuard } from "../tailnet-guard-wiring.js";
 import { createNotifier } from "../notify.js";
 import { createReviewService } from "../review-service.js";
 import {
@@ -229,6 +236,7 @@ import {
   providerAgentListsEqual,
   defaultSessionsScanPath,
   defaultWorkflowsDir,
+  effectiveWebPort,
   ensureConfigFile,
   loadConfig,
   type JarvisConfig,
@@ -1437,6 +1445,12 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
       return () => clearInterval(timer);
     },
     isPrNamedTab: (tabId) => prTabNamer.isPrNamedTab(tabId),
+    // A PR the user asked about in the session's prompt names the tab too.
+    onPromptPr: (paneKey, ref, opts) => prTabNamer.fromPrompt(paneKey, ref, opts),
+    statFile: async (path) => {
+      const info = await stat(path);
+      return { size: info.size, mtime: info.mtimeMs };
+    },
   });
   sessionTabNamer.start();
 
@@ -1644,7 +1658,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
   // first".
   const applyFromDisk = serialize(async () => {
     const next = await loadConfig(DEFAULT_CONFIG_PATH);
-    await remoteAccess.apply(next.remote);
+    await applyRemoteFromFile(config.remote, remoteAccess, tailnetGuard, next.remote);
   });
 
   // After a successful write, the file on disk is the only source of
@@ -1690,7 +1704,11 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
       } else {
         draft = input;
       }
-      const result = await writeSettingsFile(DEFAULT_CONFIG_PATH, draft);
+      // An updater started from the file just above, so whatever it says of
+      // `remote.tailnet` is not stale. A draft is whatever Settings last read.
+      const result = await writeSettingsFile(DEFAULT_CONFIG_PATH, draft, {
+        writesTailnet: typeof input === "function",
+      });
       if (result.ok) {
         // Keep the same object identities held by already-running handlers.
         // Reads on their next operation see the saved values immediately.
@@ -1746,6 +1764,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
         build: buildWebManifest,
       }),
       enforceFileModes: remoteEnforceFileModes,
+      hostname: () => hostname(),
       log: (line) => console.error(line),
     },
     // Backs remoteKeyAuthorizer's pane/session checks. `followers` is
@@ -1791,6 +1810,9 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     fetch: (url, init) => fetch(url, init),
     // Phase 0: a global login lockout or a reused refresh token.
     showNotification: (title, body) => host.showNotification(title, body),
+    // A join comes from the bridge's listener, which starts after the
+    // notifier below exists.
+    onDeviceJoined: () => notifier.deviceJoined(),
   });
 
   // M10 Task 4: built right after remoteAccess and before wiring.start(),
@@ -2091,6 +2113,8 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
       }
     };
     safely("wiring", () => wiring.stop());
+    // Before the bridge it reports to.
+    safely("tailnet guard", () => tailnetGuard.stop());
     // The bridge's own listener and its sockets — stop() removes the push
     // sink too (remote-access.ts), so a relaunch never double-sends.
     //
@@ -2377,6 +2401,18 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     platform,
   };
 
+  // Tailscale access's guard (tailnet-guard.ts): idle until the switch is on.
+  // Each read goes to the live config, which a settings save merges in place.
+  const tailnetGuard = createRemoteTailnetGuard({
+    remote: () => config.remote,
+    access: remoteAccess,
+    tailscale: tailscaleCertDeps,
+    certificateExpiry: (certPath) => certificateExpiry((path) => readFile(path, "utf8"), certPath),
+    timers: nodeTimers,
+    now: Date.now,
+    log: (line) => console.error(line),
+  });
+
   // The phone's Fit toggle (terminal-fit-overrides.ts): shared with
   // onDeviceDisconnected above, which runs only well after this is set.
   const fitOverrides = createTerminalFitOverrides({
@@ -2534,6 +2570,22 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     notifier,
     tailscaleCert: { obtain: () => obtainCertificate(tailscaleCertDeps) },
     writeConfig,
+    tailnet: {
+      config: () => config.remote,
+      ports: (remote) => [remote.port, effectiveWebPort(remote)],
+      readServeStatus: () => readServeStatus(tailscaleCertDeps),
+      readTailscaleIps: () => readTailscaleIps(tailscaleCertDeps),
+      enableRelay: (ports) => enableRelay(tailscaleCertDeps, ports),
+      disableRelay: (ports) => disableRelay(tailscaleCertDeps, ports),
+      restoreForward: (port, forward) => restoreForward(tailscaleCertDeps, port, forward),
+      // Queued behind the apply the write itself started, so this resolves
+      // only after the written file has reached the bridge.
+      applied: () => applyFromDisk(),
+      rearm: () => remoteAccess.rearmTailnet(),
+      reloadCertificate: () => remoteAccess.reloadCertificate(),
+      checkNow: () => tailnetGuard.checkNow(),
+      log: (line) => console.error(line),
+    },
     // Phase 1: remote:openWebClient's system browser (dispatch.ts).
     openExternal: (url) => host.openExternal(url),
     reviews,
@@ -2803,6 +2855,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
         .catch((error: unknown) =>
           console.error(`remote bridge: start failed: ${errorMessage(error)}`),
         );
+      tailnetGuard.start();
     },
     reapplyRemote: () => applyFromDisk(),
     setDaemonEnabled: async (enabled) => {
@@ -2811,6 +2864,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     announceStartup,
     stop: releaseChildren,
     async shutdown() {
+      tailnetGuard.stop();
       await stopRemote();
       releaseChildren();
       await uploadsStopped;

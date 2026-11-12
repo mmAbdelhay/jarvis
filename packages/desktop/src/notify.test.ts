@@ -1,7 +1,8 @@
 import type { Session, SessionOutput, Turn } from "@jarvis/core";
 import type { ExpoPushMessage } from "@jarvis/remote";
 import { MAX_PUSH_PROJECT_CHARS } from "@jarvis/wire";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { MESSAGES } from "./messages.js";
 import {
   buildPushMessage,
   createNotifier,
@@ -89,8 +90,90 @@ describe("relevantChannels", () => {
     [{ kind: "review-comment", pr: "acme/web#18" }, [{ channel: "reviews:changed" }]],
     [{ kind: "review-queued", pr: "acme/web#18" }, [{ channel: "reviews:changed" }]],
     [{ kind: "review-requested", pr: "acme/web#18" }, [{ channel: "reviews:changed" }]],
+    // A join alert is news to whoever is looking at any screen.
+    [{ kind: "device-joined" }, []],
   ])("maps %j to %j", (event, expected) => {
     expect(relevantChannels(event)).toEqual(expected);
+  });
+});
+
+describe("device-joined push", () => {
+  const joined: NotifyEvent = { kind: "device-joined" };
+
+  it("follows remote.push.enabled", () => {
+    const result = shouldNotify(INITIAL_NOTIFY_STATE, makeContext({ enabled: false }), joined, 0);
+    expect(result.targets).toEqual([]);
+  });
+
+  it("is not held back by focus, like the login lockout alert it sits beside", () => {
+    const result = shouldNotify(INITIAL_NOTIFY_STATE, makeContext({ focused: true }), joined, 0);
+    expect(result.targets).toEqual([d1, d2]);
+  });
+
+  it("is not coalesced: a second join is a second event", () => {
+    const first = shouldNotify(INITIAL_NOTIFY_STATE, makeContext(), joined, 0);
+    const second = shouldNotify(first.state, makeContext(), joined, 1);
+    expect(second.targets).toEqual([d1, d2]);
+  });
+
+  it.each(["en", "ar"] as const)("carries no device name, only its kind (%s)", (language) => {
+    const message = buildPushMessage({ ...d1, language }, joined, true);
+    expect(message.data).toEqual({ kind: "device-joined", device: d1.deviceId });
+    expect(message.body).toBe(MESSAGES.pushBody("device-joined", undefined, language));
+    expect(JSON.stringify(message)).not.toContain("Other Mac");
+  });
+
+  it("the notifier sends and audits it, and logs no focus suppression", () => {
+    const send = vi.fn();
+    const audit = vi.fn();
+    const log = vi.fn();
+    const notifier = createNotifier({
+      sessions: {
+        onChange: () => () => {},
+        onOutput: () => () => {},
+        get: () => undefined,
+        log: () => "",
+        list: () => [],
+      },
+      onTurn: () => () => {},
+      context: () => makeContext({ focused: true, targets: [d1] }),
+      send,
+      audit,
+      now: () => 0,
+      timers: { setTimeout: () => 0, clearTimeout: () => {} },
+      log,
+    });
+
+    notifier.deviceJoined();
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(audit).toHaveBeenCalledWith([{ deviceId: "d1", kind: "device-joined" }]);
+    expect(log).toHaveBeenCalledWith("notify: device-joined targets=1 suppressed=none");
+  });
+
+  it("sends nothing after dispose", () => {
+    const send = vi.fn();
+    const notifier = createNotifier({
+      sessions: {
+        onChange: () => () => {},
+        onOutput: () => () => {},
+        get: () => undefined,
+        log: () => "",
+        list: () => [],
+      },
+      onTurn: () => () => {},
+      context: () => makeContext({ targets: [d1] }),
+      send,
+      audit: vi.fn(),
+      now: () => 0,
+      timers: { setTimeout: () => 0, clearTimeout: () => {} },
+      log: vi.fn(),
+    });
+
+    notifier.dispose();
+    notifier.deviceJoined();
+
+    expect(send).not.toHaveBeenCalled();
   });
 });
 
@@ -207,31 +290,53 @@ describe("buildPushMessage", () => {
     expect((message.data.project as string).length).toBe(MAX_PUSH_PROJECT_CHARS);
   });
 
-  it("carries exactly {kind} in command-finished's data", () => {
+  it("carries exactly {kind, device} in command-finished's data", () => {
     const event: NotifyEvent = { kind: "command-finished", paneKey: "p1", seconds: 30, ok: true };
     const message = buildPushMessage(d1, event, true);
-    expect(message.data).toEqual({ kind: "command-finished" });
+    expect(message.data).toEqual({ kind: "command-finished", device: d1.deviceId });
   });
 
-  it("carries exactly {kind} in reply's data", () => {
+  it("carries exactly {kind, device} in reply's data", () => {
     const event: NotifyEvent = { kind: "reply", replyTo: "turn-1" };
     const message = buildPushMessage(d1, event, true);
-    expect(message.data).toEqual({ kind: "reply" });
+    expect(message.data).toEqual({ kind: "reply", device: d1.deviceId });
   });
 
   it("keeps the repo out of a review push entirely when includeProjectNames is off", () => {
     const event: NotifyEvent = { kind: "review-comment", pr: "acme/web#18" };
     const message = buildPushMessage(d1, event, false);
-    expect(message.data).toEqual({ kind: "review-comment" });
+    expect(message.data).toEqual({ kind: "review-comment", device: d1.deviceId });
     expect(message.body).toContain("#18");
     expect(JSON.stringify(message)).not.toContain("acme");
   });
 
-  it("carries exactly {kind, pr} and names acme/web#18 when includeProjectNames is on", () => {
+  it("carries exactly {kind, pr, device} and names acme/web#18 when includeProjectNames is on", () => {
     const event: NotifyEvent = { kind: "review-comment", pr: "acme/web#18" };
     const message = buildPushMessage(d1, event, true);
-    expect(message.data).toEqual({ kind: "review-comment", pr: "acme/web#18" });
+    expect(message.data).toEqual({
+      kind: "review-comment",
+      pr: "acme/web#18",
+      device: d1.deviceId,
+    });
     expect(message.body).toContain("acme/web#18");
+  });
+
+  it.each<NotifyEvent>([
+    { kind: "session-done", sessionId: "s1", project: "acme" },
+    { kind: "session-failed", sessionId: "s1", project: "acme" },
+    { kind: "session-waiting", sessionId: "s1", project: "acme" },
+    { kind: "command-finished", paneKey: "p1", seconds: 30, ok: true },
+    { kind: "reply", replyTo: "turn-1" },
+    { kind: "review-comment", pr: "acme/web#18" },
+    { kind: "review-queued", pr: "acme/web#18" },
+    { kind: "review-requested", pr: "acme/web#18" },
+    { kind: "device-joined" },
+  ])("$kind: data.device is each target's own id, and adds no name or project", (event) => {
+    const first = buildPushMessage(d1, event, false);
+    const second = buildPushMessage(d2, event, false);
+    expect(first.data.device).toBe(d1.deviceId);
+    expect(second.data.device).toBe(d2.deviceId);
+    expect(JSON.stringify(first)).not.toContain("acme");
   });
 
   it("sets `to` to the target's token", () => {
@@ -508,22 +613,30 @@ describe("createNotifier", () => {
     expect(sent).toHaveLength(0);
   });
 
-  it("commandFinished emits a command-finished event with data exactly {kind}", () => {
+  it("commandFinished emits a command-finished event with data exactly {kind, device}", () => {
     const { notifier, sent } = makeNotifier();
     notifier.commandFinished("p1", 90, false);
     expect(sent).toHaveLength(1);
-    expect(sent[0]?.[0]?.data).toEqual({ kind: "command-finished" });
+    expect(sent[0]?.[0]?.data).toEqual({ kind: "command-finished", device: d1.deviceId });
     notifier.dispose();
   });
 
-  it("review emits a review push with data exactly {kind, pr}, coalesced per PR", () => {
+  it("review emits a review push with data exactly {kind, pr, device}, coalesced per PR", () => {
     const { notifier, sent, auditCalls } = makeNotifier({ includeProjectNames: true });
     notifier.review({ kind: "review-comment", pr: "acme/web#18" });
     notifier.review({ kind: "review-comment", pr: "acme/web#18" });
     notifier.review({ kind: "review-comment", pr: "acme/web#19" });
     expect(sent).toHaveLength(2);
-    expect(sent[0]?.[0]?.data).toEqual({ kind: "review-comment", pr: "acme/web#18" });
-    expect(sent[1]?.[0]?.data).toEqual({ kind: "review-comment", pr: "acme/web#19" });
+    expect(sent[0]?.[0]?.data).toEqual({
+      kind: "review-comment",
+      pr: "acme/web#18",
+      device: d1.deviceId,
+    });
+    expect(sent[1]?.[0]?.data).toEqual({
+      kind: "review-comment",
+      pr: "acme/web#19",
+      device: d1.deviceId,
+    });
     expect(auditCalls[0]?.[0]?.kind).toBe("review-comment");
     notifier.dispose();
     notifier.review({ kind: "review-queued", pr: "acme/web#18" });

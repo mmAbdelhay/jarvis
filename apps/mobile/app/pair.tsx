@@ -1,4 +1,3 @@
-import { parsePairingUri } from "@jarvis/wire";
 import type { PairingLink } from "@jarvis/wire";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import Constants from "expo-constants";
@@ -8,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Platform,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -16,31 +16,44 @@ import {
 } from "react-native";
 import { takeClearFailedSignal } from "@/lib/clear-failed-signal";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { IconButton } from "@/components/IconButton";
 import { clientPlatformFor, clientStringFor } from "@/lib/client-platform";
 import { realClock } from "@/lib/clock";
+import { dialogs } from "@/lib/dialog";
 import { AuthCard, useAuthCardRootStyle } from "@/components/WidePanel";
-import { t } from "@/lib/i18n";
+import { type Language, t } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
 import { nativeTransport } from "@/lib/native-transport";
 import {
-  afterClearRetry,
-  type AlreadyPairedCheck,
-  canStartIntake,
+  type ConfirmStep,
+  type JoinFailure,
+  type JoinStep,
+  type LinkSource,
+  type PairFlowPhaseKind,
+  clearFailedEntry,
   entryPhaseKind,
+  heldAfterHost,
   hostStep,
-  intakeStep,
-  phaseAfterCheck,
+  intakeLink,
+  joinFailureKey,
+  keepPairing,
+  linkNeedsWarning,
+  openHeldMachine,
+  pairBackTarget,
+  phaseAfterFailedOpen,
+  phaseAfterRead,
+  readHeldMachines,
   shouldDrainPairingLink,
+  submitJoin,
 } from "@/lib/pair-flow";
-import { pair, type PairOutcome, withHost } from "@/lib/pairing";
+import { useMachineSessions, useNavigatorGate } from "@/lib/machine-context";
+import { MAX_MACHINES, type MachineId } from "@/lib/machine-index";
+import { prepareSwitchRoute, retryClear as retryClearOf } from "@/lib/machine-sessions";
+import { machineStore, openMachineStore } from "@/lib/machine-store-instance";
+import { joinMachine, pair, type PairOutcome, withHost } from "@/lib/pairing";
 import { subscribePairingLink, takePairingLink } from "@/lib/pairing-link-holder";
-import {
-  clearPairing,
-  loadPairing,
-  PairingAlreadyExistsError,
-  savePairing,
-} from "@/lib/pairing-record";
-import { expoSecureStore } from "@/lib/secure-store";
+import { leavePairScreen } from "@/lib/scope-routing";
+import { screenHeaderModel } from "@/lib/screen-header";
 import { systemTransportFor } from "@/lib/system-transport";
 import { theme } from "@/lib/theme";
 import { createAppTransport } from "@/lib/trust-routing-transport";
@@ -58,24 +71,26 @@ const transport = createAppTransport(PLATFORM, {
 
 type PairFailureReason = Exclude<PairOutcome, { ok: true }>["reason"];
 // Screen-only conditions (I5, Important-1): `pair()` itself either
-// succeeded and the keychain write afterwards failed, or the mount-time
-// "is this phone already paired" check itself failed to read the keychain.
-type ScreenFailure = PairFailureReason | "save-failed" | "check-failed";
+// succeeded and the keychain write afterwards failed or the phone is full,
+// or the mount-time read of the machines failed.
+type ScreenFailure = PairFailureReason | "save-failed" | "check-failed" | "limit";
 
 type Phase =
   | { kind: "checking" }
-  | { kind: "alreadyPaired" }
   // Reached when the laptop unpaired this phone and `_layout.tsx`'s
-  // `onUnpaired` handler couldn't clear the stored record — distinct from
-  // `alreadyPaired` on purpose, so the screen never shows "already paired"
-  // right under a banner that just said "this phone was unpaired", and
-  // never offers the Dashboard button that would only reconnect with the
-  // now-revoked token (task-6-rereview-r1.md).
+  // `onUnpaired` handler couldn't clear the stored record. It never offers
+  // the Dashboard button that would only reconnect with the now-revoked
+  // token (task-6-rereview-r1.md): only a retry, and another machine if one
+  // is held.
   | { kind: "clearFailed" }
+  | { kind: "sameMachine"; id: MachineId }
   | { kind: "scan" }
+  | { kind: "join"; failure?: JoinFailure }
   | { kind: "needsHost"; invalid?: boolean }
-  | { kind: "confirm"; host: string; port: number; fingerprintTail: string; name?: string }
-  | { kind: "waiting" }
+  // `warnLink`: `linkNeedsWarning` said so when it was reached.
+  | (ConfirmStep & { warnLink?: boolean })
+  // `join`: nobody has an approval to give, so nothing asks for one.
+  | { kind: "waiting"; join?: boolean }
   | { kind: "error"; failure: ScreenFailure }
   | { kind: "success" };
 
@@ -104,6 +119,8 @@ function errorKey(reason: ScreenFailure) {
       return "pair.checkFailed" as const;
     case "web-needs-certificate":
       return "pair.webNeedsCertificate" as const;
+    case "limit":
+      return "pair.limit" as const;
     // Neither of these is ever produced by `pair()` today (host-needed is
     // resolved before `pair()` is called, through the "needsHost"/"confirm"
     // steps; a busy laptop's own close code maps to `expired` — see
@@ -125,16 +142,77 @@ export default function PairScreenRoute() {
   );
 }
 
+// The password lives in this component's state and nowhere else on this screen:
+// cleared the moment submit reads it, and gone with the form once the join
+// starts. `onSubmit` hands it straight on, so a retry is typed again.
+function JoinForm(props: {
+  language: Language;
+  name: string;
+  onNameChange(name: string): void;
+  failure: JoinFailure | undefined;
+  onSubmit(name: string, password: string): void;
+  onCancel(): void;
+}) {
+  const { language, name, onNameChange, failure, onSubmit, onCancel } = props;
+  const [password, setPassword] = useState("");
+
+  function submit(): void {
+    const read = password;
+    setPassword("");
+    if (read.length === 0) return;
+    onSubmit(name, read);
+  }
+
+  return (
+    <>
+      <Text style={styles.label}>{t(language, "pair.joinName")}</Text>
+      <TextInput
+        style={styles.input}
+        value={name}
+        onChangeText={onNameChange}
+        autoCapitalize="none"
+        autoCorrect={false}
+        keyboardType="url"
+      />
+      <Text style={styles.label}>{t(language, "pair.joinPassword")}</Text>
+      <TextInput
+        style={styles.input}
+        value={password}
+        onChangeText={setPassword}
+        onSubmitEditing={submit}
+        secureTextEntry
+        autoCapitalize="none"
+        autoCorrect={false}
+      />
+      {failure !== undefined && (
+        <Text style={styles.errorText}>{t(language, joinFailureKey(failure))}</Text>
+      )}
+      <TouchableOpacity style={styles.button} onPress={submit}>
+        <Text style={styles.buttonText}>{t(language, "common.ok")}</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={styles.button} onPress={onCancel}>
+        <Text style={styles.buttonText}>{t(language, "common.cancel")}</Text>
+      </TouchableOpacity>
+    </>
+  );
+}
+
 function PairScreen() {
   const cardRoot = useAuthCardRootStyle();
   const insets = useSafeAreaInsets();
   const language = useLanguage();
   const router = useRouter();
+  const gate = useNavigatorGate();
+  const sessions = useMachineSessions();
+  const clearFailedIdRef = useRef<MachineId | null>(null);
   const [permission, requestPermission] = useCameraPermissions();
   const [phase, setPhase] = useState<Phase>({ kind: "checking" });
   const [hostText, setHostText] = useState("");
   const [pastedLink, setPastedLink] = useState("");
+  const [joinName, setJoinName] = useState("");
   const [deviceName, setDeviceName] = useState("");
+  // Ids alone, for the back button.
+  const [held, setHeld] = useState<MachineId[]>([]);
   const scannedRef = useRef(false);
   const mountedRef = useRef(true);
   // Mirrors `deviceName` for code that must read the *current* value from
@@ -150,7 +228,12 @@ function PairScreen() {
   // on submit (handed to `pair()`), on cancel, on a full retry, and on
   // unmount.
   const pendingLinkRef = useRef<PairingLink | null>(null);
-  const alreadyPairedRef = useRef(false);
+  // How the link in `pendingLinkRef` got here, for the confirm step after a host
+  // was typed for it.
+  const linkSourceRef = useRef<LinkSource>("link");
+  // The join in flight. Going away cancels it, which keeps a password that has
+  // not gone out from going out.
+  const joinCancelRef = useRef<AbortController | null>(null);
 
   const phaseRef = useRef(phase);
 
@@ -169,6 +252,7 @@ function PairScreen() {
     return () => {
       mountedRef.current = false;
       pendingLinkRef.current = null;
+      joinCancelRef.current?.abort();
     };
   }, []);
 
@@ -190,28 +274,26 @@ function PairScreen() {
     };
   }, []);
 
-  // C1a / Important-1: while a pairing record already exists, this screen
-  // refuses to start any pairing at all — deep link, scan or paste —
-  // until the user has explicitly unpaired. A `loadPairing` failure fails
-  // *closed*: `phaseAfterCheck` never routes a failed check to "scan",
-  // so a transient keychain error can never unlock scanning.
-  const checkAlreadyPaired = useCallback(async () => {
+  const refreshHeld = useCallback(async () => {
+    const read = await readHeldMachines(openMachineStore, machineStore);
+    if (read.ok && mountedRef.current) setHeld(read.ids);
+    return read;
+  }, []);
+
+  // C1a / Important-1: a phone may add a machine whatever it holds, and a held
+  // machine is refused by its id, at each intake. A machine store that could
+  // not open fails *closed*: `phaseAfterRead` never routes a failed read to
+  // "scan", so a transient keychain error can never unlock scanning.
+  const checkMachines = useCallback(async () => {
     safeSetPhase({ kind: "checking" });
-    let check: AlreadyPairedCheck;
-    try {
-      const loaded = await loadPairing(expoSecureStore);
-      check = { ok: true, paired: loaded !== undefined };
-    } catch {
+    const read = await refreshHeld();
+    if (!read.ok) {
       // Logged without any secret: just the fact that the check failed.
-      console.warn("pair: loadPairing failed while checking for an existing pairing");
-      check = { ok: false };
+      console.warn("pair: reading the machines failed");
     }
-    const nextKind = phaseAfterCheck(check);
-    alreadyPairedRef.current = nextKind !== "scan";
-    // R-M1: a link stashed for a phone that turns out to be already
-    // paired (or whose check itself failed) must not linger in the
-    // holder — drained here so it can never resurface at a later scan
-    // phase, e.g. after the user unpairs.
+    const nextKind = phaseAfterRead(read);
+    // R-M1: a link stashed for a phone whose check failed must not linger in
+    // the holder — drained here so it can never resurface at a later scan.
     if (shouldDrainPairingLink(nextKind)) {
       takePairingLink();
     }
@@ -220,54 +302,135 @@ function PairScreen() {
       return;
     }
     safeSetPhase({ kind: nextKind });
-  }, [safeSetPhase]);
+  }, [refreshHeld, safeSetPhase]);
 
   useEffect(() => {
     // Arriving with the one-shot clearFailed signal set (clear-failed-
     // signal.ts, consumed here — never a route param, which a forged
     // `jarvis://pair?...&clearFailed=1` link could set) goes straight to
-    // that phase — never through `checkAlreadyPaired`, which would find
-    // the still-present record and show the contradictory "already
-    // paired" screen instead.
-    const entryKind = entryPhaseKind(takeClearFailedSignal());
+    // that phase. A signal for a machine no longer on screen is not this
+    // visit's: the user has moved past it.
+    const signal = clearFailedEntry(takeClearFailedSignal(), sessions.current().id);
+    clearFailedIdRef.current = signal?.id ?? null;
+    const entryKind = entryPhaseKind(signal !== undefined);
     if (entryKind === "clearFailed") {
-      alreadyPairedRef.current = true;
-      // R-M1: same reasoning as the checkAlreadyPaired branch above.
+      // R-M1: same reasoning as the checkMachines branch above.
       if (shouldDrainPairingLink(entryKind)) {
         takePairingLink();
       }
       safeSetPhase({ kind: "clearFailed" });
+      // For the back button: with none read, the retry is still there.
+      void refreshHeld();
       return;
     }
-    void checkAlreadyPaired();
+    void checkMachines();
     // Runs once, on mount: `takeClearFailedSignal()` is one-shot by design
-    // (consuming it again on a later `checkAlreadyPaired` identity change
-    // would read `false` and silently skip the phase), and both callbacks
-    // are otherwise stable.
-  }, [checkAlreadyPaired, safeSetPhase]);
+    // (consuming it again on a later `checkMachines` identity change would
+    // read `false` and silently skip the phase), and every callback here is
+    // otherwise stable.
+  }, [checkMachines, refreshHeld, safeSetPhase, sessions]);
 
-  // The clearFailed phase's own retry — calls clearPairing directly (never
-  // checkAlreadyPaired: a retry that just cleared the record is already
-  // known to have nothing left to find) and moves on to "scan" only once
-  // it actually succeeds.
+  // Off this screen, to the machine on screen. Through the gate: this runs
+  // after an await, and a switch's remount may have taken the navigator.
+  const leave = useCallback(() => {
+    leavePairScreen({
+      gate,
+      screenUp: () => mountedRef.current,
+      toDashboard: () => prepareSwitchRoute(router, gate, (line) => console.warn(line)),
+    });
+  }, [gate, router]);
+
+  // Decision 11: nobody is stranded on this screen while another machine works.
+  // A machine that cannot be opened may have gone. `from` is the phase that asked,
+  // to go back to; one the user has since moved on from stays.
+  const openMachine = useCallback(
+    (id: MachineId, from: PairFlowPhaseKind) =>
+      openHeldMachine(id, {
+        switchTo: sessions.switchTo,
+        leave,
+        failed: () => {
+          dialogs.notice(t(language, "machines.openFailed"));
+          void refreshHeld();
+          const { kind } = phaseRef.current;
+          if (kind === "checking" || kind === "sameMachine") {
+            scannedRef.current = false;
+            safeSetPhase({ kind: phaseAfterFailedOpen(from) });
+          }
+        },
+        log: (line) => console.warn(line),
+      }),
+    [sessions, leave, language, refreshHeld, safeSetPhase],
+  );
+
+  // The clearFailed phase's own retry — removes the machine the signal named,
+  // with its session's memory of the stored token, and moves on only once it
+  // actually succeeds. A machine named next may not have reached the screen, as
+  // reading it can have failed, so this goes there itself.
   const retryClear = useCallback(async () => {
-    let cleared: boolean;
-    try {
-      await clearPairing(expoSecureStore);
-      cleared = true;
-    } catch {
+    const next = await retryClearOf(sessions, clearFailedIdRef.current);
+    if (next === "clearFailed") {
       // Logged without any secret: just the fact that the retry failed.
-      console.warn("pair: retrying clearPairing failed");
-      cleared = false;
+      console.warn("pair: retrying the clear failed");
+      safeSetPhase({ kind: "clearFailed" });
+      return;
     }
-    const next = afterClearRetry(cleared);
+    clearFailedIdRef.current = null;
+    void refreshHeld();
     if (next === "scan") {
-      alreadyPairedRef.current = false;
       safeSetPhase({ kind: "scan" });
       return;
     }
-    safeSetPhase({ kind: "clearFailed" });
-  }, [safeSetPhase]);
+    safeSetPhase({ kind: "checking" });
+    await openMachine(next.next, "checking");
+  }, [sessions, safeSetPhase, refreshHeld, openMachine]);
+
+  const isHeld = useCallback((id: MachineId) => machineStore.has(id), []);
+  // From the index, as `add` measures it: a machine that cannot be read still
+  // takes a place, and a join that only then found the phone full would leave a
+  // device on the target that nobody holds.
+  const atLimit = useCallback(() => machineStore.count() >= MAX_MACHINES, []);
+
+  const withLinkWarning = useCallback(
+    (step: ConfirmStep): Phase => ({
+      ...step,
+      warnLink: linkNeedsWarning({
+        source: linkSourceRef.current,
+        heldCount: () => machineStore.count(),
+      }),
+    }),
+    [],
+  );
+
+  const applyStep = useCallback(
+    (step: JoinStep) => {
+      switch (step.kind) {
+        case "success":
+          safeSetPhase({ kind: "success" });
+          leave();
+          return;
+        case "sameMachine":
+          safeSetPhase({ kind: "sameMachine", id: step.id });
+          return;
+        case "limit":
+          safeSetPhase({ kind: "error", failure: "limit" });
+          return;
+        case "saveFailed":
+          // I5: a keychain write failure must not leave the screen stuck on
+          // the wait forever.
+          safeSetPhase({ kind: "error", failure: "save-failed" });
+          return;
+        case "checkFailed":
+          safeSetPhase({ kind: "error", failure: "check-failed" });
+          return;
+        case "join":
+          safeSetPhase({ kind: "join", failure: step.failure });
+          return;
+        case "abandoned":
+          return;
+      }
+    },
+    [leave, safeSetPhase],
+  );
 
   const startPairing = useCallback(
     async (link: PairingLink): Promise<void> => {
@@ -286,57 +449,83 @@ function PairScreen() {
         safeSetPhase({ kind: "error", failure: outcome.reason });
         return;
       }
-      try {
-        await savePairing(expoSecureStore, outcome.record, outcome.credential);
-      } catch (err) {
-        if (err instanceof PairingAlreadyExistsError) {
-          // Important-1, defence in depth: the mount-time check said "not
-          // paired", but a valid record exists by the time this write
-          // happened (e.g. a concurrent pairing elsewhere) — `savePairing`
-          // itself refused rather than overwrite it.
-          alreadyPairedRef.current = true;
-          safeSetPhase({ kind: "alreadyPaired" });
-          return;
-        }
-        // I5: a keychain write failure must not leave the screen stuck on
-        // "Waiting for approval…" forever.
-        safeSetPhase({ kind: "error", failure: "save-failed" });
-        return;
-      }
-      safeSetPhase({ kind: "success" });
-      router.replace("/dashboard");
+      applyStep(
+        await keepPairing(
+          {
+            stillWanted: () => mountedRef.current,
+            addAndSwitch: sessions.addAndSwitch,
+            add: sessions.add,
+          },
+          outcome.record,
+          outcome.credential,
+        ),
+      );
     },
-    [router, safeSetPhase],
+    [applyStep, sessions, safeSetPhase],
+  );
+
+  const startJoin = useCallback(
+    async (nameText: string, password: string): Promise<void> => {
+      if (phaseRef.current.kind !== "join") return;
+      const name = deviceNameRef.current.trim() || defaultDeviceNameRef.current;
+      const cancel = new AbortController();
+      joinCancelRef.current = cancel;
+      const running = submitJoin(
+        {
+          isHeld,
+          atLimit,
+          waiting: () => safeSetPhase({ kind: "waiting", join: true }),
+          join: (address, secret) =>
+            joinMachine(
+              { transport, clock: realClock, client: CLIENT_STRING, platform: PLATFORM },
+              address,
+              secret,
+              name,
+              cancel.signal,
+            ),
+          stillWanted: () => mountedRef.current,
+          addAndSwitch: sessions.addAndSwitch,
+          add: sessions.add,
+        },
+        nameText,
+        password,
+      );
+      // This frame lasts through the wait, and has no more use for it.
+      password = "";
+      applyStep(await running);
+    },
+    [applyStep, atLimit, isHeld, sessions, safeSetPhase],
   );
 
   const intake = useCallback(
-    (uri: string) => {
-      if (
-        !canStartIntake({
-          alreadyPaired: alreadyPairedRef.current,
-          phaseKind: phaseRef.current.kind,
-        })
-      ) {
-        return;
+    (uri: string, source: LinkSource) => {
+      // Important-2, ruling C1b: every link — scanned, pasted or a deep link
+      // — goes through this same pure classification, which can only ever
+      // stop short of `pair()`.
+      const result = intakeLink({ phaseKind: phaseRef.current.kind, uri, isHeld, atLimit });
+      switch (result.kind) {
+        case "dropped":
+          return;
+        case "invalid":
+          safeSetPhase({ kind: "error", failure: "invalid-link" });
+          return;
+        case "checkFailed":
+          safeSetPhase({ kind: "error", failure: "check-failed" });
+          return;
+        case "limit":
+          safeSetPhase({ kind: "error", failure: "limit" });
+          return;
+        case "sameMachine":
+          safeSetPhase({ kind: "sameMachine", id: result.id });
+          return;
+        case "step":
+          pendingLinkRef.current = result.link;
+          linkSourceRef.current = source;
+          safeSetPhase(result.step.kind === "confirm" ? withLinkWarning(result.step) : result.step);
+          return;
       }
-      const link = parsePairingUri(uri);
-      if (link === undefined) {
-        safeSetPhase({ kind: "error", failure: "invalid-link" });
-        return;
-      }
-      pendingLinkRef.current = link;
-      // Important-2, ruling C1b: every link — scanned, pasted or a deep
-      // link — goes through this same pure classification, which can only
-      // ever produce "needsHost" or "confirm"; nothing here can start
-      // `pair()`.
-      const step = intakeStep(link);
-      if (step.kind === "needsHost") {
-        safeSetPhase({ kind: "needsHost" });
-        return;
-      }
-      safeSetPhase(step);
     },
-    [safeSetPhase],
+    [atLimit, isHeld, safeSetPhase, withLinkWarning],
   );
 
   // A cold-start `jarvis://` link is stashed by `app/+native-intent.tsx`
@@ -348,7 +537,7 @@ function PairScreen() {
     if (phase.kind !== "scan") return;
     const url = takePairingLink();
     if (url !== null) {
-      intake(url);
+      intake(url, "link");
     }
   }, [phase, intake]);
 
@@ -361,7 +550,7 @@ function PairScreen() {
     return subscribePairingLink(() => {
       const url = takePairingLink();
       if (url !== null && phaseRef.current.kind === "scan") {
-        intake(url);
+        intake(url, "link");
       }
     });
   }, [intake]);
@@ -369,7 +558,7 @@ function PairScreen() {
   function handleBarcodeScanned(result: { data: string }): void {
     if (scannedRef.current) return;
     scannedRef.current = true;
-    intake(result.data);
+    intake(result.data, "scan");
   }
 
   function handlePasteSubmit(): void {
@@ -378,7 +567,7 @@ function PairScreen() {
     // never keeps a rendered copy of a link that carries the secret.
     setPastedLink("");
     if (uri.length === 0) return;
-    intake(uri);
+    intake(uri, "link");
   }
 
   function handleHostSubmit(): void {
@@ -399,8 +588,29 @@ function PairScreen() {
       safeSetPhase({ kind: "needsHost", invalid: true });
       return;
     }
+    // Its id is known only now. Same answers as `intakeLink`'s.
+    let sameId: MachineId | undefined;
+    let full = false;
+    try {
+      sameId = heldAfterHost(resolved, isHeld);
+      full = atLimit();
+    } catch {
+      pendingLinkRef.current = null;
+      safeSetPhase({ kind: "error", failure: "check-failed" });
+      return;
+    }
+    if (sameId !== undefined) {
+      pendingLinkRef.current = null;
+      safeSetPhase({ kind: "sameMachine", id: sameId });
+      return;
+    }
+    if (full) {
+      pendingLinkRef.current = null;
+      safeSetPhase({ kind: "error", failure: "limit" });
+      return;
+    }
     pendingLinkRef.current = resolved;
-    safeSetPhase(step);
+    safeSetPhase(withLinkWarning(step));
   }
 
   function handleConfirm(): void {
@@ -418,36 +628,86 @@ function PairScreen() {
   function retry(): void {
     scannedRef.current = false;
     pendingLinkRef.current = null;
+    if (phase.kind === "error" && phase.failure === "check-failed") {
+      void checkMachines();
+      return;
+    }
     safeSetPhase({ kind: "scan" });
   }
 
+  const backTarget = pairBackTarget({
+    phaseKind: phase.kind,
+    onScreen: sessions.current().id,
+    clearFailedId: clearFailedIdRef.current,
+    held,
+  });
+
   return (
     <View style={[styles.container, { paddingTop: insets.top + 8 }, cardRoot]}>
-      <Text style={styles.title}>{t(language, "pair.title")}</Text>
-
-      {phase.kind === "alreadyPaired" && (
-        <>
-          <Text style={styles.label}>{t(language, "pair.alreadyPaired")}</Text>
-          <TouchableOpacity style={styles.button} onPress={() => router.replace("/dashboard")}>
-            <Text style={styles.buttonText}>{t(language, "nav.dashboard")}</Text>
-          </TouchableOpacity>
-        </>
-      )}
+      <View style={styles.titleRow}>
+        {backTarget !== undefined && (
+          <IconButton
+            icon="back"
+            label={t(language, "common.back")}
+            onPress={() => {
+              const from = phase.kind;
+              pendingLinkRef.current = null;
+              // Nothing on the screen stays live under the switch.
+              safeSetPhase({ kind: "checking" });
+              void openMachine(backTarget, from);
+            }}
+            mirrorInRtl={screenHeaderModel({ language, hasBack: true }).backMirrored}
+          />
+        )}
+        <Text style={styles.title}>
+          {t(language, phase.kind === "join" ? "pair.joinTitle" : "pair.title")}
+        </Text>
+      </View>
 
       {phase.kind === "clearFailed" && (
         <>
           <Text style={styles.errorText}>{t(language, "pair.clearFailed")}</Text>
           {/* No Dashboard button here — reaching it would just reconnect
               with the still-stored, now-revoked token and loop back to
-              this exact screen. */}
+              this exact screen. The back button goes to another machine. */}
           <TouchableOpacity style={styles.button} onPress={() => void retryClear()}>
             <Text style={styles.buttonText}>{t(language, "common.retry")}</Text>
           </TouchableOpacity>
         </>
       )}
 
-      {phase.kind === "scan" && (
+      {phase.kind === "sameMachine" && (
         <>
+          <Text style={styles.label}>{t(language, "pair.sameMachine")}</Text>
+          <TouchableOpacity
+            style={styles.button}
+            onPress={() => void openMachine(phase.id, "sameMachine")}
+          >
+            <Text style={styles.buttonText}>{t(language, "pair.openMachine")}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.button} onPress={handleCancelConfirm}>
+            <Text style={styles.buttonText}>{t(language, "common.cancel")}</Text>
+          </TouchableOpacity>
+        </>
+      )}
+
+      {phase.kind === "join" && (
+        <JoinForm
+          language={language}
+          name={joinName}
+          onNameChange={setJoinName}
+          failure={phase.failure}
+          onSubmit={(name, password) => void startJoin(name, password)}
+          onCancel={handleCancelConfirm}
+        />
+      )}
+
+      {phase.kind === "scan" && (
+        <ScrollView
+          style={styles.scanScroll}
+          contentContainerStyle={styles.scanContent}
+          keyboardShouldPersistTaps="handled"
+        >
           <View style={styles.scanArea}>
             {permission === null ? null : permission.granted ? (
               <CameraView
@@ -471,6 +731,10 @@ function PairScreen() {
           </View>
           <Text style={styles.label}>{t(language, "pair.scan")}</Text>
 
+          <TouchableOpacity style={styles.button} onPress={() => safeSetPhase({ kind: "join" })}>
+            <Text style={styles.buttonText}>{t(language, "pair.joinTitle")}</Text>
+          </TouchableOpacity>
+
           <Text style={styles.label}>{t(language, "pair.pasteLink")}</Text>
           <TextInput
             style={styles.input}
@@ -493,7 +757,7 @@ function PairScreen() {
             onChangeText={setDeviceName}
             autoCorrect={false}
           />
-        </>
+        </ScrollView>
       )}
 
       {phase.kind === "needsHost" && (
@@ -517,6 +781,13 @@ function PairScreen() {
 
       {phase.kind === "confirm" && (
         <>
+          {phase.warnLink === true && (
+            <>
+              {/* Whole, however long: the end of a name is what tells it apart. */}
+              <Text style={styles.linkName}>{phase.name ?? phase.host}</Text>
+              <Text style={styles.errorText}>{t(language, "pair.linkWarning")}</Text>
+            </>
+          )}
           {phase.name !== undefined && (
             <Text style={styles.label}>
               {t(language, "pair.confirmName", { name: phase.name })}
@@ -544,17 +815,16 @@ function PairScreen() {
       {phase.kind === "waiting" && (
         <>
           <ActivityIndicator color={theme.colors.primary} />
-          <Text style={styles.label}>{t(language, "pair.waitingApproval")}</Text>
+          {phase.join !== true && (
+            <Text style={styles.label}>{t(language, "pair.waitingApproval")}</Text>
+          )}
         </>
       )}
 
       {phase.kind === "error" && (
         <>
           <Text style={styles.errorText}>{t(language, errorKey(phase.failure))}</Text>
-          <TouchableOpacity
-            style={styles.button}
-            onPress={phase.failure === "check-failed" ? () => void checkAlreadyPaired() : retry}
-          >
+          <TouchableOpacity style={styles.button} onPress={retry}>
             <Text style={styles.buttonText}>{t(language, "common.retry")}</Text>
           </TouchableOpacity>
         </>
@@ -576,14 +846,30 @@ const styles = StyleSheet.create({
     paddingBottom: 34,
     gap: 10,
   },
+  titleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "stretch",
+    gap: 8,
+    marginBottom: 6,
+  },
   title: {
+    flex: 1,
     color: theme.colors.text,
     fontSize: theme.font.size.xl,
     fontFamily: theme.font.bold,
     textAlign: "auto",
-    alignSelf: "stretch",
-    marginBottom: 6,
   },
+  linkName: {
+    alignSelf: "stretch",
+    color: theme.colors.text,
+    fontSize: theme.font.size.xl,
+    fontFamily: theme.font.bold,
+    textAlign: "center",
+    writingDirection: "ltr",
+  },
+  scanScroll: { alignSelf: "stretch" },
+  scanContent: { alignItems: "center", gap: 10 },
   scanArea: {
     width: "100%",
     height: 342,

@@ -12,8 +12,8 @@ import { useCallback, useEffect, useState } from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { t } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
-import { loadPairing } from "@/lib/pairing-record";
-import { expoSecureStore } from "@/lib/secure-store";
+import { loadScreenMachine } from "@/lib/machine-store-instance";
+import { useMachineId } from "@/lib/rpc-context";
 import { isAllowedSidecarUrl } from "@/lib/sidecar-url";
 import { theme } from "@/lib/theme";
 
@@ -22,6 +22,7 @@ type Status = "loading" | "opened" | "refused";
 export default function SidecarViewWebScreen() {
   const language = useLanguage();
   const router = useRouter();
+  const machineId = useMachineId();
   const { url } = useLocalSearchParams<{ url: string }>();
   const uri = typeof url === "string" ? url : "";
   const [allowedUrl, setAllowedUrl] = useState<string | undefined>(undefined);
@@ -36,7 +37,7 @@ export default function SidecarViewWebScreen() {
     void (async () => {
       let record: { name?: string; port: number } | undefined;
       try {
-        record = (await loadPairing(expoSecureStore))?.record;
+        record = (await loadScreenMachine(machineId))?.record;
       } catch {
         record = undefined;
       }
@@ -57,7 +58,7 @@ export default function SidecarViewWebScreen() {
     return () => {
       cancelled = true;
     };
-  }, [uri, openTab]);
+  }, [uri, openTab, machineId]);
 
   return (
     <View style={styles.screen}>

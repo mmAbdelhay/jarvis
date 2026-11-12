@@ -14,6 +14,13 @@ import { describeError } from "./io.js";
 import type { SocketLike } from "./io.js";
 import { MAX_TEXT_FRAME_BYTES } from "./protocol.js";
 import { originAllowed, originClass } from "./origin.js";
+import {
+  listenProxyFront,
+  PROXY_HEADER_TIMEOUT_MS,
+  type ProxyFront,
+  recordedSourceOf,
+  sourceOf,
+} from "./proxy-front.js";
 import { parseProxyPath } from "./proxy-rewrite.js";
 
 const HANDSHAKE_TIMEOUT_MS = 5_000;
@@ -130,6 +137,14 @@ export const listenTls: Listen = (options: ListenOptions): Promise<Listener> => 
     });
 
     httpsServer.on("upgrade", (request: IncomingMessage, socket: Duplex, head: Buffer) => {
+      // The front records a source before every hand-off, so a miss means the
+      // internal behind the lookup changed. Falling back would report the
+      // relay's loopback: every peer on one backoff key, and in every audit line.
+      if (options.proxyProtocol === true && recordedSourceOf(request.socket) === undefined) {
+        options.log("remote server: refused a relay connection with no recorded source");
+        socket.destroy();
+        return;
+      }
       const url = request.url;
       const kind = url === "/rpc" ? "rpc" : url === "/pair" ? "pair" : undefined;
       if (kind === undefined) {
@@ -173,12 +188,7 @@ export const listenTls: Listen = (options: ListenOptions): Promise<Listener> => 
         if (kind === "rpc")
           (socket as unknown as { setNoDelay(enable: boolean): void }).setNoDelay(true);
         const adapter = toSocketLike(ws);
-        const handlers = options.onSocket(
-          kind,
-          adapter,
-          request.socket.remoteAddress ?? "",
-          origin,
-        );
+        const handlers = options.onSocket(kind, adapter, sourceOf(request.socket), origin);
         ws.on("message", (data: Buffer, isBinary: boolean) => {
           // A binary frame's byte cap (MAX_BLOB_CHUNK_BYTES) is enforced
           // twice: `ws`'s own `maxPayload` (below, MAX_TEXT_FRAME_BYTES)
@@ -210,6 +220,9 @@ export const listenTls: Listen = (options: ListenOptions): Promise<Listener> => 
       socket.on("close", () => sockets.delete(socket));
     });
 
+    // Relay mode only: owns the port, so `httpsServer` itself never binds one.
+    let front: ProxyFront | undefined;
+
     function onListenError(error: Error): void {
       httpsServer.off("listening", onListening);
       reject(error);
@@ -226,14 +239,18 @@ export const listenTls: Listen = (options: ListenOptions): Promise<Listener> => 
         options.log(`remote server: ${describeError(error)}`);
       });
       const address = httpsServer.address();
-      const port = typeof address === "object" && address !== null ? address.port : options.port;
+      const port =
+        front?.port ??
+        (typeof address === "object" && address !== null ? address.port : options.port);
       resolve({
         port,
-        close() {
-          return new Promise<void>((resolveClose, rejectClose) => {
-            for (const socket of sockets) socket.destroy();
+        async close() {
+          for (const socket of sockets) socket.destroy();
+          await front?.close();
+          await new Promise<void>((resolveClose, rejectClose) => {
             httpsServer.close((error) => {
-              if (error) rejectClose(error);
+              // Behind a front, "not running" is all this can say: it never bound.
+              if (error && front === undefined) rejectClose(error);
               else resolveClose();
             });
           });
@@ -243,6 +260,20 @@ export const listenTls: Listen = (options: ListenOptions): Promise<Listener> => 
 
     httpsServer.once("error", onListenError);
     httpsServer.once("listening", onListening);
-    httpsServer.listen(options.port, options.host);
+    if (options.proxyProtocol === true) {
+      listenProxyFront({
+        host: options.host,
+        port: options.port,
+        target: httpsServer,
+        timeoutMs: PROXY_HEADER_TIMEOUT_MS,
+      }).then((started) => {
+        front = started;
+        // Never bound, so Node would never say this itself, and its request
+        // and header timeouts only start checking once it has been said.
+        httpsServer.emit("listening");
+      }, reject);
+    } else {
+      httpsServer.listen(options.port, options.host);
+    }
   });
 };
