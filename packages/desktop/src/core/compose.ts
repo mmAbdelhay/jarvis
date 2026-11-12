@@ -1437,6 +1437,8 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
       return () => clearInterval(timer);
     },
     isPrNamedTab: (tabId) => prTabNamer.isPrNamedTab(tabId),
+    // A PR the user asked about in the session's prompt names the tab too.
+    onPromptPr: (paneKey, ref) => prTabNamer.fromPrompt(paneKey, ref),
   });
   sessionTabNamer.start();
 

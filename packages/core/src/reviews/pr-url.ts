@@ -5,6 +5,7 @@
 // something else, a narrow pane wraps it onto the next line (often behind
 // a box border), and a chunk can end halfway through it. Each pane keeps a
 // short raw tail so a URL cut by a chunk boundary is read whole next time.
+// firstPrRef reads the same URLs out of plain text: the user's own prompt.
 
 export type PrRef = { repo: string; number: number };
 
@@ -82,6 +83,27 @@ function readUrl(text: string, from: number): string | undefined {
   return undefined;
 }
 
+/** The PR named by the URL starting at `at`, or undefined when it names
+ *  something else (an issue, a comment, a file list). */
+function prRefAt(text: string, at: number): PrRef | undefined {
+  // Sentence punctuation after a URL is not part of it.
+  const url = readUrl(text, at)?.replace(/[.,:;!?)]+$/, "");
+  const match = url === undefined ? null : PR_PATH.exec(url);
+  if (match === null) return undefined;
+  return { repo: `${match[1]}/${match[2]}`, number: Number(match[3]) };
+}
+
+/** The first PR URL in plain text such as a user's prompt, read by the
+ *  scanner's rules. A prompt is whole, so a URL at its very end counts. */
+export function firstPrRef(text: string): PrRef | undefined {
+  const padded = `${text} `;
+  for (let at = padded.indexOf(PREFIX); at !== -1; at = padded.indexOf(PREFIX, at + 1)) {
+    const ref = prRefAt(padded, at);
+    if (ref !== undefined) return ref;
+  }
+  return undefined;
+}
+
 export function createPrUrlScanner(): PrUrlScanner {
   const tails = new Map<string, string>();
   const reported = new Map<string, Set<string>>();
@@ -96,11 +118,8 @@ export function createPrUrlScanner(): PrUrlScanner {
       let seen = reported.get(paneKey);
       let found: PrRef | undefined;
       for (let at = text.indexOf(PREFIX); at !== -1; at = text.indexOf(PREFIX, at + 1)) {
-        // Sentence punctuation after a URL is not part of it.
-        const url = readUrl(text, at)?.replace(/[.,:;!?)]+$/, "");
-        const match = url === undefined ? null : PR_PATH.exec(url);
-        if (match === null) continue;
-        const ref = { repo: `${match[1]}/${match[2]}`, number: Number(match[3]) };
+        const ref = prRefAt(text, at);
+        if (ref === undefined) continue;
         const key = `${ref.repo.toLowerCase()}#${ref.number}`;
         if (seen === undefined) {
           seen = new Set();

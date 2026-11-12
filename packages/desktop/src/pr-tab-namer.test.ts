@@ -248,3 +248,110 @@ describe("PR tab namer", () => {
     expect(w.renames).toHaveLength(2);
   });
 });
+
+describe("PR tab namer, from the user's prompt", () => {
+  const OLD = NOW - 3 * 24 * 60 * 60_000;
+  const PR_42 = { repo: "acme/app", number: 42 };
+  const PR_7 = { repo: "acme/app", number: 7 };
+  const old = (over: Partial<PrInfo> = {}) =>
+    world({ prInfo: async (_r, n) => info(n, { createdAt: OLD, ...over }) });
+
+  it("names and links a PR asked for review, however old", async () => {
+    const w = old();
+    w.namer.fromPrompt("t1", PR_42);
+    await w.namer.whenIdle();
+    expect(w.renames).toEqual([["t1", "PR #42 · Fix the header"]]);
+    expect(w.links).toEqual([["Acme/App#42", "t1"]]);
+    expect(w.order).toEqual(["track", "poll", "link"]);
+    expect(w.namer.isPrNamedTab("t1")).toBe(true);
+  });
+
+  it("keeps the freshness rule for the same PR seen only in output", async () => {
+    const w = old();
+    w.print("t1", `${URL_42}\n`);
+    await w.namer.whenIdle();
+    expect(w.renames).toEqual([]);
+    expect(w.links).toEqual([]);
+  });
+
+  it.each(["CLOSED", "MERGED"])("ignores a %s PR from a prompt", async (state) => {
+    const w = old({ state });
+    w.namer.fromPrompt("t1", PR_42);
+    await w.namer.whenIdle();
+    expect(w.renames).toEqual([]);
+    expect(w.links).toEqual([]);
+  });
+
+  it("renames without linking while auto-link is off", async () => {
+    const w = old();
+    w.cfg.autoLink = false;
+    w.namer.fromPrompt("t1", PR_42);
+    await w.namer.whenIdle();
+    expect(w.renames).toHaveLength(1);
+    expect(w.links).toEqual([]);
+    expect(w.tracked).toEqual([]);
+  });
+
+  it("never writes over a manual link or unlink", async () => {
+    const w = world({
+      prInfo: async (_r, n) => info(n, { createdAt: OLD }),
+      manual: ["acme/app#42"],
+    });
+    w.namer.fromPrompt("t1", PR_42);
+    await w.namer.whenIdle();
+    expect(w.renames).toHaveLength(1);
+    expect(w.links).toEqual([]);
+  });
+
+  it("follows a later prompt that names another PR", async () => {
+    const w = old();
+    w.namer.fromPrompt("t1", PR_42);
+    await w.namer.whenIdle();
+    w.namer.fromPrompt("t1", PR_7);
+    await w.namer.whenIdle();
+    expect(w.renames).toEqual([
+      ["t1", "PR #42 · Fix the header"],
+      ["t1", "PR #7 · Fix the header"],
+    ]);
+    expect(w.links.at(-1)).toEqual(["Acme/App#7", "t1"]);
+  });
+
+  it("asks gh once for the same prompt seen on every re-check", async () => {
+    const w = old();
+    for (let i = 0; i < 3; i++) {
+      w.namer.fromPrompt("t1", { repo: "Acme/App", number: 42 });
+      await w.namer.whenIdle();
+    }
+    expect(w.lookups()).toBe(1);
+    expect(w.renames).toHaveLength(1);
+  });
+
+  it("keeps a waiting prompt PR when a stale output URL arrives behind it", async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const w = world({
+      prInfo: async (_r, n) => {
+        if (n === 1) await gate;
+        return info(n, { createdAt: OLD });
+      },
+    });
+    w.print("t1", "https://github.com/acme/app/pull/1\n");
+    w.namer.fromPrompt("t1", PR_42);
+    w.print("t1", "https://github.com/acme/app/pull/7\n");
+    release();
+    await w.namer.whenIdle();
+    expect(w.renames).toEqual([["t1", "PR #42 · Fix the header"]]);
+  });
+
+  it("is not renamed by a later output URL that fails the freshness rule", async () => {
+    const w = old();
+    w.namer.fromPrompt("t1", PR_42);
+    await w.namer.whenIdle();
+    w.print("t1", "https://github.com/acme/app/pull/7\n");
+    await w.namer.whenIdle();
+    expect(w.renames).toEqual([["t1", "PR #42 · Fix the header"]]);
+    expect(w.namer.isPrNamedTab("t1")).toBe(true);
+  });
+});

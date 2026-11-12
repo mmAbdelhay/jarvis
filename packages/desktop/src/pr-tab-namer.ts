@@ -1,14 +1,21 @@
-// A Terminal tab follows the pull request an agent opens in it: when a pane
-// prints a GitHub PR URL (core's createPrUrlScanner reads it out of the raw
-// TUI output), the tab is renamed "PR #N · <title>" and the pane is linked
-// to that PR in Reviews, so review comments come back to the session that
-// wrote the code. Reviews' own repo + branch match misses an agent working
-// in a worktree; the URL in the pane's own output does not.
+// A Terminal tab follows the pull request its pane is about, from two
+// sources. The tab is renamed "PR #N · <title>" and the pane is linked to
+// that PR in Reviews, so review comments come back to the session there.
+// Reviews' own repo + branch match misses an agent working in a worktree;
+// these sources do not.
 //
-// A URL in the output is not proof the pane opened that PR — `gh pr list`,
-// a changelog, a pasted review comment all print them. So gh is asked
-// first, and only an open PR created in the last PR_FRESH_MS counts; and a
-// link is never written over one already set (by hand, or an unlink).
+// 1. Output: a GitHub PR URL the pane prints (core's createPrUrlScanner
+//    reads it out of the raw TUI output) — the PR an agent opened. A URL in
+//    the output is not proof the pane opened that PR — `gh pr list`, a
+//    changelog, a pasted review comment all print them — so only an open
+//    PR created in the last PR_FRESH_MS counts.
+// 2. Prompt: a PR URL in the user's own prompt to the Claude session in the
+//    pane (session-tab-name.ts reads it from the transcript and calls
+//    fromPrompt) — typically a PR asked for review, so it may be any age.
+//    It still must be open, and each prompt PR is handled once per pane.
+//
+// Either way gh is asked first, the latest PR wins per pane, and a link is
+// never written over one already set (by hand, or an unlink).
 
 import {
   createPrUrlScanner,
@@ -56,6 +63,9 @@ export type PrTabNamer = {
   /** Whether any pane of this tab has named it after a PR, so the session
    *  namer (session-tab-name.ts) leaves the tab alone. */
   isPrNamedTab(tabId: string): boolean;
+  /** A PR named in the user's own prompt in this pane: no freshness limit.
+   *  The same PR reported again for the pane is not looked up again. */
+  fromPrompt(paneKey: string, ref: PrRef): void;
   /** Resolves once every PR seen so far has been handled. */
   whenIdle(): Promise<void>;
 };
@@ -70,12 +80,19 @@ export function prTabTitle(number: number, title: string | undefined): string {
     : `${full.slice(0, PR_TAB_TITLE_MAX - 1).trimEnd()}…`;
 }
 
+/** A PR to handle, and whether it came from the user's prompt. */
+type Seen = { ref: PrRef; fromPrompt: boolean };
+
 export function createPrTabNamer(deps: PrTabNamerDeps): PrTabNamer {
   const scanner = createPrUrlScanner();
   /** Pane → the PR its tab is named after. */
   const named = new Map<string, string>();
-  /** Pane → the newest PR seen while one was being handled (latest wins). */
-  const waiting = new Map<string, PrRef>();
+  /** Pane → the last prompt PR handed in, lower-cased: handled once. */
+  const prompted = new Map<string, string>();
+  /** Pane → the newest PR of each source seen while one was being handled,
+   *  oldest first (latest wins). Per source, so a stale output URL cannot
+   *  push out a prompt PR that is handled only once. */
+  const waiting = new Map<string, Seen[]>();
   /** Pane → its handling loop, one at a time per pane. */
   const running = new Map<string, Promise<void>>();
   const unsubscribers: (() => void)[] = [];
@@ -89,11 +106,11 @@ export function createPrTabNamer(deps: PrTabNamerDeps): PrTabNamer {
     }
   }
 
-  async function apply(paneKey: string, ref: PrRef): Promise<void> {
+  async function apply(paneKey: string, { ref, fromPrompt }: Seen): Promise<void> {
     const info = await infoOf(ref);
     if (stopped || info === undefined) return;
     if (info.state.toUpperCase() !== "OPEN") return;
-    if (deps.now() - info.createdAt > PR_FRESH_MS) return;
+    if (!fromPrompt && deps.now() - info.createdAt > PR_FRESH_MS) return;
 
     const key = prKey(info.repo, info.number);
     named.set(paneKey, key);
@@ -114,17 +131,19 @@ export function createPrTabNamer(deps: PrTabNamerDeps): PrTabNamer {
     }
   }
 
-  function enqueue(paneKey: string, ref: PrRef): void {
+  function enqueue(paneKey: string, seen: Seen): void {
     if (running.has(paneKey)) {
-      waiting.set(paneKey, ref);
+      const queue = (waiting.get(paneKey) ?? []).filter((s) => s.fromPrompt !== seen.fromPrompt);
+      waiting.set(paneKey, [...queue, seen]);
       return;
     }
     const loop = (async () => {
-      let next: PrRef | undefined = ref;
+      let next: Seen | undefined = seen;
       while (next !== undefined && !stopped) {
         await apply(paneKey, next);
-        next = waiting.get(paneKey);
-        waiting.delete(paneKey);
+        const queue = waiting.get(paneKey) ?? [];
+        next = queue.shift();
+        if (queue.length === 0) waiting.delete(paneKey);
       }
     })();
     running.set(paneKey, loop);
@@ -138,14 +157,22 @@ export function createPrTabNamer(deps: PrTabNamerDeps): PrTabNamer {
         deps.shells.onOutput(({ paneKey, chunk }) => {
           if (stopped) return;
           const ref = scanner.push(paneKey, chunk);
-          if (ref !== undefined) enqueue(paneKey, ref);
+          if (ref !== undefined) enqueue(paneKey, { ref, fromPrompt: false });
         }),
         deps.shells.onShellExit(({ paneKey }) => {
           scanner.forget(paneKey);
           named.delete(paneKey);
+          prompted.delete(paneKey);
           waiting.delete(paneKey);
         }),
       );
+    },
+    fromPrompt(paneKey, ref) {
+      if (stopped) return;
+      const key = prKey(ref.repo, ref.number).toLowerCase();
+      if (prompted.get(paneKey) === key) return;
+      prompted.set(paneKey, key);
+      enqueue(paneKey, { ref, fromPrompt: true });
     },
     stop() {
       stopped = true;

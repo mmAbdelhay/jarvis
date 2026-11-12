@@ -5,10 +5,11 @@
 // service uses. Applied only when the session name changes, so a name the
 // user typed into the tab stands until the session's own name moves on.
 
-import type { AgentConfig, WorkspaceState } from "@jarvis/core";
+import { firstPrRef, type AgentConfig, type PrRef, type WorkspaceState } from "@jarvis/core";
 import {
   lastCustomTitle,
   lastAiTitle,
+  parseTranscript,
   type ExternalAgentProcess,
   type ShellManager,
   type TranscriptFile,
@@ -51,7 +52,27 @@ export type SessionTabNameDeps = {
   /** A tab named after a PR one of its panes opened (pr-tab-namer.ts):
    *  that name outranks the session's own. */
   isPrNamedTab?(tabId: string): boolean;
+  /** The PR named in the user's latest prompt that names one, on every
+   *  check (pr-tab-namer.ts fromPrompt, which handles each once). When set,
+   *  the transcript is read even if the pid file names the session. */
+  onPromptPr?(paneKey: string, ref: PrRef): void;
 };
+
+/** The PR of the last user prompt in a stretch of transcript that names
+ *  one — its first PR URL. Only what the user typed counts: tool results,
+ *  assistant text and the CLI's own injections are not prompts. */
+export function lastPromptPr(text: string): PrRef | undefined {
+  const turns = parseTranscript(text);
+  for (let i = turns.length - 1; i >= 0; i--) {
+    const turn = turns[i];
+    if (turn?.role !== "user") continue;
+    const ref = firstPrRef(turn.text);
+    if (ref !== undefined) return ref;
+  }
+  return undefined;
+}
+
+type TranscriptRead = { name: string | undefined; prompt: PrRef | undefined; readAt: number };
 
 export type SessionTabNamer = {
   /** Subscribes, starts the fallback timer and runs a first check. */
@@ -81,9 +102,10 @@ export function createSessionTabNamer(deps: SessionTabNameDeps): SessionTabNamer
   const createdAt = deps.now();
   /** Sessions read during the current check, for pruning transcriptPaths. */
   const seenSessions = new Set<string>();
-  /** Session id → its transcript path, once found (fallback only). */
+  /** Session id → its transcript path, once found (a title fallback, and
+   *  the user's prompts when onPromptPr is set). */
   const transcriptPaths = createTranscriptPaths(deps.listTranscripts);
-  const titles = new Map<string, { name: string | undefined; readAt: number }>();
+  const titles = new Map<string, TranscriptRead>();
   const watchers = new Map<string, { close(): void }>();
   /** Panes whose output has been seen — a new one means a shell started. */
   const seenPanes = new Set<string>();
@@ -111,28 +133,34 @@ export function createSessionTabNamer(deps: SessionTabNameDeps): SessionTabNamer
     }
   }
 
-  async function nameFor(
+  /** What the session's transcript says: its title and the PR of the
+   *  user's latest prompt naming one (only read when onPromptPr is set). */
+  async function readTranscript(
     paths: { transcriptsDir: string },
-    record: { sessionId: string; name?: string },
-  ): Promise<string | undefined> {
-    if (record.name !== undefined) return record.name;
-    const path = await transcriptPaths.find(paths.transcriptsDir, record.sessionId);
+    sessionId: string,
+  ): Promise<TranscriptRead | undefined> {
+    const path = await transcriptPaths.find(paths.transcriptsDir, sessionId);
     if (path === undefined) return undefined;
-    const cached = titles.get(record.sessionId);
+    const cached = titles.get(sessionId);
     const now = deps.now();
-    if (cached !== undefined && now - cached.readAt < SESSION_TAB_RECHECK_MS) return cached.name;
+    if (cached !== undefined && now - cached.readAt < SESSION_TAB_RECHECK_MS) return cached;
     // The user's /rename (custom-title) beats Claude's ai-title wherever
     // it is: a session renamed long ago and then resumed has the rename in
     // the head and newer ai-titles in the tail. Newest custom-title first
-    // (the tail is newer than the head), then the newest ai-title.
+    // (the tail is newer than the head), then the newest ai-title. A
+    // prompt's PR likewise: the tail's latest, else the head's.
+    const wantPrompt = deps.onPromptPr !== undefined;
     const tail = await deps.readTail(path);
     let name = lastCustomTitle(tail);
-    if (name === undefined) {
+    let prompt = wantPrompt ? lastPromptPr(tail) : undefined;
+    if (name === undefined || (wantPrompt && prompt === undefined)) {
       const head = await deps.readHead(path);
-      name = lastCustomTitle(head) ?? lastAiTitle(tail) ?? lastAiTitle(head);
+      name ??= lastCustomTitle(head) ?? lastAiTitle(tail) ?? lastAiTitle(head);
+      if (wantPrompt) prompt ??= lastPromptPr(head);
     }
-    titles.set(record.sessionId, { name, readAt: now });
-    return name;
+    const read = { name, prompt, readAt: now };
+    titles.set(sessionId, read);
+    return read;
   }
 
   async function applyTo(process: ExternalAgentProcess, paneKey: string): Promise<void> {
@@ -143,8 +171,14 @@ export function createSessionTabNamer(deps: SessionTabNameDeps): SessionTabNamer
     const record = await readClaudePidRecord(deps.readFile, paths.sessionsDir, process.pid);
     if (record === null) return;
     seenSessions.add(record.sessionId);
-    const name = await nameFor(paths, record);
-    if (name === undefined || stopped) return;
+    const transcript =
+      record.name === undefined || deps.onPromptPr !== undefined
+        ? await readTranscript(paths, record.sessionId)
+        : undefined;
+    if (stopped) return;
+    if (transcript?.prompt !== undefined) deps.onPromptPr?.(paneKey, transcript.prompt);
+    const name = record.name ?? transcript?.name;
+    if (name === undefined) return;
 
     const last = applied.get(paneKey);
     if (last?.sessionId === record.sessionId && last.name === name) return;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createPrUrlScanner } from "./pr-url.js";
+import { createPrUrlScanner, firstPrRef } from "./pr-url.js";
 
 const URL_42 = "https://github.com/acme/widgets/pull/42";
 
@@ -110,5 +110,29 @@ describe("createPrUrlScanner", () => {
     scan.push("p", `${URL_42}\n`);
     scan.forget("p");
     expect(scan.push("p", `${URL_42}\n`)).toBeDefined();
+  });
+});
+
+describe("firstPrRef", () => {
+  it("reads a PR URL at the very end of a prompt", () => {
+    expect(firstPrRef("review this https://github.com/acme/widgets/pull/123")).toEqual({
+      repo: "acme/widgets",
+      number: 123,
+    });
+  });
+
+  it("uses the first of two PR URLs", () => {
+    expect(
+      firstPrRef(
+        "compare https://github.com/acme/widgets/pull/1, then https://github.com/acme/widgets/pull/2",
+      ),
+    ).toEqual({ repo: "acme/widgets", number: 1 });
+  });
+
+  it("skips a URL that is not a PR, and returns undefined when there is none", () => {
+    expect(
+      firstPrRef("see https://github.com/acme/widgets/issues/5 and https://github.com/a/b/pull/9."),
+    ).toEqual({ repo: "a/b", number: 9 });
+    expect(firstPrRef("no link here")).toBeUndefined();
   });
 });
