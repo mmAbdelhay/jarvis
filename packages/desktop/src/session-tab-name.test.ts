@@ -558,3 +558,169 @@ describe("session tab namer", () => {
     expect(w.timers.size).toBe(0);
   });
 });
+
+describe("session tab namer, PRs in the user's prompts", () => {
+  const userSays = (content: unknown) =>
+    JSON.stringify({ type: "user", message: { role: "user", content } });
+  const assistantSays = (text: string) =>
+    JSON.stringify({
+      type: "assistant",
+      message: { role: "assistant", content: [{ type: "text", text }] },
+    });
+  const toolResult = (text: string) =>
+    userSays([{ type: "tool_result", tool_use_id: "x", content: text }]);
+  const pr = (n: number) => `https://github.com/acme/app/pull/${n}`;
+
+  /** A Claude session in t1 whose transcript tail (and head) are given. */
+  function session(tail: string[], head: string[] = [], pidName = "named") {
+    const w = world();
+    const seen: [string, { repo: string; number: number }][] = [];
+    w.deps.onPromptPr = (paneKey, ref) => {
+      seen.push([paneKey, ref]);
+    };
+    w.setProcesses([w.claudeIn("t1", 101)]);
+    w.files.set(join(SESSIONS, "101.json"), pidFile(101, "s1", pidName));
+    const path = join(PROJECTS, "-w", "s1.jsonl");
+    w.transcripts.push({ path, mtime: 1 });
+    w.files.set(path, tail.join("\n"));
+    w.deps.readHead = async () => head.join("\n");
+    return { w, seen };
+  }
+
+  it("reports the PR in the user's prompt, even when the pid file names the session", async () => {
+    const { w, seen } = session([userSays(`review this ${pr(123)}`)]);
+    await createSessionTabNamer(w.deps).check();
+    expect(seen).toEqual([["t1", { repo: "acme/app", number: 123 }]]);
+    expect(w.renames).toEqual([["t1", "named"]]);
+  });
+
+  it("reads a prompt given as text blocks", async () => {
+    const { w, seen } = session([userSays([{ type: "text", text: `look at ${pr(5)}` }])]);
+    await createSessionTabNamer(w.deps).check();
+    expect(seen).toEqual([["t1", { repo: "acme/app", number: 5 }]]);
+  });
+
+  it("ignores a PR URL only in an assistant message or a tool result", async () => {
+    const { w, seen } = session([
+      userSays("list my PRs"),
+      toolResult(`#9 ${pr(9)}`),
+      assistantSays(`Found ${pr(9)}`),
+    ]);
+    await createSessionTabNamer(w.deps).check();
+    expect(seen).toEqual([]);
+  });
+
+  it("uses the first PR URL of a prompt", async () => {
+    const { w, seen } = session([userSays(`review ${pr(1)} against ${pr(2)}`)]);
+    await createSessionTabNamer(w.deps).check();
+    expect(seen).toEqual([["t1", { repo: "acme/app", number: 1 }]]);
+  });
+
+  it("uses the latest prompt that names a PR", async () => {
+    const { w, seen } = session([
+      userSays(`review ${pr(1)}`),
+      assistantSays("done"),
+      userSays(`now review ${pr(2)}`),
+      userSays("thanks"),
+    ]);
+    await createSessionTabNamer(w.deps).check();
+    expect(seen).toEqual([["t1", { repo: "acme/app", number: 2 }]]);
+  });
+
+  it("finds the prompt in the head when the tail has none", async () => {
+    const { w, seen } = session([assistantSays("working")], [userSays(`review ${pr(8)}`)]);
+    await createSessionTabNamer(w.deps).check();
+    expect(seen).toEqual([["t1", { repo: "acme/app", number: 8 }]]);
+  });
+
+  it("prefers a PR prompt in the tail over one in the head", async () => {
+    const { w, seen } = session([userSays(`then ${pr(4)}`)], [userSays(`review ${pr(3)}`)]);
+    await createSessionTabNamer(w.deps).check();
+    expect(seen).toEqual([["t1", { repo: "acme/app", number: 4 }]]);
+  });
+
+  it("does not re-read an unchanged transcript, and reads an appended prompt", async () => {
+    const { w, seen } = session([userSays(`review ${pr(1)}`)]);
+    const path = join(PROJECTS, "-w", "s1.jsonl");
+    let now = NOW;
+    let mtime = 1;
+    let reads = 0;
+    w.deps.now = () => now;
+    w.deps.statFile = async (p) => ({ size: (w.files.get(p) ?? "").length, mtime });
+    const readTail = w.deps.readTail;
+    w.deps.readTail = async (p) => {
+      reads++;
+      return readTail(p);
+    };
+    const namer = createSessionTabNamer(w.deps);
+
+    await namer.check();
+    now += 3 * SESSION_TAB_RECHECK_MS; // past the time cache: only the stat says "same"
+    await namer.check();
+    expect(reads).toBe(1);
+
+    w.files.set(path, `${w.files.get(path)}\n${userSays(`now ${pr(2)}`)}`);
+    mtime = 2;
+    await namer.check();
+    expect(reads).toBe(2);
+    expect(seen.at(-1)).toEqual(["t1", { repo: "acme/app", number: 2 }]);
+  });
+
+  it.each([
+    [
+      "a /compact summary",
+      JSON.stringify({
+        type: "user",
+        isCompactSummary: true,
+        isVisibleInTranscriptOnly: true,
+        message: { role: "user", content: `Summary: we reviewed ${pr(9)}` },
+      }),
+    ],
+    [
+      "a transcript-only record",
+      JSON.stringify({
+        type: "user",
+        isVisibleInTranscriptOnly: true,
+        message: { role: "user", content: `see ${pr(9)}` },
+      }),
+    ],
+    [
+      "a task notification",
+      JSON.stringify({
+        type: "user",
+        origin: { kind: "task-notification" },
+        message: {
+          role: "user",
+          content: `<task-notification><result>Opened ${pr(9)}</result></task-notification>`,
+        },
+      }),
+    ],
+    [
+      "task-notification text with no origin",
+      userSays([{ type: "text", text: `<task-notification>done: ${pr(9)}</task-notification>` }]),
+    ],
+  ])("ignores a PR URL in %s", async (_label, record) => {
+    const { w, seen } = session([userSays(`review ${pr(1)}`), record]);
+    await createSessionTabNamer(w.deps).check();
+    expect(seen).toEqual([["t1", { repo: "acme/app", number: 1 }]]);
+  });
+
+  it("says whether the session predates this run", async () => {
+    const { w } = session([userSays(`review ${pr(1)}`)]);
+    const calls: boolean[] = [];
+    w.deps.onPromptPr = (_pane, _ref, opts) => {
+      calls.push(opts.predatesRun);
+    };
+    w.setProcesses([{ ...w.claudeIn("t1", 101), startedAt: NOW - 1_000 }]);
+    await createSessionTabNamer(w.deps).check();
+    w.setProcesses([w.claudeIn("t1", 101)]);
+    await createSessionTabNamer(w.deps).check();
+    expect(calls).toEqual([true, false]);
+  });
+
+  it("reports nothing for a session with no PR prompt", async () => {
+    const { w, seen } = session([userSays("hello")]);
+    await createSessionTabNamer(w.deps).check();
+    expect(seen).toEqual([]);
+  });
+});
