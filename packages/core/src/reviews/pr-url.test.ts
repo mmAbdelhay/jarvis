@@ -135,4 +135,32 @@ describe("firstPrRef", () => {
     ).toEqual({ repo: "a/b", number: 9 });
     expect(firstPrRef("no link here")).toBeUndefined();
   });
+
+  it.each([
+    "/files",
+    "/commits",
+    "/checks",
+    "/changes",
+    "#issuecomment-1",
+    "#discussion_r1",
+    "/files#diff-abc",
+    "/",
+    "?w=1",
+    "/files?diff=split&w=1",
+  ])("reads a pasted PR link ending %s as the PR", (suffix) => {
+    expect(firstPrRef(`review https://github.com/acme/widgets/pull/123${suffix} please`)).toEqual({
+      repo: "acme/widgets",
+      number: 123,
+    });
+  });
+
+  it("does not read a longer number or an issue as the PR", () => {
+    expect(firstPrRef("https://github.com/acme/widgets/pull/123abc")).toBeUndefined();
+    expect(firstPrRef("https://github.com/acme/widgets/issues/123")).toBeUndefined();
+  });
+
+  it("leaves the output scanner's rules as they were", () => {
+    const scan = createPrUrlScanner();
+    expect(scan.push("p", "https://github.com/acme/widgets/pull/123/files\n")).toBeUndefined();
+  });
 });

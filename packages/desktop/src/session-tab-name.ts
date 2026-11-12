@@ -56,6 +56,10 @@ export type SessionTabNameDeps = {
    *  check (pr-tab-namer.ts fromPrompt, which handles each once). When set,
    *  the transcript is read even if the pid file names the session. */
   onPromptPr?(paneKey: string, ref: PrRef): void;
+  /** A transcript's size and mtime: one that has not changed since the
+   *  last read is not read again. Without it, reads are cached for
+   *  SESSION_TAB_RECHECK_MS. */
+  statFile?(path: string): Promise<{ size: number; mtime: number }>;
 };
 
 /** The PR of the last user prompt in a stretch of transcript that names
@@ -72,7 +76,13 @@ export function lastPromptPr(text: string): PrRef | undefined {
   return undefined;
 }
 
-type TranscriptRead = { name: string | undefined; prompt: PrRef | undefined; readAt: number };
+type TranscriptRead = {
+  name: string | undefined;
+  prompt: PrRef | undefined;
+  readAt: number;
+  /** The file's size and mtime at the read, when statFile gave them. */
+  stamp?: string;
+};
 
 export type SessionTabNamer = {
   /** Subscribes, starts the fallback timer and runs a first check. */
@@ -133,6 +143,16 @@ export function createSessionTabNamer(deps: SessionTabNameDeps): SessionTabNamer
     }
   }
 
+  async function stampOf(path: string): Promise<string | undefined> {
+    if (deps.statFile === undefined) return undefined;
+    try {
+      const { size, mtime } = await deps.statFile(path);
+      return `${size}:${mtime}`;
+    } catch {
+      return undefined; // Read it, and let the read say what is wrong.
+    }
+  }
+
   /** What the session's transcript says: its title and the PR of the
    *  user's latest prompt naming one (only read when onPromptPr is set). */
   async function readTranscript(
@@ -143,7 +163,13 @@ export function createSessionTabNamer(deps: SessionTabNameDeps): SessionTabNamer
     if (path === undefined) return undefined;
     const cached = titles.get(sessionId);
     const now = deps.now();
-    if (cached !== undefined && now - cached.readAt < SESSION_TAB_RECHECK_MS) return cached;
+    const stamp = await stampOf(path);
+    if (cached !== undefined) {
+      // Unchanged since the last read: same size and mtime. Without a
+      // stamp, the time cache stands in.
+      if (stamp !== undefined && cached.stamp === stamp) return cached;
+      if (stamp === undefined && now - cached.readAt < SESSION_TAB_RECHECK_MS) return cached;
+    }
     // The user's /rename (custom-title) beats Claude's ai-title wherever
     // it is: a session renamed long ago and then resumed has the rename in
     // the head and newer ai-titles in the tail. Newest custom-title first
@@ -158,7 +184,8 @@ export function createSessionTabNamer(deps: SessionTabNameDeps): SessionTabNamer
       name ??= lastCustomTitle(head) ?? lastAiTitle(tail) ?? lastAiTitle(head);
       if (wantPrompt) prompt ??= lastPromptPr(head);
     }
-    const read = { name, prompt, readAt: now };
+    const read: TranscriptRead = { name, prompt, readAt: now };
+    if (stamp !== undefined) read.stamp = stamp;
     titles.set(sessionId, read);
     return read;
   }

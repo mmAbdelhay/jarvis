@@ -639,6 +639,33 @@ describe("session tab namer, PRs in the user's prompts", () => {
     expect(seen).toEqual([["t1", { repo: "acme/app", number: 4 }]]);
   });
 
+  it("does not re-read an unchanged transcript, and reads an appended prompt", async () => {
+    const { w, seen } = session([userSays(`review ${pr(1)}`)]);
+    const path = join(PROJECTS, "-w", "s1.jsonl");
+    let now = NOW;
+    let mtime = 1;
+    let reads = 0;
+    w.deps.now = () => now;
+    w.deps.statFile = async (p) => ({ size: (w.files.get(p) ?? "").length, mtime });
+    const readTail = w.deps.readTail;
+    w.deps.readTail = async (p) => {
+      reads++;
+      return readTail(p);
+    };
+    const namer = createSessionTabNamer(w.deps);
+
+    await namer.check();
+    now += 3 * SESSION_TAB_RECHECK_MS; // past the time cache: only the stat says "same"
+    await namer.check();
+    expect(reads).toBe(1);
+
+    w.files.set(path, `${w.files.get(path)}\n${userSays(`now ${pr(2)}`)}`);
+    mtime = 2;
+    await namer.check();
+    expect(reads).toBe(2);
+    expect(seen.at(-1)).toEqual(["t1", { repo: "acme/app", number: 2 }]);
+  });
+
   it("reports nothing for a session with no PR prompt", async () => {
     const { w, seen } = session([userSays("hello")]);
     await createSessionTabNamer(w.deps).check();
