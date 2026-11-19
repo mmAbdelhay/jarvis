@@ -5,7 +5,7 @@ connection — see the root README's "What it exposes" for what the bridge is,
 when it listens, and what a paired phone can do on this machine. This page
 covers the phone side: pairing, the owner login every paired device signs in
 with, what the phone app can see, what happens when a pairing ends, and the
-three ways a pairing can be reached. The same app also runs in a browser on
+three ways a pairing can be reached. [Your machines on Tailscale](#your-machines-on-tailscale) covers switching between several of your own machines. The same app also runs in a browser on
 another computer or phone; see [The browser client](#the-browser-client) at
 the end.
 
@@ -450,6 +450,181 @@ there too — the phone's confirmation dialog says so.
 the device locale) and is not part of the pairing record. Changing it in
 Settings asks you to restart the app — real right-to-left layout is applied
 process-wide at startup, so it cannot take effect until the app restarts.
+
+## Your machines on Tailscale
+
+If you run Jarvis on more than one computer, this lets one Jarvis open the
+others. A phone, a browser or the desktop app on one machine can switch to
+another machine on your tailnet (your private Tailscale network) without
+unpairing and pairing again. Each machine still decides who may reach it:
+you set it up once at that machine, and a new device joins with that
+machine's owner password.
+
+This is only for your own devices on one tailnet. It does not use the public
+internet, a relay service or any Jarvis server.
+
+### Set up each machine, once
+
+Do this at the machine itself. It cannot be done from a phone, a browser or
+another machine.
+
+1. Set the owner password in **Settings → Remote access → Owner account**
+   (at least 12 characters). Turning the feature on is refused without one.
+2. In **Settings → Remote access**, turn on **Tailscale access**. Jarvis then
+   also turns on the remote bridge and browser access. If the machine has no
+   Tailscale certificate yet, Jarvis gets one for you. Tailscale HTTPS
+   certificates must be enabled for your tailnet in the Tailscale admin
+   console (see [Sidecars over Tailscale](#sidecars-over-tailscale-from-settings)).
+3. Pick how Jarvis listens:
+   - **Default.** Jarvis listens on the machine's Tailscale address. Use this
+     when nothing else is in the way, which is the usual case on Linux.
+   - **Forward through Tailscale (relay).** Jarvis listens on this machine
+     only (`127.0.0.1`) and runs `tailscale serve --tcp` with
+     `--proxy-protocol=2` for the bridge and web ports, so Tailscale hands the
+     connections over. Pick this when the machine's firewall blocks its
+     Tailscale address, as on a managed Mac. It also replaces a forward you
+     already made on those two ports; Jarvis puts yours back when you turn
+     the feature off. With the relay on, a direct connection to the
+     machine's loopback address is dropped, which includes a USB phone using
+     `adb reverse`. If Tailscale refuses to create the forward, Settings shows
+     the exact command to run yourself.
+4. Turn on **Keep Jarvis running in the background** (Settings → General).
+   Without it, access stops when you quit Jarvis. Settings tells you so, and
+   the machine cannot be reached when no Jarvis window is open.
+
+When you turn it on, a device that is already paired may need to pair again,
+because the certificate or the address it knows changes. Settings warns you
+first.
+
+Settings shows the state of the switch in one line: on, or blocked and why.
+Turning it off stops password joins and the peer file. The remote bridge and
+browser access stay as they are, so paired devices keep working.
+
+Jarvis does not turn itself off for being idle while this switch is on
+(`remote.idleDisableMinutes` does nothing then), or the machine would
+disappear while you are away.
+
+### Add the first machine on a phone
+
+1. On the phone, open the pair screen and choose to add a machine by name.
+2. Type the machine's **full** name, like `mac.tail1234.ts.net`. Add `:port`
+   if it does not use the default bridge port 7717.
+3. Type its owner password.
+
+Short names do not work, such as `mac`. The phone cannot expand a short name,
+and the certificate is issued for the full name, so only the full name can be
+checked. `tailscale status` shows the full name. The name must end in
+`.ts.net`.
+
+The phone asks you to confirm with the warning "Only continue if you started
+this on your own machine." Never enter a password for a name you do not
+recognise. The phone never stores the owner password: it is used once, then
+the phone holds a device token as after a normal pairing.
+
+A phone holds up to 16 machines. The pairing you already had stays as your
+first machine, with no re-pair and no sign-out. After the first machine, a
+machine found on your tailnet appears in the switcher with an **Add**
+button, with its name already filled in.
+
+Pairing by QR code still works as before.
+
+### Switch machines
+
+- **Phone.** The machine switcher is on the Home connection pill, in the
+  sidebar on a tablet, and on the unlock screen. It shows each machine's
+  online state. A switch closes the connection to the current machine and
+  opens one to the new one. Notifications carry the machine they came from, so
+  tapping one switches to that machine first. Each machine unlocks on its own.
+- **Browser.** The browser version lists your other machines as links. A
+  browser page can only talk to its own machine, so a link opens that
+  machine's own page, where you sign in.
+- **Desktop app.** The top bar has a machine switcher next to the Jarvis name.
+  "This machine" comes first, then the other machines found. Choosing one
+  opens that machine's own Jarvis page full-window. It stays loaded while you
+  look at another machine, so terminals keep their state. Each opened machine
+  has a close control in the menu. The desktop finds machines by running
+  `tailscale status`, so it needs Tailscale installed. Without it the menu says
+  "Install Tailscale to see your other machines." It lists only your own
+  untagged machines that are online and answer on the web port 7718 with the
+  name they were looked up by; machines shared in from another tailnet user
+  are left out.
+
+Using the machine's own page means the screens and the protocol always match
+that machine.
+
+### What stays at the machine
+
+Switching machines never gives a remote device control over who may reach
+that machine. These stay at the machine itself:
+
+- Setting or changing the owner password.
+- Pairing new devices by QR code.
+- Revoking devices. A device that joined by password appears in
+  **Settings → Remote access** in the paired-devices list, where you can
+  revoke it.
+- Turning Tailscale access on or off.
+
+### Limits on joining by password
+
+Any device on your tailnet can try the owner password, so Jarvis slows it down:
+
+- All join attempts share one counter. After 5 wrong passwords in a row, every
+  join is refused for 60 seconds. Each further wrong password doubles that
+  wait, up to 1 hour. A correct password resets the counter.
+- The counter is kept in memory only. Restarting Jarvis clears it.
+- Wrong passwords at the join screen are never counted against devices that
+  are already paired, so they cannot lock out your phone. The owner-login
+  limit of 20 wrong passwords per hour is separate.
+- Every join is written to the audit log as `joined-by-password`, and the
+  machine shows a notification that a device joined, naming the device. If
+  push notifications are on, already-joined phones get one too, with no
+  device name. If you did not expect it, revoke the device and change the
+  password.
+
+### Tailscale Funnel
+
+Funnel puts a local port on the public internet. Jarvis refuses to turn
+Tailscale access on while Funnel exposes the bridge or web port, or if it
+cannot read Funnel's settings to check. If Funnel starts exposing one of those
+ports later, Jarvis closes every listener, including for paired devices.
+Turn Funnel off, then turn the Jarvis switch off and on again. Jarvis checks
+once a minute.
+
+### When something goes wrong
+
+- **"That machine is not reachable."** The machine is off, asleep, has no
+  Jarvis running, has Tailscale access off, or is not on your tailnet.
+  Check each. A machine asleep or powered off cannot be woken from here.
+- **"That machine's certificate could not be checked."** The machine's
+  certificate has expired or does not match its name. At that machine, open
+  Settings → Remote access and renew it (**Renew**). Jarvis also renews it
+  itself when less than 30 days are left, and reloads it when no device is
+  connected, or at 7 days left whatever is connected.
+- **"Update Jarvis on that machine."** The two Jarvis versions use different
+  protocols. Update the older one. There is no way to update a machine
+  remotely, so go to it or use SSH.
+- **Phone: "Not accepted."** Wrong password, Tailscale access is off at that
+  machine, or too many wrong attempts. Wait and try again.
+- **Phone: "Couldn't reach that machine."** Check the name, that the machine
+  is on, and that it is in your Tailscale network.
+- **Phone: "Use the full name ending in .ts.net."** You typed a short name.
+
+If a machine's certificate or address changed, phones that pinned the old one
+show "Pair again", which clears only that machine. Join again with the
+password.
+
+### The Jarvis window keeps its sign-in
+
+In the desktop app, a machine opened full-window asks for the owner password
+once and then stays signed in. It has no idle lock, and Settings there says
+"Signed in for this Jarvis window." instead of the idle-lock and
+keep-signed-in rows. The sign-in ends after 7 days without use, or 30 days
+after it began, and signing out by hand still works. Ordinary browsers and
+the phone keep their own idle lock and keep-signed-in rules, unchanged.
+
+The catch: anyone at the unlocked desktop can use the other machine, with
+everything that means for that machine, until you sign out or the sign-in
+expires. Lock your screen. See [SECURITY.md](../../SECURITY.md).
 
 ## The browser client
 

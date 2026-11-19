@@ -8,6 +8,26 @@ version and the downloads. This file is the index.
 
 ## Unreleased
 
+- Tailscale access: a new Settings → Remote access switch (off by default,
+  changed only at the machine) lets other devices on your tailnet join this
+  machine with its owner password. It needs an owner password and a Tailscale
+  certificate, and can listen on the Tailscale address or "Forward through
+  Tailscale" (relay) for machines whose firewall blocks that address. It is
+  refused while Tailscale Funnel exposes a Jarvis port, and the listeners
+  close if Funnel starts exposing one later. Joins have their own limit (5 wrong
+  passwords, then 60 s, doubling to 1 h), are audited, appear in the device
+  list and raise an alert. See Remote access → Your machines on Tailscale.
+- Phone: holds up to 16 machines with a switcher on Home, the tablet sidebar
+  and the unlock screen. Add one by its full `.ts.net` name and owner
+  password; the existing pairing stays as the first machine with no re-pair.
+  Notifications switch to the right machine on tap. The browser client lists
+  other machines as links.
+- Desktop: a machine switcher in the top bar opens another Jarvis machine
+  full-window, listing machines found with `tailscale status` (the phone and
+  browser list them too). Those windows keep their sign-in with no idle lock,
+  ending after 7 days unused or 30 days total; this exception is described in
+  SECURITY.md.
+
 ## [0.1.13] — 2026-11-01
 
 - Phone: the Claude chat view now works for every Claude account, not only
