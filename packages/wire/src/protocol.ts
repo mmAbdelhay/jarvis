@@ -263,6 +263,24 @@ export type PeerInfo = {
   webPort: number;
 };
 
+/** Another Jarvis machine this machine's core found on the tailnet: the same
+ *  fields as PeerInfo, `name` being its full MagicDNS name without the
+ *  trailing dot. */
+export type TailnetMachine = {
+  name: string;
+  label: string;
+  v: number;
+  bridgePort: number;
+  webPort: number;
+};
+
+/** `tailnet:peers`' answer. `no-cli`: Tailscale is not installed here;
+ *  `not-running`: its status could not be read or it is not connected. */
+export type TailnetPeers = {
+  state: "ok" | "no-cli" | "not-running";
+  machines: TailnetMachine[];
+};
+
 // `name` (M11, ruling 1) is set only when the laptop serves a configured
 // certificate carrying a DNS SAN: its presence is what tells the phone to
 // dial that name with the OS trust store instead of pinning the leaf.

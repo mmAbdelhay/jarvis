@@ -78,6 +78,7 @@ import {
   readTailscaleIps,
   type TailscaleCertDeps,
 } from "../tailscale-cert.js";
+import { createTailnetPeers, probePeerFile } from "../tailnet-peers.js";
 import { disableRelay, enableRelay, readServeStatus, restoreForward } from "../tailnet-guard.js";
 import { applyRemoteFromFile, createRemoteTailnetGuard } from "../tailnet-guard-wiring.js";
 import { createNotifier } from "../notify.js";
@@ -2401,6 +2402,14 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     platform,
   };
 
+  // Tailnet machines (tailnet-peers.ts): `tailnet:peers`' finder, over the
+  // same Tailscale deps; probes go to each peer's own web listener.
+  const tailnetPeers = createTailnetPeers({
+    tailscale: tailscaleCertDeps,
+    probe: probePeerFile,
+    now: () => Date.now(),
+  });
+
   // Tailscale access's guard (tailnet-guard.ts): idle until the switch is on.
   // Each read goes to the live config, which a settings save merges in place.
   const tailnetGuard = createRemoteTailnetGuard({
@@ -2590,6 +2599,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     openExternal: (url) => host.openExternal(url),
     reviews,
     awake,
+    tailnetPeers,
     claudeView,
     attachUpload: paneAttach,
     plans: {

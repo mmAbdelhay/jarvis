@@ -54,6 +54,7 @@ import {
 import type { InvokeChannel } from "./channels.js";
 import type { ReviewService } from "./review-service.js";
 import { isAwakeMode, type KeepAwake } from "./keep-awake.js";
+import type { TailnetPeersFinder } from "./tailnet-peers.js";
 import type { IpLocateResult } from "./ip-locate.js";
 import type { TabHost } from "./core/tab-host.js";
 import type { UsageHistory } from "./usage-history.js";
@@ -434,6 +435,9 @@ export type DispatchDeps = {
   // Keep awake (Task 18): keep-awake.ts's createKeepAwake, built once in
   // compose.ts — narrowed to the two calls its channels make.
   awake: Pick<KeepAwake, "status" | "set">;
+  // Tailnet machines: tailnet-peers.ts's createTailnetPeers, built once in
+  // compose.ts. Never throws; failures are its `state`.
+  tailnetPeers: Pick<TailnetPeersFinder, "list">;
   // The phone's chat view of a pane (claude-view.ts's handlers, built in
   // compose.ts). Both validate their own arguments.
   claudeView: {
@@ -1812,5 +1816,7 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
 
     "awake:status": () => deps.awake.status(),
     "awake:set": async ([patchArg]) => deps.awake.set(awakePatch(patchArg)),
+
+    "tailnet:peers": () => deps.tailnetPeers.list(),
   } satisfies Record<TableChannel, Handler>;
 }

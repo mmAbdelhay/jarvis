@@ -292,6 +292,7 @@ function stubJarvis(overrides: Partial<RendererApi>): RendererApi {
     awakeStatus: vi.fn(async () => AWAKE_STATUS),
     setAwake: vi.fn(async () => AWAKE_STATUS),
     onAwakeChanged: vi.fn(),
+    tailnetPeers: vi.fn(async () => ({ state: "no-cli" as const, machines: [] })),
     backgroundStatus: vi.fn(async () => ({
       enabled: false,
       inApp: true,

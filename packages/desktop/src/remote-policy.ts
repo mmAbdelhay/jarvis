@@ -326,6 +326,8 @@ export const CHANNEL_POLICY = {
   // dispatch.ts accepts only `mode` and `simulateInput` from anyone.
   "awake:status": "remote",
   "awake:set": "remote",
+  // Tailnet machines: the phone and browser list the other machines too.
+  "tailnet:peers": "remote",
   // The updater replaces and quits the laptop's own app; never a phone's
   // call to make.
   "update:check": "desktop-only",
@@ -521,6 +523,8 @@ export const REMOTE_EFFECT = {
   // Keep awake: the status is a read; a set writes jarvis.yaml.
   "awake:status": "read",
   "awake:set": "mutate",
+  // Tailnet machines: runs `tailscale status` and probes peers; changes nothing.
+  "tailnet:peers": "read",
 } as const satisfies Record<RemoteChannel, "read" | "mutate" | "input">;
 
 /** M12 Task 3: how often `channel`'s outcome gets a `remote-call` audit

@@ -39,6 +39,7 @@ import type {
   ClaudeView,
   PushRegisterResult,
   PushRegistration,
+  TailnetPeers,
   TerminalPaneInfo,
 } from "@jarvis/wire";
 import {
@@ -1201,6 +1202,9 @@ export type RendererApi = {
   setAwake(patch: AwakePatch): Promise<AwakeStatus>;
   /** The keep-awake status changed; the payload is the new one. */
   onAwakeChanged(cb: (status: AwakeStatus) => void): void;
+  /** The other Jarvis machines on this user's tailnet (tailnet-peers.ts),
+   *  cached for 30 s. */
+  tailnetPeers(): Promise<TailnetPeers>;
 };
 
 export type WiringDeps = {

@@ -256,6 +256,13 @@ describe("awake:* policy", () => {
   });
 });
 
+describe("tailnet:peers policy", () => {
+  it("lets a phone read the other machines on the tailnet", () => {
+    expect(isRemoteAllowed("tailnet:peers")).toBe(true);
+    expect(REMOTE_EFFECT["tailnet:peers"]).toBe("read");
+  });
+});
+
 describe("auditPolicyFor", () => {
   const noBlobs = () => false;
   const isVoiceUpload = (channel: string) => channel === "remote:uploadAudio";

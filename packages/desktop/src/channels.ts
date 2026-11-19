@@ -315,6 +315,9 @@ export const INVOKE_CHANNELS = {
   // read it and flip it; idleSeconds changes only through Settings' save.
   awakeStatus: "awake:status",
   setAwake: "awake:set",
+  // Tailnet machines (tailnet-peers.ts): the other Jarvis machines this
+  // core found on the tailnet. Remote-legal: a read.
+  tailnetPeers: "tailnet:peers",
   // The updater (updater.ts). Electron-bound and desktop-only: they act on
   // this app's own install and quit it.
   updateCheck: "update:check",

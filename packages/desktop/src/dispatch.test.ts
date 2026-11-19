@@ -298,6 +298,9 @@ export function fakeDeps(overrides: Partial<DispatchDeps> = {}): DispatchDeps {
       status: vi.fn(() => AWAKE_OFF),
       set: vi.fn(async () => AWAKE_OFF),
     },
+    tailnetPeers: {
+      list: vi.fn(async () => ({ state: "no-cli" as const, machines: [] })),
+    },
     claudeView: {
       view: vi.fn(async () => ({ kind: "none" as const })),
       answer: vi.fn(() => ({ ok: true as const })),
