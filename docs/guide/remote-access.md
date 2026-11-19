@@ -460,8 +460,10 @@ unpairing and pairing again. Each machine still decides who may reach it:
 you set it up once at that machine, and a new device joins with that
 machine's owner password.
 
-This is only for your own devices on one tailnet. It does not use the public
-internet, a relay service or any Jarvis server.
+This is only for your own devices on one tailnet. Traffic stays inside your
+tailnet, end-to-end encrypted by Tailscale, and no Jarvis server is involved.
+(Tailscale may route it through its own encrypted relays when two devices
+cannot connect directly.)
 
 ### Set up each machine, once
 
@@ -471,13 +473,16 @@ another machine.
 1. Set the owner password in **Settings → Remote access → Owner account**
    (at least 12 characters). Turning the feature on is refused without one.
 2. In **Settings → Remote access**, turn on **Tailscale access**. Jarvis then
-   also turns on the remote bridge and browser access. If the machine has no
-   Tailscale certificate yet, Jarvis gets one for you. Tailscale HTTPS
+   also turns on the remote bridge and browser access. If no certificate is
+   set up, Jarvis gets a Tailscale one for you. If you set your own
+   certificate, it must carry the machine's `.ts.net` name. Tailscale HTTPS
    certificates must be enabled for your tailnet in the Tailscale admin
    console (see [Sidecars over Tailscale](#sidecars-over-tailscale-from-settings)).
 3. Pick how Jarvis listens:
    - **Default.** Jarvis listens on the machine's Tailscale address. Use this
-     when nothing else is in the way, which is the usual case on Linux.
+     when nothing else is in the way, which is the usual case on Linux. If
+     Tailscale already forwards one of Jarvis's ports, Default is refused;
+     choose the relay instead.
    - **Forward through Tailscale (relay).** Jarvis listens on this machine
      only (`127.0.0.1`) and runs `tailscale serve --tcp` with
      `--proxy-protocol=2` for the bridge and web ports, so Tailscale hands the
@@ -486,8 +491,9 @@ another machine.
      already made on those two ports; Jarvis puts yours back when you turn
      the feature off. With the relay on, a direct connection to the
      machine's loopback address is dropped, which includes a USB phone using
-     `adb reverse`. If Tailscale refuses to create the forward, Settings shows
-     the exact command to run yourself.
+     `adb reverse`. If Tailscale refuses to create the forward, the switch
+     stays off and Settings shows the command so you can run it and see
+     Tailscale's reason.
 4. Turn on **Keep Jarvis running in the background** (Settings → General).
    Without it, access stops when you quit Jarvis. Settings tells you so, and
    the machine cannot be reached when no Jarvis window is open.
@@ -498,7 +504,8 @@ first.
 
 Settings shows the state of the switch in one line: on, or blocked and why.
 Turning it off stops password joins and the peer file. The remote bridge and
-browser access stay as they are, so paired devices keep working.
+browser access stay on, back at the address they used before you turned this
+on. Devices that paired while it was on may need to pair again.
 
 Jarvis does not turn itself off for being idle while this switch is on
 (`remote.idleDisableMinutes` does nothing then), or the machine would
@@ -547,7 +554,7 @@ Pairing by QR code still works as before.
   "Install Tailscale to see your other machines." It lists only your own
   untagged machines that are online and answer on the web port 7718 with the
   name they were looked up by; machines shared in from another tailnet user
-  are left out.
+  are left out. A machine appears only once Tailscale access is on there.
 
 Using the machine's own page means the screens and the protocol always match
 that machine.
@@ -577,10 +584,10 @@ Any device on your tailnet can try the owner password, so Jarvis slows it down:
   limit of 20 wrong passwords per hour is separate.
 - Every join is written to the audit log as `joined-by-password`, and the
   machine shows a notification that a device joined, naming the device. With
-  no Jarvis window open, the background service keeps it and shows it when
-  the app next opens. If
-  push notifications are on, already-joined phones get one too, with no
-  device name. If you did not expect it, revoke the device and change the
+  no Jarvis window open, the background service keeps up to 20 such alerts
+  in memory and shows them when the app next opens. If push notifications are
+  on, every paired phone with notifications on gets one too, with no device
+  name. If you did not expect it, revoke the device and change the
   password.
 
 ### Tailscale Funnel
@@ -594,15 +601,16 @@ once a minute.
 
 ### When something goes wrong
 
-- **"That machine is not reachable."** The machine is off, asleep, has no
+- **Desktop: "That machine is not reachable."** The machine is off, asleep, has no
   Jarvis running, has Tailscale access off, or is not on your tailnet.
   Check each. A machine asleep or powered off cannot be woken from here.
-- **"That machine's certificate could not be checked."** The machine's
+- **Desktop: "That machine's certificate could not be checked."** The machine's
   certificate has expired or does not match its name. At that machine, open
-  Settings → Remote access and renew it (**Renew**). Jarvis also renews it
-  itself when less than 30 days are left, and reloads it when no device is
-  connected, or at 7 days left whatever is connected.
-- **"Update Jarvis on that machine."** The two Jarvis versions use different
+  Settings → Remote access and renew it (**Renew**). While Tailscale access
+  is on, Jarvis checks daily and renews a certificate it got itself when less
+  than 30 days are left. It reloads it when no device is connected, or at 7
+  days left whatever is connected.
+- **Desktop: "Update Jarvis on that machine."** The two Jarvis versions use different
   protocols. Update the older one. There is no way to update a machine
   remotely, so go to it or use SSH.
 - **Phone: "Not accepted."** Wrong password, Tailscale access is off at that

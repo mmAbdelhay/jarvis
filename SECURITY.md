@@ -74,10 +74,12 @@ In scope, roughly:
     limits, so failed joins never count toward the 20 wrong passwords per hour
     and can never lock out a paired device. Audit lines are `joined-by-password`,
     `join-failed` and a coalesced `join-refused` (one per minute at most, with
-    a count), by source address and device id only. Every success raises a
-    desktop alert naming the device (queued by the background service until a
-    desktop app attaches, when none is open) and, with `remote.push.enabled`, a push
-    to joined phones that carries no device name. A joined device is listed
+    a count), by source address, device id and the device name the joining device gave
+    (never the password). Every success raises a desktop alert naming the
+    device (queued in memory by the background service until a desktop app
+    attaches, at most 20, oldest dropped first, when none is open) and, with
+    `remote.push.enabled`, a push to every paired phone that has notifications
+    on, which carries no device name. A joined device is listed
     with the paired devices and is revoked there. In scope: a join without
     the password, with the switch off or without a named certificate, one that
     is not audited, a failed join that counts against a paired device, a join
@@ -94,11 +96,11 @@ In scope, roughly:
     address comes from a PROXY v2 header. The header is read only in relay mode
     and only on a listener bound to loopback (the front refuses any other host).
     It is required there, with no fallback to plain TLS, read before any TLS,
-    within 5 s, from at most 64 connections. Known limit: any process on this
+    within 5 s, with at most 64 connections open at once. Known limit: any process on this
     machine can connect to that loopback port and claim any source address.
     Relay mode trusts local processes that far. In scope: honouring the header
     on a non-loopback listener or outside relay mode.
-  - **Peer file.** While the switch is on, the web listener answers
+  - **Peer file.** While the switch is on and not blocked, the web listener answers
     `/jarvis-peer.json` with five fields and nothing else: machine name (full
     DNS name), label, protocol version, bridge port, web port. The Host header
     must match exactly. With the switch off the connection is closed. In scope:
@@ -125,11 +127,12 @@ In scope, roughly:
     server's refresh lifetimes, unchanged), and signing out still works. The
     client knows it is in a machine view from a user-agent token,
     `JarvisMachineView/1`, which only the desktop host sets, per session, for
-    these views. A page cannot change its own user agent, and the token must
-    be a whole word. Ordinary browsers and the phone keep today's rules. Why
+    these views. No other web page can change the user agent the Jarvis client sees on
+    its own origin, and the token must be a whole word. Ordinary browsers and the phone keep today's rules. Why
     this is accepted: the owner chose one password prompt for a window that is
-    already inside their own signed-in desktop session, and the window has no
-    way to lock a page the desktop does not already hold. The limit: anyone at
+    already inside their own signed-in desktop session, and an idle lock
+    there would only repeat the lock of the desktop session the window already
+    sits in. The limit: anyone at
     the unlocked desktop can use the other machine, with the full access
     "a paired device is you" describes, until the sign-in is ended or expires.
     The token is not a secret. A person who sets that user agent in their own
