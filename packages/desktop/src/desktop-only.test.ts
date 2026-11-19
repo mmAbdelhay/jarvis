@@ -309,6 +309,14 @@ describe("desktop-only registrations", () => {
       expect(deps.machines.showLocal).toHaveBeenCalledOnce();
     });
 
+    it("a bad machine:show target changes nothing", () => {
+      const { deps, listener } = setup();
+      listener("machine:show")({}, { name: "evil.com/x", webPort: 7718, v: 2 });
+      listener("machine:show")({}, null);
+      expect(deps.views.hideAll).not.toHaveBeenCalled();
+      expect(deps.machines.show).not.toHaveBeenCalled();
+    });
+
     it("converts bounds like workspace:bounds and refuses a malformed rect", () => {
       const { deps, listener } = setup();
       listener("machine:bounds")(

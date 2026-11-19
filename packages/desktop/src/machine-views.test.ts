@@ -126,6 +126,70 @@ function event() {
 }
 
 describe("createMachineViews", () => {
+  it("shows a machine view only once its page has loaded, and hides it on a failed load", () => {
+    const { machines, views } = setup();
+    machines.show(TARGET);
+    expect(views[0]!.visible).toBe(false);
+    views[0]!.contents.fire("did-finish-load");
+    expect(views[0]!.visible).toBe(true);
+    views[0]!.contents.fire("did-fail-load", {}, -105, "ERR_NAME_NOT_RESOLVED", `${ORIGIN}/`, true);
+    expect(views[0]!.visible).toBe(false);
+  });
+
+  it("a load finishing for a machine that is not the shown one stays hidden", () => {
+    const { machines, views } = setup();
+    machines.show(TARGET);
+    machines.showLocal();
+    views[0]!.contents.fire("did-finish-load");
+    expect(views[0]!.visible).toBe(false);
+  });
+
+  it("choosing an offline or certificate-failed machine again reloads it", () => {
+    const { machines, views, states } = setup();
+    machines.show(TARGET);
+    views[0]!.contents.fire("did-fail-load", {}, -105, "ERR_NAME_NOT_RESOLVED", `${ORIGIN}/`, true);
+    machines.show(TARGET);
+    expect(views[0]!.contents.loaded).toHaveLength(2);
+    expect(states.map((s) => s.phase)).toEqual(["loading", "offline", "loading"]);
+    views[0]!.contents.fire("did-fail-load", {}, -202, "ERR_CERT_AUTHORITY_INVALID", `${ORIGIN}/`, true);
+    machines.show(TARGET);
+    expect(views[0]!.contents.loaded).toHaveLength(3);
+    // A ready machine is not reloaded.
+    views[0]!.contents.fire("did-finish-load");
+    machines.show(TARGET);
+    expect(views[0]!.contents.loaded).toHaveLength(3);
+  });
+
+  it("opens the system browser at most once per second per view", () => {
+    let t = 10_000;
+    const { machines, views, opened } = setup({ now: () => t });
+    machines.show(TARGET);
+    const handler = views[0]!.contents.openHandler!;
+    handler({ url: "https://a.example/" });
+    t += 999;
+    handler({ url: "https://b.example/" });
+    t += 1;
+    handler({ url: "https://c.example/" });
+    expect(opened).toEqual(["https://a.example/", "https://c.example/"]);
+  });
+
+  it("allows a clipboard write from its own origin only; reading stays denied", () => {
+    const { machines, sessions } = setup();
+    machines.show(TARGET);
+    const session = [...sessions.values()][0]!;
+    const ask = (permission: string, url: string) => {
+      let granted: boolean | undefined;
+      session.requestHandler!({}, permission, (g) => (granted = g), { requestingUrl: url });
+      return granted;
+    };
+    expect(ask("clipboard-sanitized-write", `${ORIGIN}/`)).toBe(true);
+    expect(ask("clipboard-sanitized-write", "https://evil.example/")).toBe(false);
+    expect(ask("clipboard-read", `${ORIGIN}/`)).toBe(false);
+    expect(session.checkHandler!({}, "clipboard-sanitized-write", ORIGIN, {})).toBe(true);
+    expect(session.checkHandler!({}, "clipboard-sanitized-write", "https://evil.example", {})).toBe(false);
+    expect(session.checkHandler!({}, "clipboard-read", ORIGIN, {})).toBe(false);
+  });
+
   it("creates a hardened view in the machine's own partition and loads its origin", () => {
     const { machines, views, states } = setup();
     machines.show(TARGET);
@@ -140,14 +204,16 @@ describe("createMachineViews", () => {
     });
     expect("preload" in views[0]!.options.webPreferences).toBe(false);
     expect(views[0]!.contents.loaded).toEqual([`${ORIGIN}/`]);
-    expect(views[0]!.visible).toBe(true);
+    expect(views[0]!.visible).toBe(false); // not before its page has loaded
     expect(states).toEqual([{ name: TARGET.name, phase: "loading" }]);
   });
 
   it("reuses the view on a second show and hides, never destroys, when switching away", () => {
     const { machines, views } = setup();
     machines.show(TARGET);
+    views[0]!.contents.fire("did-finish-load");
     machines.show({ ...TARGET, name: "other.tail1234.ts.net" });
+    views[1]!.contents.fire("did-finish-load");
     expect(views).toHaveLength(2);
     expect(views[0]!.visible).toBe(false);
     expect(views[0]!.destroyed).toBe(false);
@@ -298,7 +364,8 @@ describe("createMachineViews", () => {
     });
 
     it("denies every popup, opening an https one in the system browser", () => {
-      const { machines, views, opened } = setup();
+      let t = 0;
+      const { machines, views, opened } = setup({ now: () => (t += 2000) });
       machines.show(TARGET);
       const handler = views[0]!.contents.openHandler!;
       expect(handler({ url: "https://github.com/" })).toEqual({ action: "deny" });

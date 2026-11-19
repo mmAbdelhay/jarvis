@@ -50,6 +50,9 @@ export async function initMachineSwitcher(
   let peers: TailnetPeers | undefined;
   let timer: ReturnType<typeof setInterval> | undefined;
   let round = 0;
+  /** The open menu hid this machine's hosted workspace pages (they are
+   *  native and would paint over its lower rows). */
+  let menuHidWorkspace = false;
 
   button.setAttribute("aria-haspopup", "menu");
   menu.setAttribute("role", "menu");
@@ -58,6 +61,7 @@ export async function initMachineSwitcher(
     const label = active?.label ?? MESSAGES.machineThisMachine(en);
     const text = doc.getElementById("machine-button-label") ?? button;
     text.textContent = label;
+    text.setAttribute("dir", "auto");
     button.setAttribute("aria-label", MESSAGES.machineSwitcherLabel(label, en));
     button.classList.toggle("machine-btn--remote", active !== undefined);
   };
@@ -101,6 +105,7 @@ export async function initMachineSwitcher(
       );
       const label = doc.createElement("span");
       label.className = "machine-menu-label";
+      label.setAttribute("dir", "auto");
       label.textContent = m.label;
       const name = doc.createElement("span");
       name.className = "machine-menu-name mono";
@@ -153,6 +158,10 @@ export async function initMachineSwitcher(
     // topbar, this menu included. Hidden — never resized, which would resize
     // that machine's terminals — until the menu closes.
     if (active !== undefined) logged(api.showLocalMachine());
+    else {
+      api.hideWorkspace();
+      menuHidWorkspace = true;
+    }
     renderMenu();
     void refresh();
     timer = setInterval(() => void refresh(), MACHINE_POLL_MS);
@@ -167,6 +176,8 @@ export async function initMachineSwitcher(
     if (timer !== undefined) clearInterval(timer);
     timer = undefined;
     if (reshow && active !== undefined) logged(api.showMachine(target(active)));
+    if (menuHidWorkspace && reshow && active === undefined) api.restoreWorkspace();
+    menuHidWorkspace = false;
   };
 
   /** The area below the topbar, where the machine view goes. */
@@ -234,8 +245,11 @@ export async function initMachineSwitcher(
   };
 
   const chooseLocal = async (): Promise<void> => {
+    const hid = menuHidWorkspace;
     closeMenu(false);
     await goLocal();
+    // Already on this machine: the open menu had hidden its pages.
+    if (hid && active === undefined) api.restoreWorkspace();
   };
 
   const goLocal = async (): Promise<void> => {
@@ -262,7 +276,14 @@ export async function initMachineSwitcher(
       console.error(`machine switcher: ${String(error)}`);
     }
     // The menu stays open on the list, now without that close control.
-    if (wasActive) await goLocal();
+    if (wasActive) {
+      await goLocal();
+      // goLocal brought the pages back under the still-open menu.
+      if (!menu.hidden) {
+        api.hideWorkspace();
+        menuHidWorkspace = true;
+      }
+    }
     if (!menu.hidden) renderMenu();
   };
 

@@ -110,6 +110,8 @@ export type MachineViewsDeps = {
   protocolVersion: number;
   /** The system browser. Called only with an https URL. */
   openExternal(url: string): void;
+  /** The clock, in ms; Date.now unless a test supplies one. */
+  now?: () => number;
 };
 
 export type MachineViews = {
@@ -125,6 +127,8 @@ export const MACHINE_VIEW_USER_AGENT_TOKEN = "JarvisMachineView/1";
 const DNS_NAME = /^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*$/;
 const MAX_DNS_NAME = 253;
 const MAX_EXTERNAL_URL = 2048;
+/** A machine page may open the system browser once per this long. */
+const EXTERNAL_OPEN_GAP_MS = 1000;
 const ERR_ABORTED = -3;
 
 /** Chromium's net errors -200 to -299 are the certificate errors. */
@@ -187,11 +191,18 @@ export function createMachineViews(deps: MachineViewsDeps): MachineViews {
     if (entry !== undefined) entry.phase = phase;
     emit({ name, phase });
   };
+  const now = deps.now ?? Date.now;
+  /** The machine the user chose to see. Its native view paints over the
+   *  renderer's loading/failure overlay, so it is made visible only while
+   *  this one is `ready`. */
+  let shown: string | undefined;
   const hideAll = (): void => {
     for (const entry of entries.values()) entry.view.setVisible(false);
   };
-  const openOutside = (url: string): void => {
-    if (isExternalUrl(url)) deps.openExternal(url.trim());
+  const syncVisible = (name: string): void => {
+    const entry = entries.get(name);
+    if (entry === undefined) return;
+    entry.view.setVisible(shown === name && entry.phase === "ready");
   };
 
   /** The permission rule, read against the machine's current origin. */
@@ -205,22 +216,23 @@ export function createMachineViews(deps: MachineViewsDeps): MachineViews {
     };
     session.setPermissionRequestHandler((_contents, permission, callback, details) => {
       const types = details.mediaTypes ?? [];
+      const own = isOwn([originOf(details.requestingUrl), originOf(details.securityOrigin)]);
       callback(
-        permission === "media" &&
-          types.includes("audio") &&
-          !types.includes("video") &&
-          isOwn([originOf(details.requestingUrl), originOf(details.securityOrigin)]),
+        (permission === "media" && types.includes("audio") && !types.includes("video") && own) ||
+          // Copying out of the terminal; reading the clipboard stays denied.
+          (permission === "clipboard-sanitized-write" && own),
       );
     });
     session.setPermissionCheckHandler((_contents, permission, requestingOrigin, details) => {
+      const own = isOwn([
+        originOf(requestingOrigin),
+        originOf(details.requestingUrl),
+        originOf(details.securityOrigin),
+      ]);
       return (
-        permission === "media" &&
-        details.mediaType === "audio" &&
-        isOwn([
-          originOf(requestingOrigin),
-          originOf(details.requestingUrl),
-          originOf(details.securityOrigin),
-        ])
+        own &&
+        ((permission === "media" && details.mediaType === "audio") ||
+          permission === "clipboard-sanitized-write")
       );
     });
   };
@@ -246,6 +258,14 @@ export function createMachineViews(deps: MachineViewsDeps): MachineViews {
     contents.setUserAgent(agent);
     session.setUserAgent(agent);
 
+    let lastOpenAt: number | undefined;
+    const openOutside = (url: string): void => {
+      if (!isExternalUrl(url)) return;
+      const at = now();
+      if (lastOpenAt !== undefined && at - lastOpenAt < EXTERNAL_OPEN_GAP_MS) return;
+      lastOpenAt = at;
+      deps.openExternal(url.trim());
+    };
     const isOwnOrigin = (url: string): boolean => originOf(url) === entry.origin;
     contents.on("will-navigate", (event, url) => {
       if (isOwnOrigin(url)) return;
@@ -267,10 +287,14 @@ export function createMachineViews(deps: MachineViewsDeps): MachineViews {
       openOutside(url);
       return { action: "deny" };
     });
-    contents.on("did-finish-load", () => setPhase(name, "ready"));
+    contents.on("did-finish-load", () => {
+      setPhase(name, "ready");
+      syncVisible(name);
+    });
     contents.on("did-fail-load", (_event, errorCode, _description, _url, isMainFrame) => {
       if (!isMainFrame || errorCode === ERR_ABORTED) return;
       setPhase(name, isCertificateError(errorCode) ? "certificate" : "offline");
+      syncVisible(name);
     });
 
     if (bounds !== undefined) view.setBounds(bounds);
@@ -284,6 +308,7 @@ export function createMachineViews(deps: MachineViewsDeps): MachineViews {
     const entry = entries.get(name);
     if (entry === undefined) return;
     entries.delete(name);
+    if (shown === name) shown = undefined;
     entry.view.destroy();
   };
 
@@ -292,6 +317,7 @@ export function createMachineViews(deps: MachineViewsDeps): MachineViews {
       if (!isMachineTarget(target)) return;
       const name = target.name.toLowerCase();
       hideAll();
+      shown = undefined;
       if (target.v !== deps.protocolVersion) {
         emit({ name, phase: "version" });
         return;
@@ -304,13 +330,20 @@ export function createMachineViews(deps: MachineViewsDeps): MachineViews {
       }
       if (entry === undefined) {
         entry = create(name, origin);
+      } else if (entry.phase === "offline" || entry.phase === "certificate") {
+        // Choosing a failed machine again is the retry.
+        entry.phase = "loading";
+        emit({ name, phase: "loading" });
+        entry.view.webContents.loadURL(`${origin}/`).catch(() => {});
       } else {
         emit({ name, phase: entry.phase });
       }
+      shown = name;
       if (bounds !== undefined) entry.view.setBounds(bounds);
-      entry.view.setVisible(true);
+      syncVisible(name);
     },
     showLocal() {
+      shown = undefined;
       hideAll();
     },
     setBounds(rect) {

@@ -173,7 +173,7 @@ describe("the topbar machine switcher", () => {
     await flush();
 
     expect(menu().hidden).toBe(true);
-    expect(api.hideWorkspace).toHaveBeenCalledTimes(1);
+    expect(api.hideWorkspace).toHaveBeenCalledTimes(2); // the open menu, then the choice
     expect(api.setMachineBounds).toHaveBeenCalledWith({
       x: 0,
       y: 0,
@@ -299,6 +299,52 @@ describe("the topbar machine switcher", () => {
     await openMenu();
     expect(closeLabel("Studio")).not.toBeNull();
     expect(closeLabel("Attic")).toBeNull();
+  });
+
+  it("on this machine, the open menu hides the workspace pages and a close with no choice restores them", async () => {
+    const { api } = fakeApi({ state: "ok", machines: [machine()] });
+    await initMachineSwitcher(api);
+    await openMenu();
+    expect(api.hideWorkspace).toHaveBeenCalledTimes(1);
+    expect(api.restoreWorkspace).not.toHaveBeenCalled();
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await flush();
+    expect(api.restoreWorkspace).toHaveBeenCalledTimes(1);
+  });
+
+  it("choosing This machine from the menu on this machine restores the pages once", async () => {
+    const { api } = fakeApi({ state: "ok", machines: [machine()] });
+    await initMachineSwitcher(api);
+    await openMenu();
+    items()[0]?.click();
+    await flush();
+    expect(api.restoreWorkspace).toHaveBeenCalledTimes(1);
+  });
+
+  it("closing the shown machine from the open menu keeps the pages hidden under it", async () => {
+    const { api } = fakeApi({ state: "ok", machines: [machine()] });
+    await initMachineSwitcher(api);
+    await openMenu();
+    items()[1]?.click();
+    await flush();
+    await openMenu();
+    api.hideWorkspace.mockClear();
+    (
+      menu().querySelector(`[aria-label="${MESSAGES.machineClose("Studio", en)}"]`) as HTMLElement
+    ).click();
+    await flush();
+    expect(api.hideWorkspace).toHaveBeenCalledTimes(1);
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await flush();
+    expect(api.restoreWorkspace).toHaveBeenCalledTimes(2);
+  });
+
+  it("sets dir=auto on machine labels", async () => {
+    const { api } = fakeApi({ state: "ok", machines: [machine({ label: "المكتب" })] });
+    await initMachineSwitcher(api);
+    expect(document.getElementById("machine-button-label")?.getAttribute("dir")).toBe("auto");
+    await openMenu();
+    expect(menu().querySelector(".machine-menu-label")?.getAttribute("dir")).toBe("auto");
   });
 
   it("closing a background machine keeps the shown one; closing the shown one goes back", async () => {

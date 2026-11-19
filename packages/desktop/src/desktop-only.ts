@@ -9,7 +9,7 @@ import { isDevToolsDock, type DevToolsDock } from "./browser-host.js";
 import type { ElectronBoundChannel } from "./dispatch.js";
 import type { ChangeResult, DaemonStatus } from "./daemon/mode.js";
 import type { ReportedRect } from "./ipc.js";
-import type { MachineViews } from "./machine-views.js";
+import { isMachineTarget, type MachineViews } from "./machine-views.js";
 import { errorMessage, MESSAGES } from "./messages.js";
 import type { DesktopOnlyChannel } from "./remote-policy.js";
 import { tabMenuTemplate } from "./tab-menu.js";
@@ -277,8 +277,9 @@ export function registerDesktopOnly(deps: DesktopOnlyDeps): void {
   // Tailnet machines. machine-views.ts checks the target itself; a machine
   // view covers the window, so the workspace pages are hidden under it.
   deps.handle("machine:show", (_event, target) => {
+    if (!isMachineTarget(target)) return;
     deps.views.hideAll();
-    deps.machines.show(target as never);
+    deps.machines.show(target);
   });
   deps.handle("machine:showLocal", () => deps.machines.showLocal());
   deps.handle("machine:bounds", (_event, bounds) => {
