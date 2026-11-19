@@ -1726,6 +1726,7 @@ export const STRINGS = {
   "machines.current": { en: "This one", ar: "هذا الجهاز" },
   "machines.openFailed": { en: "That machine could not be opened", ar: "تعذّر فتح ذلك الجهاز" },
   "machines.add": { en: "Add machine", ar: "إضافة جهاز" },
+  "machines.foundAdd": { en: "Add", ar: "إضافة" },
   "machines.addLink": { en: "Add a machine's address", ar: "أضف عنوان جهاز" },
   "machines.removeLink": { en: "Remove", ar: "إزالة" },
   "pair.joinHere": { en: "Join with the owner password", ar: "انضم باستخدام كلمة مرور المالك" },

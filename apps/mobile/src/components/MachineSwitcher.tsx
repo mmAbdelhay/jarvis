@@ -28,7 +28,9 @@ import type { MachineId } from "@/lib/machine-index";
 import { type MachineOnline, createOnlineStore, probeMachine } from "@/lib/machine-probe";
 import type { MachineEntry } from "@/lib/machine-store";
 import { loadScreenMachine, machineStore, openMachineStore } from "@/lib/machine-store-instance";
+import { setJoinNameSignal } from "@/lib/join-name-signal";
 import {
+  type DiscoveredMachine,
   addMachineRowVisible,
   machineLabel,
   otherMachinesLinkVisible,
@@ -40,8 +42,9 @@ import {
 import { nativeTransport } from "@/lib/native-transport";
 import { loadPrefs, setMachineLinks } from "@/lib/prefs";
 import { filePrefsStore } from "@/lib/prefs-file";
-import { useConnectionStore, useMachineId } from "@/lib/rpc-context";
+import { useConnectionStore, useMachineId, useRpcClient } from "@/lib/rpc-context";
 import { systemTransportFor } from "@/lib/system-transport";
+import { fetchDiscovered, startDiscoveredPoll } from "@/lib/tailnet-peers-store";
 import { theme } from "@/lib/theme";
 import { createAppTransport } from "@/lib/trust-routing-transport";
 import {
@@ -82,10 +85,16 @@ function localeTag(): string {
   return Intl.DateTimeFormat().resolvedOptions().locale;
 }
 
-/** The browser's rows: itself, a link per machine, and the field to add one. A
- *  link leaves this page for that machine's own address, in the same tab. */
-function WebMachineRows(props: { visible: boolean; selfLabel: string }) {
-  const { visible, selfLabel } = props;
+/** The browser's rows: itself, a link per machine, the found machines, and the
+ *  field to add a link. A link or a found machine leaves this page for that
+ *  machine's own address, in the same tab; a found one is not saved. */
+function WebMachineRows(props: {
+  visible: boolean;
+  selfLabel: string;
+  selfName: string | undefined;
+  discovered: readonly DiscoveredMachine[];
+}) {
+  const { visible, selfLabel, selfName, discovered } = props;
   const language = useLanguage();
   const [links, setLinks] = useState<MachineLink[]>([]);
   const [text, setText] = useState("");
@@ -131,7 +140,7 @@ function WebMachineRows(props: { visible: boolean; selfLabel: string }) {
 
   return (
     <>
-      {webSwitcherRows({ selfLabel, links }).map((row) => {
+      {webSwitcherRows({ selfLabel, selfName, links, discovered }).map((row) => {
         if (row.kind === "self") {
           return (
             <View key="self" style={[styles.row, styles.rowActive]}>
@@ -144,9 +153,12 @@ function WebMachineRows(props: { visible: boolean; selfLabel: string }) {
             </View>
           );
         }
-        const link = links.find((candidate) => machineLinkUrl(candidate) === row.url);
+        const link =
+          row.kind === "link"
+            ? links.find((candidate) => machineLinkUrl(candidate) === row.url)
+            : undefined;
         return (
-          <View key={row.url} style={styles.row}>
+          <View key={`${row.kind}:${row.url}`} style={styles.row}>
             <Pressable
               accessibilityRole="link"
               onPress={() => window.location.assign(row.url)}
@@ -217,6 +229,8 @@ export function MachineSwitcher(props: { visible: boolean; onClose(): void }) {
   );
   const [online, setOnline] = useState<ReadonlyMap<MachineId, MachineOnline>>(onlineStore.get());
   const [appActive, setAppActive] = useState(sessions.isAppActive());
+  const client = useRpcClient();
+  const [discovered, setDiscovered] = useState<readonly DiscoveredMachine[]>([]);
   // Its caller's function may be new on each render: no reason to read again.
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
@@ -257,11 +271,27 @@ export function MachineSwitcher(props: { visible: boolean; onClose(): void }) {
     return onlineStore.subscribe(() => setOnline(onlineStore.get()));
   }, [probing, onlineStore]);
 
+  // Both platforms ask the machine on screen what it found on the tailnet.
+  const discovering = shouldProbe({ visible, appActive });
+  useEffect(() => {
+    if (!discovering) return;
+    const stop = startDiscoveredPoll({
+      fetch: () => fetchDiscovered(client),
+      clock: realClock,
+      onFound: setDiscovered,
+    });
+    return () => {
+      stop();
+      setDiscovered([]);
+    };
+  }, [discovering, client]);
+
   const rows = switcherRows({
     entries,
     activeId: machineId ?? undefined,
     activeConnection: connection,
     online,
+    discovered,
   });
   const self = entries.find((entry) => entry.id === machineId);
 
@@ -282,43 +312,70 @@ export function MachineSwitcher(props: { visible: boolean; onClose(): void }) {
               <WebMachineRows
                 visible={visible}
                 selfLabel={self !== undefined ? machineLabel(self.record) : ""}
+                selfName={self?.record.name}
+                discovered={discovered}
               />
             )}
             {PLATFORM !== "web" &&
-              rows.map((row) => (
-                <Pressable
-                  key={row.id}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: row.active }}
-                  onPress={() =>
-                    tapSwitcherRow(row, {
-                      switchTo: sessions.switchTo,
-                      close: onClose,
-                      notice: () => dialogs.notice(t(language, "machines.openFailed")),
-                      log: (line) => console.warn(line),
-                    })
-                  }
-                  style={[styles.row, row.active && styles.rowActive]}
-                >
-                  <View style={styles.rowText}>
-                    <Text style={styles.name} numberOfLines={1}>
-                      {row.label}
-                    </Text>
-                    <Text style={styles.subtitle} numberOfLines={1}>
-                      {row.subtitle}
-                    </Text>
-                  </View>
-                  <View style={styles.rowEnd}>
-                    {row.active && (
-                      <Text style={styles.current}>{t(language, "machines.current")}</Text>
-                    )}
-                    <View style={styles.onlineGroup}>
-                      <View style={[styles.dot, { backgroundColor: ONLINE_COLOR[row.online] }]} />
-                      <Text style={styles.onlineText}>{t(language, ONLINE_KEY[row.online])}</Text>
+              rows.map((row) =>
+                row.kind === "found" ? (
+                  <Pressable
+                    key={`found:${row.joinText}`}
+                    accessibilityRole="button"
+                    onPress={() => {
+                      onClose();
+                      setJoinNameSignal(row.joinText);
+                      gate.navigate(() => router.push("/pair"));
+                    }}
+                    style={styles.row}
+                  >
+                    <View style={styles.rowText}>
+                      <Text style={styles.name} numberOfLines={1}>
+                        {row.label}
+                      </Text>
+                      <Text style={styles.subtitle} numberOfLines={1}>
+                        {row.subtitle}
+                      </Text>
                     </View>
-                  </View>
-                </Pressable>
-              ))}
+                    <View style={styles.rowEnd}>
+                      <Text style={styles.current}>{t(language, "machines.foundAdd")}</Text>
+                    </View>
+                  </Pressable>
+                ) : (
+                  <Pressable
+                    key={row.id}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: row.active }}
+                    onPress={() =>
+                      tapSwitcherRow(row, {
+                        switchTo: sessions.switchTo,
+                        close: onClose,
+                        notice: () => dialogs.notice(t(language, "machines.openFailed")),
+                        log: (line) => console.warn(line),
+                      })
+                    }
+                    style={[styles.row, row.active && styles.rowActive]}
+                  >
+                    <View style={styles.rowText}>
+                      <Text style={styles.name} numberOfLines={1}>
+                        {row.label}
+                      </Text>
+                      <Text style={styles.subtitle} numberOfLines={1}>
+                        {row.subtitle}
+                      </Text>
+                    </View>
+                    <View style={styles.rowEnd}>
+                      {row.active && (
+                        <Text style={styles.current}>{t(language, "machines.current")}</Text>
+                      )}
+                      <View style={styles.onlineGroup}>
+                        <View style={[styles.dot, { backgroundColor: ONLINE_COLOR[row.online] }]} />
+                        <Text style={styles.onlineText}>{t(language, ONLINE_KEY[row.online])}</Text>
+                      </View>
+                    </View>
+                  </Pressable>
+                ),
+              )}
             {addMachineRowVisible(PLATFORM) && (
               <Pressable
                 accessibilityRole="button"

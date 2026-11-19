@@ -15,6 +15,7 @@ import {
   View,
 } from "react-native";
 import { takeClearFailedSignal } from "@/lib/clear-failed-signal";
+import { phaseAfterReadForJoin, takeJoinNameSignal } from "@/lib/join-name-signal";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { IconButton } from "@/components/IconButton";
 import { clientPlatformFor, clientStringFor } from "@/lib/client-platform";
@@ -284,25 +285,34 @@ function PairScreen() {
   // machine is refused by its id, at each intake. A machine store that could
   // not open fails *closed*: `phaseAfterRead` never routes a failed read to
   // "scan", so a transient keychain error can never unlock scanning.
-  const checkMachines = useCallback(async () => {
-    safeSetPhase({ kind: "checking" });
-    const read = await refreshHeld();
-    if (!read.ok) {
-      // Logged without any secret: just the fact that the check failed.
-      console.warn("pair: reading the machines failed");
-    }
-    const nextKind = phaseAfterRead(read);
-    // R-M1: a link stashed for a phone whose check failed must not linger in
-    // the holder — drained here so it can never resurface at a later scan.
-    if (shouldDrainPairingLink(nextKind)) {
-      takePairingLink();
-    }
-    if (nextKind === "checkFailed") {
-      safeSetPhase({ kind: "error", failure: "check-failed" });
-      return;
-    }
-    safeSetPhase({ kind: nextKind });
-  }, [refreshHeld, safeSetPhase]);
+  // `joinText`: a found machine's name from the switcher (join-name-signal.ts).
+  const checkMachines = useCallback(
+    async (joinText?: string) => {
+      safeSetPhase({ kind: "checking" });
+      const read = await refreshHeld();
+      if (!read.ok) {
+        // Logged without any secret: just the fact that the check failed.
+        console.warn("pair: reading the machines failed");
+      }
+      const nextKind = phaseAfterRead(read);
+      if (phaseAfterReadForJoin(nextKind, joinText) === "join" && joinText !== undefined) {
+        if (mountedRef.current) setJoinName(joinText);
+        safeSetPhase({ kind: "join" });
+        return;
+      }
+      // R-M1: a link stashed for a phone whose check failed must not linger in
+      // the holder — drained here so it can never resurface at a later scan.
+      if (shouldDrainPairingLink(nextKind)) {
+        takePairingLink();
+      }
+      if (nextKind === "checkFailed") {
+        safeSetPhase({ kind: "error", failure: "check-failed" });
+        return;
+      }
+      safeSetPhase({ kind: nextKind });
+    },
+    [refreshHeld, safeSetPhase],
+  );
 
   useEffect(() => {
     // Arriving with the one-shot clearFailed signal set (clear-failed-
@@ -311,6 +321,8 @@ function PairScreen() {
     // that phase. A signal for a machine no longer on screen is not this
     // visit's: the user has moved past it.
     const signal = clearFailedEntry(takeClearFailedSignal(), sessions.current().id);
+    // Taken either way, so a name never waits for a later visit.
+    const joinText = takeJoinNameSignal();
     clearFailedIdRef.current = signal?.id ?? null;
     const entryKind = entryPhaseKind(signal !== undefined);
     if (entryKind === "clearFailed") {
@@ -323,7 +335,7 @@ function PairScreen() {
       void refreshHeld();
       return;
     }
-    void checkMachines();
+    void checkMachines(joinText);
     // Runs once, on mount: `takeClearFailedSignal()` is one-shot by design
     // (consuming it again on a later `checkMachines` identity change would
     // read `false` and silently skip the phase), and every callback here is

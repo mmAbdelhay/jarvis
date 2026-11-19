@@ -34,7 +34,7 @@ const ENTRIES: MachineEntry[] = [
   { id: "c_1", record: record({ host: "10.0.0.9", port: 4318 }) },
 ];
 
-function rows(
+function allRows(
   input: Partial<Parameters<typeof switcherRows>[0]> = {},
 ): ReturnType<typeof switcherRows> {
   return switcherRows({
@@ -44,6 +44,15 @@ function rows(
     online: new Map<string, MachineOnline>(),
     ...input,
   });
+}
+
+/** The held machines' rows alone. */
+function rows(input: Partial<Parameters<typeof switcherRows>[0]> = {}): SwitcherRow[] {
+  return allRows(input).filter((row): row is SwitcherRow => row.kind === "machine");
+}
+
+function found(name: string, port = 7717, label = name.split(".")[0] as string) {
+  return { name, label, port, webPort: 7718 };
 }
 
 describe("machineLabel", () => {
@@ -97,9 +106,37 @@ describe("switcherRows", () => {
     expect(rows()[1]?.online).toBe("checking");
   });
 
-  it("a discovered list is accepted and adds no row yet", () => {
-    const result = rows({ discovered: [{ name: "new.tail.ts.net", label: "new" }] });
-    expect(result.map((row) => row.id)).toEqual(["a_1", "b_1", "c_1"]);
+  it("found machines come after the held ones, with their label and full name", () => {
+    const result = allRows({ discovered: [found("new.tail.ts.net", 7717, "New")] });
+    expect(result.map((row) => row.kind)).toEqual(["machine", "machine", "machine", "found"]);
+    expect(result[3]).toEqual({
+      kind: "found",
+      label: "New",
+      subtitle: "new.tail.ts.net",
+      joinText: "new.tail.ts.net",
+    });
+  });
+
+  it("a found machine this phone holds, by name and bridge port, is dropped", () => {
+    const result = allRows({
+      discovered: [found("mac.tail.ts.net", 7717), found("mac.tail.ts.net", 9000)],
+    });
+    expect(result.filter((row) => row.kind === "found")).toEqual([
+      {
+        kind: "found",
+        label: "mac",
+        subtitle: "mac.tail.ts.net",
+        joinText: "mac.tail.ts.net:9000",
+      },
+    ]);
+  });
+
+  it("the machine on screen is never a found row", () => {
+    const result = allRows({
+      activeId: "b_1",
+      discovered: [found("mac.tail.ts.net")],
+    });
+    expect(result.some((row) => row.kind === "found")).toBe(false);
   });
 
   it("one machine is one row", () => {
@@ -174,9 +211,44 @@ describe("webSwitcherRows", () => {
     ).toEqual([{ kind: "self", label: "x" }]);
   });
 
-  it("leaves the tailnet's list alone until step 3", () => {
+  it("found machines come after the links, each a link to its web port", () => {
     expect(
-      webSwitcherRows({ selfLabel: "x", links: [], discovered: [{ name: NAME, label: "mac" }] }),
+      webSwitcherRows({
+        selfLabel: "x",
+        links: [{ name: NAME, port: 7718 }],
+        discovered: [{ name: "mini.tail1234.ts.net", label: "Mini", port: 7717, webPort: 9001 }],
+      }),
+    ).toEqual([
+      { kind: "self", label: "x" },
+      { kind: "link", label: "mac", url: `https://${NAME}:7718/` },
+      { kind: "found", label: "Mini", url: "https://mini.tail1234.ts.net:9001/" },
+    ]);
+  });
+
+  it("a found machine with a saved link, or the one this page is on, is dropped", () => {
+    expect(
+      webSwitcherRows({
+        selfLabel: "x",
+        selfName: "self.tail1234.ts.net",
+        links: [{ name: NAME, port: 7718 }],
+        discovered: [
+          { name: NAME, label: "mac", port: 7717, webPort: 7718 },
+          { name: "self.tail1234.ts.net", label: "self", port: 7717, webPort: 7718 },
+        ],
+      }),
+    ).toEqual([
+      { kind: "self", label: "x" },
+      { kind: "link", label: "mac", url: `https://${NAME}:7718/` },
+    ]);
+  });
+
+  it("a found machine failing validation yields no row", () => {
+    expect(
+      webSwitcherRows({
+        selfLabel: "x",
+        links: [],
+        discovered: [{ name: "evil.example.com", label: "evil", port: 7717, webPort: 7718 }],
+      }),
     ).toEqual([{ kind: "self", label: "x" }]);
   });
 });
@@ -216,6 +288,7 @@ describe("tapSwitcherRow", () => {
   }
 
   const row = (active: boolean): SwitcherRow => ({
+    kind: "machine",
     id: "b_1",
     label: "mac",
     subtitle: "mac.tail.ts.net",
