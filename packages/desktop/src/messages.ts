@@ -246,6 +246,36 @@ export const MESSAGES = {
         return line;
     }
   },
+  // The topbar's machine switcher (renderer/machine-switcher.ts): other
+  // Jarvis machines on the tailnet, opened full-window.
+  machineThisMachine: (language: "ar" | "en"): string =>
+    language === "ar" ? "هذا الجهاز" : "This machine",
+  machineSwitcherLabel: (label: string, language: "ar" | "en"): string =>
+    language === "ar" ? `الجهاز: ${label} — اختر جهازًا آخر` : `Machine: ${label} — choose another`,
+  machineLooking: (language: "ar" | "en"): string =>
+    language === "ar" ? "جارٍ البحث عن أجهزتك الأخرى…" : "Looking for your other machines…",
+  machineNoCli: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "ثبّت Tailscale لترى أجهزتك الأخرى."
+      : "Install Tailscale to see your other machines.",
+  machineNotRunning: (language: "ar" | "en"): string =>
+    language === "ar" ? "Tailscale لا يعمل." : "Tailscale is not running.",
+  machineNoneFound: (language: "ar" | "en"): string =>
+    language === "ar" ? "لم يُعثر على أجهزة Jarvis أخرى." : "No other Jarvis machines found.",
+  machineLoading: (label: string, language: "ar" | "en"): string =>
+    language === "ar" ? `جارٍ فتح ${label}…` : `Opening ${label}…`,
+  machineOffline: (language: "ar" | "en"): string =>
+    language === "ar" ? "لا يمكن الوصول إلى ذلك الجهاز." : "That machine is not reachable.",
+  machineCertificate: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "تعذّر التحقق من شهادة ذلك الجهاز."
+      : "That machine's certificate could not be checked.",
+  machineVersion: (language: "ar" | "en"): string =>
+    language === "ar" ? "حدّث Jarvis على ذلك الجهاز." : "Update Jarvis on that machine.",
+  machineBack: (language: "ar" | "en"): string =>
+    language === "ar" ? "العودة إلى هذا الجهاز" : "Back to this machine",
+  machineClose: (label: string, language: "ar" | "en"): string =>
+    language === "ar" ? `إغلاق ${label}` : `Close ${label}`,
   awakeButtonLabel: (status: AwakeStatus, language: "ar" | "en"): string => {
     if (language === "ar") {
       return status.mode === "off"

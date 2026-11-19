@@ -21,6 +21,10 @@
 
   <div class="topbar">
     <div class="brand">JARVIS</div>
+    <!-- Other Jarvis machines on the tailnet (machine-switcher.ts). Not in
+         topbar-fit.ts's collapse order: it is the only way back from a
+         machine shown full-window, so it never hides. -->
+    <button id="machine-button" class="machine-btn" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="machine-menu"><span id="machine-button-label">This machine</span><span class="machine-btn-caret" aria-hidden="true">&#9662;</span></button>
     <div class="nav">
       <button id="nav-dashboard" class="nav-btn nav-btn--on" type="button">Dashboard</button>
       <button id="nav-changes" class="nav-btn" type="button">Changes</button>
@@ -101,6 +105,13 @@
       <svg aria-hidden="true" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#9fb7c4" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5M12 7v5l4 2"></path></svg>
     </button>
   </div>
+
+  <!-- Behind another machine's view: covers this machine's routes below the
+       topbar and says what that view is doing until its page has loaded. -->
+  <div id="machine-stage" class="machine-stage" hidden></div>
+  <!-- The switcher's menu lives outside the topbar, which clips anything that
+       overflows it; machine-switcher.ts places it under the button. -->
+  <div id="machine-menu" class="machine-menu" role="menu" hidden></div>
 
   <div class="main" id="view-dashboard">
     <!-- The threads: one glowing curve from the core's trunk to each
