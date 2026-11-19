@@ -5553,3 +5553,112 @@
 .reviews-replying { flex: 1 0 100%; display: flex; gap: 10px; align-items: center; font-size: 12px; color: var(--text-secondary); }
 .reviews-reply-input { flex: 1 1 320px; height: auto; min-height: 40px; max-height: 200px; padding: var(--s2) var(--s3); line-height: 1.45; resize: vertical; }
 /* /Reviews page */
+
+/* Tailnet machines (machine-switcher.ts). The button sits right after the
+   brand and is never collapsed (topbar-fit.ts). The menu lives outside the
+   topbar, which clips overflow, and is placed under the button in JS. */
+.machine-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-inline-end: 16px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: 600 12px var(--font-ui);
+  max-width: 220px;
+  flex-shrink: 0;
+}
+.machine-btn:hover { color: var(--text); background: var(--surface-raised); }
+.machine-btn[aria-expanded="true"] { color: var(--text); border-color: var(--accent); }
+.machine-btn--remote { color: var(--accent-text); border-color: var(--accent-dim); }
+#machine-button-label { overflow: hidden; text-overflow: ellipsis; }
+.machine-btn-caret { font-size: 9px; color: var(--text-dim); }
+
+.machine-menu {
+  position: fixed;
+  z-index: 60;
+  min-width: 240px;
+  max-width: min(420px, calc(100vw - 24px));
+  padding: var(--s1);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-raised);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.machine-menu[hidden] { display: none; }
+.machine-menu-row { display: flex; align-items: stretch; gap: 2px; }
+.machine-menu-item {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: 600 13px var(--font-ui);
+  text-align: start;
+}
+.machine-menu-item:hover,
+.machine-menu-item:focus-visible { background: var(--selected); }
+.machine-menu-item[aria-current="true"] { color: var(--accent-text); }
+.machine-menu-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; font-size: 11px; font-weight: 400; color: var(--text-dim); }
+.machine-menu-close {
+  flex: 0 0 auto;
+  width: 28px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 15px;
+}
+.machine-menu-close:hover,
+.machine-menu-close:focus-visible { background: var(--bad-quiet); color: var(--bad); }
+.machine-menu-note { padding: 6px 10px; font-size: 12px; color: var(--text-muted); white-space: normal; }
+
+/* Behind another machine's native view: the area below the topbar. Its
+   `top` is set from the topbar's own height in JS. */
+.machine-stage {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--ground);
+}
+.machine-stage[hidden] { display: none; }
+.machine-stage-panel { display: flex; flex-direction: column; align-items: center; gap: var(--s3); max-width: 420px; padding: 16px; text-align: center; }
+.machine-stage-text { margin: 0; font-size: 14px; color: var(--text-secondary); }
+.machine-stage-panel--offline .machine-stage-text,
+.machine-stage-panel--certificate .machine-stage-text { color: var(--warn); }
+.machine-stage-back {
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: 600 13px var(--font-ui);
+}
+.machine-stage-back:hover { border-color: var(--accent); }
+.machine-stage-spinner {
+  width: 22px;
+  height: 22px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: machine-spin 0.9s linear infinite;
+}
+@keyframes machine-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .machine-stage-spinner { animation: none; }
+}

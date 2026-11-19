@@ -59,9 +59,19 @@ export function showView(name: ViewName): void {
   syncHostedView();
 }
 
+/** Set while another tailnet machine covers the window (machine-switcher.ts):
+ *  its view sits over the whole area below the topbar, so a workspace page
+ *  must not show through whatever route is current. */
+let machineShown = false;
+
+export function setMachineShown(shown: boolean): void {
+  machineShown = shown;
+  syncHostedView();
+}
+
 export function syncHostedView(): void {
   // Optional-chained: several renderer test harnesses run with no bridge at
   // all, and a route change must not throw there.
   const historyOpen = document.getElementById("history-overlay")?.hasAttribute("hidden") === false;
-  void window.jarvis?.setWorkspaceVisible?.(view === "workspace" && !historyOpen);
+  void window.jarvis?.setWorkspaceVisible?.(view === "workspace" && !historyOpen && !machineShown);
 }

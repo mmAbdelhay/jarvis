@@ -18,6 +18,17 @@ export function shouldShowUnlock(state: ClientState, auth: AuthView, pathname: s
   return state === "locked" || auth.lockedLocally;
 }
 
+/** The unlock screen closes itself by going back, which pops whatever is on top
+ *  of the stack. With /pair pushed over it that is /pair, so it waits until it is
+ *  the one on top. */
+export function shouldCloseUnlock(
+  state: ClientState,
+  lockedLocally: boolean,
+  focused: boolean,
+): boolean {
+  return focused && state === "open" && !lockedLocally;
+}
+
 /** D3: the unlock screen's connection line is a retry button while there
  *  is no socket at all (never connected, or given up) — the password and
  *  passkey need one first. */

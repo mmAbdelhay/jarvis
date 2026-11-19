@@ -286,6 +286,58 @@ describe("desktop-only registrations", () => {
   // Task 8 (controller ruling): main's webContents deny every
   // target=_blank outright, so this channel is a plan link's only route to
   // the OS browser — and the one place that route is gated.
+  describe("machine:*", () => {
+    function setup() {
+      const deps = fakeDesktopDeps();
+      const handle = vi.fn();
+      registerDesktopOnly({ ...deps, handle });
+      const listener = (channel: string) =>
+        handle.mock.calls.find(([c]) => c === channel)![1] as (
+          event: unknown,
+          ...args: unknown[]
+        ) => unknown;
+      return { deps, listener };
+    }
+
+    it("hides the workspace pages and hands the target to the machine views", () => {
+      const { deps, listener } = setup();
+      const target = { name: "studio.tail1234.ts.net", webPort: 7718, v: 2 };
+      listener("machine:show")({}, target);
+      expect(deps.views.hideAll).toHaveBeenCalledOnce();
+      expect(deps.machines.show).toHaveBeenCalledWith(target);
+      listener("machine:showLocal")({});
+      expect(deps.machines.showLocal).toHaveBeenCalledOnce();
+    });
+
+    it("a bad machine:show target changes nothing", () => {
+      const { deps, listener } = setup();
+      listener("machine:show")({}, { name: "evil.com/x", webPort: 7718, v: 2 });
+      listener("machine:show")({}, null);
+      expect(deps.views.hideAll).not.toHaveBeenCalled();
+      expect(deps.machines.show).not.toHaveBeenCalled();
+    });
+
+    it("converts bounds like workspace:bounds and refuses a malformed rect", () => {
+      const { deps, listener } = setup();
+      listener("machine:bounds")(
+        {},
+        { x: 0, y: 0, width: "wide", height: 10, devicePixelRatio: 2 },
+      );
+      listener("machine:bounds")({}, null);
+      expect(deps.machines.setBounds).not.toHaveBeenCalled();
+      listener("machine:bounds")({}, { x: 0, y: 0, width: 100, height: 50, devicePixelRatio: 2 });
+      expect(deps.machines.setBounds).toHaveBeenCalledOnce();
+    });
+
+    it("closes only by a string name", () => {
+      const { deps, listener } = setup();
+      listener("machine:close")({}, 42);
+      expect(deps.machines.close).not.toHaveBeenCalled();
+      listener("machine:close")({}, "studio");
+      expect(deps.machines.close).toHaveBeenCalledWith("studio");
+    });
+  });
+
   describe("plans:openLink", () => {
     function openLinkListener(deps: ReturnType<typeof fakeDesktopDeps>) {
       const handle = vi.fn();
@@ -399,6 +451,12 @@ function fakeDesktopDeps(): DesktopOnlyDeps {
       setEnabled: vi.fn(async () => ({ ok: true as const })),
       restart: vi.fn(async () => ({ ok: true as const })),
       stopNow: vi.fn(async () => ({ ok: true as const })),
+    },
+    machines: {
+      show: vi.fn(),
+      showLocal: vi.fn(),
+      setBounds: vi.fn(),
+      close: vi.fn(),
     },
     language: "en" as const,
   };

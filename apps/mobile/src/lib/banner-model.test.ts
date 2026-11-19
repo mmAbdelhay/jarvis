@@ -77,3 +77,23 @@ describe("bannerModel", () => {
     expect(bannerModel(view({ state: "open", stale: false }))).toBeUndefined();
   });
 });
+
+describe("bannerModel: a phone revoked with no machine left", () => {
+  it("idle says why", () => {
+    expect(bannerModel(view({ state: "idle" }), true)).toEqual({
+      key: "conn.unpaired",
+      pairAgain: false,
+    });
+  });
+
+  it("not revoked, idle stays silent", () => {
+    expect(bannerModel(view({ state: "idle" }), false)).toBeUndefined();
+  });
+
+  it("anything the connection has to say goes first", () => {
+    expect(bannerModel(view({ state: "connecting" }), true)).toEqual({
+      key: "conn.connecting",
+      pairAgain: false,
+    });
+  });
+});

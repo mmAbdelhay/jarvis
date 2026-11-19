@@ -236,6 +236,51 @@ export type PairClientMessage = {
 };
 export type PairServerMessage = { t: "paired"; v: number; deviceId: string; token: string };
 
+/** Joining with the owner password in place of a pairing secret, over the
+ *  same pre-auth channel. Additive, so PROTOCOL_VERSION does not change. */
+export type PairJoinMessage = {
+  t: "join";
+  v: number;
+  password: string;
+  deviceName: string;
+  client: string;
+};
+/** A successful join: the device credentials plus a logged-in token family. */
+export type PairJoinedMessage = {
+  t: "joined";
+  v: number;
+  deviceId: string;
+  token: string;
+  tokens: AuthTokens;
+};
+
+/** Another Jarvis machine on the tailnet, as it describes itself. */
+export type PeerInfo = {
+  name: string;
+  label: string;
+  v: number;
+  bridgePort: number;
+  webPort: number;
+};
+
+/** Another Jarvis machine this machine's core found on the tailnet: the same
+ *  fields as PeerInfo, `name` being its full MagicDNS name without the
+ *  trailing dot. */
+export type TailnetMachine = {
+  name: string;
+  label: string;
+  v: number;
+  bridgePort: number;
+  webPort: number;
+};
+
+/** `tailnet:peers`' answer. `no-cli`: Tailscale is not installed here;
+ *  `not-running`: its status could not be read or it is not connected. */
+export type TailnetPeers = {
+  state: "ok" | "no-cli" | "not-running";
+  machines: TailnetMachine[];
+};
+
 // `name` (M11, ruling 1) is set only when the laptop serves a configured
 // certificate carrying a DNS SAN: its presence is what tells the phone to
 // dial that name with the OS trust store instead of pinning the leaf.
@@ -248,7 +293,13 @@ export type PairingLink = {
 };
 
 export function encodeMessage(
-  message: ClientMessage | ServerMessage | PairClientMessage | PairServerMessage,
+  message:
+    | ClientMessage
+    | ServerMessage
+    | PairClientMessage
+    | PairServerMessage
+    | PairJoinMessage
+    | PairJoinedMessage,
 ): string {
   return JSON.stringify(message);
 }

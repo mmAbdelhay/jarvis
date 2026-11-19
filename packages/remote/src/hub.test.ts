@@ -12,6 +12,7 @@ import { createHub, MAX_CLIENTS, MAX_PENDING } from "./hub.js";
 import type { HubDeps } from "./hub.js";
 import type { SessionHandlers, SocketLike } from "./io.js";
 import { TEST_FAMILY_ID, unlockedOwnerAuth } from "./owner-auth-double.js";
+import { createPairSession } from "./pair-session.js";
 import type { ChannelPolicies, ChannelPolicy, StreamPolicy } from "./policy.js";
 import { CLOSE, PROTOCOL_VERSION } from "./protocol.js";
 import { FakeSocket } from "./socket-double.js";
@@ -480,6 +481,55 @@ describe("createHub: pair", () => {
     const socket2 = new FakeSocket();
     hub.accept("pair", socket2, "10.0.3.1:1");
     expect(socket2.closed).toEqual({ code: CLOSE.tooManyRequests, reason: "" });
+  });
+
+  it("5 wrong joins back off their own source and leave a paired device's /rpc accept alone on another", async () => {
+    const JOINER = "10.0.3.2";
+    const pairSession = (
+      socket: SocketLike,
+      source: string,
+      onFailure: () => void,
+    ): SessionHandlers =>
+      createPairSession(socket, {
+        pairing: { begin: vi.fn(), cancel: vi.fn() },
+        devices: { add: vi.fn(), revoke: vi.fn() },
+        audit: { record: vi.fn() },
+        timers: clock.timers,
+        source,
+        log: vi.fn(),
+        onFailure,
+        onSettled: vi.fn(),
+        join: {
+          allowed: () => true,
+          checkPassword: async () => "refused",
+          issue: vi.fn(),
+          onJoined: vi.fn(),
+        },
+      });
+    const { hub, clock } = makeHarness({ pairSession });
+    const frame = JSON.stringify({
+      t: "join",
+      v: PROTOCOL_VERSION,
+      password: "wrong",
+      deviceName: "Laptop",
+      client: "web",
+    });
+
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const socket = new FakeSocket();
+      hub.accept("pair", socket, JOINER).onText(frame);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(socket.closed).toEqual({ code: CLOSE.unauthorized, reason: "" });
+      if (attempt < 4) clock.advance(60 * 60_000); // past this source's backoff
+    }
+
+    const blocked = new FakeSocket();
+    hub.accept("pair", blocked, JOINER);
+    expect(blocked.closed).toEqual({ code: CLOSE.tooManyRequests, reason: "" });
+
+    const { socket: paired } = openDevice(hub, 1, "10.0.3.3");
+    expect(paired.sent[0]?.t).toBe("welcome");
+    expect(paired.closed).toBeUndefined();
   });
 });
 

@@ -2,7 +2,11 @@
 // client with a scripted `call`, in-memory prefs.
 import { PUSH_REGISTER_CHANNEL, PUSH_UNREGISTER_CHANNEL } from "@jarvis/wire";
 import { describe, expect, test, vi } from "vitest";
+import { A_ID, B_ID, C_ID, type FakePrefsFile, seedPhone } from "./fake-machines";
+import type { MachineId } from "./machine-index";
+import { createMachineStore } from "./machine-store";
 import type { NotificationResponse, NotificationsAdapter, PushPermission } from "./notifications";
+import { createPrefsFacade, loadPushSeed } from "./push-context-support";
 import {
   ANDROID_CHANNEL_ID,
   PUSH_REGISTER_TIMEOUT_MS,
@@ -140,6 +144,74 @@ describe("createPushRegistration: construction", () => {
       expect(fakeAdapter.getExpoPushToken).not.toHaveBeenCalled();
     },
   );
+});
+
+describe("createPushRegistration: syncIfOpen", () => {
+  test("a connection opened before construction registers once synced, and not before", async () => {
+    const { deps, fakeClient, fakeAdapter, fakePrefs } = baseDeps();
+    await fakePrefs.prefs.set({ notifications: true, pushRegistered: false });
+    fakeAdapter.getPermission = vi.fn(async (): Promise<PushPermission> => "granted");
+    fakeClient.setScripted(async () => ({
+      ok: true,
+      value: { registered: true, laptopEnabled: true },
+    }));
+    fakeClient.setState("open");
+
+    const reg = createPushRegistration(deps);
+    await flush();
+    expect(fakeClient.calls).toEqual([]);
+
+    reg.syncIfOpen();
+    await flush();
+
+    expect(fakeAdapter.requestPermission).not.toHaveBeenCalled();
+    expect(fakeClient.calls.map((call) => call.channel)).toEqual([PUSH_REGISTER_CHANNEL]);
+    expect(reg.get()).toMatchObject({ phase: "on", registered: true });
+    expect(fakePrefs.current().pushRegistered).toBe(true);
+  });
+
+  test("a connection opened before construction unregisters once synced, with the switch off", async () => {
+    const { deps, fakeClient, fakePrefs } = baseDeps();
+    await fakePrefs.prefs.set({ notifications: false, pushRegistered: true });
+    fakeClient.setScripted(async () => ({ ok: true, value: {} }));
+    fakeClient.setState("open");
+
+    const reg = createPushRegistration(deps);
+    reg.syncIfOpen();
+    await flush();
+
+    expect(fakeClient.calls.map((call) => call.channel)).toEqual([PUSH_UNREGISTER_CHANNEL]);
+    expect(fakePrefs.current().pushRegistered).toBe(false);
+  });
+
+  test("syncing with no open connection does nothing", async () => {
+    const { deps, fakeClient, fakeAdapter, fakePrefs } = baseDeps();
+    await fakePrefs.prefs.set({ notifications: true, pushRegistered: true });
+    const reg = createPushRegistration(deps);
+    const before = reg.get();
+
+    reg.syncIfOpen();
+    await flush();
+
+    expect(fakeClient.calls).toEqual([]);
+    expect(fakeAdapter.getPermission).not.toHaveBeenCalled();
+    expect(fakeAdapter.getExpoPushToken).not.toHaveBeenCalled();
+    expect(reg.get()).toEqual(before);
+  });
+
+  test("a disposed registration does nothing when synced", async () => {
+    const { deps, fakeClient, fakeAdapter, fakePrefs } = baseDeps();
+    await fakePrefs.prefs.set({ notifications: true, pushRegistered: true });
+    fakeClient.setState("open");
+    const reg = createPushRegistration(deps);
+    reg.dispose();
+
+    reg.syncIfOpen();
+    await flush();
+
+    expect(fakeClient.calls).toEqual([]);
+    expect(fakeAdapter.getPermission).not.toHaveBeenCalled();
+  });
 });
 
 describe("createPushRegistration: setEnabled(true)", () => {
@@ -1065,6 +1137,162 @@ describe("createPushRegistration: dispose", () => {
     await flush();
 
     expect(fakeClient.calls).toEqual([]);
+  });
+});
+
+describe("createPushRegistration: one registration per machine", () => {
+  type Saved = {
+    notifications?: boolean;
+    pushRegistered?: boolean;
+    machineFlags?: Record<string, { pushRegistered: boolean }>;
+  };
+
+  function savedOf(prefs: FakePrefsFile): Saved {
+    return JSON.parse(prefs.text ?? "{}") as Saved;
+  }
+
+  /** The real machine store and prefs of a phone holding A (legacy), B and C. */
+  async function phone(saved: { notifications: boolean; registered: MachineId[] }) {
+    const { secure, refresh, prefs } = seedPhone();
+    const flags: Record<string, { refreshTokenStored: boolean; pushRegistered: boolean }> = {};
+    for (const id of [B_ID, C_ID]) {
+      flags[id] = { refreshTokenStored: true, pushRegistered: saved.registered.includes(id) };
+    }
+    prefs.text = JSON.stringify({
+      notifications: saved.notifications,
+      pushRegistered: saved.registered.includes(A_ID),
+      machineFlags: flags,
+    });
+    const store = createMachineStore({
+      secure,
+      refresh,
+      prefs,
+      localeTag: "en-US",
+      singleSlot: false,
+      log: () => {},
+    });
+    await store.open();
+
+    /** What `PushProvider` builds for a machine's tree when it mounts. */
+    async function mount(id: MachineId) {
+      const flag = store.pushFlag(id);
+      const seed = await loadPushSeed(prefs, "en-US", flag);
+      const fakeClient = createFakeClient();
+      const fakeAdapter = createFakeAdapter({
+        getPermission: vi.fn(async (): Promise<PushPermission> => "granted"),
+      });
+      fakeClient.setScripted(async (channel) =>
+        channel === PUSH_REGISTER_CHANNEL
+          ? { ok: true, value: { registered: true, laptopEnabled: true } }
+          : { ok: true, value: undefined },
+      );
+      const registration = createPushRegistration({
+        client: fakeClient.client,
+        adapter: fakeAdapter,
+        prefs: createPrefsFacade(prefs, "en-US", seed, flag),
+        language: () => "en",
+        channelName: () => "Jarvis",
+        log: () => {},
+      });
+      return { fakeClient, registration };
+    }
+
+    return { prefs, mount };
+  }
+
+  async function settled(): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  test("each machine's open registers there, with notifications on", async () => {
+    const { mount } = await phone({ notifications: true, registered: [] });
+
+    const a = await mount(A_ID);
+    a.fakeClient.emitOpen();
+    await settled();
+    a.registration.dispose();
+    const b = await mount(B_ID);
+    b.fakeClient.emitOpen();
+    await settled();
+
+    for (const machine of [a, b]) {
+      expect(machine.fakeClient.calls.map((call) => call.channel)).toEqual([PUSH_REGISTER_CHANNEL]);
+      expect(machine.registration.get().registered).toBe(true);
+    }
+  });
+
+  test("a machine not opened yet registers nothing", async () => {
+    const { mount } = await phone({ notifications: true, registered: [] });
+    const b = await mount(B_ID);
+    await settled();
+    expect(b.fakeClient.calls).toEqual([]);
+  });
+
+  test("a machine's flag is independent of another's", async () => {
+    const { prefs, mount } = await phone({ notifications: true, registered: [] });
+
+    const b = await mount(B_ID);
+    b.fakeClient.emitOpen();
+    await settled();
+
+    const saved = savedOf(prefs);
+    expect(saved.machineFlags?.[B_ID]?.pushRegistered).toBe(true);
+    expect(saved.machineFlags?.[C_ID]?.pushRegistered).toBe(false);
+    expect(saved.pushRegistered).toBe(false);
+  });
+
+  test("a machine sees its own flag at mount, not another's", async () => {
+    const { mount } = await phone({ notifications: true, registered: [B_ID] });
+    expect((await mount(B_ID)).registration.get().registered).toBe(true);
+    expect((await mount(C_ID)).registration.get().registered).toBe(false);
+    expect((await mount(A_ID)).registration.get().registered).toBe(false);
+  });
+
+  test("the legacy machine uses the top-level pushRegistered", async () => {
+    const { prefs, mount } = await phone({ notifications: true, registered: [] });
+
+    const a = await mount(A_ID);
+    a.fakeClient.emitOpen();
+    await settled();
+
+    const saved = savedOf(prefs);
+    expect(saved.pushRegistered).toBe(true);
+    expect(saved.machineFlags?.[A_ID]).toBeUndefined();
+    expect(saved.machineFlags?.[B_ID]?.pushRegistered).toBe(false);
+  });
+
+  test("notifications off: the active unregisters now, another at its next open, clearing only its flag", async () => {
+    const { prefs, mount } = await phone({
+      notifications: true,
+      registered: [A_ID, B_ID, C_ID],
+    });
+
+    const a = await mount(A_ID);
+    a.fakeClient.emitOpen();
+    await settled();
+    a.fakeClient.calls.length = 0;
+
+    await a.registration.setEnabled(false);
+    expect(a.fakeClient.calls.map((call) => call.channel)).toEqual([PUSH_UNREGISTER_CHANNEL]);
+    let saved = savedOf(prefs);
+    expect(saved.notifications).toBe(false);
+    expect(saved.pushRegistered).toBe(false);
+    expect(saved.machineFlags?.[B_ID]?.pushRegistered).toBe(true);
+    expect(saved.machineFlags?.[C_ID]?.pushRegistered).toBe(true);
+    a.registration.dispose();
+
+    const b = await mount(B_ID);
+    await settled();
+    expect(b.fakeClient.calls).toEqual([]);
+    expect(savedOf(prefs).machineFlags?.[B_ID]?.pushRegistered).toBe(true);
+
+    b.fakeClient.emitOpen();
+    await settled();
+    expect(b.fakeClient.calls.map((call) => call.channel)).toEqual([PUSH_UNREGISTER_CHANNEL]);
+    saved = savedOf(prefs);
+    expect(saved.notifications).toBe(false);
+    expect(saved.machineFlags?.[B_ID]?.pushRegistered).toBe(false);
+    expect(saved.machineFlags?.[C_ID]?.pushRegistered).toBe(true);
   });
 });
 

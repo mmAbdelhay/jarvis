@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { connect as tlsConnect } from "node:tls";
+import type { PeerInfo } from "@jarvis/wire";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { mintSelfSigned } from "./certificate.js";
 import {
@@ -9,6 +10,7 @@ import {
   listenWeb,
   webHeaders,
   type WebAsset,
+  type WebManifest,
 } from "./web-server.js";
 
 const INDEX: WebAsset = {
@@ -72,7 +74,10 @@ function response(): ServerResponse & {
   return result as unknown as ReturnType<typeof response>;
 }
 
-function handle(overrides: Partial<IncomingMessage> = {}) {
+function handle(
+  overrides: Partial<IncomingMessage> = {},
+  options: { peer?: () => PeerInfo | undefined; manifest?: WebManifest } = {},
+) {
   const req = request(overrides);
   const res = response();
   createWebRequestHandler({
@@ -80,9 +85,126 @@ function handle(overrides: Partial<IncomingMessage> = {}) {
     port: 8443,
     bridgePort: 9443,
     manifest: MANIFEST,
+    ...options,
   })(req, res);
   return { req, res };
 }
+
+describe("the peer file", () => {
+  const PEER: PeerInfo = {
+    name: "jarvis.test",
+    label: "mac-mini",
+    v: 2,
+    bridgePort: 9443,
+    webPort: 8443,
+  };
+  const url = "/jarvis-peer.json";
+
+  it("answers PeerInfo as JSON with the security headers and no-store", () => {
+    const { req, res } = handle({ url }, { peer: () => PEER });
+
+    expect(req.socket.destroy).not.toHaveBeenCalled();
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body.toString())).toEqual(PEER);
+    expect(res.headers).toMatchObject({
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-store",
+      "X-Content-Type-Options": "nosniff",
+      "Referrer-Policy": "no-referrer",
+      "Content-Length": String(res.body.length),
+    });
+    expect(res.headers["Content-Security-Policy"]).toContain("frame-ancestors 'none'");
+    expect(res.headers["ETag"]).toBeUndefined();
+  });
+
+  it("ignores a query string, like every other path", () => {
+    const { res } = handle({ url: `${url}?x=1` }, { peer: () => PEER });
+    expect(JSON.parse(res.body.toString())).toEqual(PEER);
+  });
+
+  it("HEAD answers the same headers and no body", () => {
+    const { res } = handle({ url, method: "HEAD" }, { peer: () => PEER });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toHaveLength(0);
+    expect(res.headers["Content-Length"]).toBe(String(Buffer.from(JSON.stringify(PEER)).length));
+  });
+
+  function expectDestroyedSilently({ req, res }: ReturnType<typeof handle>): void {
+    expect(req.socket.destroy).toHaveBeenCalledTimes(1);
+    expect(res.body).toHaveLength(0);
+    expect(res.headers).toEqual({});
+  }
+
+  it("a wrong Host is destroyed with no bytes, and the peer is never asked", () => {
+    const peer = vi.fn(() => PEER);
+    expectDestroyedSilently(handle({ url, headers: { host: "other.test:8443" } }, { peer }));
+    expect(peer).not.toHaveBeenCalled();
+  });
+
+  it("a second Host line is destroyed with no bytes", () => {
+    const peer = vi.fn(() => PEER);
+    expectDestroyedSilently(
+      handle(
+        {
+          url,
+          headers: { host: "jarvis.test:8443" },
+          rawHeaders: ["Host", "jarvis.test:8443", "Host", "other.test"],
+        },
+        { peer },
+      ),
+    );
+    expect(peer).not.toHaveBeenCalled();
+  });
+
+  it("a method other than GET or HEAD is destroyed with no bytes", () => {
+    const peer = vi.fn(() => PEER);
+    expectDestroyedSilently(handle({ url, method: "POST" }, { peer }));
+    expect(peer).not.toHaveBeenCalled();
+  });
+
+  it("no peer option is destroyed with no bytes", () => {
+    expectDestroyedSilently(handle({ url }));
+  });
+
+  it("a peer returning undefined is destroyed with no bytes", () => {
+    expectDestroyedSilently(handle({ url }, { peer: () => undefined }));
+  });
+
+  it("a peer that throws is destroyed with no bytes", () => {
+    expectDestroyedSilently(
+      handle(
+        { url },
+        {
+          peer: () => {
+            throw new Error("no hostname");
+          },
+        },
+      ),
+    );
+  });
+
+  it("the peer is what answers even if the export happens to ship that path", () => {
+    const manifest = new Map([...MANIFEST, [url, INDEX]]);
+    expectDestroyedSilently(handle({ url }, { manifest, peer: () => undefined }));
+    const { res } = handle({ url }, { manifest, peer: () => PEER });
+    expect(JSON.parse(res.body.toString())).toEqual(PEER);
+  });
+
+  it("another spelling of the path gets no peer data", () => {
+    const peer = vi.fn(() => PEER);
+    expectDestroyedSilently(handle({ url: "/jarvis%2Dpeer.json" }, { peer }));
+    expectDestroyedSilently(handle({ url: "/JARVIS-PEER.JSON" }, { peer }));
+    expect(peer).not.toHaveBeenCalled();
+  });
+
+  it("every other path still ignores the peer option", () => {
+    const peer = vi.fn(() => PEER);
+    const { res } = handle({ url: "/index.html" }, { peer });
+    expect(res.body).toEqual(INDEX.bytes);
+    expect(peer).not.toHaveBeenCalled();
+  });
+});
 
 describe("buildWebManifest", () => {
   it("maps URL paths to bytes, extension content types, and strong sha256 base64url etags", () => {
@@ -127,7 +249,7 @@ describe("webHeaders", () => {
       webHeaders({ name: "jarvis.test", bridgePort: 9443, path: "/app.json", asset: SCRIPT }),
     ).toEqual({
       "Content-Security-Policy":
-        "default-src 'self'; script-src 'self'; connect-src wss://jarvis.test:9443; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; frame-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+        "default-src 'self'; script-src 'self'; connect-src 'self' wss://jarvis.test:9443; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; frame-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
       "X-Content-Type-Options": "nosniff",
       "Referrer-Policy": "no-referrer",
       "Content-Type": "text/javascript; charset=utf-8",
@@ -145,7 +267,7 @@ describe("webHeaders", () => {
         asset: TERMINAL,
       })["Content-Security-Policy"],
     ).toBe(
-      "default-src 'self'; script-src 'self'; connect-src wss://jarvis.test:9443; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; frame-src 'self'; frame-ancestors 'self'; base-uri 'none'; form-action 'none'",
+      "default-src 'self'; script-src 'self'; connect-src 'self' wss://jarvis.test:9443; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; frame-src 'self'; frame-ancestors 'self'; base-uri 'none'; form-action 'none'",
     );
   });
 
@@ -162,7 +284,7 @@ describe("webHeaders", () => {
         "Content-Security-Policy"
       ],
     ).toBe(
-      "default-src 'self'; script-src 'self'; connect-src wss://jarvis.test:9443; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; frame-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+      "default-src 'self'; script-src 'self'; connect-src 'self' wss://jarvis.test:9443; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; frame-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
     );
   });
 
@@ -365,6 +487,7 @@ function rawExchange(port: number, request: string): Promise<string> {
 
 describe("listenWeb over real TLS", () => {
   let listener: { close(): Promise<void>; port: number };
+  let peerAnswer: () => PeerInfo | undefined = () => undefined;
 
   beforeAll(async () => {
     const { cert, key } = await mintSelfSigned(Date.now(), "0a0b0c0d0e0f1011");
@@ -376,6 +499,7 @@ describe("listenWeb over real TLS", () => {
       name: "jarvis.test",
       bridgePort: 9443,
       manifest: MANIFEST,
+      peer: () => peerAnswer(),
     });
   });
 
@@ -396,11 +520,39 @@ describe("listenWeb over real TLS", () => {
     );
   }
 
+  it("serves the peer file, and drops it with no bytes on a wrong Host, no peer or a throw", async () => {
+    const host = `jarvis.test:${listener.port}`;
+    const peer: PeerInfo = {
+      name: "jarvis.test",
+      label: "mac-mini",
+      v: 2,
+      bridgePort: 9443,
+      webPort: listener.port,
+    };
+    peerAnswer = () => peer;
+
+    const served = await get("/jarvis-peer.json", host);
+    expect(served).toMatch(/^HTTP\/1\.1 200 /);
+    expect(served).toContain("application/json; charset=utf-8");
+    expect(served).toContain("no-store");
+    expect(served.slice(served.indexOf("\r\n\r\n") + 4)).toBe(JSON.stringify(peer));
+
+    expect(await get("/jarvis-peer.json", "other.test")).toBe("");
+
+    peerAnswer = () => undefined;
+    expect(await get("/jarvis-peer.json", host)).toBe("");
+
+    peerAnswer = () => {
+      throw new Error("no hostname");
+    };
+    expect(await get("/jarvis-peer.json", host)).toBe("");
+  });
+
   it("serves index.html with the exact CSP when Host matches the bound port", async () => {
     const reply = await get("/projects/alpha", `jarvis.test:${listener.port}`);
     expect(reply.startsWith("HTTP/1.1 200")).toBe(true);
     expect(reply).toContain(
-      "Content-Security-Policy: default-src 'self'; script-src 'self'; connect-src wss://jarvis.test:9443;",
+      "Content-Security-Policy: default-src 'self'; script-src 'self'; connect-src 'self' wss://jarvis.test:9443;",
     );
     expect(reply.endsWith("<main>Jarvis</main>")).toBe(true);
   });

@@ -32,8 +32,11 @@ export type DesktopHost = {
   /** The file sidebar's Move to Trash — Electron's `shell.trashItem`. The
    *  path is already proven inside a project by the core. */
   trashItem(path: string): Promise<void>;
-  /** Settings' Restart button: relaunch the app. */
-  restart(): void;
+  /** Settings' Restart button: relaunch the app. A host that cannot say
+   *  anything else answers nothing; the core's own link answers
+   *  "no-service" when nothing would start the app or daemon again (no app
+   *  attached, or a daemon no service manager supervises). */
+  restart(): "no-service" | undefined;
   /** Keep awake (keep-awake.ts): hold (true) or release (false) the OS
    *  stay-awake — Electron's powerSaveBlocker, which only an app has. Sent
    *  on change only; a host attached while it is held is told on attach. */
@@ -95,11 +98,9 @@ export function createHostLink(): HostLink {
         ? Promise.reject(new Error("No desktop app is attached to move a file to the trash"))
         : attached.trashItem(path),
     restart: () => {
-      if (attached !== undefined) {
-        attached.restart();
-        return;
-      }
+      if (attached !== undefined) return attached.restart();
       console.error("restart not done: no desktop app is attached");
+      return "no-service";
     },
     // Remembered, so the window that attaches after the core decided (the
     // core starts before the window exists) still holds it.

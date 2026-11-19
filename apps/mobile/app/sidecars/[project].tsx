@@ -2,7 +2,7 @@
 // Database and Cluster rows, or the LAN-only hint when the pairing has no
 // `name` (ruling 12). All decision logic lives in sidecars-store.ts; this
 // file is layout only — it reads the pairing record once on mount (the
-// same `loadPairing` read every other screen uses), builds the store from
+// same read of this screen's machine every other screen uses), builds the store from
 // it, and re-runs `load()` on focus.
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -12,9 +12,8 @@ import { WideShell } from "@/components/WideShell";
 import { STRINGS, t } from "@/lib/i18n";
 import type { Language, MessageKey } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
-import { loadPairing } from "@/lib/pairing-record";
-import { useRpcClient } from "@/lib/rpc-context";
-import { expoSecureStore } from "@/lib/secure-store";
+import { loadScreenMachine } from "@/lib/machine-store-instance";
+import { useMachineId, useRpcClient } from "@/lib/rpc-context";
 import type { SidecarRow, SidecarsStore, SidecarsView } from "@/lib/sidecars-store";
 import { createSidecarsStore } from "@/lib/sidecars-store";
 import { theme } from "@/lib/theme";
@@ -50,6 +49,7 @@ function SidecarsScreen() {
   const language = useLanguage();
   const router = useRouter();
   const client = useRpcClient();
+  const machineId = useMachineId();
   const { project } = useLocalSearchParams<{ project: string }>();
   // expo-router decodes dynamic segments before handing them back here
   // (getStateFromPath's safelyDecodeURIComponent) — decoding again turns
@@ -62,14 +62,14 @@ function SidecarsScreen() {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const pairing = await loadPairing(expoSecureStore);
+      const pairing = await loadScreenMachine(machineId);
       if (cancelled) return;
       setRecord({ name: pairing?.record.name, port: pairing?.record.port ?? 0 });
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [machineId]);
 
   const store: SidecarsStore | undefined = useMemo(() => {
     if (record === undefined) return undefined;

@@ -259,6 +259,18 @@ export function focusTerminalPane(paneKey: string): boolean {
   return true;
 }
 
+/** Brings the hosted pages back after another tailnet machine was shown.
+ *  machine:show hid them the way a project switch does (hideAll), and only
+ *  an activate reveals them again — so the active tab is re-activated, but
+ *  only when it belongs to the project on screen: a project with no open
+ *  tab was showing nothing, and must go on showing nothing. */
+export function restoreWorkspaceViews(): void {
+  const active = activeTab();
+  if (active !== undefined && active.project === selectedProject()) {
+    void window.jarvis.activateTab(active.id);
+  }
+}
+
 /** Selects `project` and shows whatever it was last on: its remembered
  *  tab if that tab still exists, any other of its open tabs otherwise, or
  *  nothing (hideAll) if it has none open at all. Shared by the project

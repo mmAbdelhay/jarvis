@@ -95,7 +95,8 @@ export function createTopBarStore(deps: { client: RpcClient }): TopBarStore {
 
 const stores = new WeakMap<RpcClient, TopBarStore>();
 
-/** The one top-bar store for `client` (the app has exactly one client). */
+/** The one top-bar store for `client`. Each machine has its own client, so the
+ *  values cached here are that machine's own. */
 export function topBarStoreFor(client: RpcClient): TopBarStore {
   let store = stores.get(client);
   if (store === undefined) {

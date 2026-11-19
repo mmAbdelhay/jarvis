@@ -136,9 +136,10 @@ export const CHANNEL_POLICY = {
   // configured project root (ipc.ts's resolveWithin/entryWithin, the same
   // containment terminal:listDir uses, never loosened for a remote origin),
   // refuse the root itself, and trash goes through the DesktopHost seam to
-  // the OS trash, never a hard delete. Creating a file stays desktop-only:
-  // no phone screen calls it.
-  "terminal:createEntry": "desktop-only",
+  // the OS trash, never a hard delete. Creating a file or folder is remote
+  // too, under the same containment (createEntry resolves its parent with
+  // resolveWithin and refuses a name that is not a plain new name).
+  "terminal:createEntry": "remote",
   "terminal:renameEntry": "remote",
   "terminal:trashEntry": "remote",
   "terminal:settings": "remote",
@@ -160,8 +161,11 @@ export const CHANNEL_POLICY = {
   "terminal:attachUpload": "remote",
   "terminal:input": "remote",
   "terminal:resize": "remote",
-  "terminal:split": "desktop-only",
-  "terminal:closePane": "desktop-only",
+  // A phone may split and close panes of a terminal tab: dispatch.ts
+  // validates the tab, caps the count, makes the pane id itself and refuses
+  // a bare tab id on close; the laptop's layout follows via terminal:layout.
+  "terminal:split": "remote",
+  "terminal:closePane": "remote",
   // Desktop-only (M10 Task 4): the laptop's own local decision to push,
   // reported by the pane that watched the block finish — a phone has no
   // pane of its own to report from, and dispatch.ts refuses a remote
@@ -177,7 +181,7 @@ export const CHANNEL_POLICY = {
   "docker:restart": "remote",
   "docker:composeUp": "remote",
   "docker:composeDown": "remote",
-  "docker:shell": "desktop-only",
+  "docker:shell": "remote",
   "docker:follow": "remote",
   "docker:unfollow": "remote",
   "api:open": "desktop-only",
@@ -223,17 +227,16 @@ export const CHANNEL_POLICY = {
   "bookmarks:rename": "remote",
   "bookmarks:reorder": "remote",
   "settings:read": "remote",
-  // Remote, owner decision 2026-10-03 (the phone's "The laptop" settings).
-  // A phone may change only the `sessions` section: dispatch.ts parses that
-  // section alone and applies it inside the serialized config write, ignoring
-  // the rest of the draft, so a save can neither change the bridge, project
-  // roots or command paths nor undo a concurrent laptop-side change.
-  // testAgent stays desktop-only.
+  // Remote: the phone saves the whole settings draft. The `remote` and
+  // `daemon` sections are never the draft's: the write keeps whatever is on
+  // disk for both (ipc.ts saveFromRemote).
   "settings:save": "remote",
-  // Desktop-only (M4 final review, I2): runs a phone-supplied executable on
-  // the laptop by name. Revisit when a phone Settings UI ships.
-  "settings:testAgent": "desktop-only",
-  "settings:restart": "desktop-only",
+  // Remote, but a phone sends an agent id, never a command: the host looks
+  // the id up in the on-disk registry and runs only that configured command.
+  "settings:testAgent": "remote",
+  // Remote: restarts the app, or the daemon when a service manager would
+  // start it again; answers no-service otherwise.
+  "settings:restart": "remote",
   // Desktop-only, all four (Task 23): they install, start, stop and remove
   // the background service and replace the app's core. The Electron host
   // answers them (desktop-only.ts); no core, and so no phone, ever sees them.
@@ -276,6 +279,10 @@ export const CHANNEL_POLICY = {
   // exactly the class of persistent, laptop-controlled-tool config change
   // settings:save and settings:testAgent are already desktop-only for.
   "remote:tailscaleCert": "desktop-only",
+  // Desktop-only: whether this machine accepts the owner password from its
+  // Tailscale network is decided on the machine, never by a joined device.
+  "remote:tailnetEnable": "desktop-only",
+  "remote:tailnetDisable": "desktop-only",
   // Remote, all eight (Task 5, plan panel spec): the same "parity of
   // content, not of the tab model" rule this file's header states for
   // sessions/git/bookmarks applies to a plan and its comments — a paired
@@ -322,6 +329,13 @@ export const CHANNEL_POLICY = {
   // dispatch.ts accepts only `mode` and `simulateInput` from anyone.
   "awake:status": "remote",
   "awake:set": "remote",
+  // Tailnet machines: the phone and browser list the other machines too.
+  "tailnet:peers": "remote",
+  // Machine views open views over the laptop's own window; never a phone's.
+  "machine:show": "desktop-only",
+  "machine:showLocal": "desktop-only",
+  "machine:bounds": "desktop-only",
+  "machine:close": "desktop-only",
   // The updater replaces and quits the laptop's own app; never a phone's
   // call to make.
   "update:check": "desktop-only",
@@ -434,6 +448,9 @@ export const REMOTE_EFFECT = {
   "terminal:listDir": "read",
   "terminal:renameEntry": "mutate",
   "terminal:trashEntry": "mutate",
+  "terminal:split": "mutate",
+  "terminal:closePane": "mutate",
+  "terminal:createEntry": "mutate",
   "terminal:settings": "read",
   "terminal:workflows": "read",
   "terminal:ai": "mutate",
@@ -452,6 +469,7 @@ export const REMOTE_EFFECT = {
   "docker:start": "mutate",
   "docker:stop": "mutate",
   "docker:restart": "mutate",
+  "docker:shell": "mutate",
   "docker:composeUp": "mutate",
   "docker:composeDown": "mutate",
   "docker:follow": "mutate",
@@ -484,6 +502,8 @@ export const REMOTE_EFFECT = {
   "bookmarks:reorder": "mutate",
   "settings:read": "read",
   "settings:save": "mutate",
+  "settings:testAgent": "mutate",
+  "settings:restart": "mutate",
   "projects:list": "read",
   "remote:registerPush": "mutate",
   "remote:unregisterPush": "mutate",
@@ -517,6 +537,8 @@ export const REMOTE_EFFECT = {
   // Keep awake: the status is a read; a set writes jarvis.yaml.
   "awake:status": "read",
   "awake:set": "mutate",
+  // Tailnet machines: runs `tailscale status` and probes peers; changes nothing.
+  "tailnet:peers": "read",
 } as const satisfies Record<RemoteChannel, "read" | "mutate" | "input">;
 
 /** M12 Task 3: how often `channel`'s outcome gets a `remote-call` audit

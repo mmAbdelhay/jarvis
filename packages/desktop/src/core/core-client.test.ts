@@ -106,7 +106,10 @@ function recordingHost(): { host: DesktopHost; seen: unknown[][]; state: { focus
       openExternal: async (url) => {
         seen.push(["openExternal", url]);
       },
-      restart: () => seen.push(["restart"]),
+      restart: () => {
+        seen.push(["restart"]);
+        return undefined;
+      },
       setStayAwake: (on) => seen.push(["setStayAwake", on]),
     },
   };
@@ -282,7 +285,7 @@ describe("inProcessCoreClient: host hooks", () => {
       link.host.destroyViews();
       link.host.requestFavicon("acme", "https://example.com/");
       link.host.showNotification("Locked out", "body");
-      link.host.restart();
+      expect(link.host.restart()).toBe("no-service");
       await expect(link.host.openExternal("https://web.example/")).rejects.toThrow(
         "No desktop app",
       );

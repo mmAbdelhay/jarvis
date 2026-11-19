@@ -100,6 +100,8 @@ export const REMOTE_PUSH_POLICY: {
   "workspace:tabPlans": "desktop-only",
   // The laptop's own app updater (updater.ts).
   "update:state": "desktop-only",
+  // This window's own machine views (machine-views.ts).
+  "machine:state": "desktop-only",
   // Each names a local child process a phone never started.
   "setup:output": "desktop-only",
   "voice:hotkeys": "desktop-only",
@@ -133,6 +135,9 @@ export const REMOTE_PUSH_POLICY: {
   // Keyed, unlike the reliable channels above: a phone that only cares
   // about one pane subscribes to that pane's exit, not every pane's.
   "terminal:exit": { kind: "reliable", keyOf: (payload) => stringField(payload, "paneKey") },
+  // Keyed by tab id: a phone looking at one terminal tab learns when another
+  // device split or closed one of its panes.
+  "terminal:layout": { kind: "reliable", keyOf: (payload) => stringField(payload, "tabId") },
   // Keyed like terminal:exit: the phone's chat view subscribes to the one
   // pane it shows, and re-fetches terminal:claudeView on each push.
   "terminal:claudeViewChanged": {
@@ -193,6 +198,7 @@ export function remoteKeyAuthorizer(owners: StreamOwners): AuthorizeKey {
       case "terminal:data":
       case "terminal:exit":
       case "terminal:claudeViewChanged":
+      case "terminal:layout":
         return owners.hasPane(key);
       case "session:output":
         return owners.hasSession(key);

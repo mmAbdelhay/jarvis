@@ -7,6 +7,7 @@ import { SETTINGS_CARD, SETTINGS_CARD_TITLE } from "@/components/SettingsCard";
 import type { ClientPlatform } from "@/lib/client-platform";
 import { platformKey, t, type Language } from "@/lib/i18n";
 import { passkeys } from "@/lib/passkey";
+import { IN_MACHINE_VIEW } from "@/lib/machine-view-env";
 import { IDLE_LOCK_MINUTES } from "@/lib/prefs";
 import {
   notificationsStatusKey,
@@ -155,6 +156,9 @@ export function SettingsSections(props: Props): React.JSX.Element {
               {notificationsText}
             </Text>
           )}
+          {props.view.hasOtherMachines && (
+            <Text style={styles.cardLine}>{t(props.language, "settings.pushOtherMachines")}</Text>
+          )}
           {props.view.notifications.phase === "blocked" && (
             <TouchableOpacity style={styles.button} onPress={() => void Linking.openSettings()}>
               <Text style={styles.buttonText}>
@@ -235,23 +239,30 @@ export function SettingsSections(props: Props): React.JSX.Element {
       {shown("security") && (
         <View {...section("security")}>
           <Text style={sectionTitle}>{t(props.language, "settings.security")}</Text>
-          <Text style={styles.switchHint}>{t(props.language, "settings.idleLock")}</Text>
-          <View style={styles.row}>
-            {IDLE_LOCK_MINUTES.map((minutes) => (
-              <TouchableOpacity
-                key={minutes}
-                style={[
-                  styles.langButton,
-                  props.view.idleLockMinutes === minutes && styles.langButtonActive,
-                ]}
-                onPress={() => void props.store.setIdleLockMinutes(minutes).catch(() => {})}
-              >
-                <Text style={styles.langButtonText}>
-                  {t(props.language, "settings.idleLock.minutes", { minutes })}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
+          {IN_MACHINE_VIEW ? (
+            // A Jarvis window: always signed in, no idle lock to pick.
+            <Text style={styles.switchHint}>{t(props.language, "auth.machineViewSignedIn")}</Text>
+          ) : (
+            <>
+              <Text style={styles.switchHint}>{t(props.language, "settings.idleLock")}</Text>
+              <View style={styles.row}>
+                {IDLE_LOCK_MINUTES.map((minutes) => (
+                  <TouchableOpacity
+                    key={minutes}
+                    style={[
+                      styles.langButton,
+                      props.view.idleLockMinutes === minutes && styles.langButtonActive,
+                    ]}
+                    onPress={() => void props.store.setIdleLockMinutes(minutes).catch(() => {})}
+                  >
+                    <Text style={styles.langButtonText}>
+                      {t(props.language, "settings.idleLock.minutes", { minutes })}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </>
+          )}
         </View>
       )}
 
@@ -267,20 +278,23 @@ export function SettingsSections(props: Props): React.JSX.Element {
 
       {Platform.OS === "web" && shown("keep-signed-in") && (
         <>
-          <View {...section("keep-signed-in")}>
-            <Text style={wide ? sectionTitle : styles.cardLine}>
-              {t(props.language, "auth.keepSignedIn")}
-            </Text>
-            <View style={styles.switchRow}>
-              <Text style={styles.switchHint}>{t(props.language, "auth.keepSignedInHint")}</Text>
-              <Switch
-                value={props.view.keepSignedIn}
-                accessibilityLabel={t(props.language, "auth.keepSignedIn")}
-                // Bound to the store's view: a failed write leaves it as it was.
-                onValueChange={(on) => void props.store.setKeepSignedIn(on).catch(() => {})}
-              />
+          {/* A Jarvis window keeps its sign-in: the security section says so. */}
+          {!IN_MACHINE_VIEW && (
+            <View {...section("keep-signed-in")}>
+              <Text style={wide ? sectionTitle : styles.cardLine}>
+                {t(props.language, "auth.keepSignedIn")}
+              </Text>
+              <View style={styles.switchRow}>
+                <Text style={styles.switchHint}>{t(props.language, "auth.keepSignedInHint")}</Text>
+                <Switch
+                  value={props.view.keepSignedIn}
+                  accessibilityLabel={t(props.language, "auth.keepSignedIn")}
+                  // Bound to the store's view: a failed write leaves it as it was.
+                  onValueChange={(on) => void props.store.setKeepSignedIn(on).catch(() => {})}
+                />
+              </View>
             </View>
-          </View>
+          )}
           {passkeys.isSupported() && (
             <View {...section("passkeys")}>
               <Text style={sectionTitle}>{t(props.language, "settings.passkeys")}</Text>
@@ -304,11 +318,6 @@ export function SettingsSections(props: Props): React.JSX.Element {
               {t(props.language, platformKey("settings.unpair", props.platform))}
             </Text>
           </TouchableOpacity>
-          {props.view.unpairError && (
-            <Text style={styles.errorText}>
-              {t(props.language, platformKey("settings.unpairFailed", props.platform))}
-            </Text>
-          )}
           <Text style={styles.version}>
             {t(props.language, "settings.appVersion", { version: props.view.appVersion })}
           </Text>

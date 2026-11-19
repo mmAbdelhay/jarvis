@@ -33,7 +33,6 @@ describe("remote policy", () => {
     "workspace:visible",
     "workspace:hideAll",
     "workspace:pip",
-    "settings:restart",
     "setup:install",
     "dialog:pickFiles",
     "dialog:readJson",
@@ -41,11 +40,13 @@ describe("remote policy", () => {
     "voice:start",
     "voice:stop",
     "voice:preview",
-    // M4 final review D1/D2: these persistently rewrite laptop state or run
+    // M4 final review D1/D2: this persistently rewrites laptop state or runs
     // phone-controlled code/files on it.
-    "settings:testAgent",
     "api:saveSettings",
     "remote:tailscaleCert",
+    // Tailscale access: the switch itself is the owner's, on the machine.
+    "remote:tailnetEnable",
+    "remote:tailnetDisable",
     // Bug 5: an outbound IP-geolocation request the laptop makes for
     // itself only after navigator.geolocation has already failed there.
     "prayer:locateIp",
@@ -69,15 +70,17 @@ describe("remote policy", () => {
     "settings:save",
     "terminal:renameEntry",
     "terminal:trashEntry",
+    "terminal:split",
+    "terminal:closePane",
+    "docker:shell",
+    "terminal:createEntry",
+    "settings:testAgent",
+    "settings:restart",
   ])("allows %s remotely and audits it as a mutation", (channel) => {
     expect(CHANNEL_POLICY[channel as keyof typeof CHANNEL_POLICY]).toBe("remote");
     expect(isRemoteAllowed(channel)).toBe(true);
     expect(REMOTE_EFFECT[channel as keyof typeof REMOTE_EFFECT]).toBe("mutate");
     expect(auditPolicyFor(channel, () => false)).toBe("always");
-  });
-
-  it("keeps terminal:createEntry desktop-only", () => {
-    expect(isRemoteAllowed("terminal:createEntry")).toBe(false);
   });
 
   it("allows the guarded api send path remotely", () => {
@@ -250,6 +253,24 @@ describe("awake:* policy", () => {
     expect(isRemoteAllowed("awake:set")).toBe(true);
     expect(REMOTE_EFFECT["awake:set"]).toBe("mutate");
     expect(auditPolicyFor("awake:set", () => false)).toBe("always");
+  });
+});
+
+describe("machine:* policy", () => {
+  // A machine view is a view over the laptop's own window: never a phone's.
+  it.each(["machine:show", "machine:showLocal", "machine:bounds", "machine:close"])(
+    "keeps %s desktop-only",
+    (channel) => {
+      expect(CHANNEL_POLICY[channel as keyof typeof CHANNEL_POLICY]).toBe("desktop-only");
+      expect(isRemoteAllowed(channel)).toBe(false);
+    },
+  );
+});
+
+describe("tailnet:peers policy", () => {
+  it("lets a phone read the other machines on the tailnet", () => {
+    expect(isRemoteAllowed("tailnet:peers")).toBe(true);
+    expect(REMOTE_EFFECT["tailnet:peers"]).toBe("read");
   });
 });
 

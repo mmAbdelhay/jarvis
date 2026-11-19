@@ -14,6 +14,7 @@ import {
   DEFAULT_AWAKE,
   parseConfig,
   parseDaemon,
+  parseRemoteTailnet,
 } from "./config.js";
 
 export type SettingsWriteResult = { ok: true } | { ok: false; detail: string };
@@ -183,6 +184,7 @@ export function toRawConfig(config: JarvisConfig): unknown {
 export async function writeSettingsFile(
   path: string,
   draft: JarvisConfig,
+  options: { writesTailnet?: boolean } = {},
 ): Promise<SettingsWriteResult> {
   const validated = validateDraft(draft);
   if (!validated.ok) return validated;
@@ -203,8 +205,27 @@ export async function writeSettingsFile(
   // or an older renderer that never carried the key — must not turn the
   // background service off or on by saving something else.
   const daemon = daemonInFile(current);
-  await writeAtomically(path, stringify(toRawConfig({ ...validated.value, daemon })));
+  // `remote.tailnet` is the Tailscale access switch's (tailnet-switch.ts), for
+  // the same reason, and worse if lost: a draft read before the switch moved
+  // would turn access back on with none of the enable's checks. Only a write
+  // that read this file inside the queue may set it (`writesTailnet`).
+  const remote = options.writesTailnet
+    ? validated.value.remote
+    : { ...validated.value.remote, tailnet: tailnetInFile(current) };
+  await writeAtomically(path, stringify(toRawConfig({ ...validated.value, remote, daemon })));
   return { ok: true };
+}
+
+/** The `remote.tailnet` section of the file as it is now; off when there is
+ *  no file, or it or the section does not parse. */
+function tailnetInFile(text: string | undefined): RemoteConfig["tailnet"] {
+  if (text === undefined) return { ...DEFAULT_REMOTE.tailnet };
+  try {
+    const remote = (parse(text) as { remote?: { tailnet?: unknown } } | null)?.remote;
+    return parseRemoteTailnet(remote?.tailnet);
+  } catch {
+    return { ...DEFAULT_REMOTE.tailnet };
+  }
 }
 
 /** The `daemon:` section of the file as it is now; the default when there

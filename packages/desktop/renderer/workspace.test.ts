@@ -18,6 +18,7 @@ import {
   initWorkspace,
   renderWorkspace,
   reportWorkspaceBounds,
+  restoreWorkspaceViews,
   setBrowserSnapshot,
 } from "./workspace.js";
 
@@ -226,6 +227,7 @@ function harness(): Recorded[] {
     resizeTerminal: record("resizeTerminal"),
     onTerminalData: () => {},
     onTerminalExit: () => {},
+    onTerminalLayout: () => {},
     // Task 8: workspace-terminal.ts's initWorkspaceTerminals subscribes to
     // both unconditionally, so the module import throws without them even
     // in a test that never opens a terminal tab's plan panel.
@@ -563,6 +565,28 @@ describe("workspace chrome", () => {
     await flush();
 
     expect(calls.some((entry) => entry.call === "hideAllTabs")).toBe(true);
+    expect(calls.some((entry) => entry.call === "activateTab")).toBe(false);
+  });
+
+  it("brings the selected project's active page back after another machine was shown", () => {
+    renderWorkspace({ tabs: [tab({ project: "acme" })], activeTabId: "tab-1" });
+    calls.length = 0;
+
+    restoreWorkspaceViews();
+
+    expect(calls).toContainEqual({ call: "activateTab", args: ["tab-1"] });
+  });
+
+  it("leaves the pages hidden when the active tab belongs to another project", async () => {
+    renderWorkspace({ tabs: [tab({ project: "acme" })], activeTabId: "tab-1" });
+    const select = document.getElementById("workspace-project") as HTMLSelectElement;
+    select.value = "storefront";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    await flush();
+    calls.length = 0;
+
+    restoreWorkspaceViews();
+
     expect(calls.some((entry) => entry.call === "activateTab")).toBe(false);
   });
 

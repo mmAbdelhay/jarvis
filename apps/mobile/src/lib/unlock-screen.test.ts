@@ -6,6 +6,7 @@ import {
   runWebAutoSignIn,
   registerMessageKey,
   shouldAutoPasskey,
+  shouldCloseUnlock,
   shouldShowUnlock,
   unlockMessageKey,
 } from "./unlock-screen";
@@ -82,6 +83,21 @@ describe("unlock-screen", () => {
     expect(lockCauseKey("expired")).toBe("auth.reason.expired");
     expect(lockCauseKey("logout")).toBe("auth.reason.logout");
     expect(lockCauseKey("signed-out")).toBe("auth.reason.signedOut");
+  });
+});
+
+describe("shouldCloseUnlock", () => {
+  it("closes once open, unlocked and on top", () => {
+    expect(shouldCloseUnlock("open", false, true)).toBe(true);
+  });
+
+  it("stays while /pair is on top of it: going back would pop /pair", () => {
+    expect(shouldCloseUnlock("open", false, false)).toBe(false);
+  });
+
+  it("stays while the connection is not open, or the phone has locked itself", () => {
+    expect(shouldCloseUnlock("locked", false, true)).toBe(false);
+    expect(shouldCloseUnlock("open", true, true)).toBe(false);
   });
 });
 

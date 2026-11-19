@@ -1,7 +1,9 @@
-import { appendFile, mkdtemp, rm } from "node:fs/promises";
+import { appendFile, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { parse } from "yaml";
+import type { JarvisConfig } from "../config.js";
 import type { Core } from "./compose.js";
 import { type CoreClient, inProcessCoreClient } from "./core-client.js";
 
@@ -15,6 +17,7 @@ import { type CoreClient, inProcessCoreClient } from "./core-client.js";
 const HOME_VARS = ["HOME", "USERPROFILE"] as const;
 const originalHome = Object.fromEntries(HOME_VARS.map((name) => [name, process.env[name]]));
 let home: string;
+let configPath: string;
 let core: Core;
 let client: CoreClient;
 
@@ -27,6 +30,7 @@ beforeAll(async () => {
   // Never the user's own config: config.ts must have loaded after the swap.
   if (!DEFAULT_CONFIG_PATH.startsWith(home))
     throw new Error("config.ts loaded before HOME was set");
+  configPath = DEFAULT_CONFIG_PATH;
   await ensureConfigFile(DEFAULT_CONFIG_PATH);
   await appendFile(DEFAULT_CONFIG_PATH, `\nprojects:\n  scratch: ${JSON.stringify(home)}\n`);
   const { createCore } = await import("./compose.js");
@@ -85,5 +89,44 @@ describe("the real dispatch table's results are JSON values", () => {
     // hostConfig and the tab state cross the same way.
     expect(client.hostConfig()).toEqual(core.hostConfig());
     expect(client.workspace.state().tabs.length).toBe(snapshot.tabs.length);
+  });
+});
+
+// Through the real write queue and the real file. Relay stays off and
+// `remote.enabled` false, so no `tailscale` command and no bridge are involved.
+describe("only the switch writes remote.tailnet", () => {
+  const tailnetInFile = async (): Promise<unknown> => {
+    const root = parse(await readFile(configPath, "utf8")) as {
+      remote?: { tailnet?: { enabled?: boolean } };
+    };
+    return root.remote?.tailnet?.enabled ?? false;
+  };
+  const draftSaying = async (enabled: boolean): Promise<JarvisConfig> => {
+    const read = (await client.invoke("settings:read", [])) as JarvisConfig;
+    return { ...read, remote: { ...read.remote, tailnet: { enabled, relay: false } } };
+  };
+
+  it("a save keeps the file's value, a disable changes it, and a stale save cannot undo it", async () => {
+    await appendFile(configPath, "\nremote:\n  tailnet:\n    enabled: true\n");
+    // The disable waits for the apply, which waits for this. Nothing listens:
+    // `remote.enabled` is false.
+    core.startRemote();
+
+    const staleOff = await draftSaying(false);
+    expect(await client.invoke("settings:save", [staleOff])).toMatchObject({ ok: true });
+    expect(await tailnetInFile()).toBe(true);
+
+    // Sent together: the disable is still in flight when the save goes in.
+    const staleOn = await draftSaying(true);
+    const [disabled, saved] = await Promise.all([
+      client.invoke("remote:tailnetDisable", []),
+      client.invoke("settings:save", [staleOn]),
+    ]);
+    expect(disabled).toEqual({ ok: true, commands: [] });
+    expect(saved).toMatchObject({ ok: true });
+    expect(await tailnetInFile()).toBe(false);
+
+    expect(await client.invoke("settings:save", [staleOn])).toMatchObject({ ok: true });
+    expect(await tailnetInFile()).toBe(false);
   });
 });

@@ -1417,6 +1417,7 @@ describe("remote", () => {
     tls: {},
     push: { enabled: false, includeProjectNames: false },
     web: { enabled: false },
+    tailnet: { enabled: false, relay: false },
     idleDisableMinutes: 0,
   };
 
@@ -1440,6 +1441,7 @@ describe("remote", () => {
       tls: { certPath: "/certs/m.crt", keyPath: "/certs/m.key" },
       push: { enabled: true, includeProjectNames: true },
       web: { enabled: true, port: 8443 },
+      tailnet: { enabled: true, relay: true },
       idleDisableMinutes: 30,
     };
     expect(parseConfig({ ...base, remote }).remote).toEqual(remote);
@@ -1527,6 +1529,13 @@ describe("remote", () => {
       { remote: { push: { includeProjectNames: "no" } } },
       "Config `remote.push.includeProjectNames` must be true or false",
     ],
+    [{ remote: { tailnet: true } }, "Config `remote.tailnet` must be an object"],
+    [{ remote: { tailnet: [] } }, "Config `remote.tailnet` must be an object"],
+    [
+      { remote: { tailnet: { enabled: "yes" } } },
+      "Config `remote.tailnet.enabled` must be true or false",
+    ],
+    [{ remote: { tailnet: { relay: 1 } } }, "Config `remote.tailnet.relay` must be true or false"],
     [{ remote: { web: true } }, "Config `remote.web` must be an object"],
     [{ remote: { web: [] } }, "Config `remote.web` must be an object"],
     [{ remote: { web: { enabled: "yes" } } }, "Config `remote.web.enabled` must be true or false"],
@@ -1619,6 +1628,132 @@ describe("remote", () => {
       expect(web({ port: 0, web: { enabled: true, port: 8443 } })).toEqual({
         enabled: true,
         port: 8443,
+      });
+    });
+  });
+
+  describe("tailnet", () => {
+    const tailnet = (remote: Record<string, unknown>) =>
+      parseConfig({ ...base, remote }).remote.tailnet;
+
+    it("is off when absent, null or empty", () => {
+      const off = { enabled: false, relay: false };
+      expect(parseConfig(base).remote.tailnet).toEqual(off);
+      expect(tailnet({})).toEqual(off);
+      expect(tailnet({ tailnet: null })).toEqual(off);
+      expect(tailnet({ tailnet: {} })).toEqual(off);
+    });
+
+    it("defaults each flag on its own", () => {
+      expect(tailnet({ tailnet: { enabled: true } })).toEqual({ enabled: true, relay: false });
+      expect(tailnet({ tailnet: { relay: true } })).toEqual({ enabled: false, relay: true });
+    });
+
+    it("never hands out DEFAULT_REMOTE's own object", () => {
+      expect(parseConfig(base).remote.tailnet).not.toBe(DEFAULT_REMOTE.tailnet);
+      expect(tailnet({})).not.toBe(DEFAULT_REMOTE.tailnet);
+    });
+
+    describe("bindBeforeEnable", () => {
+      const recorded = (bindBeforeEnable: unknown) =>
+        tailnet({ tailnet: { enabled: true, bindBeforeEnable } }).bindBeforeEnable;
+
+      it.each(["192.168.1.5", "100.84.17.203", "127.0.0.1", "0.0.0.0", "::1"])(
+        "reads %s",
+        (bind) => {
+          expect(recorded(bind)).toBe(bind);
+        },
+      );
+
+      it.each([
+        ["absent", undefined],
+        ["null", null],
+        ["a number", 7717],
+        ["an object", { address: "127.0.0.1" }],
+        ["a hostname", "machine.local"],
+        ["empty", ""],
+        ["shell text", "127.0.0.1; rm -rf /"],
+      ])("%s parses as absent, and never throws", (_name, value) => {
+        expect(recorded(value)).toBeUndefined();
+        expect(tailnet({ tailnet: { enabled: true, bindBeforeEnable: value } })).not.toHaveProperty(
+          "bindBeforeEnable",
+        );
+      });
+    });
+
+    describe("replacedForwards", () => {
+      const recorded = (replacedForwards: unknown) =>
+        tailnet({ tailnet: { enabled: true, relay: true, replacedForwards } }).replacedForwards;
+
+      it("reads each form an enable records", () => {
+        const record = {
+          "7717": { target: "127.0.0.1:7717" },
+          "7718": { target: "localhost:9000", proxyProtocol: 1, terminateTls: true },
+          "7719": { target: "[::1]:7719" },
+        };
+        expect(recorded(record)).toEqual(record);
+      });
+
+      it.each([
+        ["absent", undefined],
+        ["null", null],
+        ["a string", "7717"],
+        ["a number", 7717],
+        ["an array", [{ target: "127.0.0.1:7717" }]],
+        ["empty", {}],
+      ])("%s parses as absent", (_name, value) => {
+        expect(recorded(value)).toBeUndefined();
+        expect(tailnet({ tailnet: { enabled: true, replacedForwards: value } })).not.toHaveProperty(
+          "replacedForwards",
+        );
+      });
+
+      it.each([
+        ["a port that is no number", { abc: { target: "127.0.0.1:1" } }],
+        ["port 0", { "0": { target: "127.0.0.1:1" } }],
+        ["a port too high", { "65536": { target: "127.0.0.1:1" } }],
+        ["a null entry", { "7717": null }],
+        ["a string entry", { "7717": "127.0.0.1:7717" }],
+        ["no target", { "7717": {} }],
+        ["a target of the wrong type", { "7717": { target: 7717 } }],
+        ["a target with no port", { "7717": { target: "127.0.0.1" } }],
+        ["a target with a space", { "7717": { target: "a b:1" } }],
+        ["a target with a semicolon", { "7717": { target: "a;rm:1" } }],
+        ["a target with a substitution", { "7717": { target: "$(id):1" } }],
+        ["a target with a backtick", { "7717": { target: "`id`:1" } }],
+        ["a target with a pipe", { "7717": { target: "a|b:1" } }],
+        ["a target with a scheme", { "7717": { target: "tcp://a:1" } }],
+        ["a target with an option's dash", { "7717": { target: "--help:1" } }],
+        ["a host with an underscore", { "7717": { target: "a_b:1" } }],
+        ["an IPv4 that is no address", { "7717": { target: "999.1.1.1:1" } }],
+        ["an IPv6 with no brackets", { "7717": { target: "::1:7717" } }],
+        ["brackets round a non-address", { "7717": { target: "[localhost]:1" } }],
+        ["brackets with a shell zone", { "7717": { target: "[fe80::1%a;b]:1" } }],
+        ["target port 0", { "7717": { target: "a:0" } }],
+        ["target port 65536", { "7717": { target: "a:65536" } }],
+        ["a PROXY version in words", { "7717": { target: "a:1", proxyProtocol: "1" } }],
+        ["a PROXY version of zero", { "7717": { target: "a:1", proxyProtocol: 0 } }],
+        ["a fractional PROXY version", { "7717": { target: "a:1", proxyProtocol: 1.5 } }],
+        ["a TLS flag in words", { "7717": { target: "a:1", terminateTls: "yes" } }],
+      ])("%s parses as absent, and never throws", (_name, value) => {
+        expect(recorded(value)).toBeUndefined();
+      });
+
+      it.each([
+        "127.0.0.1:7717",
+        "localhost:1",
+        "machine.tailnet.ts.net:65535",
+        "my-host:80",
+        "[::1]:7719",
+        "[fd7a:115c:a1e0::1]:443",
+      ])("keeps the target %s", (target) => {
+        expect(recorded({ "7717": { target } })).toEqual({ "7717": { target } });
+      });
+
+      it("a malformed entry does not take a good one with it", () => {
+        expect(recorded({ "7717": { target: "127.0.0.1:7717" }, "7718": { target: 1 } })).toEqual({
+          "7717": { target: "127.0.0.1:7717" },
+        });
       });
     });
   });
