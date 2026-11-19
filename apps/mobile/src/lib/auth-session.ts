@@ -280,6 +280,9 @@ export function createAuthSession(deps: AuthSessionDeps): AuthSession {
   function armIdleTimer(): void {
     cancelIdleTimer();
     if (access === undefined || disposed) return;
+    // A non-finite window (machine-view.ts NO_IDLE_LOCK) never locks; a
+    // browser would fire such a delay at once.
+    if (!Number.isFinite(idleMs)) return;
     const remaining = lastActivityAt + idleMs - deps.clock.now();
     idleTimer = deps.clock.setTimeout(
       () => {

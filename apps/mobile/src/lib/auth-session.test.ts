@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { createAuthSession } from "./auth-session";
 import type { AuthBroadcast, AuthChannel, DeviceAuth, RefreshLock } from "./auth-session";
 import { createFakeClock } from "./clock";
+import { NO_IDLE_LOCK, idleLockMs } from "./machine-view";
 import { createWebDeviceAuth } from "./web-device-auth";
 import type { ClientState, RpcResult } from "./rpc-client";
 import type { SecureStore } from "./secure-store";
@@ -180,6 +181,7 @@ function setup(
     deviceAuth?: DeviceAuth;
     storedUnlockAtLaunchOnly?: boolean;
     refreshKey?: () => string;
+    idleMs?: number;
   } = {},
 ) {
   const clock = createFakeClock();
@@ -196,7 +198,7 @@ function setup(
     refreshStoredFlag: flag.flag,
     deviceAuth: options.deviceAuth ?? device.auth,
     storedUnlockAtLaunchOnly: options.storedUnlockAtLaunchOnly,
-    idleMs: IDLE,
+    idleMs: options.idleMs ?? IDLE,
     log: (line) => logs.push(line),
   });
   /** A refresh token already on the phone from an earlier launch. */
@@ -707,6 +709,36 @@ describe("auth-session: idle lock", () => {
     session.setAppActive(false);
     (clock as unknown as { now: () => number }).now = () => IDLE + 1;
     session.setAppActive(true);
+    await flush();
+    expect(double.rpc.state()).toBe("locked");
+    expect(session.get().lockCause).toBe("idle");
+  });
+
+  it("a machine view (no idle lock) never arms the idle timer", async () => {
+    const { clock, double, session } = setup({ idleMs: NO_IDLE_LOCK });
+    const delays: number[] = [];
+    const schedule = clock.setTimeout;
+    clock.setTimeout = (fn, ms) => {
+      delays.push(ms);
+      return schedule(fn, ms);
+    };
+    await session.unlockWithPassword("pw");
+    clock.advance(IDLE * 10);
+    await flush();
+    session.setAppActive(false);
+    session.setAppActive(true);
+    session.setIdleMs(NO_IDLE_LOCK);
+    await flush();
+    expect(double.rpc.state()).toBe("open");
+    expect(session.get().lockedLocally).toBe(false);
+    // A browser fires a non-finite delay at once: none is ever scheduled.
+    expect(delays.every((ms) => Number.isFinite(ms))).toBe(true);
+  });
+
+  it("outside a machine view the idle timer is armed as before", async () => {
+    const { clock, double, session } = setup({ idleMs: idleLockMs(false, IDLE) });
+    await session.unlockWithPassword("pw");
+    clock.advance(IDLE);
     await flush();
     expect(double.rpc.state()).toBe("locked");
     expect(session.get().lockCause).toBe("idle");

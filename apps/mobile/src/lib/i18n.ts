@@ -1441,6 +1441,10 @@ export const STRINGS = {
     en: "Keep me signed in on this browser",
     ar: "إبقائي مسجّل الدخول على هذا المتصفح",
   },
+  "auth.machineViewSignedIn": {
+    en: "Signed in for this Jarvis window.",
+    ar: "تم تسجيل الدخول لنافذة Jarvis هذه.",
+  },
   "auth.keepSignedInHint": {
     en: "Off: every visit needs a passkey or the password. On: opening Jarvis in this browser signs you in automatically (the sign-in stops working after 7 days without use); after locking for inactivity you still need a passkey or the password.",
     ar: "عند الإيقاف: كل زيارة تحتاج إلى مفتاح مرور أو كلمة المرور. عند التشغيل: فتح Jarvis في هذا المتصفح يسجّل دخولك تلقائيًا (يتوقف تسجيل الدخول بعد 7 أيام دون استخدام)؛ وبعد القفل بسبب عدم النشاط ستحتاج إلى مفتاح مرور أو كلمة المرور.",

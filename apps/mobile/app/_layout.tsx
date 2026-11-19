@@ -63,6 +63,8 @@ import { systemTransportFor } from "@/lib/system-transport";
 import { theme } from "@/lib/theme";
 import { createAppTransport } from "@/lib/trust-routing-transport";
 import { dialogs } from "@/lib/dialog";
+import { idleLockMs } from "@/lib/machine-view";
+import { IN_MACHINE_VIEW } from "@/lib/machine-view-env";
 import { useLayoutClass } from "@/lib/use-layout-class";
 import { VoiceProvider } from "@/lib/voice-context";
 
@@ -130,7 +132,8 @@ export default function RootLayout() {
         refreshLock,
         // Browser: keep-signed-in off and logout lock every other tab too.
         authChannel,
-        idleMs: DEFAULT_IDLE_LOCK_MINUTES * 60_000,
+        // A Jarvis window (machine view) has no idle lock.
+        idleMs: idleLockMs(IN_MACHINE_VIEW, DEFAULT_IDLE_LOCK_MINUTES * 60_000),
         onUnpaired: (id) =>
           unpairedHandlerFor({
             id,
@@ -261,7 +264,7 @@ export default function RootLayout() {
       if (!cancelled) {
         // Before anything mounts. The sessions keep it for each scope, built
         // or to come, and Settings' setter goes the same way.
-        sessions.setIdleMs(prefs.idleLockMinutes * 60_000);
+        sessions.setIdleMs(idleLockMs(IN_MACHINE_VIEW, prefs.idleLockMinutes * 60_000));
         setLanguage(prefs.language);
       }
     })();

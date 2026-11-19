@@ -19,6 +19,8 @@ import { platformKey, t } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
 import { useMachineSessions, useNavigatorGate } from "@/lib/machine-context";
 import { applyForgetOutcome } from "@/lib/machine-sessions";
+import { idleLockMs } from "@/lib/machine-view";
+import { IN_MACHINE_VIEW } from "@/lib/machine-view-env";
 import { loadScreenMachine, machineStore } from "@/lib/machine-store-instance";
 import { filePrefsStore } from "@/lib/prefs-file";
 import { usePushRegistration } from "@/lib/push-context";
@@ -118,7 +120,8 @@ function SettingsScreen() {
         // (push-context.tsx), never a second instance built here.
         push,
         auth: authSession,
-        setIdleMs: sessions.setIdleMs,
+        // A Jarvis window (machine view) keeps no idle lock whatever is picked.
+        setIdleMs: (ms) => sessions.setIdleMs(idleLockMs(IN_MACHINE_VIEW, ms)),
       }),
     [machineId, sessions, gate, client, connection, router, push, authSession],
   );
