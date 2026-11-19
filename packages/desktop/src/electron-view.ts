@@ -11,6 +11,11 @@ import {
   type ViewFactory,
   type WebContentsLike,
 } from "./browser-host.js";
+import type {
+  MachineContentsLike,
+  MachineViewHandle,
+  MachineViewOptions,
+} from "./machine-views.js";
 
 /**
  * The only place in the app that constructs a WebContentsView, kept apart
@@ -396,6 +401,32 @@ export function createElectronViewFactory(
       },
       onEvent: (listener) => {
         listeners.push(listener);
+      },
+    };
+  };
+}
+
+/**
+ * Machine views (machine-views.ts): another Jarvis machine's web client over
+ * this window. The options — partition, sandbox, no preload — come from
+ * machine-views.ts, where they are tested; this only constructs the view
+ * and makes it a hidden child of the window.
+ */
+export function createElectronMachineViewFactory(
+  window: BrowserWindow,
+): (options: MachineViewOptions) => MachineViewHandle {
+  return (options) => {
+    const view = new WebContentsView(options);
+    view.setBackgroundColor("#ffffff");
+    window.contentView.addChildView(view);
+    view.setVisible(false);
+    return {
+      webContents: view.webContents as unknown as MachineContentsLike,
+      setVisible: (visible) => view.setVisible(visible),
+      setBounds: (rect) => view.setBounds(rect),
+      destroy: () => {
+        if (!window.isDestroyed()) window.contentView.removeChildView(view);
+        if (!view.webContents.isDestroyed()) view.webContents.close();
       },
     };
   };

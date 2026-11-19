@@ -48,7 +48,9 @@ import {
   replayStateOnLoad,
 } from "./updater.js";
 import { webExportDir } from "./web-export.js";
-import { createElectronViewFactory } from "./electron-view.js";
+import { createElectronMachineViewFactory, createElectronViewFactory } from "./electron-view.js";
+import { createMachineViews, type MachineSessionLike } from "./machine-views.js";
+import { PROTOCOL_VERSION } from "@jarvis/wire";
 import { ViewReconciler } from "./view-reconciler.js";
 import { cacheFavicon as fetchFavicon } from "./favicon-fetch.js";
 import { isAllowedNavigation } from "./navigation.js";
@@ -236,6 +238,21 @@ function createDesktopHost(client: CoreClient) {
   );
   views.follow(client.workspace);
 
+  // Tailnet machines: another machine's web client, full-window over this
+  // one. Apart from the reconciler on purpose — it never suspends these.
+  // Every rule (origin, permissions, popups) lives in machine-views.ts.
+  const machines = createMachineViews({
+    createView: createElectronMachineViewFactory(window),
+    session: (partition) => session.fromPartition(partition) as unknown as MachineSessionLike,
+    protocolVersion: PROTOCOL_VERSION,
+    openExternal: (url) => {
+      electronShell.openExternal(url).catch((error: unknown) => {
+        console.error(`machine view: shell.openExternal failed: ${errorMessage(error)}`);
+      });
+    },
+  });
+  const stopMachineState = machines.onState((state) => local("machine:state", state));
+
   /** The size cap, the image-type check and the miss-on-failure rule all
    *  live in favicon-fetch.ts, where they are testable without Electron.
    *  This is only the binding of the store to it. */
@@ -340,6 +357,7 @@ function createDesktopHost(client: CoreClient) {
     stopPushes();
     detach();
     views.destroy();
+    stopMachineState();
     // Nothing of this window holds the machine awake past it.
     stayAwake.set(false);
   });
@@ -350,7 +368,7 @@ function createDesktopHost(client: CoreClient) {
     toWindow(channel, payload);
   }
 
-  return { window, views, local };
+  return { window, views, machines, local };
 }
 
 /**
@@ -538,7 +556,7 @@ app.whenReady().then(async () => {
         : inProcessCoreClient(inProcessCore as Awaited<ReturnType<typeof createCore>>),
       (line) => console.error(line),
     );
-    const { window, views, local } = createDesktopHost(client);
+    const { window, views, machines, local } = createDesktopHost(client);
     appWindow = window;
     focusAppWindow = () => {
       if (window.isDestroyed()) return;
@@ -646,6 +664,7 @@ app.whenReady().then(async () => {
       dialog,
       buildMenu: (template) => Menu.buildFromTemplate(template),
       views,
+      machines,
       chooseDock: (dock) => local("workspace:devtoolsDockChosen", dock),
       // Bug 2: the tab menu's Reload is workspace:reload's own view call,
       // and Close runs the dispatch table's workspace:close (terminal

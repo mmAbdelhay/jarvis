@@ -100,6 +100,8 @@ export const REMOTE_PUSH_POLICY: {
   "workspace:tabPlans": "desktop-only",
   // The laptop's own app updater (updater.ts).
   "update:state": "desktop-only",
+  // This window's own machine views (machine-views.ts).
+  "machine:state": "desktop-only",
   // Each names a local child process a phone never started.
   "setup:output": "desktop-only",
   "voice:hotkeys": "desktop-only",

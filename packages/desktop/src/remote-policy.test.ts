@@ -256,6 +256,17 @@ describe("awake:* policy", () => {
   });
 });
 
+describe("machine:* policy", () => {
+  // A machine view is a view over the laptop's own window: never a phone's.
+  it.each(["machine:show", "machine:showLocal", "machine:bounds", "machine:close"])(
+    "keeps %s desktop-only",
+    (channel) => {
+      expect(CHANNEL_POLICY[channel as keyof typeof CHANNEL_POLICY]).toBe("desktop-only");
+      expect(isRemoteAllowed(channel)).toBe(false);
+    },
+  );
+});
+
 describe("tailnet:peers policy", () => {
   it("lets a phone read the other machines on the tailnet", () => {
     expect(isRemoteAllowed("tailnet:peers")).toBe(true);

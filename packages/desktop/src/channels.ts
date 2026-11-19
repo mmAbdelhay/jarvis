@@ -2,6 +2,7 @@ import type { RemoteStatus } from "@jarvis/remote";
 import type { DevToolsDock } from "./browser-host.js";
 import type { IpcChannels, RendererApi } from "./ipc.js";
 import type { AwakeStatus } from "./keep-awake.js";
+import type { MachineViewState } from "./machine-views.js";
 import type { UpdateState } from "./updater.js";
 
 /**
@@ -61,6 +62,9 @@ export type PushChannels = IpcChannels & {
   // The updater's state (updater.ts), after every change. Local to this
   // window: a phone has no business installing the laptop's app.
   "update:state": UpdateState;
+  // Tailnet machines: a machine view's load state (machine-views.ts). Local
+  // to this window: the views are this app's own.
+  "machine:state": MachineViewState;
 };
 
 /**
@@ -318,6 +322,12 @@ export const INVOKE_CHANNELS = {
   // Tailnet machines (tailnet-peers.ts): the other Jarvis machines this
   // core found on the tailnet. Remote-legal: a read.
   tailnetPeers: "tailnet:peers",
+  // Machine views (machine-views.ts): another machine's web client in a
+  // view over this window. Electron-bound and desktop-only.
+  showMachine: "machine:show",
+  showLocalMachine: "machine:showLocal",
+  setMachineBounds: "machine:bounds",
+  closeMachine: "machine:close",
   // The updater (updater.ts). Electron-bound and desktop-only: they act on
   // this app's own install and quit it.
   updateCheck: "update:check",
@@ -357,6 +367,7 @@ export const PUSH_CHANNELS = {
   onAwakeChanged: "awake:changed",
   onTabPlans: "workspace:tabPlans",
   onUpdateState: "update:state",
+  onMachineState: "machine:state",
 } as const satisfies Record<PushKey, string>;
 
 /**

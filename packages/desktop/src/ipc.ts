@@ -98,6 +98,7 @@ import { resolveDirectory } from "./completion-source.js";
 import type { CompletionSource } from "./completion-source.js";
 import type { JarvisConfig, TerminalConfig } from "./config.js";
 import type { AwakePatch, AwakeStatus } from "./keep-awake.js";
+import type { MachineTarget, MachineViewState } from "./machine-views.js";
 import type { ChangeResult, DaemonStatus } from "./daemon/mode.js";
 import { MESSAGES } from "./messages.js";
 import type { SnippetLanguage } from "@jarvis/platform";
@@ -1205,6 +1206,20 @@ export type RendererApi = {
   /** The other Jarvis machines on this user's tailnet (tailnet-peers.ts),
    *  cached for 30 s. */
   tailnetPeers(): Promise<TailnetPeers>;
+  /** Shows another machine's web client full-window over this one
+   *  (machine-views.ts), creating its view on first use and keeping it alive
+   *  while hidden. Workspace pages are hidden first. A bad target is
+   *  ignored; a protocol mismatch reports phase "version" without loading. */
+  showMachine(target: MachineTarget): Promise<void>;
+  /** Hides every machine view; the renderer restores the workspace pages. */
+  showLocalMachine(): Promise<void>;
+  /** The rectangle reserved for a machine view, in CSS pixels, like
+   *  setWorkspaceBounds. */
+  setMachineBounds(bounds: ReportedRect): Promise<void>;
+  /** Destroys that machine's view; the next showMachine loads it afresh. */
+  closeMachine(name: string): Promise<void>;
+  /** A machine view's load state changed. Returns the unsubscribe. */
+  onMachineState(cb: (state: MachineViewState) => void): () => void;
 };
 
 export type WiringDeps = {

@@ -223,7 +223,13 @@ export type ElectronBoundChannel =
   | "background:status"
   | "background:setEnabled"
   | "background:restart"
-  | "background:stopNow";
+  | "background:stopNow"
+  // Tailnet machines: the machine views are this window's own
+  // (machine-views.ts).
+  | "machine:show"
+  | "machine:showLocal"
+  | "machine:bounds"
+  | "machine:close";
 
 export type TableChannel = Exclude<InvokeChannel, ElectronBoundChannel>;
 

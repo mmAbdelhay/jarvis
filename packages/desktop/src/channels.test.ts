@@ -47,6 +47,7 @@ describe("the channel table", () => {
       "awake:changed",
       "docker:log",
       "git:counts",
+      "machine:state",
       "metrics:update",
       "plans:changed",
       "providers:update",

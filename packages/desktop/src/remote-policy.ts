@@ -328,6 +328,11 @@ export const CHANNEL_POLICY = {
   "awake:set": "remote",
   // Tailnet machines: the phone and browser list the other machines too.
   "tailnet:peers": "remote",
+  // Machine views open views over the laptop's own window; never a phone's.
+  "machine:show": "desktop-only",
+  "machine:showLocal": "desktop-only",
+  "machine:bounds": "desktop-only",
+  "machine:close": "desktop-only",
   // The updater replaces and quits the laptop's own app; never a phone's
   // call to make.
   "update:check": "desktop-only",

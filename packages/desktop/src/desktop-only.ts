@@ -9,6 +9,7 @@ import { isDevToolsDock, type DevToolsDock } from "./browser-host.js";
 import type { ElectronBoundChannel } from "./dispatch.js";
 import type { ChangeResult, DaemonStatus } from "./daemon/mode.js";
 import type { ReportedRect } from "./ipc.js";
+import type { MachineViews } from "./machine-views.js";
 import { errorMessage, MESSAGES } from "./messages.js";
 import type { DesktopOnlyChannel } from "./remote-policy.js";
 import { tabMenuTemplate } from "./tab-menu.js";
@@ -46,6 +47,10 @@ export const ELECTRON_BOUND_CHANNELS: readonly (ElectronBoundChannel & DesktopOn
   "background:setEnabled",
   "background:restart",
   "background:stopNow",
+  "machine:show",
+  "machine:showLocal",
+  "machine:bounds",
+  "machine:close",
 ];
 
 /** plans:openLink's own gate (Task 8, controller ruling). main's own
@@ -127,7 +132,18 @@ export type DesktopOnlyDeps = {
     restart(): Promise<ChangeResult>;
     stopNow(): Promise<ChangeResult>;
   };
+  /** Tailnet machines: other machines' web clients over this window
+   *  (machine-views.ts). */
+  machines: Pick<MachineViews, "show" | "showLocal" | "setBounds" | "close">;
 };
+
+function isReportedRect(value: unknown): value is ReportedRect {
+  if (typeof value !== "object" || value === null) return false;
+  const rect = value as Record<string, unknown>;
+  return ["x", "y", "width", "height", "devicePixelRatio"].every(
+    (key) => typeof rect[key] === "number" && Number.isFinite(rect[key]),
+  );
+}
 
 export function registerDesktopOnly(deps: DesktopOnlyDeps): void {
   // Which display the window is actually on: dragging Jarvis to a second
@@ -258,4 +274,18 @@ export function registerDesktopOnly(deps: DesktopOnlyDeps): void {
   });
   deps.handle("background:restart", () => deps.background.restart());
   deps.handle("background:stopNow", () => deps.background.stopNow());
+  // Tailnet machines. machine-views.ts checks the target itself; a machine
+  // view covers the window, so the workspace pages are hidden under it.
+  deps.handle("machine:show", (_event, target) => {
+    deps.views.hideAll();
+    deps.machines.show(target as never);
+  });
+  deps.handle("machine:showLocal", () => deps.machines.showLocal());
+  deps.handle("machine:bounds", (_event, bounds) => {
+    if (!isReportedRect(bounds)) return;
+    deps.machines.setBounds(toDeviceIndependent(bounds, bounds.devicePixelRatio, displayScale()));
+  });
+  deps.handle("machine:close", (_event, name) => {
+    if (typeof name === "string") deps.machines.close(name);
+  });
 }
