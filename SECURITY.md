@@ -75,7 +75,8 @@ In scope, roughly:
     and can never lock out a paired device. Audit lines are `joined-by-password`,
     `join-failed` and a coalesced `join-refused` (one per minute at most, with
     a count), by source address and device id only. Every success raises a
-    desktop alert naming the device and, with `remote.push.enabled`, a push
+    desktop alert naming the device (queued by the background service until a
+    desktop app attaches, when none is open) and, with `remote.push.enabled`, a push
     to joined phones that carries no device name. A joined device is listed
     with the paired devices and is revoked there. In scope: a join without
     the password, with the switch off or without a named certificate, one that

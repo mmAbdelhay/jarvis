@@ -576,7 +576,9 @@ Any device on your tailnet can try the owner password, so Jarvis slows it down:
   are already paired, so they cannot lock out your phone. The owner-login
   limit of 20 wrong passwords per hour is separate.
 - Every join is written to the audit log as `joined-by-password`, and the
-  machine shows a notification that a device joined, naming the device. If
+  machine shows a notification that a device joined, naming the device. With
+  no Jarvis window open, the background service keeps it and shows it when
+  the app next opens. If
   push notifications are on, already-joined phones get one too, with no
   device name. If you did not expect it, revoke the device and change the
   password.
