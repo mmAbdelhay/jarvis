@@ -28,7 +28,7 @@ import type { MachineId } from "@/lib/machine-index";
 import { type MachineOnline, createOnlineStore, probeMachine } from "@/lib/machine-probe";
 import type { MachineEntry } from "@/lib/machine-store";
 import { loadScreenMachine, machineStore, openMachineStore } from "@/lib/machine-store-instance";
-import { setJoinNameSignal } from "@/lib/join-name-signal";
+import { openJoinWithName } from "@/lib/join-name-signal";
 import {
   type DiscoveredMachine,
   addMachineRowVisible,
@@ -324,8 +324,7 @@ export function MachineSwitcher(props: { visible: boolean; onClose(): void }) {
                     accessibilityRole="button"
                     onPress={() => {
                       onClose();
-                      setJoinNameSignal(row.joinText);
-                      gate.navigate(() => router.push("/pair"));
+                      openJoinWithName(gate, row.joinText, () => router.push("/pair"));
                     }}
                     style={styles.row}
                   >

@@ -151,7 +151,14 @@ describe("createMachineViews", () => {
     machines.show(TARGET);
     expect(views[0]!.contents.loaded).toHaveLength(2);
     expect(states.map((s) => s.phase)).toEqual(["loading", "offline", "loading"]);
-    views[0]!.contents.fire("did-fail-load", {}, -202, "ERR_CERT_AUTHORITY_INVALID", `${ORIGIN}/`, true);
+    views[0]!.contents.fire(
+      "did-fail-load",
+      {},
+      -202,
+      "ERR_CERT_AUTHORITY_INVALID",
+      `${ORIGIN}/`,
+      true,
+    );
     machines.show(TARGET);
     expect(views[0]!.contents.loaded).toHaveLength(3);
     // A ready machine is not reloaded.
@@ -186,7 +193,9 @@ describe("createMachineViews", () => {
     expect(ask("clipboard-sanitized-write", "https://evil.example/")).toBe(false);
     expect(ask("clipboard-read", `${ORIGIN}/`)).toBe(false);
     expect(session.checkHandler!({}, "clipboard-sanitized-write", ORIGIN, {})).toBe(true);
-    expect(session.checkHandler!({}, "clipboard-sanitized-write", "https://evil.example", {})).toBe(false);
+    expect(session.checkHandler!({}, "clipboard-sanitized-write", "https://evil.example", {})).toBe(
+      false,
+    );
     expect(session.checkHandler!({}, "clipboard-read", ORIGIN, {})).toBe(false);
   });
 

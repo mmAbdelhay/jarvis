@@ -24,3 +24,22 @@ export function phaseAfterReadForJoin(
 ): "scan" | "join" | "checkFailed" {
   return read === "scan" && joinText !== undefined ? "join" : read;
 }
+
+/** Opens /pair for a found machine. The name is set inside the navigate
+ *  action, so a navigation the gate drops never leaves a stale name behind
+ *  for the next unrelated /pair visit. */
+export function openJoinWithName(
+  gate: { navigate(action: () => void, onDropped?: () => void): void },
+  text: string,
+  push: () => void,
+): void {
+  gate.navigate(
+    () => {
+      setJoinNameSignal(text);
+      push();
+    },
+    () => {
+      takeJoinNameSignal();
+    },
+  );
+}
