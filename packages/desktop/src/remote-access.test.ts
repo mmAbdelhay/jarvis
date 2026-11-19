@@ -38,7 +38,7 @@ describe("remoteRequestHandler", () => {
   // before the table is ever touched.
   it("refuses a policy-denied channel before the table is ever touched", async () => {
     const spied = {
-      "settings:restart": vi.fn(),
+      "background:setEnabled": vi.fn(),
       "dialog:readJson": vi.fn(),
       "remote:pair": vi.fn(),
       "remote:revoke": vi.fn(),
@@ -891,6 +891,32 @@ describe("createRemoteAccess: publishSidecar", () => {
     expect(result).toEqual({
       ok: true,
       url: "https://mac.tail.ts.net:7717/s/h/?folder=%2Fp&k=k",
+    });
+  });
+
+  // editor:open with a file: the manager's URL carries an encoded `payload`
+  // (ipc.ts withOpenFilePayload) that the phone's first load must still
+  // have after the one-time key is redeemed, byte for byte.
+  it("keeps an editor URL's encoded payload query whole, with k appended", async () => {
+    const { remoteAccess, bridge } = harness();
+    (bridge.publishSidecar as ReturnType<typeof vi.fn>).mockReturnValue({ url: "/s/h/?k=k" });
+    (bridge.status as ReturnType<typeof vi.fn>).mockReturnValue({
+      ...CLOSED_STATUS,
+      listening: LISTENING_WITH_HOSTNAME,
+    });
+    await remoteAccess.start(REMOTE_CONFIG);
+    const payload = encodeURIComponent(
+      JSON.stringify([["openFile", "vscode-remote://remote/p/a%20b%26c.ts"]]),
+    );
+
+    const result = remoteAccess.publishSidecar("d1", {
+      kind: "editor",
+      url: `http://127.0.0.1:4321/?folder=%2Fp&payload=${payload}`,
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      url: `https://mac.tail.ts.net:7717/s/h/?folder=%2Fp&payload=${payload}&k=k`,
     });
   });
 

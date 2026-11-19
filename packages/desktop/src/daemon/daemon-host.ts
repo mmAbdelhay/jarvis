@@ -121,11 +121,14 @@ export function createDaemonHost(deps: {
           "restart asked for, but no service manager runs jarvisd: restart jarvisd manually",
         );
         if (asker !== undefined) deps.pushTo(asker, DAEMON_PUSHES.restartManual, null);
-        return;
+        // Nobody asked from an app and nothing would start jarvisd again:
+        // the caller (a remote device) is told, rather than left waiting.
+        return asker === undefined ? "no-service" : undefined;
       }
       deps.log("restarting jarvisd");
       deps.push(DAEMON_PUSHES.restarting, null);
       deps.restartDaemon();
+      return undefined;
     },
     setStayAwake(on) {
       stayAwake = on;

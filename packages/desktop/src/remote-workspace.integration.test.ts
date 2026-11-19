@@ -306,6 +306,14 @@ describe("remote-workspace.integration: dispatch + policy + blob + api-executor 
           fileOps.push(`trash ${path}`);
           disk.delete(path);
         },
+        makeFile: (path: string) => {
+          fileOps.push(`touch ${path}`);
+          disk.add(path);
+        },
+        makeDir: (path: string) => {
+          fileOps.push(`mkdir ${path}`);
+          disk.add(path);
+        },
       },
     });
     terminalHandlers.open(PROJECT);
@@ -318,9 +326,10 @@ describe("remote-workspace.integration: dispatch + policy + blob + api-executor 
     const settings = {
       read: vi.fn(async () => ({ remote: { enabled: true } }) as never),
       save: vi.fn(async () => ({ ok: true }) as never),
-      saveSessions: vi.fn(async () => ({ ok: true }) as never),
+      saveFromRemote: vi.fn(async () => ({ ok: true }) as never),
       testAgent: vi.fn(async () => ({}) as never),
-      restart: vi.fn(),
+      testAgentById: vi.fn(async () => undefined),
+      restart: vi.fn(() => ({ ok: true as const })),
     };
 
     const dispatchDeps = fakeDeps({
@@ -328,6 +337,7 @@ describe("remote-workspace.integration: dispatch + policy + blob + api-executor 
       workspace,
       terminal: {
         ...fakeDeps().terminal,
+        createEntry: terminalHandlers.createEntry,
         renameEntry: terminalHandlers.renameEntry,
         trashEntry: terminalHandlers.trashEntry,
       },
@@ -397,7 +407,7 @@ describe("remote-workspace.integration: dispatch + policy + blob + api-executor 
     // No laptop view/tab activation: every mutating workspace/terminal/
     // docker/dialog channel below is desktop-only by CHANNEL_POLICY — a
     // remote origin never reaches workspace.ts, a split/close of an
-    // existing terminal pane, a native dialog or the docker shell, whatever
+    // existing terminal pane or a native dialog, whatever
     // args it sends. `terminal:open` (creating a *new* tab) is remote-legal
     // now — see the dedicated test below for its own project gate.
     const forbiddenChannels: [string, unknown[]][] = [
@@ -406,7 +416,6 @@ describe("remote-workspace.integration: dispatch + policy + blob + api-executor 
       ["workspace:activate", ["tab-terminal-1"]],
       ["workspace:navigate", ["tab-terminal-1", "https://x"]],
       ["workspace:visible", [true]],
-      ["docker:shell", [PROJECT, "web"]],
       ["docker:open", [PROJECT]],
       ["dialog:readJson", ["/etc/passwd"]],
       ["dialog:pickFiles", []],
@@ -445,15 +454,15 @@ describe("remote-workspace.integration: dispatch + policy + blob + api-executor 
     expect(workspace.close).toHaveBeenCalledWith("tab-terminal-1");
   });
 
-  it("settings:save from a remote device reaches settings.saveSessions with only the sessions section", async () => {
+  it("settings:save from a remote device reaches settings.saveFromRemote with the whole draft", async () => {
     const { handle, settings } = buildStack();
-    const outcome = (await handle(
-      "settings:save",
-      [{ sessions: { importWindowDays: 14, worktrees: "off" }, remote: { enabled: false } }],
-      DEVICE_A,
-    )) as Outcome;
+    const draft = {
+      sessions: { importWindowDays: 14, worktrees: "off" },
+      remote: { enabled: false },
+    };
+    const outcome = (await handle("settings:save", [draft], DEVICE_A)) as Outcome;
     expect(outcome.kind).toBe("value");
-    expect(settings.saveSessions).toHaveBeenCalledWith({ importWindowDays: 14 });
+    expect(settings.saveFromRemote).toHaveBeenCalledWith(draft);
     expect(settings.save).not.toHaveBeenCalled();
   });
 
@@ -494,10 +503,28 @@ describe("remote-workspace.integration: dispatch + policy + blob + api-executor 
       }
       expect(fileOps).toEqual([]);
 
-      // File creation stays desktop-only.
+      // Creating a file or folder is remote, inside the root only.
       expect(
         await handle("terminal:createEntry", ["tab-terminal-1", "/p/acme", "n", "file"], DEVICE_A),
-      ).toEqual({ kind: "forbidden" });
+      ).toEqual({ kind: "value", value: { ok: true, path: "/p/acme/n" } });
+      expect(
+        await handle(
+          "terminal:createEntry",
+          ["tab-terminal-1", "/p/acme", "d", "directory"],
+          DEVICE_A,
+        ),
+      ).toEqual({ kind: "value", value: { ok: true, path: "/p/acme/d" } });
+      expect(fileOps).toEqual(["touch /p/acme/n", "mkdir /p/acme/d"]);
+      fileOps.length = 0;
+      for (const args of [
+        ["tab-terminal-1", "/etc", "n", "file"],
+        ["tab-terminal-1", "/p/acme/escape", "n", "file"],
+        ["tab-terminal-1", "/p/acme", "../n", "file"],
+      ]) {
+        const outcome = (await handle("terminal:createEntry", args, DEVICE_A)) as Outcome;
+        expect(outcome).toMatchObject({ kind: "value", value: { ok: false } });
+      }
+      expect(fileOps).toEqual([]);
     },
   );
 

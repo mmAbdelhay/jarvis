@@ -245,7 +245,7 @@ import {
 import { parseScan, serializeScan } from "../session-scan-cache.js";
 import { LOGIN_TERMINAL_DETAIL } from "../login-terminal.js";
 import { serialize } from "../serialize.js";
-import { writeSettingsFile } from "../settings-io.js";
+import { validateDraft, writeSettingsFile } from "../settings-io.js";
 import { writeDaemonEnabled } from "../daemon/config-file.js";
 import { errorMessage, MESSAGES, PRIMARY_LANGUAGE } from "../messages.js";
 import { createPaneScreens } from "../pane-screen.js";
@@ -806,6 +806,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     codeServer,
     projects: config.projects,
     editors: config.editors,
+    realPath: (path) => realpathSync(path),
     language: PRIMARY_LANGUAGE,
   });
 
@@ -1922,7 +1923,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     // onIdleDisabled callback uses above — never a second writer to
     // jarvis.yaml. After a successful write, the file on disk is the
     // only source of truth for `remote:` (a remote-origin settings:save
-    // changes only `sessions`, as an update of that file — dispatch.ts) — so
+    // keeps `remote` and `daemon` from that file — ipc.ts saveFromRemote) — so
     // writeConfig re-reads the file rather than trusting `draft.remote`,
     // and applies whatever that read finds to the live bridge, via the
     // queued applyFromDisk above it. A rejected re-read (or a rejected
@@ -1930,10 +1931,12 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     // and a phone or the laptop's own Settings panel is not left hanging
     // on the bridge catching up.
     writeConfig,
+    validateDraft,
     run: runCommand,
     // A restart the user did not ask for is the wrong kind of "helpful"
     // — this only ever fires from the renderer's own Restart button
-    // click, after a save has already succeeded.
+    // click, or a paired device's, after a save has already succeeded. A
+    // restart nothing would bring back reports "no-service" to the asker.
     restart: () => host.restart(),
     language: PRIMARY_LANGUAGE,
   });

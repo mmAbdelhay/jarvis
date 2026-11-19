@@ -60,7 +60,6 @@ import type { IpLocateResult } from "./ip-locate.js";
 import type { TabHost } from "./core/tab-host.js";
 import type { UsageHistory } from "./usage-history.js";
 import type { JarvisConfig } from "./config.js";
-import { parseSessions, type SessionsConfig } from "./sessions-config.js";
 import {
   DESKTOP_OWNER,
   REMOTE_FOLLOW_TAB_PATTERN,
@@ -123,6 +122,14 @@ const MAX_PANES_PER_TAB = 8;
 /** `{ ok:false, text: MESSAGES.invalidArgument(language), language }`, named
  *  once so a channel that only needs "the argument was the wrong shape"
  *  (remote:revoke) does not repeat that shape inline. */
+/** A phone's `terminal:history` limit: a whole number from 1 to 500, 100
+ *  when it is not a finite number. The handler would otherwise read
+ *  whatever the phone asked for out of the command log. */
+function clampHistoryLimit(limit: unknown): number {
+  if (typeof limit !== "number" || !Number.isFinite(limit)) return 100;
+  return Math.min(500, Math.max(1, Math.floor(limit)));
+}
+
 export function invalidArgument(language: "ar" | "en"): GitViewResult<never> {
   return { ok: false, text: MESSAGES.invalidArgument(language), language };
 }
@@ -892,17 +899,21 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
         .panes()
         .filter((pane) => pane.paneKey === tabId || pane.paneKey.startsWith(splitPrefix));
     },
-    "editor:open": ([project, root], origin) => {
+    "editor:open": ([project, root, file], origin) => {
       const p = typeof project === "string" ? project : "";
       // Absent means the project directory itself; anything that is not a
       // string is not a root name and must not be treated as one.
       const r = typeof root === "string" ? root : undefined;
-      if (origin.kind !== "remote") return editor.open(p, r);
+      // A file is checked by editor.open itself (resolveWithin, inside the
+      // project); a value that is not a string is refused here, never
+      // coerced into "no file".
+      if (file !== undefined && typeof file !== "string") return invalidArgument(deps.language);
+      if (origin.kind !== "remote") return editor.open(p, r, file);
       // Task 4 rule 2: a remote origin never sees the manager's own
       // loopback URL — only the `/s/<handle>/…` proxy URL deps.sidecars
       // publishes it under, or the reason the phone stays without one.
       return (async () => {
-        const result = await editor.open(p, r);
+        const result = await editor.open(p, r, file);
         if (!result.ok) return result;
         const published = deps.sidecars.publish(origin.deviceId, {
           kind: "editor",
@@ -992,7 +1003,18 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
       docker.restart(project as string, container as string),
     "docker:composeUp": ([project]) => docker.composeUp(project as string),
     "docker:composeDown": ([project]) => docker.composeDown(project as string),
-    "docker:shell": ([project, container]) => docker.shell(project as string, container as string),
+    "docker:shell": ([project, container], origin) => {
+      // The handler checks project membership and the declared container;
+      // a remote caller's arguments are typed here first so nothing but two
+      // strings ever reaches it.
+      if (
+        origin.kind === "remote" &&
+        (typeof project !== "string" || typeof container !== "string")
+      ) {
+        return invalidArgument(deps.language);
+      }
+      return docker.shell(project as string, container as string);
+    },
     "docker:follow": ([tabId, project, container], origin) => {
       if (
         typeof tabId !== "string" ||
@@ -1254,16 +1276,32 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
         path as string | undefined,
         origin.kind === "remote",
       ),
-    "terminal:history": ([paneKey, limit]) => terminal.history(paneKey as string, limit as number),
+    "terminal:history": ([paneKey, limit], origin) =>
+      terminal.history(
+        paneKey as string,
+        origin.kind === "remote" ? clampHistoryLimit(limit) : (limit as number),
+      ),
     "terminal:listDir": ([paneKey, path]) => terminal.listDir(paneKey as string, path as string),
     "terminal:openFile": ([paneKey, path]) => terminal.openFile(paneKey as string, path as string),
-    "terminal:createEntry": ([paneKey, parentPath, name, kind]) =>
-      terminal.createEntry(
+    "terminal:createEntry": ([paneKey, parentPath, name, kind], origin) => {
+      // The handler's own checks (project root containment, a plain new
+      // name) stay; a remote caller's arguments are typed first.
+      if (
+        origin.kind === "remote" &&
+        (typeof paneKey !== "string" ||
+          typeof parentPath !== "string" ||
+          typeof name !== "string" ||
+          (kind !== "file" && kind !== "directory"))
+      ) {
+        return { ok: false, reason: "failed" };
+      }
+      return terminal.createEntry(
         paneKey as string,
         parentPath as string,
         name as string,
         kind as EntryKind,
-      ),
+      );
+    },
     "terminal:renameEntry": ([paneKey, path, newName]) =>
       terminal.renameEntry(paneKey as string, path as string, newName as string),
     "terminal:trashEntry": ([paneKey, path]) =>
@@ -1319,31 +1357,27 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
     "bookmarks:reorder": ([project, urls]) =>
       bookmarks.reorder(project as string, urls as string[]),
     "settings:read": () => settings.read(),
-    // A phone may change one section of jarvis.yaml: `sessions`. Project
-    // roots, agent and binary paths, history locations and the bridge's own
-    // configuration (ruling 28) are the laptop's to decide, so a remote
-    // draft is read for `sessions` alone — field by field, with the rule the
-    // config parser applies — and everything else in it is ignored. The
-    // change is applied inside the serialized config write as an update of
-    // the file as it is then, so a laptop-side change made between the
-    // phone's read and this write is never undone. The desktop path is
-    // unchanged and never calls settings.read() (see settings:read).
+    // A phone saves the whole draft, with one exception: `remote` (the
+    // bridge and its tailnet switch) and `daemon` on disk never change from
+    // a phone. settings.saveFromRemote validates the draft and writes it as
+    // an update of the file as it is then, keeping those two sections from
+    // that file, so a laptop-side change made between the phone's read and
+    // this write is never undone. The desktop path is unchanged and never
+    // calls settings.read() (see settings:read).
     "settings:save": async ([draft], origin) => {
       if (origin.kind !== "remote") return settings.save(draft);
       if (typeof draft !== "object" || draft === null || Array.isArray(draft)) {
         return invalidArgument(deps.language);
       }
-      const raw = (draft as Record<string, unknown>)["sessions"];
-      if (raw === undefined) return invalidArgument(deps.language);
-      let sessions: SessionsConfig;
-      try {
-        sessions = parseSessions(raw);
-      } catch {
-        return invalidArgument(deps.language);
-      }
-      return settings.saveSessions(sessions);
+      return settings.saveFromRemote(draft);
     },
-    "settings:testAgent": ([agent]) => settings.testAgent(agent),
+    // A phone sends an agent id, never a command: the host runs only the
+    // command the on-disk registry holds under that id.
+    "settings:testAgent": async ([agent], origin) => {
+      if (origin.kind !== "remote") return settings.testAgent(agent);
+      if (typeof agent !== "string") return invalidArgument(deps.language);
+      return (await settings.testAgentById(agent)) ?? invalidArgument(deps.language);
+    },
     "settings:restart": () => settings.restart(),
     "projects:list": () => Object.keys(deps.projects),
     // Settings' address picker. Takes no arguments, so there is nothing to

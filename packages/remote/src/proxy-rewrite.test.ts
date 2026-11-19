@@ -49,6 +49,16 @@ describe("parseProxyPath", () => {
 });
 
 describe("takeKey", () => {
+  it("hands back an encoded payload query untouched once the key is taken", () => {
+    const payload = encodeURIComponent(
+      JSON.stringify([["openFile", "vscode-remote://remote/p/a%20b%26c.ts"]]),
+    );
+    expect(takeKey(`/?folder=%2Fp&payload=${payload}&k=${KEY}`)).toEqual({
+      key: KEY,
+      rest: `/?folder=%2Fp&payload=${payload}`,
+    });
+  });
+
   it("extracts the only k, dropping the ? when nothing remains", () => {
     expect(takeKey(`/foo?k=${KEY}`)).toEqual({ key: KEY, rest: "/foo" });
   });

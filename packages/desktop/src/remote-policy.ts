@@ -136,9 +136,10 @@ export const CHANNEL_POLICY = {
   // configured project root (ipc.ts's resolveWithin/entryWithin, the same
   // containment terminal:listDir uses, never loosened for a remote origin),
   // refuse the root itself, and trash goes through the DesktopHost seam to
-  // the OS trash, never a hard delete. Creating a file stays desktop-only:
-  // no phone screen calls it.
-  "terminal:createEntry": "desktop-only",
+  // the OS trash, never a hard delete. Creating a file or folder is remote
+  // too, under the same containment (createEntry resolves its parent with
+  // resolveWithin and refuses a name that is not a plain new name).
+  "terminal:createEntry": "remote",
   "terminal:renameEntry": "remote",
   "terminal:trashEntry": "remote",
   "terminal:settings": "remote",
@@ -180,7 +181,7 @@ export const CHANNEL_POLICY = {
   "docker:restart": "remote",
   "docker:composeUp": "remote",
   "docker:composeDown": "remote",
-  "docker:shell": "desktop-only",
+  "docker:shell": "remote",
   "docker:follow": "remote",
   "docker:unfollow": "remote",
   "api:open": "desktop-only",
@@ -226,17 +227,16 @@ export const CHANNEL_POLICY = {
   "bookmarks:rename": "remote",
   "bookmarks:reorder": "remote",
   "settings:read": "remote",
-  // Remote, owner decision 2026-10-03 (the phone's "The laptop" settings).
-  // A phone may change only the `sessions` section: dispatch.ts parses that
-  // section alone and applies it inside the serialized config write, ignoring
-  // the rest of the draft, so a save can neither change the bridge, project
-  // roots or command paths nor undo a concurrent laptop-side change.
-  // testAgent stays desktop-only.
+  // Remote: the phone saves the whole settings draft. The `remote` and
+  // `daemon` sections are never the draft's: the write keeps whatever is on
+  // disk for both (ipc.ts saveFromRemote).
   "settings:save": "remote",
-  // Desktop-only (M4 final review, I2): runs a phone-supplied executable on
-  // the laptop by name. Revisit when a phone Settings UI ships.
-  "settings:testAgent": "desktop-only",
-  "settings:restart": "desktop-only",
+  // Remote, but a phone sends an agent id, never a command: the host looks
+  // the id up in the on-disk registry and runs only that configured command.
+  "settings:testAgent": "remote",
+  // Remote: restarts the app, or the daemon when a service manager would
+  // start it again; answers no-service otherwise.
+  "settings:restart": "remote",
   // Desktop-only, all four (Task 23): they install, start, stop and remove
   // the background service and replace the app's core. The Electron host
   // answers them (desktop-only.ts); no core, and so no phone, ever sees them.
@@ -450,6 +450,7 @@ export const REMOTE_EFFECT = {
   "terminal:trashEntry": "mutate",
   "terminal:split": "mutate",
   "terminal:closePane": "mutate",
+  "terminal:createEntry": "mutate",
   "terminal:settings": "read",
   "terminal:workflows": "read",
   "terminal:ai": "mutate",
@@ -468,6 +469,7 @@ export const REMOTE_EFFECT = {
   "docker:start": "mutate",
   "docker:stop": "mutate",
   "docker:restart": "mutate",
+  "docker:shell": "mutate",
   "docker:composeUp": "mutate",
   "docker:composeDown": "mutate",
   "docker:follow": "mutate",
@@ -500,6 +502,8 @@ export const REMOTE_EFFECT = {
   "bookmarks:reorder": "mutate",
   "settings:read": "read",
   "settings:save": "mutate",
+  "settings:testAgent": "mutate",
+  "settings:restart": "mutate",
   "projects:list": "read",
   "remote:registerPush": "mutate",
   "remote:unregisterPush": "mutate",

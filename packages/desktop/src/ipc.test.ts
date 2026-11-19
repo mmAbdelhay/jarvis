@@ -85,6 +85,7 @@ import {
 } from "@jarvis/core";
 import type { JarvisConfig, TerminalConfig } from "./config.js";
 import { MESSAGES } from "./messages.js";
+import { validateDraft } from "./settings-io.js";
 
 // Shared fixture for buildWiring's provider-facing tests: everything a
 // WiringDeps needs, wired to a `sent` capture array instead of a bare
@@ -1168,6 +1169,68 @@ describe("editor handlers", () => {
     expect(result.ok).toBe(false);
   });
 
+  describe.runIf(POSIX_FIXTURES)("a file", () => {
+    function withFile(opened: { project: string; folder: string | undefined }[]) {
+      return createEditorHandlers({
+        codeServer: codeServer({
+          open: (project, folder) => {
+            opened.push({ project, folder });
+            return Promise.resolve({ ok: true, url: "http://127.0.0.1:9001/?folder=%2Fp%2Facme" });
+          },
+        }),
+        projects: { acme: "/p/acme" },
+        editors: {},
+        realPath: (path) => path.replace(/^\/link\//, "/real/"),
+        language: "en",
+      });
+    }
+
+    it("is opened inside the project and carried in the URL's payload", async () => {
+      const opened: { project: string; folder: string | undefined }[] = [];
+      const result = await withFile(opened).open("acme", undefined, "/p/acme/src/a b.ts");
+
+      expect(opened).toEqual([{ project: "/p/acme", folder: "/p/acme" }]);
+      expect(result).toEqual({
+        ok: true,
+        value: `http://127.0.0.1:9001/?folder=%2Fp%2Facme&payload=${encodeURIComponent(
+          JSON.stringify([["openFile", "vscode-remote://remote/p/acme/src/a%20b.ts"]]),
+        )}`,
+      });
+    });
+
+    // [bite-proof] Skipping resolveWithin would open /etc/passwd here.
+    it.each([
+      "/etc/passwd",
+      "/p/acme/../secret",
+      "/p/acme-secrets/x.ts",
+      "src/a.ts",
+      "../a.ts",
+      "/p/acme/a\0.ts",
+      "/link/escape",
+    ])("refuses %j without starting an editor", async (file) => {
+      const opened: { project: string; folder: string | undefined }[] = [];
+      const result = await withFile(opened).open("acme", undefined, file);
+
+      expect(result.ok).toBe(false);
+      expect(opened).toEqual([]);
+    });
+
+    it("refuses a non-string file and an editor with no way to resolve paths", async () => {
+      const opened: { project: string; folder: string | undefined }[] = [];
+      expect((await withFile(opened).open("acme", undefined, 5 as unknown as string)).ok).toBe(
+        false,
+      );
+      const bare = createEditorHandlers({
+        codeServer: codeServer(),
+        projects: { acme: "/p/acme" },
+        editors: {},
+        language: "en",
+      });
+      expect((await bare.open("acme", undefined, "/p/acme/a.ts")).ok).toBe(false);
+      expect(opened).toEqual([]);
+    });
+  });
+
   // A project with configured roots: the Editor button asks for one by
   // name, and main is the only side that ever sees a path.
   describe("editor roots", () => {
@@ -1648,14 +1711,15 @@ function settingsDeps(
       command: string,
       args: string[],
     ) => Promise<{ code: number; stdout: string; stderr: string }>;
-    restart: () => void;
+    restart: () => "no-service" | undefined;
   }> = {},
 ) {
   return {
     readConfig: overrides.readConfig ?? (() => Promise.resolve(sampleConfig)),
     writeConfig: overrides.writeConfig ?? (() => Promise.resolve({ ok: true } as const)),
+    validateDraft,
     run: overrides.run ?? (() => Promise.resolve({ code: 0, stdout: "1.0.0", stderr: "" })),
-    restart: overrides.restart ?? (() => {}),
+    restart: overrides.restart ?? (() => undefined),
     language: "en" as const,
   };
 }
@@ -1684,10 +1748,15 @@ describe("createSettingsHandlers", () => {
     expect(written).toEqual([sampleConfig]);
   });
 
-  // [bite-proof] Writing a config read earlier (settings.read() then save)
-  // would put `remote.enabled` back to true here.
-  it("saveSessions changes only `sessions`, on the config as it is when the write runs", async () => {
-    let disk: JarvisConfig = { ...sampleConfig, remote: { ...sampleConfig.remote, enabled: true } };
+  // [bite-proof] Writing the phone's own `remote` or `daemon` section (or a
+  // config read earlier) would put the bridge back on here, or switch the
+  // background service off.
+  it("saveFromRemote takes the draft but keeps remote and daemon as they are when the write runs", async () => {
+    let disk: JarvisConfig = {
+      ...sampleConfig,
+      remote: { ...sampleConfig.remote, enabled: true },
+      daemon: { enabled: true },
+    };
     const handlers = createSettingsHandlers(
       settingsDeps({
         writeConfig: (input) => {
@@ -1698,25 +1767,88 @@ describe("createSettingsHandlers", () => {
     );
     // The laptop turns the bridge off after the phone read its settings and
     // before the phone's save lands.
-    disk = { ...disk, remote: { ...disk.remote, enabled: false } };
+    disk = { ...disk, remote: { ...disk.remote, enabled: false, port: 9001 } };
+    const keptRemote = disk.remote;
 
-    const result = await handlers.saveSessions({ importWindowDays: 3, worktrees: "parallel" });
+    const result = await handlers.saveFromRemote({
+      ...sampleConfig,
+      sessions: { importWindowDays: 3, worktrees: "parallel" },
+      projects: { acme: "/p/acme", extra: "/p/extra" },
+      remote: { ...sampleConfig.remote, enabled: true, port: 1234 },
+      daemon: { enabled: false },
+    });
 
     expect(result).toEqual({ ok: true });
-    expect(disk.remote.enabled).toBe(false);
+    expect(disk.remote).toEqual(keptRemote);
+    expect(disk.daemon).toEqual({ enabled: true });
     expect(disk.sessions).toEqual({ importWindowDays: 3, worktrees: "parallel" });
-    expect(disk.projects).toEqual(sampleConfig.projects);
-    expect(disk.whisper).toEqual(sampleConfig.whisper);
+    expect(disk.projects).toEqual({ acme: "/p/acme", extra: "/p/extra" });
   });
 
-  it("saveSessions reports a write failure like save does", async () => {
+  it("saveFromRemote refuses a draft that does not validate and writes nothing", async () => {
+    const written: unknown[] = [];
+    const handlers = createSettingsHandlers(
+      settingsDeps({
+        writeConfig: (input) => {
+          written.push(input);
+          return Promise.resolve({ ok: true });
+        },
+      }),
+    );
+
+    const result = await handlers.saveFromRemote({
+      ...sampleConfig,
+      sessions: { importWindowDays: -4 },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(written).toEqual([]);
+  });
+
+  it("saveFromRemote reports a write failure like save does", async () => {
     const handlers = createSettingsHandlers(
       settingsDeps({ writeConfig: () => Promise.resolve({ ok: false, detail: "disk full" }) }),
     );
-    expect(await handlers.saveSessions({ importWindowDays: 3 })).toMatchObject({
+    expect(await handlers.saveFromRemote(sampleConfig)).toMatchObject({
       ok: false,
       detail: "disk full",
     });
+  });
+
+  // [bite-proof] Running whatever the caller names (not what the config
+  // names) would run /bin/sh here.
+  it("testAgentById runs only the command the on-disk registry names for that id", async () => {
+    const ran: string[] = [];
+    const handlers = createSettingsHandlers(
+      settingsDeps({
+        run: (command) => {
+          ran.push(command);
+          return Promise.resolve({ code: 0, stdout: "1.0.0", stderr: "" });
+        },
+      }),
+    );
+
+    const health = await handlers.testAgentById("claude-main");
+
+    expect(health).toMatchObject({ id: "claude-main", ok: true });
+    expect(ran).toEqual(["claude-main"]);
+  });
+
+  it("testAgentById answers undefined and runs nothing for an unknown or inherited id", async () => {
+    const ran: string[] = [];
+    const handlers = createSettingsHandlers(
+      settingsDeps({
+        run: (command) => {
+          ran.push(command);
+          return Promise.resolve({ code: 0, stdout: "1.0.0", stderr: "" });
+        },
+      }),
+    );
+
+    for (const id of ["nope", "/bin/sh", "constructor", "__proto__", ""]) {
+      expect(await handlers.testAgentById(id)).toBeUndefined();
+    }
+    expect(ran).toEqual([]);
   });
 
   it("wraps a write failure in the bilingual headline plus the raw detail", async () => {
@@ -1780,19 +1912,25 @@ describe("createSettingsHandlers", () => {
     expect(health.ok).toBe(false);
   });
 
-  it("calls the injected restart function", () => {
+  it("calls the injected restart function and says ok", () => {
     let called = false;
     const handlers = createSettingsHandlers(
       settingsDeps({
         restart: () => {
           called = true;
+          return undefined;
         },
       }),
     );
 
-    handlers.restart();
-
+    expect(handlers.restart()).toEqual({ ok: true });
     expect(called).toBe(true);
+  });
+
+  it("says no-service when nothing would start the app again", () => {
+    const handlers = createSettingsHandlers(settingsDeps({ restart: () => "no-service" }));
+
+    expect(handlers.restart()).toEqual({ ok: false, reason: "no-service" });
   });
 });
 
@@ -6068,7 +6206,7 @@ describe("createDockerHandlers", () => {
 
     const result = h.shell("acme", "acme-app-1");
 
-    expect(result.ok).toBe(true);
+    expect(result).toEqual({ ok: true, value: "tab-1" });
     expect(opened).toEqual(["acme"]);
     expect(sent).toEqual(["docker exec -it acme-app-1 sh -c 'exec bash || exec sh'\r"]);
   });

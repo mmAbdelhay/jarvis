@@ -376,6 +376,36 @@ describe("daemon host: security alerts", () => {
     expect(sent).toEqual([[2, DAEMON_PUSHES.trashItem, { path: "/proj/a.ts" }]]);
   });
 
+  // A restart asked for by a remote device has no app asking (initiator is
+  // undefined): the daemon restarts itself only when a service manager
+  // would start it again, and says so when it cannot.
+  it("restart with no asking app answers no-service without a service manager, and restarts with one", () => {
+    const restartDaemon = vi.fn();
+    const base = {
+      push: () => {},
+      pushTo: () => {},
+      initiator: () => undefined,
+      log: () => {},
+      now: () => 0,
+    };
+    expect(createDaemonHost(base).host.restart()).toBe("no-service");
+
+    const supervised = createDaemonHost({ ...base, restartDaemon });
+    expect(supervised.host.restart()).toBeUndefined();
+    expect(restartDaemon).toHaveBeenCalledOnce();
+  });
+
+  it("restart asked for by an app is as it was, with or without a service manager", () => {
+    const base = {
+      push: () => {},
+      pushTo: () => {},
+      initiator: () => 4,
+      log: () => {},
+      now: () => 0,
+    };
+    expect(createDaemonHost(base).host.restart()).toBeUndefined();
+  });
+
   it("sends the stay-awake to every attached app, and to one attaching while it is held", () => {
     const pushes: Array<[string, unknown]> = [];
     const sent: Array<[number, string, unknown]> = [];

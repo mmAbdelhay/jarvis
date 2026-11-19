@@ -100,6 +100,7 @@ export function fakeDeps(overrides: Partial<DispatchDeps> = {}): DispatchDeps {
       terminalAi: vi.fn(async () => ""),
       chips: vi.fn(async () => undefined),
       paneStartDir: vi.fn(() => undefined),
+      createEntry: vi.fn(async () => ({ ok: true as const, path: "/p/a.txt" })),
     },
     shells: {
       log: vi.fn(() => "backlog"),
@@ -184,9 +185,10 @@ export function fakeDeps(overrides: Partial<DispatchDeps> = {}): DispatchDeps {
     settings: {
       read: vi.fn(async () => ({}) as never),
       save: vi.fn(async () => ({ ok: true }) as never),
-      saveSessions: vi.fn(async () => ({ ok: true }) as never),
+      saveFromRemote: vi.fn(async () => ({ ok: true }) as never),
       testAgent: vi.fn(async () => ({}) as never),
-      restart: vi.fn(),
+      testAgentById: vi.fn(async () => ({ id: "claude-acme", ok: true, detail: "1.0" })),
+      restart: vi.fn(() => ({ ok: true as const })),
     },
     providers: { refreshCapacity: vi.fn(async () => undefined) },
     usageHistory: () => ({ capacity: [], sessionsPerDay: [] }),
@@ -1448,49 +1450,184 @@ describe("dispatch table: terminal, bookmarks, settings", () => {
     expect(deps.terminal.suggest).toHaveBeenNthCalledWith(2, "p1", "ls ", undefined, true);
   });
 
-  // [bite-proof] Passing a remote draft through to settings.save (the old
-  // behaviour, with `remote` pinned) fails the first test: projects, agents
-  // and whisper would reach disk from a phone.
-  it("settings:save from a remote origin hands only the parsed `sessions` section on", async () => {
+  // [bite-proof] Routing a remote draft to settings.save (which would let a
+  // phone's `remote` or `daemon` section reach disk) fails the first test.
+  it("settings:save from a remote origin hands the whole draft to the remote-safe save", async () => {
     const deps = fakeDeps();
     const table = createDispatchTable(deps);
-    await callAs(table, REMOTE_ORIGIN, "settings:save", {
-      sessions: { importWindowDays: 7, worktrees: "always", extra: 1 },
-      projects: { evil: "/" },
-      registry: { agents: { x: { command: "rm" } } },
+    const draft = {
+      sessions: { importWindowDays: 7 },
+      projects: { p: "/tmp/p" },
       remote: { enabled: false },
-      whisper: { binaryPath: "/bin/sh", modelPath: "" },
-    });
-    expect(deps.settings.saveSessions).toHaveBeenCalledWith({
-      importWindowDays: 7,
-      worktrees: "always",
-    });
+      daemon: { enabled: false },
+    };
+    await callAs(table, REMOTE_ORIGIN, "settings:save", draft);
+    expect(deps.settings.saveFromRemote).toHaveBeenCalledWith(draft);
     expect(deps.settings.save).not.toHaveBeenCalled();
     expect(deps.settings.read).not.toHaveBeenCalled();
   });
 
-  it("settings:save from a remote origin refuses an invalid or missing `sessions`", async () => {
+  it("settings:save from a remote origin refuses a draft that is not an object", async () => {
     const deps = fakeDeps();
     const table = createDispatchTable(deps);
-    const bad: unknown[] = [
-      "x",
-      null,
-      [],
-      {},
-      { remote: { enabled: false } },
-      { sessions: "x" },
-      { sessions: { worktrees: "sometimes" } },
-      { sessions: { importWindowDays: -1 } },
-      { sessions: { importWindowDays: "7" } },
-    ];
-    for (const draft of bad) {
+    for (const draft of ["x", null, [], 5, undefined]) {
       const result = (await callAs(table, REMOTE_ORIGIN, "settings:save", draft)) as {
         ok: boolean;
       };
       expect(result.ok).toBe(false);
     }
-    expect(deps.settings.saveSessions).not.toHaveBeenCalled();
+    expect(deps.settings.saveFromRemote).not.toHaveBeenCalled();
     expect(deps.settings.save).not.toHaveBeenCalled();
+  });
+
+  it("settings:testAgent from a remote origin sends only an agent id to the by-id test", async () => {
+    const deps = fakeDeps();
+    const table = createDispatchTable(deps);
+    const result = await callAs(table, REMOTE_ORIGIN, "settings:testAgent", "claude-acme");
+    expect(deps.settings.testAgentById).toHaveBeenCalledWith("claude-acme");
+    expect(result).toEqual({ id: "claude-acme", ok: true, detail: "1.0" });
+    expect(deps.settings.testAgent).not.toHaveBeenCalled();
+  });
+
+  it("settings:testAgent from a remote origin refuses an object, a non-string and an unknown id", async () => {
+    const deps = fakeDeps({
+      settings: { ...fakeDeps().settings, testAgentById: vi.fn(async () => undefined) },
+    });
+    const table = createDispatchTable(deps);
+    for (const agent of [{ id: "x", command: "/bin/sh" }, "/bin/sh", 5, undefined, null]) {
+      const result = (await callAs(table, REMOTE_ORIGIN, "settings:testAgent", agent)) as {
+        ok?: boolean;
+      };
+      expect(result.ok).toBe(false);
+    }
+    expect(deps.settings.testAgent).not.toHaveBeenCalled();
+  });
+
+  it("settings:testAgent from the desktop passes the draft agent through unchanged", async () => {
+    const deps = fakeDeps();
+    const table = createDispatchTable(deps);
+    const agent = { id: "a", command: "claude" };
+    await call(table, "settings:testAgent", agent);
+    expect(deps.settings.testAgent).toHaveBeenCalledWith(agent);
+    expect(deps.settings.testAgentById).not.toHaveBeenCalled();
+  });
+
+  it("settings:restart answers the handler's result to a remote origin", async () => {
+    const deps = fakeDeps({
+      settings: {
+        ...fakeDeps().settings,
+        restart: vi.fn(() => ({ ok: false as const, reason: "no-service" as const })),
+      },
+    });
+    const table = createDispatchTable(deps);
+    expect(await callAs(table, REMOTE_ORIGIN, "settings:restart")).toEqual({
+      ok: false,
+      reason: "no-service",
+    });
+  });
+
+  it("terminal:history from a remote origin clamps the limit to 1-500 and defaults to 100", async () => {
+    const deps = fakeDeps();
+    const table = createDispatchTable(deps);
+    for (const [given, used] of [
+      [0, 1],
+      [-5, 1],
+      [10_000, 500],
+      [42, 42],
+      ["9", 100],
+      [undefined, 100],
+      [Number.NaN, 100],
+      [Number.POSITIVE_INFINITY, 100],
+    ] as const) {
+      vi.mocked(deps.terminal.history).mockClear();
+      await callAs(table, REMOTE_ORIGIN, "terminal:history", "t1", given);
+      expect(deps.terminal.history).toHaveBeenCalledWith("t1", used);
+    }
+  });
+
+  it("terminal:history from the desktop passes the limit through untouched", async () => {
+    const deps = fakeDeps();
+    await call(createDispatchTable(deps), "terminal:history", "t1", 10_000);
+    expect(deps.terminal.history).toHaveBeenCalledWith("t1", 10_000);
+  });
+
+  it("docker:shell from a remote origin returns the new tab id and refuses bad arguments", async () => {
+    const deps = fakeDeps({
+      docker: { ...fakeDeps().docker, shell: vi.fn(() => ({ ok: true as const, value: "tab-7" })) },
+    });
+    const table = createDispatchTable(deps);
+    expect(await callAs(table, REMOTE_ORIGIN, "docker:shell", "app", "web")).toEqual({
+      ok: true,
+      value: "tab-7",
+    });
+    for (const args of [[], [1, "web"], ["app", 2], [undefined, undefined], [{}, []]]) {
+      vi.mocked(deps.docker.shell).mockClear();
+      const result = (await callAs(table, REMOTE_ORIGIN, "docker:shell", ...args)) as {
+        ok: boolean;
+      };
+      expect(result.ok).toBe(false);
+      expect(deps.docker.shell).not.toHaveBeenCalled();
+    }
+  });
+
+  it("terminal:createEntry from a remote origin refuses bad arguments before the handler", async () => {
+    const deps = fakeDeps();
+    const table = createDispatchTable(deps);
+    const bad: unknown[][] = [
+      [],
+      [1, "/p", "a.txt", "file"],
+      ["t1", 2, "a.txt", "file"],
+      ["t1", "/p", 3, "file"],
+      ["t1", "/p", "a.txt", "folder"],
+      ["t1", "/p", "a.txt", undefined],
+    ];
+    for (const args of bad) {
+      const result = (await callAs(table, REMOTE_ORIGIN, "terminal:createEntry", ...args)) as {
+        ok: boolean;
+      };
+      expect(result.ok).toBe(false);
+    }
+    expect(deps.terminal.createEntry).not.toHaveBeenCalled();
+    await callAs(table, REMOTE_ORIGIN, "terminal:createEntry", "t1", "/p", "a.txt", "file");
+    expect(deps.terminal.createEntry).toHaveBeenCalledWith("t1", "/p", "a.txt", "file");
+  });
+
+  it("editor:open with a file from a remote origin passes it on and refuses a non-string file", async () => {
+    const publish = vi.fn(() => ({ ok: true as const, url: "https://h/s/x/?k=k" }));
+    const deps = fakeDeps({
+      editor: {
+        open: vi.fn(async () => ({
+          ok: true as const,
+          value: "http://127.0.0.1:4321/?folder=%2Fp&payload=%5B%5D",
+        })),
+        roots: vi.fn(async () => []),
+      },
+      sidecars: { publish },
+    });
+    const table = createDispatchTable(deps);
+    const result = await callAs(table, REMOTE_ORIGIN, "editor:open", "app", undefined, "/p/a.ts");
+    expect(deps.editor.open).toHaveBeenCalledWith("app", undefined, "/p/a.ts");
+    expect(publish).toHaveBeenCalledWith("d1", {
+      kind: "editor",
+      url: "http://127.0.0.1:4321/?folder=%2Fp&payload=%5B%5D",
+    });
+    expect(result).toEqual({ ok: true, value: "https://h/s/x/?k=k" });
+
+    vi.mocked(deps.editor.open).mockClear();
+    for (const file of [5, {}, []]) {
+      const refused = (await callAs(
+        table,
+        REMOTE_ORIGIN,
+        "editor:open",
+        "app",
+        undefined,
+        file,
+      )) as {
+        ok: boolean;
+      };
+      expect(refused.ok).toBe(false);
+    }
+    expect(deps.editor.open).not.toHaveBeenCalled();
   });
 
   it("settings:save leaves a desktop-origin draft untouched and never reads", async () => {
@@ -1498,7 +1635,7 @@ describe("dispatch table: terminal, bookmarks, settings", () => {
     const table = createDispatchTable(deps);
     await call(table, "settings:save", { remote: { enabled: false } });
     expect(deps.settings.save).toHaveBeenCalledWith({ remote: { enabled: false } });
-    expect(deps.settings.saveSessions).not.toHaveBeenCalled();
+    expect(deps.settings.saveFromRemote).not.toHaveBeenCalled();
     expect(deps.settings.read).not.toHaveBeenCalled();
   });
 
@@ -1925,15 +2062,17 @@ describe("dispatch table: the Tailscale access switch", () => {
 
     it("a remote settings:save cannot change remote.tailnet", async () => {
       const { deps, table, steps, writeConfig } = harness({});
-      const saved = vi.mocked(deps.settings.saveSessions);
+      const saved = vi.mocked(deps.settings.saveFromRemote);
 
       await callAs(table, REMOTE_ORIGIN, "settings:save", {
         sessions: { importWindowDays: 7 },
         remote: { enabled: true, tailnet: { enabled: true, relay: true } },
       });
 
+      // The remote-safe save is the only door; it keeps `remote` from disk
+      // (ipc.test.ts proves that), and the direct save and the tailnet
+      // switch's own write queue are never touched.
       expect(saved).toHaveBeenCalledTimes(1);
-      expect(JSON.stringify(saved.mock.calls[0])).not.toContain("tailnet");
       expect(deps.settings.save).not.toHaveBeenCalled();
       expect(writeConfig).not.toHaveBeenCalled();
       expect(steps).toEqual([]);

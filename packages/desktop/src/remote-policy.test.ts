@@ -33,7 +33,6 @@ describe("remote policy", () => {
     "workspace:visible",
     "workspace:hideAll",
     "workspace:pip",
-    "settings:restart",
     "setup:install",
     "dialog:pickFiles",
     "dialog:readJson",
@@ -41,9 +40,8 @@ describe("remote policy", () => {
     "voice:start",
     "voice:stop",
     "voice:preview",
-    // M4 final review D1/D2: these persistently rewrite laptop state or run
+    // M4 final review D1/D2: this persistently rewrites laptop state or runs
     // phone-controlled code/files on it.
-    "settings:testAgent",
     "api:saveSettings",
     "remote:tailscaleCert",
     // Tailscale access: the switch itself is the owner's, on the machine.
@@ -74,15 +72,15 @@ describe("remote policy", () => {
     "terminal:trashEntry",
     "terminal:split",
     "terminal:closePane",
+    "docker:shell",
+    "terminal:createEntry",
+    "settings:testAgent",
+    "settings:restart",
   ])("allows %s remotely and audits it as a mutation", (channel) => {
     expect(CHANNEL_POLICY[channel as keyof typeof CHANNEL_POLICY]).toBe("remote");
     expect(isRemoteAllowed(channel)).toBe(true);
     expect(REMOTE_EFFECT[channel as keyof typeof REMOTE_EFFECT]).toBe("mutate");
     expect(auditPolicyFor(channel, () => false)).toBe("always");
-  });
-
-  it("keeps terminal:createEntry desktop-only", () => {
-    expect(isRemoteAllowed("terminal:createEntry")).toBe(false);
   });
 
   it("allows the guarded api send path remotely", () => {
