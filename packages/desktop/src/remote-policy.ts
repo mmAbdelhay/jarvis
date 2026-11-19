@@ -160,8 +160,11 @@ export const CHANNEL_POLICY = {
   "terminal:attachUpload": "remote",
   "terminal:input": "remote",
   "terminal:resize": "remote",
-  "terminal:split": "desktop-only",
-  "terminal:closePane": "desktop-only",
+  // A phone may split and close panes of a terminal tab: dispatch.ts
+  // validates the tab, caps the count, makes the pane id itself and refuses
+  // a bare tab id on close; the laptop's layout follows via terminal:layout.
+  "terminal:split": "remote",
+  "terminal:closePane": "remote",
   // Desktop-only (M10 Task 4): the laptop's own local decision to push,
   // reported by the pane that watched the block finish — a phone has no
   // pane of its own to report from, and dispatch.ts refuses a remote
@@ -445,6 +448,8 @@ export const REMOTE_EFFECT = {
   "terminal:listDir": "read",
   "terminal:renameEntry": "mutate",
   "terminal:trashEntry": "mutate",
+  "terminal:split": "mutate",
+  "terminal:closePane": "mutate",
   "terminal:settings": "read",
   "terminal:workflows": "read",
   "terminal:ai": "mutate",

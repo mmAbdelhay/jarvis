@@ -227,6 +227,7 @@ function harness(): Recorded[] {
     resizeTerminal: record("resizeTerminal"),
     onTerminalData: () => {},
     onTerminalExit: () => {},
+    onTerminalLayout: () => {},
     // Task 8: workspace-terminal.ts's initWorkspaceTerminals subscribes to
     // both unconditionally, so the module import throws without them even
     // in a test that never opens a terminal tab's plan panel.

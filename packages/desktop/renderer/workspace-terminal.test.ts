@@ -41,6 +41,9 @@ function tab(overrides: Partial<WorkspaceTab> = {}): WorkspaceTab {
 
 let calls: Recorded[];
 let dataListener: ((tabId: string, chunk: string) => void) | undefined;
+let layoutListener:
+  | ((change: { tabId: string; change: "split" | "close"; paneKey: string; from?: string }) => void)
+  | undefined;
 let exitListener: ((tabId: string, code: number) => void) | undefined;
 let tabPlansListener: ((tabId: string) => void) | undefined;
 let plansChangedListener: ((path: string) => void) | undefined;
@@ -90,6 +93,7 @@ function harness(buffered = ""): void {
   calls = [];
   dataListener = undefined;
   exitListener = undefined;
+  layoutListener = undefined;
   tabPlansListener = undefined;
   plansChangedListener = undefined;
   sessionPlanEntry = undefined;
@@ -104,6 +108,9 @@ function harness(buffered = ""): void {
     },
     onTerminalExit: (cb: (tabId: string, code: number) => void) => {
       exitListener = cb;
+    },
+    onTerminalLayout: (cb: NonNullable<typeof layoutListener>) => {
+      layoutListener = cb;
     },
     onTabPlans: (cb: (tabId: string) => void) => {
       tabPlansListener = cb;
@@ -1150,6 +1157,71 @@ describe("splitting a terminal tab", () => {
 
     expect(calls).toContainEqual({ call: "closeTab", args: ["tab-1"] });
     expect(calls.some((entry) => entry.call === "closeTerminalPane")).toBe(false);
+  });
+
+  describe("a layout change pushed from another device", () => {
+    it("adds a leaf for a remote split, without starting a second shell or taking focus", async () => {
+      const { renderWorkspaceTerminals } = await load();
+      renderWorkspaceTerminals([tab()], "tab-1", "acme");
+      const focusedBefore = FakeTerminal.instances[0]?.focused ?? 0;
+
+      layoutListener?.({ tabId: "tab-1", change: "split", paneKey: "tab-1:pabc12345" });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(document.querySelectorAll(".terminal-split-leaf")).toHaveLength(2);
+      expect(FakeTerminal.instances).toHaveLength(2);
+      expect(calls).toContainEqual({ call: "attachTerminal", args: ["tab-1:pabc12345"] });
+      expect(calls.some((entry) => entry.call === "splitTerminal")).toBe(false);
+      expect(FakeTerminal.instances[0]?.focused).toBe(focusedBefore);
+      expect(
+        document.querySelector<HTMLElement>(".terminal-split-branch")?.style.flexDirection,
+      ).toBe("row");
+    });
+
+    it("puts the new leaf next to the pane named by from", async () => {
+      const { renderWorkspaceTerminals } = await load();
+      renderWorkspaceTerminals([tab()], "tab-1", "acme");
+      await split("d");
+
+      layoutListener?.({
+        tabId: "tab-1",
+        change: "split",
+        paneKey: "tab-1:pnew00001",
+        from: "tab-1",
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(document.querySelectorAll(".terminal-split-leaf")).toHaveLength(3);
+      dataListener?.("tab-1:pnew00001", "hello");
+      expect(FakeTerminal.instances[2]?.text).toBe("hello");
+    });
+
+    it("removes the leaf for a remote close, without asking main to kill it again", async () => {
+      const { renderWorkspaceTerminals } = await load();
+      renderWorkspaceTerminals([tab()], "tab-1", "acme");
+      layoutListener?.({ tabId: "tab-1", change: "split", paneKey: "tab-1:pabc12345" });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      layoutListener?.({ tabId: "tab-1", change: "close", paneKey: "tab-1:pabc12345" });
+
+      expect(document.querySelectorAll(".terminal-split-leaf")).toHaveLength(1);
+      expect(FakeTerminal.instances[1]?.disposed).toBe(true);
+      expect(calls.some((entry) => entry.call === "closeTerminalPane")).toBe(false);
+    });
+
+    it("ignores a change for a tab that is not open, an unknown leaf and a bad payload", async () => {
+      const { renderWorkspaceTerminals } = await load();
+      renderWorkspaceTerminals([tab()], "tab-1", "acme");
+
+      layoutListener?.({ tabId: "tab-9", change: "split", paneKey: "tab-9:p1" });
+      layoutListener?.({ tabId: "tab-1", change: "close", paneKey: "tab-1:ghost" });
+      layoutListener?.({ tabId: "tab-1", change: "close", paneKey: "tab-1" });
+      layoutListener?.({ tabId: "tab-1", change: "split", paneKey: "other:p1" });
+      layoutListener?.(undefined as never);
+
+      expect(document.querySelectorAll(".terminal-split-leaf")).toHaveLength(1);
+      expect(FakeTerminal.instances).toHaveLength(1);
+    });
   });
 
   it("moves the focus between panes on Alt+Cmd+Arrow", async () => {

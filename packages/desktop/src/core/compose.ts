@@ -2602,6 +2602,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     tailnetPeers,
     claudeView,
     attachUpload: paneAttach,
+    terminalLayout: { announce: (change) => broadcast.send("terminal:layout", change) },
     plans: {
       files: planFiles,
       comments: planComments,

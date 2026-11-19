@@ -358,6 +358,7 @@ export const PUSH_CHANNELS = {
   onDevToolsClosed: "workspace:devtoolsClosed",
   onTerminalData: "terminal:data",
   onTerminalExit: "terminal:exit",
+  onTerminalLayout: "terminal:layout",
   onTerminalClaudeViewChanged: "terminal:claudeViewChanged",
   onDockerLog: "docker:log",
   onRemoteStatus: "remote:update",

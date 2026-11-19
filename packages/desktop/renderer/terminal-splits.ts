@@ -32,6 +32,14 @@ export type SplitTree = {
   /** Moves the focus one pane on, wrapping at either end. */
   focus(delta: -1 | 1): void;
   focused(): TerminalPane;
+  /** Adds a pane another device already started a shell for, as a new leaf
+   *  next to the pane keyed `from` (the last pane when absent or unknown).
+   *  The focus stays where it was. False when the key is already a leaf. */
+  addLeaf(paneKey: string, from?: string, direction?: "row" | "column"): boolean;
+  /** Removes the leaf a pane key names, whose shell is already gone — the
+   *  other device killed it. False when no such leaf exists or it is the
+   *  tab's only pane. */
+  removeLeaf(paneKey: string): boolean;
   /** Every pane, in the order they are laid out. */
   panes(): readonly TerminalPane[];
   dispose(): void;
@@ -239,88 +247,115 @@ export function createSplitTree(
     parents.set(replacement, parent);
   };
 
+  const splitLeaf = (
+    target: Leaf,
+    key: string,
+    direction: "row" | "column",
+    takeFocus: boolean,
+  ): boolean => {
+    const branchElement = document.createElement("div");
+    branchElement.className = "terminal-split-branch";
+    branchElement.style.flexDirection = direction;
+    const created = leafElement();
+
+    // The DOM before the pane, so the new pane is built in an element
+    // that is already on screen. Both sides share the branch afresh,
+    // whatever an earlier drag left on the pane being split.
+    const at = target.element.parentElement;
+    at?.replaceChild(branchElement, target.element);
+    resetSize(target);
+    branchElement.append(target.element, created);
+
+    let leaf: Leaf;
+    try {
+      leaf = makeLeafIn(key, created);
+    } catch {
+      // A pane that could not be built leaves the tab exactly as it was,
+      // down to where the pane being split sits in the document.
+      created.remove();
+      branchElement.parentElement?.replaceChild(target.element, branchElement);
+      return false;
+    }
+
+    const branch: Branch = {
+      kind: "branch",
+      direction,
+      element: branchElement,
+      children: [target, leaf],
+    };
+    branchElement.insertBefore(makeDivider(branch), created);
+
+    const above = parents.get(target);
+    if (above === undefined) root = branch;
+    else {
+      above.children[above.children[0] === target ? 0 : 1] = branch;
+      parents.set(branch, above);
+    }
+    parents.set(target, branch);
+    parents.set(leaf, branch);
+
+    if (takeFocus) focusLeaf(leaf);
+    refitAll();
+    return true;
+  };
+
+  const closeLeaf = (target: Leaf, kill: boolean): boolean => {
+    const parent = parents.get(target);
+    // No parent is no sibling: this is the tab's only pane, and closing
+    // it is the tab's own business, not this tree's.
+    if (parent === undefined) return false;
+
+    const order = leaves();
+    const index = order.indexOf(target);
+    const sibling = parent.children[0] === target ? parent.children[1] : parent.children[0];
+
+    resetSize(sibling);
+    replace(parent, sibling);
+    parents.delete(target);
+    parents.delete(parent);
+    attempt(() => target.pane.dispose());
+    target.element.remove();
+    // The pane is gone; its shell must go with it.
+    // .catch on top of attempt(): attempt only catches a *synchronous*
+    // throw, and this is the orphan-shell path (the design's Risk 4) —
+    // an unhandled rejection here would be the only signal that a shell
+    // outlived its pane, delivered as a console error nobody reads.
+    if (kill) {
+      attempt(() => void window.jarvis.closeTerminalPane(target.key).catch(() => {}));
+    }
+
+    const remaining = leaves();
+    // The pane that took its place on screen, or the last one when the
+    // closed pane was itself the last.
+    const next = remaining[Math.min(index, remaining.length - 1)];
+    if (next !== undefined && target === current) focusLeaf(next);
+    refitAll();
+    return true;
+  };
+
   return {
     element,
 
     split(direction) {
-      const target = current;
-      const branchElement = document.createElement("div");
-      branchElement.className = "terminal-split-branch";
-      branchElement.style.flexDirection = direction;
-      const created = leafElement();
+      nextPaneId += 1;
+      splitLeaf(current, `${tabId}:p${nextPaneId}`, direction, true);
+    },
 
-      // The DOM before the pane, so the new pane is built in an element
-      // that is already on screen. Both sides share the branch afresh,
-      // whatever an earlier drag left on the pane being split.
-      const at = target.element.parentElement;
-      at?.replaceChild(branchElement, target.element);
-      resetSize(target);
-      branchElement.append(target.element, created);
-
-      let leaf: Leaf;
-      try {
-        nextPaneId += 1;
-        leaf = makeLeafIn(`${tabId}:p${nextPaneId}`, created);
-      } catch {
-        // A pane that could not be built leaves the tab exactly as it was,
-        // down to where the pane being split sits in the document.
-        created.remove();
-        branchElement.parentElement?.replaceChild(target.element, branchElement);
-        return;
-      }
-
-      const branch: Branch = {
-        kind: "branch",
-        direction,
-        element: branchElement,
-        children: [target, leaf],
-      };
-      branchElement.insertBefore(makeDivider(branch), created);
-
-      const above = parents.get(target);
-      if (above === undefined) root = branch;
-      else {
-        above.children[above.children[0] === target ? 0 : 1] = branch;
-        parents.set(branch, above);
-      }
-      parents.set(target, branch);
-      parents.set(leaf, branch);
-
-      focusLeaf(leaf);
-      refitAll();
+    addLeaf(paneKey, from, direction = "row") {
+      const all = leaves();
+      if (all.some((leaf) => leaf.key === paneKey)) return false;
+      const target = all.find((leaf) => leaf.key === from) ?? all[all.length - 1];
+      if (target === undefined) return false;
+      return splitLeaf(target, paneKey, direction, false);
     },
 
     closeFocused() {
-      const target = current;
-      const parent = parents.get(target);
-      // No parent is no sibling: this is the tab's only pane, and closing
-      // it is the tab's own business, not this tree's.
-      if (parent === undefined) return false;
+      return closeLeaf(current, true);
+    },
 
-      const order = leaves();
-      const index = order.indexOf(target);
-      const sibling = parent.children[0] === target ? parent.children[1] : parent.children[0];
-
-      resetSize(sibling);
-      replace(parent, sibling);
-      parents.delete(target);
-      parents.delete(parent);
-      attempt(() => target.pane.dispose());
-      target.element.remove();
-      // The pane is gone; its shell must go with it.
-      // .catch on top of attempt(): attempt only catches a *synchronous*
-      // throw, and this is the orphan-shell path (the design's Risk 4) —
-      // an unhandled rejection here would be the only signal that a shell
-      // outlived its pane, delivered as a console error nobody reads.
-      attempt(() => void window.jarvis.closeTerminalPane(target.key).catch(() => {}));
-
-      const remaining = leaves();
-      // The pane that took its place on screen, or the last one when the
-      // closed pane was itself the last.
-      const next = remaining[Math.min(index, remaining.length - 1)];
-      if (next !== undefined) focusLeaf(next);
-      refitAll();
-      return true;
+    removeLeaf(paneKey) {
+      const target = leaves().find((leaf) => leaf.key === paneKey);
+      return target === undefined ? false : closeLeaf(target, false);
     },
 
     focus(delta) {

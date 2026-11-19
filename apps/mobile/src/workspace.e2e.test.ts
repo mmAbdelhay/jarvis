@@ -244,8 +244,6 @@ describe("workspace.e2e: Workspace panes, Changes, uploads/Postman import, api:s
       "workspace:activate",
       "workspace:navigate",
       "terminal:open",
-      "terminal:split",
-      "terminal:closePane",
     ]) {
       expect(sentChannels).not.toContain(forbidden);
     }

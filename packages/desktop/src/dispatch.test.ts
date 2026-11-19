@@ -308,6 +308,7 @@ export function fakeDeps(overrides: Partial<DispatchDeps> = {}): DispatchDeps {
     attachUpload: {
       attach: vi.fn(async () => ({ ok: true as const, path: ".jarvis/uploads/x.png" })),
     },
+    terminalLayout: { announce: vi.fn() },
     ...overrides,
   } as DispatchDeps;
 }
@@ -3169,4 +3170,143 @@ describe("dispatch table: exhaustiveness", () => {
       expect(source).not.toMatch(/["']electron(\/|["'])/);
     },
   );
+});
+
+describe("terminal:split / terminal:closePane from another device", () => {
+  const workspaceTab = (overrides: Partial<WorkspaceTab>): WorkspaceTab => ({
+    id: "tab-1",
+    project: "app",
+    url: "",
+    kind: "terminal",
+    title: "",
+    loading: false,
+    canGoBack: false,
+    canGoForward: false,
+    error: undefined,
+    hasPlayingVideo: false,
+    pageFullscreen: false,
+    suspended: false,
+    ...overrides,
+  });
+  const withPanes = (keys: string[]) => {
+    const deps = fakeDeps({
+      workspace: {
+        ...fakeDeps().workspace,
+        state: vi.fn(() => ({
+          tabs: [
+            workspaceTab({ id: "tab-1", kind: "terminal" }),
+            workspaceTab({ id: "api-tab", kind: "api" }),
+          ],
+          activeTabId: "tab-1",
+        })),
+      },
+      shells: {
+        log: vi.fn(() => ""),
+        snapshot: vi.fn(() => ({ text: "", end: 0 })),
+        panes: vi.fn(() => keys.map((paneKey) => ({ paneKey, exited: false }))),
+        write: vi.fn(),
+      },
+    });
+    // The real terminal handler starts a shell, which shows up in panes().
+    vi.mocked(deps.terminal.split).mockImplementation((tabId, paneId) => {
+      keys.push(`${tabId}:${paneId}`);
+    });
+    return deps;
+  };
+
+  it.each([
+    ["an unknown tab", ["nope", "x"]],
+    ["a non-terminal tab", ["api-tab", "x"]],
+    ["a non-string tab id", [7, "x"]],
+    ["no arguments", []],
+  ])("refuses a remote split of %s without starting anything", async (_name, args) => {
+    const deps = withPanes(["tab-1"]);
+    const table = createDispatchTable(deps);
+    const result = (await callAs(table, REMOTE_ORIGIN, "terminal:split", ...args)) as {
+      ok: boolean;
+    };
+    expect(result.ok).toBe(false);
+    expect(deps.terminal.split).not.toHaveBeenCalled();
+    expect(deps.terminalLayout.announce).not.toHaveBeenCalled();
+  });
+
+  it("refuses a 9th pane, counting only this tab's panes", async () => {
+    const eight = ["tab-1", ...Array.from({ length: 7 }, (_, i) => `tab-1:p${i}`)];
+    const deps = withPanes([...eight, "tab-10", "tab-10:a"]);
+    const table = createDispatchTable(deps);
+    const result = (await callAs(table, REMOTE_ORIGIN, "terminal:split", "tab-1")) as {
+      ok: boolean;
+      text?: string;
+    };
+    expect(result.ok).toBe(false);
+    expect(result.text).toBeTruthy();
+    expect(deps.terminal.split).not.toHaveBeenCalled();
+  });
+
+  it("a remote split ignores the caller's pane id, makes its own and announces it", async () => {
+    const deps = withPanes(["tab-1", "tab-1:p1"]);
+    const table = createDispatchTable(deps);
+    const result = (await callAs(table, REMOTE_ORIGIN, "terminal:split", "tab-1", "evil:../x")) as {
+      ok: true;
+      value: string;
+    };
+    expect(result.ok).toBe(true);
+    expect(result.value).toMatch(/^tab-1:p[0-9a-z]{8}$/);
+    expect(deps.terminal.split).toHaveBeenCalledWith("tab-1", result.value.slice("tab-1:".length));
+    expect(deps.terminalLayout.announce).toHaveBeenCalledWith({
+      tabId: "tab-1",
+      change: "split",
+      paneKey: result.value,
+    });
+  });
+
+  it("a desktop split is unchanged: its own pane id, no result, no announcement", async () => {
+    const deps = withPanes(["tab-1"]);
+    const table = createDispatchTable(deps);
+    const result = await call(table, "terminal:split", "tab-1", "p3");
+    expect(result).toBeUndefined();
+    expect(deps.terminal.split).toHaveBeenCalledWith("tab-1", "p3");
+    expect(deps.terminalLayout.announce).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["a bare tab id", "tab-1"],
+    ["a pane of another tab kind", "api-tab:p1"],
+    ["an unknown tab", "nope:p1"],
+    ["an unknown pane", "tab-1:ghost"],
+    ["an empty pane id", "tab-1:"],
+    ["a non-string", 5],
+  ])("refuses a remote close of %s, killing nothing", async (_name, key) => {
+    const deps = withPanes(["tab-1", "tab-1:p1", "api-tab:p1"]);
+    const table = createDispatchTable(deps);
+    const result = (await callAs(table, REMOTE_ORIGIN, "terminal:closePane", key)) as {
+      ok: boolean;
+    };
+    expect(result.ok).toBe(false);
+    expect(deps.terminal.closePane).not.toHaveBeenCalled();
+    expect(deps.terminalLayout.announce).not.toHaveBeenCalled();
+  });
+
+  it("closes a real remote pane and announces it", async () => {
+    const deps = withPanes(["tab-1", "tab-1:p1"]);
+    const table = createDispatchTable(deps);
+    const result = (await callAs(table, REMOTE_ORIGIN, "terminal:closePane", "tab-1:p1")) as {
+      ok: boolean;
+    };
+    expect(result.ok).toBe(true);
+    expect(deps.terminal.closePane).toHaveBeenCalledWith("tab-1:p1");
+    expect(deps.terminalLayout.announce).toHaveBeenCalledWith({
+      tabId: "tab-1",
+      change: "close",
+      paneKey: "tab-1:p1",
+    });
+  });
+
+  it("a desktop close is unchanged and announces nothing", async () => {
+    const deps = withPanes(["tab-1", "tab-1:p1"]);
+    const table = createDispatchTable(deps);
+    await call(table, "terminal:closePane", "tab-1");
+    expect(deps.terminal.closePane).toHaveBeenCalledWith("tab-1");
+    expect(deps.terminalLayout.announce).not.toHaveBeenCalled();
+  });
 });

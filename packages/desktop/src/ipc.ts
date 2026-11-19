@@ -148,6 +148,9 @@ export type IpcChannels = {
   // `chunk` (ruling 10) — see ShellOutput.
   "terminal:data": { paneKey: string; chunk: string; offset: number };
   "terminal:exit": { paneKey: string; code: number };
+  // Another device split or closed a pane of a terminal tab; the laptop's
+  // own layout follows. Keyed by tab id.
+  "terminal:layout": TerminalLayoutChange;
   // The phone's chat view of a pane (claude-view.ts): "look again", keyed
   // by pane and throttled per pane. The key is the whole payload.
   "terminal:claudeViewChanged": { paneKey: string };
@@ -166,6 +169,18 @@ export const PROVIDER_HEALTH_INTERVAL_MS = 300_000;
 // already localised in the main process, because the renderer has no access
 // to the user's configured language and must never build user-facing strings
 // of its own (Global Constraints: one bilingual message lane).
+/** The push behind `terminal:layout`: a remote device split or closed a pane
+ *  of terminal tab `tabId`. `paneKey` is the full "<tabId>:<paneId>" shell
+ *  key. `from`, when present, is the pane key the new pane sits next to;
+ *  absent means after the tab's last pane. Emitted for remote-origin
+ *  changes only. */
+export type TerminalLayoutChange = {
+  tabId: string;
+  change: "split" | "close";
+  paneKey: string;
+  from?: string;
+};
+
 export type GitViewResult<T> =
   | { ok: true; value: T }
   | { ok: false; text: string; language: "ar" | "en" };
@@ -971,6 +986,8 @@ export type RendererApi = {
    *  "<tabId>:<paneId>" for every pane split off it. */
   onTerminalData(cb: (paneKey: string, chunk: string) => void): void;
   onTerminalExit(cb: (paneKey: string, code: number) => void): void;
+  /** Another device split or closed a pane of a terminal tab. */
+  onTerminalLayout(cb: (change: TerminalLayoutChange) => void): void;
   /**
    * A cursor onto one pane's retained output — the same shape and purpose
    * as sessionSnapshot, for a Terminal pane instead of a session. Exists

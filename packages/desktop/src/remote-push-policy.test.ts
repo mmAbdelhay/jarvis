@@ -67,6 +67,13 @@ describe("REMOTE_PUSH_POLICY", () => {
     expect(exitPolicy.kind).toBe("reliable");
     expect(exitPolicy.keyOf?.({ paneKey: "tab-1" })).toBe("tab-1");
 
+    const layoutPolicy = REMOTE_PUSH_POLICY["terminal:layout"] as ReliablePolicy;
+    expect(layoutPolicy.kind).toBe("reliable");
+    expect(layoutPolicy.keyOf?.({ tabId: "tab-1", change: "split", paneKey: "tab-1:p1" })).toBe(
+      "tab-1",
+    );
+    expect(layoutPolicy.keyOf?.({ tabId: 1 })).toBeUndefined();
+
     const viewPolicy = REMOTE_PUSH_POLICY["terminal:claudeViewChanged"] as ReliablePolicy;
     expect(viewPolicy.kind).toBe("reliable");
     expect(viewPolicy.keyOf?.({ paneKey: "tab-1" })).toBe("tab-1");
@@ -175,6 +182,8 @@ describe("remoteKeyAuthorizer", () => {
     expect(authorize("terminal:exit", "tab-2", DEVICE)).toBe(false);
     expect(authorize("terminal:claudeViewChanged", "tab-1", DEVICE)).toBe(true);
     expect(authorize("terminal:claudeViewChanged", "tab-2", DEVICE)).toBe(false);
+    expect(authorize("terminal:layout", "tab-1", DEVICE)).toBe(true);
+    expect(authorize("terminal:layout", "tab-2", DEVICE)).toBe(false);
   });
 
   it("session:output requires the session to exist", () => {

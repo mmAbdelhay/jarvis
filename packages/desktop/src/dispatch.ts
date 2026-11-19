@@ -30,6 +30,7 @@ import {
 } from "@jarvis/core";
 import type { DockerConfig, PlanCommentStore, PlanFiles, SnippetLanguage } from "@jarvis/platform";
 import { isWithin } from "@jarvis/platform";
+import { randomInt } from "node:crypto";
 import { bracketedSubmit } from "./bracketed.js";
 import {
   type AttachUploadResult,
@@ -83,6 +84,7 @@ import {
   type SettingsHandlers,
   type SetupHandlers,
   type TerminalHandlers,
+  type TerminalLayoutChange,
   hasControlCharacter,
 } from "./ipc.js";
 import { errorMessage, MESSAGES } from "./messages.js";
@@ -114,6 +116,9 @@ function isRemoteTabTitle(title: unknown): title is string {
     !/[\u202A-\u202E\u2066-\u2069]/.test(title)
   );
 }
+
+/** The most panes a remote device may split a terminal tab into. */
+const MAX_PANES_PER_TAB = 8;
 
 /** `{ ok:false, text: MESSAGES.invalidArgument(language), language }`, named
  *  once so a channel that only needs "the argument was the wrong shape"
@@ -456,6 +461,10 @@ export type DispatchDeps = {
   attachUpload: {
     attach(deviceId: string, paneKey: unknown, fileId: unknown): Promise<AttachUploadResult>;
   };
+  // Tells the laptop's own window (and any phone watching the tab) that a
+  // remote device split or closed a pane. compose.ts sends it as the
+  // `terminal:layout` push.
+  terminalLayout: { announce(change: TerminalLayoutChange): void };
 };
 
 /** awake:set's argument: an object with `mode` and/or `simulateInput` and
@@ -1185,14 +1194,58 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
     },
     // A tab's second (and third…) shell, and the one kill that is not the
     // tab's own — see TerminalHandlers.split/closePane.
-    "terminal:split": ([tabId, paneId]) => {
-      terminal.split(tabId as string, paneId as string);
+    "terminal:split": ([tabId, paneId], origin) => {
+      if (origin.kind !== "remote") {
+        terminal.split(tabId as string, paneId as string);
+        return undefined;
+      }
+      // A remote device never picks the pane id: it becomes part of a shell
+      // key and a leaf key on the laptop, so the host makes one.
+      if (typeof tabId !== "string") return invalidArgument(deps.language);
+      const tab = workspace.state().tabs.find((candidate) => candidate.id === tabId);
+      if (tab?.kind !== "terminal") return invalidArgument(deps.language);
+      const prefix = `${tabId}:`;
+      const count = deps.shells
+        .panes()
+        .filter((pane) => pane.paneKey === tabId || pane.paneKey.startsWith(prefix)).length;
+      if (count >= MAX_PANES_PER_TAB) {
+        return { ok: false, text: MESSAGES.tooManyPanes(deps.language), language: deps.language };
+      }
+      const newPaneId = `p${Array.from({ length: 8 }, () => randomInt(36).toString(36)).join("")}`;
+      const paneKey = `${tabId}:${newPaneId}`;
+      terminal.split(tabId, newPaneId);
+      // A tab with no known directory starts nothing; announcing it would
+      // leave the laptop with a leaf that has no shell behind it.
+      if (!deps.shells.panes().some((pane) => pane.paneKey === paneKey)) {
+        return { ok: false, text: MESSAGES.splitFailed(deps.language), language: deps.language };
+      }
+      deps.terminalLayout.announce({ tabId, change: "split", paneKey });
+      return { ok: true, value: paneKey };
     },
-    "terminal:closePane": ([paneKey]) => {
+    "terminal:closePane": ([paneKey], origin) => {
+      if (origin.kind === "remote") {
+        // Only "<tabId>:<paneId>" of a live pane of an existing terminal
+        // tab. A bare tab id would kill the tab's own shell, which is the
+        // tab's business (workspace:close), not a pane's.
+        if (typeof paneKey !== "string") return invalidArgument(deps.language);
+        const colon = paneKey.indexOf(":");
+        if (colon <= 0 || colon === paneKey.length - 1) return invalidArgument(deps.language);
+        const tabId = paneKey.slice(0, colon);
+        const tab = workspace.state().tabs.find((candidate) => candidate.id === tabId);
+        if (tab?.kind !== "terminal") return invalidArgument(deps.language);
+        if (!deps.shells.panes().some((pane) => pane.paneKey === paneKey)) {
+          return invalidArgument(deps.language);
+        }
+        terminal.closePane(paneKey);
+        fitOverrides.forget(paneKey);
+        deps.terminalLayout.announce({ tabId, change: "close", paneKey });
+        return { ok: true, value: undefined };
+      }
       terminal.closePane(paneKey as string);
       // Bug 8: same reasoning as workspace:close above, for a split's own
       // pane key rather than its tab's.
       fitOverrides.forget(paneKey as string);
+      return undefined;
     },
     "terminal:suggest": ([paneKey, input, path], origin) =>
       terminal.suggest(

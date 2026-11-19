@@ -59,6 +59,7 @@ describe("the channel table", () => {
       "terminal:claudeViewChanged",
       "terminal:data",
       "terminal:exit",
+      "terminal:layout",
       "turn:new",
       "update:state",
       "voice:hotkeys",

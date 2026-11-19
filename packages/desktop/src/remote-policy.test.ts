@@ -72,6 +72,8 @@ describe("remote policy", () => {
     "settings:save",
     "terminal:renameEntry",
     "terminal:trashEntry",
+    "terminal:split",
+    "terminal:closePane",
   ])("allows %s remotely and audits it as a mutation", (channel) => {
     expect(CHANNEL_POLICY[channel as keyof typeof CHANNEL_POLICY]).toBe("remote");
     expect(isRemoteAllowed(channel)).toBe(true);

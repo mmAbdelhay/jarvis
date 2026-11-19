@@ -406,8 +406,6 @@ describe("remote-workspace.integration: dispatch + policy + blob + api-executor 
       ["workspace:activate", ["tab-terminal-1"]],
       ["workspace:navigate", ["tab-terminal-1", "https://x"]],
       ["workspace:visible", [true]],
-      ["terminal:split", ["tab-terminal-1", "pane-1"]],
-      ["terminal:closePane", ["tab-terminal-1"]],
       ["docker:shell", [PROJECT, "web"]],
       ["docker:open", [PROJECT]],
       ["dialog:readJson", ["/etc/passwd"]],

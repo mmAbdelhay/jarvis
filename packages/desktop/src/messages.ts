@@ -821,6 +821,12 @@ export const MESSAGES = {
       : "This device already has the maximum amount staged.",
   // A disk-level failure staging the upload (never the dependency's own
   // message or a path — same discipline as voiceTurnFailed).
+  tooManyPanes: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "لا يمكن فتح أكثر من ٨ أجزاء في تبويب واحد."
+      : "A tab can have at most 8 panes.",
+  splitFailed: (language: "ar" | "en"): string =>
+    language === "ar" ? "تعذّر تقسيم الطرفية." : "Could not split the terminal.",
   fileUploadFailed: (language: "ar" | "en"): string =>
     language === "ar" ? "تعذّر حفظ الملف." : "Could not stage the file.",
   // resolve()/readJson()'s one shared failure for every reason a staged
