@@ -32,6 +32,7 @@ import { AuthCard, useAuthCardContentTop, useAuthCardRootStyle } from "@/compone
 import { platformKey, t } from "@/lib/i18n";
 import type { MessageKey } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
+import { IN_MACHINE_VIEW } from "@/lib/machine-view-env";
 import { passkeys } from "@/lib/passkey";
 import { setPasskeyOfferSignal, takePasskeyOfferSignal } from "@/lib/passkey-offer-signal";
 import { loadPrefs, setKeepSignedIn } from "@/lib/prefs";
@@ -278,15 +279,22 @@ function UnlockScreen() {
         )}
       </TouchableOpacity>
 
-      <View style={styles.switchRow}>
-        <Text style={styles.switchLabel}>{t(language, "auth.keepSignedIn")}</Text>
-        <Switch
-          value={keepSignedIn}
-          accessibilityLabel={t(language, "auth.keepSignedIn")}
-          onValueChange={(on) => void changeKeepSignedIn(on)}
-        />
-      </View>
-      <Text style={styles.note}>{t(language, "auth.keepSignedInHint")}</Text>
+      {IN_MACHINE_VIEW ? (
+        // A Jarvis window keeps its sign-in: nothing to choose here.
+        <Text style={styles.note}>{t(language, "auth.machineViewSignedIn")}</Text>
+      ) : (
+        <>
+          <View style={styles.switchRow}>
+            <Text style={styles.switchLabel}>{t(language, "auth.keepSignedIn")}</Text>
+            <Switch
+              value={keepSignedIn}
+              accessibilityLabel={t(language, "auth.keepSignedIn")}
+              onValueChange={(on) => void changeKeepSignedIn(on)}
+            />
+          </View>
+          <Text style={styles.note}>{t(language, "auth.keepSignedInHint")}</Text>
+        </>
+      )}
 
       {message !== undefined && <Text style={styles.error}>{t(language, message)}</Text>}
     </ScrollView>

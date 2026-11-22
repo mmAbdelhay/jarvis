@@ -4,7 +4,13 @@ import type { RemoteStatus } from "@jarvis/remote";
 import { describe, expect, it, vi } from "vitest";
 import { INVOKE_CHANNELS } from "./channels.js";
 import { ELECTRON_BOUND_CHANNELS } from "./desktop-only.js";
-import { parseConfig, type JarvisConfig } from "./config.js";
+import {
+  DEFAULT_REMOTE,
+  effectiveWebPort,
+  parseConfig,
+  type JarvisConfig,
+  type RemoteConfig,
+} from "./config.js";
 import {
   createDispatchTable,
   DESKTOP_ORIGIN,
@@ -94,6 +100,7 @@ export function fakeDeps(overrides: Partial<DispatchDeps> = {}): DispatchDeps {
       terminalAi: vi.fn(async () => ""),
       chips: vi.fn(async () => undefined),
       paneStartDir: vi.fn(() => undefined),
+      createEntry: vi.fn(async () => ({ ok: true as const, path: "/p/a.txt" })),
     },
     shells: {
       log: vi.fn(() => "backlog"),
@@ -178,9 +185,10 @@ export function fakeDeps(overrides: Partial<DispatchDeps> = {}): DispatchDeps {
     settings: {
       read: vi.fn(async () => ({}) as never),
       save: vi.fn(async () => ({ ok: true }) as never),
-      saveSessions: vi.fn(async () => ({ ok: true }) as never),
+      saveFromRemote: vi.fn(async () => ({ ok: true }) as never),
       testAgent: vi.fn(async () => ({}) as never),
-      restart: vi.fn(),
+      testAgentById: vi.fn(async () => ({ id: "claude-acme", ok: true, detail: "1.0" })),
+      restart: vi.fn(() => ({ ok: true as const })),
     },
     providers: { refreshCapacity: vi.fn(async () => undefined) },
     usageHistory: () => ({ capacity: [], sessionsPerDay: [] }),
@@ -220,6 +228,19 @@ export function fakeDeps(overrides: Partial<DispatchDeps> = {}): DispatchDeps {
       })),
     },
     writeConfig: vi.fn(async () => ({ ok: true as const })),
+    tailnet: {
+      config: vi.fn(() => DEFAULT_REMOTE),
+      ports: vi.fn((remote: RemoteConfig) => [remote.port, effectiveWebPort(remote)]),
+      readServeStatus: vi.fn(async () => ({})),
+      enableRelay: vi.fn(async () => ({ ok: true as const })),
+      disableRelay: vi.fn(async () => ({ ok: true as const })),
+      restoreForward: vi.fn(async () => ({ ok: true as const })),
+      applied: vi.fn(async () => {}),
+      rearm: vi.fn(async () => {}),
+      reloadCertificate: vi.fn(async () => {}),
+      checkNow: vi.fn(async () => {}),
+      log: vi.fn(),
+    },
     plans: {
       files: {
         list: vi.fn(async () => ({ session: undefined, planMode: [], repo: [] })),
@@ -279,6 +300,9 @@ export function fakeDeps(overrides: Partial<DispatchDeps> = {}): DispatchDeps {
       status: vi.fn(() => AWAKE_OFF),
       set: vi.fn(async () => AWAKE_OFF),
     },
+    tailnetPeers: {
+      list: vi.fn(async () => ({ state: "no-cli" as const, machines: [] })),
+    },
     claudeView: {
       view: vi.fn(async () => ({ kind: "none" as const })),
       answer: vi.fn(() => ({ ok: true as const })),
@@ -286,6 +310,7 @@ export function fakeDeps(overrides: Partial<DispatchDeps> = {}): DispatchDeps {
     attachUpload: {
       attach: vi.fn(async () => ({ ok: true as const, path: ".jarvis/uploads/x.png" })),
     },
+    terminalLayout: { announce: vi.fn() },
     ...overrides,
   } as DispatchDeps;
 }
@@ -1425,49 +1450,184 @@ describe("dispatch table: terminal, bookmarks, settings", () => {
     expect(deps.terminal.suggest).toHaveBeenNthCalledWith(2, "p1", "ls ", undefined, true);
   });
 
-  // [bite-proof] Passing a remote draft through to settings.save (the old
-  // behaviour, with `remote` pinned) fails the first test: projects, agents
-  // and whisper would reach disk from a phone.
-  it("settings:save from a remote origin hands only the parsed `sessions` section on", async () => {
+  // [bite-proof] Routing a remote draft to settings.save (which would let a
+  // phone's `remote` or `daemon` section reach disk) fails the first test.
+  it("settings:save from a remote origin hands the whole draft to the remote-safe save", async () => {
     const deps = fakeDeps();
     const table = createDispatchTable(deps);
-    await callAs(table, REMOTE_ORIGIN, "settings:save", {
-      sessions: { importWindowDays: 7, worktrees: "always", extra: 1 },
-      projects: { evil: "/" },
-      registry: { agents: { x: { command: "rm" } } },
+    const draft = {
+      sessions: { importWindowDays: 7 },
+      projects: { p: "/tmp/p" },
       remote: { enabled: false },
-      whisper: { binaryPath: "/bin/sh", modelPath: "" },
-    });
-    expect(deps.settings.saveSessions).toHaveBeenCalledWith({
-      importWindowDays: 7,
-      worktrees: "always",
-    });
+      daemon: { enabled: false },
+    };
+    await callAs(table, REMOTE_ORIGIN, "settings:save", draft);
+    expect(deps.settings.saveFromRemote).toHaveBeenCalledWith(draft);
     expect(deps.settings.save).not.toHaveBeenCalled();
     expect(deps.settings.read).not.toHaveBeenCalled();
   });
 
-  it("settings:save from a remote origin refuses an invalid or missing `sessions`", async () => {
+  it("settings:save from a remote origin refuses a draft that is not an object", async () => {
     const deps = fakeDeps();
     const table = createDispatchTable(deps);
-    const bad: unknown[] = [
-      "x",
-      null,
-      [],
-      {},
-      { remote: { enabled: false } },
-      { sessions: "x" },
-      { sessions: { worktrees: "sometimes" } },
-      { sessions: { importWindowDays: -1 } },
-      { sessions: { importWindowDays: "7" } },
-    ];
-    for (const draft of bad) {
+    for (const draft of ["x", null, [], 5, undefined]) {
       const result = (await callAs(table, REMOTE_ORIGIN, "settings:save", draft)) as {
         ok: boolean;
       };
       expect(result.ok).toBe(false);
     }
-    expect(deps.settings.saveSessions).not.toHaveBeenCalled();
+    expect(deps.settings.saveFromRemote).not.toHaveBeenCalled();
     expect(deps.settings.save).not.toHaveBeenCalled();
+  });
+
+  it("settings:testAgent from a remote origin sends only an agent id to the by-id test", async () => {
+    const deps = fakeDeps();
+    const table = createDispatchTable(deps);
+    const result = await callAs(table, REMOTE_ORIGIN, "settings:testAgent", "claude-acme");
+    expect(deps.settings.testAgentById).toHaveBeenCalledWith("claude-acme");
+    expect(result).toEqual({ id: "claude-acme", ok: true, detail: "1.0" });
+    expect(deps.settings.testAgent).not.toHaveBeenCalled();
+  });
+
+  it("settings:testAgent from a remote origin refuses an object, a non-string and an unknown id", async () => {
+    const deps = fakeDeps({
+      settings: { ...fakeDeps().settings, testAgentById: vi.fn(async () => undefined) },
+    });
+    const table = createDispatchTable(deps);
+    for (const agent of [{ id: "x", command: "/bin/sh" }, "/bin/sh", 5, undefined, null]) {
+      const result = (await callAs(table, REMOTE_ORIGIN, "settings:testAgent", agent)) as {
+        ok?: boolean;
+      };
+      expect(result.ok).toBe(false);
+    }
+    expect(deps.settings.testAgent).not.toHaveBeenCalled();
+  });
+
+  it("settings:testAgent from the desktop passes the draft agent through unchanged", async () => {
+    const deps = fakeDeps();
+    const table = createDispatchTable(deps);
+    const agent = { id: "a", command: "claude" };
+    await call(table, "settings:testAgent", agent);
+    expect(deps.settings.testAgent).toHaveBeenCalledWith(agent);
+    expect(deps.settings.testAgentById).not.toHaveBeenCalled();
+  });
+
+  it("settings:restart answers the handler's result to a remote origin", async () => {
+    const deps = fakeDeps({
+      settings: {
+        ...fakeDeps().settings,
+        restart: vi.fn(() => ({ ok: false as const, reason: "no-service" as const })),
+      },
+    });
+    const table = createDispatchTable(deps);
+    expect(await callAs(table, REMOTE_ORIGIN, "settings:restart")).toEqual({
+      ok: false,
+      reason: "no-service",
+    });
+  });
+
+  it("terminal:history from a remote origin clamps the limit to 1-500 and defaults to 100", async () => {
+    const deps = fakeDeps();
+    const table = createDispatchTable(deps);
+    for (const [given, used] of [
+      [0, 1],
+      [-5, 1],
+      [10_000, 500],
+      [42, 42],
+      ["9", 100],
+      [undefined, 100],
+      [Number.NaN, 100],
+      [Number.POSITIVE_INFINITY, 100],
+    ] as const) {
+      vi.mocked(deps.terminal.history).mockClear();
+      await callAs(table, REMOTE_ORIGIN, "terminal:history", "t1", given);
+      expect(deps.terminal.history).toHaveBeenCalledWith("t1", used);
+    }
+  });
+
+  it("terminal:history from the desktop passes the limit through untouched", async () => {
+    const deps = fakeDeps();
+    await call(createDispatchTable(deps), "terminal:history", "t1", 10_000);
+    expect(deps.terminal.history).toHaveBeenCalledWith("t1", 10_000);
+  });
+
+  it("docker:shell from a remote origin returns the new tab id and refuses bad arguments", async () => {
+    const deps = fakeDeps({
+      docker: { ...fakeDeps().docker, shell: vi.fn(() => ({ ok: true as const, value: "tab-7" })) },
+    });
+    const table = createDispatchTable(deps);
+    expect(await callAs(table, REMOTE_ORIGIN, "docker:shell", "app", "web")).toEqual({
+      ok: true,
+      value: "tab-7",
+    });
+    for (const args of [[], [1, "web"], ["app", 2], [undefined, undefined], [{}, []]]) {
+      vi.mocked(deps.docker.shell).mockClear();
+      const result = (await callAs(table, REMOTE_ORIGIN, "docker:shell", ...args)) as {
+        ok: boolean;
+      };
+      expect(result.ok).toBe(false);
+      expect(deps.docker.shell).not.toHaveBeenCalled();
+    }
+  });
+
+  it("terminal:createEntry from a remote origin refuses bad arguments before the handler", async () => {
+    const deps = fakeDeps();
+    const table = createDispatchTable(deps);
+    const bad: unknown[][] = [
+      [],
+      [1, "/p", "a.txt", "file"],
+      ["t1", 2, "a.txt", "file"],
+      ["t1", "/p", 3, "file"],
+      ["t1", "/p", "a.txt", "folder"],
+      ["t1", "/p", "a.txt", undefined],
+    ];
+    for (const args of bad) {
+      const result = (await callAs(table, REMOTE_ORIGIN, "terminal:createEntry", ...args)) as {
+        ok: boolean;
+      };
+      expect(result.ok).toBe(false);
+    }
+    expect(deps.terminal.createEntry).not.toHaveBeenCalled();
+    await callAs(table, REMOTE_ORIGIN, "terminal:createEntry", "t1", "/p", "a.txt", "file");
+    expect(deps.terminal.createEntry).toHaveBeenCalledWith("t1", "/p", "a.txt", "file");
+  });
+
+  it("editor:open with a file from a remote origin passes it on and refuses a non-string file", async () => {
+    const publish = vi.fn(() => ({ ok: true as const, url: "https://h/s/x/?k=k" }));
+    const deps = fakeDeps({
+      editor: {
+        open: vi.fn(async () => ({
+          ok: true as const,
+          value: "http://127.0.0.1:4321/?folder=%2Fp&payload=%5B%5D",
+        })),
+        roots: vi.fn(async () => []),
+      },
+      sidecars: { publish },
+    });
+    const table = createDispatchTable(deps);
+    const result = await callAs(table, REMOTE_ORIGIN, "editor:open", "app", undefined, "/p/a.ts");
+    expect(deps.editor.open).toHaveBeenCalledWith("app", undefined, "/p/a.ts");
+    expect(publish).toHaveBeenCalledWith("d1", {
+      kind: "editor",
+      url: "http://127.0.0.1:4321/?folder=%2Fp&payload=%5B%5D",
+    });
+    expect(result).toEqual({ ok: true, value: "https://h/s/x/?k=k" });
+
+    vi.mocked(deps.editor.open).mockClear();
+    for (const file of [5, {}, []]) {
+      const refused = (await callAs(
+        table,
+        REMOTE_ORIGIN,
+        "editor:open",
+        "app",
+        undefined,
+        file,
+      )) as {
+        ok: boolean;
+      };
+      expect(refused.ok).toBe(false);
+    }
+    expect(deps.editor.open).not.toHaveBeenCalled();
   });
 
   it("settings:save leaves a desktop-origin draft untouched and never reads", async () => {
@@ -1475,7 +1635,7 @@ describe("dispatch table: terminal, bookmarks, settings", () => {
     const table = createDispatchTable(deps);
     await call(table, "settings:save", { remote: { enabled: false } });
     expect(deps.settings.save).toHaveBeenCalledWith({ remote: { enabled: false } });
-    expect(deps.settings.saveSessions).not.toHaveBeenCalled();
+    expect(deps.settings.saveFromRemote).not.toHaveBeenCalled();
     expect(deps.settings.read).not.toHaveBeenCalled();
   });
 
@@ -1522,6 +1682,7 @@ describe("dispatch table: remote controls", () => {
       devices: [],
       problem: undefined,
       sidecarProxy: "off" as const,
+      tailnet: { kind: "off" as const },
     };
     const deps = fakeDeps({ remote: { ...fakeDeps().remote, status: vi.fn(() => status) } });
     const table = createDispatchTable(deps);
@@ -1678,6 +1839,7 @@ describe("dispatch table: remote:openWebClient (Phase 1)", () => {
     devices: [],
     problem: undefined,
     sidecarProxy: "off",
+    tailnet: { kind: "off" },
     web: { kind: "on", port: 7718, origin: ORIGIN },
   });
 
@@ -1787,6 +1949,940 @@ describe("dispatch table: remote:tailscaleCert", () => {
     const result = await call(table, "remote:tailscaleCert");
 
     expect(result).toEqual({ ok: false, kind: "failed", detail: "validation failed" });
+  });
+});
+
+describe("dispatch table: the Tailscale access switch", () => {
+  const CERT = { certPath: "/cfg/tls/m.crt", keyPath: "/cfg/tls/m.key" };
+  const TAILSCALE_IPS = ["100.84.17.203", "fd7a:115c:a1e0::1"];
+  const BRIDGE_PORT = 7717;
+  const WEB_PORT = 7718;
+  const PASSWORD_SET = { hasPassword: true, passkeys: [] };
+
+  /** A fake jarvis.yaml behind writeConfig, and every outside step in order. */
+  function harness(options: {
+    remote?: Partial<RemoteConfig>;
+    fileRemote?: Partial<RemoteConfig>;
+    deps?: Partial<DispatchDeps>;
+    tailnet?: Partial<DispatchDeps["tailnet"]>;
+    writeFails?: boolean;
+  }) {
+    const live: RemoteConfig = {
+      ...DEFAULT_REMOTE,
+      port: BRIDGE_PORT,
+      bindAddress: "192.168.1.5",
+      ...options.remote,
+    };
+    const file = { remote: { ...live, ...options.fileRemote } };
+    const steps: string[] = [];
+    const step = <T>(name: string, value: T) =>
+      vi.fn(async (...args: unknown[]) => {
+        steps.push(args.length === 0 ? name : `${name} ${JSON.stringify(args[0])}`);
+        return value;
+      });
+    const writeConfig = vi.fn(async (update: (current: JarvisConfig) => JarvisConfig) => {
+      if (options.writeFails) {
+        steps.push("write failed");
+        return { ok: false as const, detail: "disk full" };
+      }
+      file.remote = update(file as unknown as JarvisConfig).remote;
+      steps.push("write");
+      return { ok: true as const };
+    });
+    const obtain = vi.fn(async () => {
+      steps.push("certificate");
+      return { ok: true as const, ...CERT, name: "m.tailnet.ts.net" };
+    });
+    const tailnet = {
+      config: vi.fn(() => live),
+      ports: (remote: RemoteConfig) => [remote.port, effectiveWebPort(remote)],
+      readServeStatus: vi.fn(async (): Promise<object | undefined> => {
+        steps.push("read serve");
+        return {};
+      }),
+      readTailscaleIps: vi.fn(async (): Promise<string[] | undefined> => TAILSCALE_IPS),
+      enableRelay: step("forward", { ok: true as const }),
+      disableRelay: step("unforward", { ok: true as const }),
+      restoreForward: step("restore", { ok: true as const }),
+      applied: step("apply", undefined),
+      rearm: step("rearm", undefined),
+      reloadCertificate: step("reload", undefined),
+      checkNow: step("check", undefined),
+      log: vi.fn(),
+      ...options.tailnet,
+    } as DispatchDeps["tailnet"];
+    const deps = fakeDeps({
+      writeConfig: writeConfig as DispatchDeps["writeConfig"],
+      tailscaleCert: { obtain },
+      tailnet,
+      ...options.deps,
+    });
+    vi.mocked(deps.remote.ownerStatus).mockReturnValue(PASSWORD_SET);
+    return { deps, table: createDispatchTable(deps), file, steps, writeConfig, obtain, tailnet };
+  }
+
+  const enable = (table: ReturnType<typeof createDispatchTable>, relay: boolean) =>
+    call(table, "remote:tailnetEnable", { relay }) as Promise<{
+      ok: boolean;
+      text?: string;
+      commands: string[];
+    }>;
+  const disable = (table: ReturnType<typeof createDispatchTable>) =>
+    call(table, "remote:tailnetDisable") as Promise<{ ok: boolean; commands: string[] }>;
+
+  describe("policy", () => {
+    it.each(["remote:tailnetEnable", "remote:tailnetDisable"])(
+      "%s is desktop-only, and its handler refuses a remote origin anyway",
+      async (channel) => {
+        expect(CHANNEL_POLICY[channel as keyof typeof CHANNEL_POLICY]).toBe("desktop-only");
+        expect(isRemoteAllowed(channel)).toBe(false);
+        const { table, steps, writeConfig } = harness({
+          remote: { tailnet: { enabled: true, relay: true } },
+        });
+
+        const result = await callAs(table, REMOTE_ORIGIN, channel, { relay: false });
+
+        expect(result).toEqual({ ...invalidArgument("en"), commands: [] });
+        expect(steps).toEqual([]);
+        expect(writeConfig).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([[undefined], ["true"], [{}], [{ relay: "yes" }], [null]])(
+      "enable refuses the argument %j",
+      async (argument) => {
+        const { table, steps } = harness({});
+        expect(await call(table, "remote:tailnetEnable", argument)).toEqual({
+          ...invalidArgument("en"),
+          commands: [],
+        });
+        expect(steps).toEqual([]);
+      },
+    );
+
+    it("a remote settings:save cannot change remote.tailnet", async () => {
+      const { deps, table, steps, writeConfig } = harness({});
+      const saved = vi.mocked(deps.settings.saveFromRemote);
+
+      await callAs(table, REMOTE_ORIGIN, "settings:save", {
+        sessions: { importWindowDays: 7 },
+        remote: { enabled: true, tailnet: { enabled: true, relay: true } },
+      });
+
+      // The remote-safe save is the only door; it keeps `remote` from disk
+      // (ipc.test.ts proves that), and the direct save and the tailnet
+      // switch's own write queue are never touched.
+      expect(saved).toHaveBeenCalledTimes(1);
+      expect(deps.settings.save).not.toHaveBeenCalled();
+      expect(writeConfig).not.toHaveBeenCalled();
+      expect(steps).toEqual([]);
+    });
+  });
+
+  describe("enable", () => {
+    it("with no owner password returns the error and touches nothing", async () => {
+      const { deps, table, file, steps, writeConfig } = harness({});
+      vi.mocked(deps.remote.ownerStatus).mockReturnValue({ hasPassword: false, passkeys: [] });
+
+      const result = await enable(table, false);
+
+      expect(result).toMatchObject({
+        ok: false,
+        text: MESSAGES.remoteTailnetRefused("no-owner-password", "en"),
+      });
+      expect(steps).toEqual([]);
+      expect(writeConfig).not.toHaveBeenCalled();
+      expect(file.remote.tailnet.enabled).toBe(false);
+    });
+
+    it("with Funnel exposing a port refuses and writes nothing", async () => {
+      const funnel = {
+        AllowFunnel: { "m.tailnet.ts.net:443": true },
+        Web: {
+          "m.tailnet.ts.net:443": {
+            Handlers: { "/": { Proxy: `http://127.0.0.1:${WEB_PORT}` } },
+          },
+        },
+      };
+      const { table, steps, writeConfig, obtain } = harness({
+        tailnet: { readServeStatus: vi.fn(async () => funnel) },
+      });
+
+      const result = await enable(table, true);
+
+      expect(result).toMatchObject({
+        ok: false,
+        text: MESSAGES.remoteTailnetRefused("funnel", "en"),
+      });
+      expect(obtain).not.toHaveBeenCalled();
+      expect(steps).toEqual([]);
+      expect(writeConfig).not.toHaveBeenCalled();
+    });
+
+    it("when Tailscale's serve state cannot be read refuses with its own message", async () => {
+      const { table, writeConfig, obtain } = harness({
+        tailnet: { readServeStatus: vi.fn(async () => undefined) },
+      });
+
+      const result = await enable(table, false);
+
+      const text = MESSAGES.remoteTailnetRefused("funnel-unread", "en");
+      expect(result).toMatchObject({ ok: false, text });
+      expect(text).not.toBe(MESSAGES.remoteTailnetRefused("funnel", "en"));
+      expect(obtain).not.toHaveBeenCalled();
+      expect(writeConfig).not.toHaveBeenCalled();
+    });
+
+    it("obtains a certificate when none exists, and turns the bridge and the web client on", async () => {
+      const { table, file, steps, obtain } = harness({});
+
+      const result = await enable(table, false);
+
+      expect(result).toEqual({ ok: true, commands: [] });
+      expect(obtain).toHaveBeenCalledTimes(1);
+      expect(file.remote).toMatchObject({
+        enabled: true,
+        web: { enabled: true },
+        bindAddress: "100.84.17.203",
+        tailnet: { enabled: true, relay: false },
+        tls: CERT,
+      });
+      expect(steps).toEqual(["read serve", "certificate", "write", "apply", "rearm", "check"]);
+    });
+
+    it("keeps a configured certificate, and does not reload it", async () => {
+      const { table, file, obtain, tailnet } = harness({
+        remote: { tls: { certPath: "/own.crt", keyPath: "/own.key" } },
+      });
+
+      await enable(table, false);
+
+      expect(obtain).not.toHaveBeenCalled();
+      expect(file.remote.tls).toEqual({ certPath: "/own.crt", keyPath: "/own.key" });
+      expect(tailnet.reloadCertificate).not.toHaveBeenCalled();
+    });
+
+    it("reloads when the new files landed at the paths already on disk", async () => {
+      const { table, steps } = harness({ fileRemote: { tls: CERT } });
+
+      await enable(table, false);
+
+      expect(steps).toEqual([
+        "read serve",
+        "certificate",
+        "write",
+        "apply",
+        "rearm",
+        "reload",
+        "check",
+      ]);
+    });
+
+    it("refuses when the certificate cannot be had, with nothing written", async () => {
+      const { table, writeConfig, tailnet } = harness({
+        remote: { tailnet: { enabled: false, relay: false } },
+        deps: {
+          tailscaleCert: {
+            obtain: vi.fn(async () => ({
+              ok: false as const,
+              kind: "not-connected" as const,
+              detail: "stopped",
+            })),
+          },
+        },
+      });
+
+      const result = await enable(table, true);
+
+      expect(result).toMatchObject({ ok: false, text: MESSAGES.remoteCertNotConnected("en") });
+      expect(tailnet.enableRelay).not.toHaveBeenCalled();
+      expect(writeConfig).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["no Tailscale address", []],
+      ["only an IPv6 one", ["fd7a:115c:a1e0::1"]],
+      ["a failed read", undefined],
+    ])("without relay and with %s refuses before anything is issued", async (_label, ips) => {
+      const { table, writeConfig, obtain } = harness({
+        tailnet: { readTailscaleIps: vi.fn(async () => ips) },
+      });
+
+      const result = await enable(table, false);
+
+      expect(result).toMatchObject({
+        ok: false,
+        text: MESSAGES.remoteTailnetRefused("no-address", "en"),
+      });
+      expect(obtain).not.toHaveBeenCalled();
+      expect(writeConfig).not.toHaveBeenCalled();
+    });
+
+    it("binds what Tailscale says is its own: first IPv4, never the first in its range", async () => {
+      const { deps, table, file } = harness({
+        deps: {
+          // A carrier's shared network, listed first, in the same range.
+          networkInterfaces: vi.fn(() => ({
+            wwan0: [{ address: "100.64.0.9" }],
+            tailscale0: [{ address: "100.84.17.203" }],
+          })),
+        },
+        tailnet: {
+          readTailscaleIps: vi.fn(async () => ["fd7a:115c:a1e0::1", "100.84.17.203"]),
+        },
+      });
+
+      await enable(table, false);
+
+      expect(file.remote.bindAddress).toBe("100.84.17.203");
+      expect(deps.networkInterfaces).not.toHaveBeenCalled();
+    });
+
+    it("a mesh-range address on an interface, with none from Tailscale, is never chosen", async () => {
+      const { table, writeConfig } = harness({
+        deps: { networkInterfaces: vi.fn(() => ({ wwan0: [{ address: "100.64.0.9" }] })) },
+        tailnet: { readTailscaleIps: vi.fn(async () => []) },
+      });
+
+      expect(await enable(table, false)).toMatchObject({ ok: false });
+      expect(writeConfig).not.toHaveBeenCalled();
+    });
+
+    it("with relay does not ask Tailscale for an address", async () => {
+      const { table, tailnet } = harness({ remote: { tls: CERT } });
+
+      await enable(table, true);
+
+      expect(tailnet.readTailscaleIps).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["the bridge's", BRIDGE_PORT],
+      ["the web client's", WEB_PORT],
+    ])(
+      "without relay and with a forward on %s port refuses and changes nothing",
+      async (_l, port) => {
+        const { table, file, writeConfig, obtain, tailnet } = harness({
+          tailnet: {
+            readServeStatus: vi.fn(async () => ({
+              TCP: { [port]: { TCPForward: `127.0.0.1:${port}` } },
+            })),
+          },
+        });
+        const before = structuredClone(file.remote);
+
+        const result = await enable(table, false);
+
+        const text = MESSAGES.remoteTailnetRefused("forward-present", "en");
+        expect(result).toEqual({ ok: false, text, language: "en", commands: [] });
+        expect(text).toContain("relay");
+        expect(MESSAGES.remoteTailnetRefused("forward-present", "ar")).not.toBe(text);
+        expect(obtain).not.toHaveBeenCalled();
+        expect(writeConfig).not.toHaveBeenCalled();
+        expect(tailnet.enableRelay).not.toHaveBeenCalled();
+        expect(tailnet.applied).not.toHaveBeenCalled();
+        expect(file.remote).toEqual(before);
+      },
+    );
+
+    it("with relay and a forward already there goes ahead", async () => {
+      const { table } = harness({
+        remote: { tls: CERT },
+        tailnet: {
+          readServeStatus: vi.fn(async () => ({
+            TCP: { [BRIDGE_PORT]: { TCPForward: `127.0.0.1:${BRIDGE_PORT}` } },
+          })),
+        },
+      });
+
+      expect(await enable(table, true)).toEqual({ ok: true, commands: [] });
+    });
+
+    it("with relay forwards both ports before writing, and binds loopback", async () => {
+      const { table, file, steps } = harness({
+        remote: { tls: CERT },
+      });
+
+      const result = await enable(table, true);
+
+      expect(result).toEqual({ ok: true, commands: [] });
+      expect(file.remote).toMatchObject({
+        bindAddress: "127.0.0.1",
+        tailnet: { enabled: true, relay: true },
+      });
+      expect(steps).toEqual([
+        "read serve",
+        `forward [${BRIDGE_PORT}]`,
+        `forward [${WEB_PORT}]`,
+        "write",
+        "apply",
+        "rearm",
+        "check",
+      ]);
+    });
+
+    it("when the second forward fails removes the first, and writes nothing", async () => {
+      const removed = vi.fn(async (_ports: number[]) => ({ ok: true as const }));
+      const { table, writeConfig } = harness({
+        remote: { tls: CERT },
+        tailnet: {
+          enableRelay: vi.fn(async ([port]: number[]) =>
+            port === WEB_PORT
+              ? { ok: false as const, command: `tailscale serve --tcp=${WEB_PORT}` }
+              : { ok: true as const },
+          ),
+          disableRelay: removed,
+        },
+      });
+
+      const result = await enable(table, true);
+
+      expect(result).toMatchObject({
+        ok: false,
+        text: MESSAGES.remoteTailnetRefused("relay-failed", "en"),
+        commands: [`tailscale serve --tcp=${WEB_PORT}`],
+      });
+      expect(removed.mock.calls).toEqual([[[BRIDGE_PORT]]]);
+      expect(writeConfig).not.toHaveBeenCalled();
+    });
+
+    it("rolls back only what it added: a forward already there stays", async () => {
+      const removed = vi.fn(async (_ports: number[]) => ({ ok: true as const }));
+      const { table } = harness({
+        remote: { tls: CERT },
+        tailnet: {
+          readServeStatus: vi.fn(async () => ({
+            TCP: {
+              [BRIDGE_PORT]: { TCPForward: `127.0.0.1:${BRIDGE_PORT}`, ProxyProtocol: 2 },
+            },
+          })),
+          enableRelay: vi.fn(async () => ({ ok: false as const, command: "tailscale serve" })),
+          disableRelay: removed,
+        },
+      });
+
+      await enable(table, true);
+
+      expect(removed).not.toHaveBeenCalled();
+    });
+
+    describe("over forwards the user already had", () => {
+      const PLAIN = {
+        TCP: {
+          [BRIDGE_PORT]: { TCPForward: `127.0.0.1:${BRIDGE_PORT}` },
+          [WEB_PORT]: { TCPForward: `127.0.0.1:${WEB_PORT}` },
+        },
+      };
+      const restored = () =>
+        vi.fn(async (_port: number, _forward: unknown) => ({ ok: true as const }));
+      const secondFails = () =>
+        vi.fn(async ([port]: number[]) =>
+          port === WEB_PORT ? { ok: false as const, command: "serve web" } : { ok: true as const },
+        );
+
+      it("a failing second forward restores the first, and deletes nothing", async () => {
+        const removed = vi.fn(async () => ({ ok: true as const }));
+        const restoreForward = restored();
+        const { table, writeConfig } = harness({
+          remote: { tls: CERT },
+          tailnet: {
+            readServeStatus: vi.fn(async () => PLAIN),
+            enableRelay: secondFails(),
+            disableRelay: removed,
+            restoreForward,
+          },
+        });
+
+        const result = await enable(table, true);
+
+        expect(result).toMatchObject({ ok: false, commands: ["serve web"] });
+        expect(restoreForward.mock.calls).toEqual([
+          [BRIDGE_PORT, { target: `127.0.0.1:${BRIDGE_PORT}` }],
+        ]);
+        expect(removed).not.toHaveBeenCalled();
+        expect(writeConfig).not.toHaveBeenCalled();
+      });
+
+      it("a failed write restores both, each in its earlier form", async () => {
+        const removed = vi.fn(async () => ({ ok: true as const }));
+        const restoreForward = restored();
+        const { table } = harness({
+          remote: { tls: CERT },
+          writeFails: true,
+          tailnet: {
+            readServeStatus: vi.fn(async () => ({
+              TCP: {
+                [BRIDGE_PORT]: { TCPForward: `127.0.0.1:${BRIDGE_PORT}` },
+                [WEB_PORT]: { TCPForward: `127.0.0.1:${WEB_PORT}`, ProxyProtocol: 1 },
+              },
+            })),
+            disableRelay: removed,
+            restoreForward,
+          },
+        });
+
+        await enable(table, true);
+
+        expect(restoreForward.mock.calls).toEqual([
+          [BRIDGE_PORT, { target: `127.0.0.1:${BRIDGE_PORT}` }],
+          [WEB_PORT, { target: `127.0.0.1:${WEB_PORT}`, proxyProtocol: 1 }],
+        ]);
+        expect(removed).not.toHaveBeenCalled();
+      });
+
+      it("removes a forward that was not there, and restores one that was", async () => {
+        const removed = vi.fn(async (_ports: number[]) => ({ ok: true as const }));
+        const restoreForward = restored();
+        const { table } = harness({
+          remote: { tls: CERT },
+          writeFails: true,
+          tailnet: {
+            readServeStatus: vi.fn(async () => ({
+              TCP: { [WEB_PORT]: { TCPForward: `127.0.0.1:${WEB_PORT}` } },
+            })),
+            disableRelay: removed,
+            restoreForward,
+          },
+        });
+
+        await enable(table, true);
+
+        expect(removed.mock.calls).toEqual([[[BRIDGE_PORT]]]);
+        expect(restoreForward.mock.calls).toEqual([
+          [WEB_PORT, { target: `127.0.0.1:${WEB_PORT}` }],
+        ]);
+      });
+
+      it("names the exact command when a restore fails", async () => {
+        const { table, tailnet } = harness({
+          remote: { tls: CERT },
+          tailnet: {
+            readServeStatus: vi.fn(async () => PLAIN),
+            enableRelay: secondFails(),
+            restoreForward: vi.fn(async () => ({
+              ok: false as const,
+              command: "restore bridge",
+            })),
+          },
+        });
+
+        expect((await enable(table, true)).commands).toEqual(["serve web", "restore bridge"]);
+        expect(tailnet.log).toHaveBeenCalledWith(expect.stringContaining("restore bridge"));
+      });
+    });
+
+    it("names the command for a forward its rollback could not remove", async () => {
+      const { table } = harness({
+        remote: { tls: CERT },
+        tailnet: {
+          enableRelay: vi.fn(async ([port]: number[]) =>
+            port === WEB_PORT
+              ? { ok: false as const, command: "serve web" }
+              : { ok: true as const },
+          ),
+          disableRelay: vi.fn(async () => ({ ok: false as const, command: "off bridge" })),
+        },
+      });
+
+      expect((await enable(table, true)).commands).toEqual(["serve web", "off bridge"]);
+    });
+
+    it("when the write fails removes the forwards it added, and never applies", async () => {
+      const { table, steps, file } = harness({ remote: { tls: CERT }, writeFails: true });
+
+      const result = await enable(table, true);
+
+      expect(result).toMatchObject({
+        ok: false,
+        text: MESSAGES.remoteTailnetRefused("write-failed", "en", "disk full"),
+      });
+      expect(steps).toEqual([
+        "read serve",
+        `forward [${BRIDGE_PORT}]`,
+        `forward [${WEB_PORT}]`,
+        "write failed",
+        `unforward [${BRIDGE_PORT}]`,
+        `unforward [${WEB_PORT}]`,
+      ]);
+      expect(file.remote.tailnet.enabled).toBe(false);
+    });
+
+    it("rolls back when the write itself rejects", async () => {
+      const { table, tailnet } = harness({
+        remote: { tls: CERT },
+        deps: { writeConfig: vi.fn(async () => Promise.reject(new Error("boom"))) },
+      });
+
+      const result = await enable(table, true);
+
+      expect(result).toMatchObject({ ok: false, text: expect.stringContaining("boom") });
+      expect(tailnet.disableRelay).toHaveBeenCalledTimes(2);
+    });
+
+    it("a failed step after the write is logged, and the steps after it still run", async () => {
+      const { table, tailnet } = harness({
+        tailnet: { applied: vi.fn(async () => Promise.reject(new Error("apply broke"))) },
+      });
+
+      expect(await enable(table, false)).toEqual({
+        ok: true,
+        commands: [],
+        warning: MESSAGES.remoteTailnetNotApplied("on", "en"),
+      });
+
+      expect(tailnet.log).toHaveBeenCalledWith(expect.stringContaining("apply broke"));
+      expect(tailnet.rearm).toHaveBeenCalledTimes(1);
+      expect(tailnet.checkNow).toHaveBeenCalledTimes(1);
+    });
+
+    it("runs one change at a time", async () => {
+      const releases: (() => void)[] = [];
+      const applied = vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            releases.push(resolve);
+          }),
+      );
+      const { table, writeConfig } = harness({ remote: { tls: CERT }, tailnet: { applied } });
+
+      const first = enable(table, false);
+      const second = disable(table);
+      await vi.waitFor(() => expect(applied).toHaveBeenCalledTimes(1));
+      // The disable has not started while the enable is still applying.
+      expect(writeConfig).toHaveBeenCalledTimes(1);
+
+      releases[0]?.();
+      await first;
+      await vi.waitFor(() => expect(applied).toHaveBeenCalledTimes(2));
+      expect(writeConfig).toHaveBeenCalledTimes(2);
+      releases[1]?.();
+      await second;
+    });
+  });
+
+  describe("disable", () => {
+    const ON = { enabled: true, web: { enabled: true }, tailnet: { enabled: true, relay: true } };
+
+    it("leaves remote.enabled, remote.web.enabled and relay as they are", async () => {
+      const { table, file } = harness({ remote: ON });
+
+      await disable(table);
+
+      expect(file.remote).toMatchObject({
+        enabled: true,
+        web: { enabled: true },
+        bindAddress: "192.168.1.5",
+        tailnet: { enabled: false, relay: true },
+      });
+    });
+
+    it("with relay removes the forwards, after the apply", async () => {
+      const { table, steps } = harness({ remote: ON });
+
+      expect(await disable(table)).toEqual({ ok: true, commands: [] });
+
+      expect(steps).toEqual([
+        "write",
+        "apply",
+        `unforward [${BRIDGE_PORT}]`,
+        `unforward [${WEB_PORT}]`,
+      ]);
+    });
+
+    it("without relay touches no forward", async () => {
+      const { table, tailnet } = harness({
+        remote: { ...ON, tailnet: { enabled: true, relay: false } },
+      });
+
+      await disable(table);
+
+      expect(tailnet.disableRelay).not.toHaveBeenCalled();
+    });
+
+    describe("the bind address", () => {
+      const TAILSCALE_IP = "100.84.17.203";
+
+      it.each([
+        ["relay", true, "127.0.0.1"],
+        ["no relay", false, TAILSCALE_IP],
+      ])("with %s, on then off puts back the bind from before", async (_label, relay, bindOn) => {
+        const { table, file } = harness({ remote: { tls: CERT, bindAddress: "192.168.1.5" } });
+
+        await enable(table, relay);
+        expect(file.remote.bindAddress).toBe(bindOn);
+        expect(file.remote.tailnet.bindBeforeEnable).toBe("192.168.1.5");
+
+        await disable(table);
+        expect(file.remote.bindAddress).toBe("192.168.1.5");
+        expect(file.remote.tailnet).toEqual({ enabled: false, relay });
+      });
+
+      it("a machine already on its Tailscale address gets it back after relay", async () => {
+        const { table, file } = harness({ remote: { tls: CERT, bindAddress: TAILSCALE_IP } });
+
+        await enable(table, true);
+        expect(file.remote.bindAddress).toBe("127.0.0.1");
+        await disable(table);
+
+        expect(file.remote.bindAddress).toBe(TAILSCALE_IP);
+      });
+
+      it("a second enable keeps the first record", async () => {
+        const { table, file } = harness({ remote: { tls: CERT, bindAddress: "192.168.1.5" } });
+
+        await enable(table, true);
+        await enable(table, true);
+
+        expect(file.remote.tailnet.bindBeforeEnable).toBe("192.168.1.5");
+        await disable(table);
+        expect(file.remote.bindAddress).toBe("192.168.1.5");
+      });
+
+      it("a later enable records afresh", async () => {
+        const { table, file } = harness({ remote: { tls: CERT, bindAddress: "192.168.1.5" } });
+        await enable(table, true);
+        await disable(table);
+        file.remote.bindAddress = "10.0.0.2";
+
+        await enable(table, true);
+
+        expect(file.remote.tailnet.bindBeforeEnable).toBe("10.0.0.2");
+      });
+
+      it("no record leaves the bind alone", async () => {
+        const { table, file } = harness({
+          remote: { ...ON, bindAddress: "127.0.0.1" },
+        });
+
+        await disable(table);
+
+        expect(file.remote.bindAddress).toBe("127.0.0.1");
+      });
+    });
+
+    describe("on, then off", () => {
+      const plain = (port: number) => ({ TCPForward: `127.0.0.1:${port}` });
+      const onThenOff = (status: object, tailnet: Partial<DispatchDeps["tailnet"]> = {}) => {
+        const context = harness({
+          remote: { tls: CERT },
+          tailnet: { readServeStatus: vi.fn(async () => status), ...tailnet },
+        });
+        return {
+          ...context,
+          run: async () => {
+            expect(await enable(context.table, true)).toMatchObject({ ok: true });
+            return disable(context.table);
+          },
+        };
+      };
+
+      it("restores both plain forwards the enable replaced, and removes neither", async () => {
+        const { run, file, tailnet } = onThenOff({
+          TCP: { [BRIDGE_PORT]: plain(BRIDGE_PORT), [WEB_PORT]: plain(WEB_PORT) },
+        });
+
+        expect(await run()).toEqual({ ok: true, commands: [] });
+
+        expect(vi.mocked(tailnet.restoreForward).mock.calls).toEqual([
+          [BRIDGE_PORT, { target: `127.0.0.1:${BRIDGE_PORT}` }],
+          [WEB_PORT, { target: `127.0.0.1:${WEB_PORT}` }],
+        ]);
+        expect(tailnet.disableRelay).not.toHaveBeenCalled();
+        expect(file.remote.tailnet).toEqual({ enabled: false, relay: true });
+      });
+
+      it("restores after the apply", async () => {
+        const { run, steps } = onThenOff({
+          TCP: { [BRIDGE_PORT]: plain(BRIDGE_PORT), [WEB_PORT]: plain(WEB_PORT) },
+        });
+
+        await run();
+
+        expect(steps.slice(-3, -1)).toEqual(["apply", `restore ${BRIDGE_PORT}`]);
+      });
+
+      it("the enable records each earlier form, in its write", async () => {
+        const { table, file } = onThenOff({
+          TCP: {
+            [BRIDGE_PORT]: plain(BRIDGE_PORT),
+            [WEB_PORT]: {
+              TCPForward: "localhost:9000",
+              ProxyProtocol: 1,
+              TerminateTLS: "m.ts.net",
+            },
+          },
+        });
+
+        await enable(table, true);
+
+        expect(file.remote.tailnet).toEqual({
+          enabled: true,
+          relay: true,
+          bindBeforeEnable: "192.168.1.5",
+          replacedForwards: {
+            [BRIDGE_PORT]: { target: `127.0.0.1:${BRIDGE_PORT}` },
+            [WEB_PORT]: { target: "localhost:9000", proxyProtocol: 1, terminateTls: true },
+          },
+        });
+      });
+
+      it("removes both when nothing was there before", async () => {
+        const { run, file, tailnet } = onThenOff({});
+
+        expect(await run()).toEqual({ ok: true, commands: [] });
+
+        expect(tailnet.restoreForward).not.toHaveBeenCalled();
+        expect(tailnet.disableRelay).toHaveBeenCalledTimes(2);
+        expect(file.remote.tailnet).toEqual({ enabled: false, relay: true });
+      });
+
+      it("restores the one it replaced and removes the one it added", async () => {
+        const { run, tailnet } = onThenOff({ TCP: { [WEB_PORT]: plain(WEB_PORT) } });
+
+        await run();
+
+        expect(vi.mocked(tailnet.disableRelay).mock.calls).toEqual([[[BRIDGE_PORT]]]);
+        expect(vi.mocked(tailnet.restoreForward).mock.calls).toEqual([
+          [WEB_PORT, { target: `127.0.0.1:${WEB_PORT}` }],
+        ]);
+      });
+
+      it("a restore that fails is logged and reported, tries the rest, and the disable stands", async () => {
+        const { run, file, tailnet } = onThenOff(
+          { TCP: { [BRIDGE_PORT]: plain(BRIDGE_PORT), [WEB_PORT]: plain(WEB_PORT) } },
+          {
+            restoreForward: vi.fn(async (port: number) =>
+              port === BRIDGE_PORT
+                ? { ok: false as const, command: "restore bridge" }
+                : { ok: true as const },
+            ),
+          },
+        );
+
+        expect(await run()).toEqual({
+          ok: true,
+          commands: ["restore bridge"],
+          restoring: true,
+        });
+
+        expect(tailnet.restoreForward).toHaveBeenCalledTimes(2);
+        expect(tailnet.log).toHaveBeenCalledWith(expect.stringContaining("restore bridge"));
+        expect(file.remote.tailnet).toEqual({ enabled: false, relay: true });
+      });
+
+      it("a second enable while on keeps the record it already holds", async () => {
+        const status = vi.fn(
+          async (): Promise<object> => ({
+            TCP: { [BRIDGE_PORT]: plain(BRIDGE_PORT), [WEB_PORT]: plain(WEB_PORT) },
+          }),
+        );
+        const { table, file } = harness({
+          remote: { tls: CERT },
+          tailnet: { readServeStatus: status },
+        });
+        await enable(table, true);
+        const record = file.remote.tailnet.replacedForwards;
+        status.mockResolvedValue({
+          TCP: {
+            [BRIDGE_PORT]: { ...plain(BRIDGE_PORT), ProxyProtocol: 2 },
+            [WEB_PORT]: { ...plain(WEB_PORT), ProxyProtocol: 2 },
+          },
+        });
+
+        await enable(table, true);
+
+        expect(file.remote.tailnet.replacedForwards).toEqual(record);
+      });
+    });
+
+    it("a machine already on relay with no record has its forwards removed", async () => {
+      const { table, tailnet } = harness({ remote: ON });
+
+      await disable(table);
+
+      expect(tailnet.restoreForward).not.toHaveBeenCalled();
+      expect(tailnet.disableRelay).toHaveBeenCalledTimes(2);
+    });
+
+    it("restores a recorded port the config has since moved off", async () => {
+      const { table, tailnet } = harness({
+        remote: {
+          ...ON,
+          tailnet: {
+            enabled: true,
+            relay: true,
+            replacedForwards: { "7000": { target: "127.0.0.1:7000" } },
+          },
+        },
+      });
+
+      await disable(table);
+
+      expect(vi.mocked(tailnet.restoreForward).mock.calls).toEqual([
+        [7000, { target: "127.0.0.1:7000" }],
+      ]);
+      expect(vi.mocked(tailnet.disableRelay).mock.calls).toEqual([[[BRIDGE_PORT]], [[WEB_PORT]]]);
+    });
+
+    it("a removal that fails is logged and reported, and the disable stands", async () => {
+      const { table, file, tailnet } = harness({
+        remote: ON,
+        tailnet: {
+          disableRelay: vi.fn(async ([port]: number[]) => ({
+            ok: false as const,
+            command: `tailscale serve --tcp=${port} off`,
+          })),
+        },
+      });
+
+      const result = await disable(table);
+
+      expect(result).toEqual({
+        ok: true,
+        commands: [
+          `tailscale serve --tcp=${BRIDGE_PORT} off`,
+          `tailscale serve --tcp=${WEB_PORT} off`,
+        ],
+      });
+      expect(file.remote.tailnet.enabled).toBe(false);
+      expect(tailnet.log).toHaveBeenCalledWith(
+        expect.stringContaining(`tailscale serve --tcp=${WEB_PORT} off`),
+      );
+    });
+
+    it("when the write fails keeps the forwards", async () => {
+      const { table, tailnet } = harness({ remote: ON, writeFails: true });
+
+      expect(await disable(table)).toMatchObject({ ok: false });
+
+      expect(tailnet.applied).not.toHaveBeenCalled();
+      expect(tailnet.disableRelay).not.toHaveBeenCalled();
+    });
+
+    it("a failed apply still removes the forwards", async () => {
+      const { table, tailnet } = harness({
+        remote: ON,
+        tailnet: { applied: vi.fn(async () => Promise.reject(new Error("apply broke"))) },
+      });
+
+      const warning = MESSAGES.remoteTailnetNotApplied("off", "en");
+      expect(await disable(table)).toEqual({ ok: true, commands: [], warning });
+      expect(warning).toContain("may still accept joins");
+      expect(warning).not.toBe(MESSAGES.remoteTailnetNotApplied("off", "ar"));
+
+      expect(tailnet.disableRelay).toHaveBeenCalledTimes(2);
+    });
+
+    it("with the switch already off does nothing", async () => {
+      const { table, steps, tailnet } = harness({
+        remote: { ...ON, tailnet: { enabled: false, relay: true } },
+      });
+
+      expect(await disable(table)).toEqual({ ok: true, commands: [] });
+
+      expect(tailnet.disableRelay).not.toHaveBeenCalled();
+      expect(steps).toEqual(["write"]);
+    });
   });
 });
 
@@ -2213,4 +3309,143 @@ describe("dispatch table: exhaustiveness", () => {
       expect(source).not.toMatch(/["']electron(\/|["'])/);
     },
   );
+});
+
+describe("terminal:split / terminal:closePane from another device", () => {
+  const workspaceTab = (overrides: Partial<WorkspaceTab>): WorkspaceTab => ({
+    id: "tab-1",
+    project: "app",
+    url: "",
+    kind: "terminal",
+    title: "",
+    loading: false,
+    canGoBack: false,
+    canGoForward: false,
+    error: undefined,
+    hasPlayingVideo: false,
+    pageFullscreen: false,
+    suspended: false,
+    ...overrides,
+  });
+  const withPanes = (keys: string[]) => {
+    const deps = fakeDeps({
+      workspace: {
+        ...fakeDeps().workspace,
+        state: vi.fn(() => ({
+          tabs: [
+            workspaceTab({ id: "tab-1", kind: "terminal" }),
+            workspaceTab({ id: "api-tab", kind: "api" }),
+          ],
+          activeTabId: "tab-1",
+        })),
+      },
+      shells: {
+        log: vi.fn(() => ""),
+        snapshot: vi.fn(() => ({ text: "", end: 0 })),
+        panes: vi.fn(() => keys.map((paneKey) => ({ paneKey, exited: false }))),
+        write: vi.fn(),
+      },
+    });
+    // The real terminal handler starts a shell, which shows up in panes().
+    vi.mocked(deps.terminal.split).mockImplementation((tabId, paneId) => {
+      keys.push(`${tabId}:${paneId}`);
+    });
+    return deps;
+  };
+
+  it.each([
+    ["an unknown tab", ["nope", "x"]],
+    ["a non-terminal tab", ["api-tab", "x"]],
+    ["a non-string tab id", [7, "x"]],
+    ["no arguments", []],
+  ])("refuses a remote split of %s without starting anything", async (_name, args) => {
+    const deps = withPanes(["tab-1"]);
+    const table = createDispatchTable(deps);
+    const result = (await callAs(table, REMOTE_ORIGIN, "terminal:split", ...args)) as {
+      ok: boolean;
+    };
+    expect(result.ok).toBe(false);
+    expect(deps.terminal.split).not.toHaveBeenCalled();
+    expect(deps.terminalLayout.announce).not.toHaveBeenCalled();
+  });
+
+  it("refuses a 9th pane, counting only this tab's panes", async () => {
+    const eight = ["tab-1", ...Array.from({ length: 7 }, (_, i) => `tab-1:p${i}`)];
+    const deps = withPanes([...eight, "tab-10", "tab-10:a"]);
+    const table = createDispatchTable(deps);
+    const result = (await callAs(table, REMOTE_ORIGIN, "terminal:split", "tab-1")) as {
+      ok: boolean;
+      text?: string;
+    };
+    expect(result.ok).toBe(false);
+    expect(result.text).toBeTruthy();
+    expect(deps.terminal.split).not.toHaveBeenCalled();
+  });
+
+  it("a remote split ignores the caller's pane id, makes its own and announces it", async () => {
+    const deps = withPanes(["tab-1", "tab-1:p1"]);
+    const table = createDispatchTable(deps);
+    const result = (await callAs(table, REMOTE_ORIGIN, "terminal:split", "tab-1", "evil:../x")) as {
+      ok: true;
+      value: string;
+    };
+    expect(result.ok).toBe(true);
+    expect(result.value).toMatch(/^tab-1:p[0-9a-z]{8}$/);
+    expect(deps.terminal.split).toHaveBeenCalledWith("tab-1", result.value.slice("tab-1:".length));
+    expect(deps.terminalLayout.announce).toHaveBeenCalledWith({
+      tabId: "tab-1",
+      change: "split",
+      paneKey: result.value,
+    });
+  });
+
+  it("a desktop split is unchanged: its own pane id, no result, no announcement", async () => {
+    const deps = withPanes(["tab-1"]);
+    const table = createDispatchTable(deps);
+    const result = await call(table, "terminal:split", "tab-1", "p3");
+    expect(result).toBeUndefined();
+    expect(deps.terminal.split).toHaveBeenCalledWith("tab-1", "p3");
+    expect(deps.terminalLayout.announce).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["a bare tab id", "tab-1"],
+    ["a pane of another tab kind", "api-tab:p1"],
+    ["an unknown tab", "nope:p1"],
+    ["an unknown pane", "tab-1:ghost"],
+    ["an empty pane id", "tab-1:"],
+    ["a non-string", 5],
+  ])("refuses a remote close of %s, killing nothing", async (_name, key) => {
+    const deps = withPanes(["tab-1", "tab-1:p1", "api-tab:p1"]);
+    const table = createDispatchTable(deps);
+    const result = (await callAs(table, REMOTE_ORIGIN, "terminal:closePane", key)) as {
+      ok: boolean;
+    };
+    expect(result.ok).toBe(false);
+    expect(deps.terminal.closePane).not.toHaveBeenCalled();
+    expect(deps.terminalLayout.announce).not.toHaveBeenCalled();
+  });
+
+  it("closes a real remote pane and announces it", async () => {
+    const deps = withPanes(["tab-1", "tab-1:p1"]);
+    const table = createDispatchTable(deps);
+    const result = (await callAs(table, REMOTE_ORIGIN, "terminal:closePane", "tab-1:p1")) as {
+      ok: boolean;
+    };
+    expect(result.ok).toBe(true);
+    expect(deps.terminal.closePane).toHaveBeenCalledWith("tab-1:p1");
+    expect(deps.terminalLayout.announce).toHaveBeenCalledWith({
+      tabId: "tab-1",
+      change: "close",
+      paneKey: "tab-1:p1",
+    });
+  });
+
+  it("a desktop close is unchanged and announces nothing", async () => {
+    const deps = withPanes(["tab-1", "tab-1:p1"]);
+    const table = createDispatchTable(deps);
+    await call(table, "terminal:closePane", "tab-1");
+    expect(deps.terminal.closePane).toHaveBeenCalledWith("tab-1");
+    expect(deps.terminalLayout.announce).not.toHaveBeenCalled();
+  });
 });

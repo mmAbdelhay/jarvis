@@ -202,7 +202,10 @@ function recordingHost() {
     openExternal: async (url) => {
       seen.push(["openExternal", url]);
     },
-    restart: () => seen.push(["restart"]),
+    restart: () => {
+      seen.push(["restart"]);
+      return undefined;
+    },
     setStayAwake: (on) => seen.push(["setStayAwake", on]),
   };
   return { host, seen, state };

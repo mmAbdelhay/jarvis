@@ -23,7 +23,7 @@ export function bindChoices(interfaces: InterfaceMap): BindChoice[] {
   const choices: BindChoice[] = [];
   for (const [iface, entries] of Object.entries(interfaces)) {
     for (const { address } of entries ?? []) {
-      const kind = classify(address);
+      const kind = bindKindOf(address);
       if (kind === undefined || seen.has(address)) continue;
       seen.add(address);
       choices.push({ address, iface, kind });
@@ -45,7 +45,7 @@ function rank(choice: BindChoice): number {
 }
 
 /** undefined = not offered at all. */
-function classify(address: string): BindKind | undefined {
+export function bindKindOf(address: string): BindKind | undefined {
   const v4 = octets(address);
   if (v4 !== undefined) {
     const [a = 0, b = 0] = v4;

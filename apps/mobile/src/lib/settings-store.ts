@@ -12,14 +12,13 @@
 // (`fingerprintTail`) ever reach `view` (and so React state).
 //
 // Two dependencies aren't literal 1:1 mirrors of a plain data read:
-// `navigateToPair` (unpair's disconnect → clear → navigate sequence is
+// `afterForget` (unpair's disconnect → clear → route sequence is
 // something a test needs to observe the store itself performing) and the
 // shared `connectFromStored` (connect-stored.ts's `connectFromStoredPairing`,
-// partially applied by the caller with the app's real secure store and
-// client) — the same one `_layout.tsx` uses on entry, so there is exactly
-// one `loadPairing` read path in the whole app, not two that could
-// disagree, and a keychain failure becomes a typed outcome instead of an
-// unhandled rejection.
+// partially applied by the caller with the app's machine store and client)
+// — the same one `_layout.tsx` uses on entry, so there is exactly one read
+// path for connecting in the whole app, not two that could disagree, and a
+// keychain failure becomes a typed outcome instead of an unhandled rejection.
 
 import { PUSH_UNREGISTER_CHANNEL } from "@jarvis/wire";
 import type { ConnectStoredOutcome } from "./connect-stored";
@@ -27,7 +26,10 @@ import type { Clock } from "./clock";
 import type { ConnectionStore, ConnectionView } from "./connection-store";
 import { languageFromLocale } from "./i18n";
 import type { Language, MessageKey } from "./i18n";
+import type { MachineId } from "./machine-index";
+import type { ForgetOutcome } from "./machine-sessions";
 import { fingerprintTail as computeFingerprintTail } from "./pair-flow";
+import { JOINED_FINGERPRINT } from "./pairing";
 import { isClearingPairing, setClearingPairing } from "./pairing-guard";
 import type { PairingRecord } from "./pairing-record";
 import type { AuthSession } from "./auth-session";
@@ -70,17 +72,14 @@ export type SettingsView = {
   // M10 Task 5, rule 10: mirrors `deps.push.get()` — the push controller
   // owns permission/registration state; this store only relays it.
   notifications: PushView;
+  // The switch reaches a machine not on screen only when it is next opened
+  // (decision 9), which Settings says only when there is such a machine.
+  hasOtherMachines: boolean;
   connection: ConnectionView;
   lastFrameAgoMs?: number;
   appVersion: string;
-  // Set when `deps.unpair()` (the keychain clear) threw — the screen shows
-  // `settings.unpairFailed` and the Unpair button stays available to
-  // retry, instead of the failure being a silent, unhandled rejection.
-  unpairError: boolean;
   // Set when `reconnect()`'s shared read failed — `settings.reconnectFailed`,
-  // similarly retryable. Cleared, along with `unpairError` (a stale "couldn't
-  // unpair" would otherwise sit next to a working connection), the next time
-  // a reconnect actually succeeds.
+  // retryable. Cleared the next time a reconnect actually succeeds.
   reconnectError: boolean;
 };
 
@@ -132,15 +131,17 @@ export type SettingsStore = {
 export type SettingsStoreDeps = {
   prefs: PrefsStore;
   localeTag: string;
+  // The machine this store's screen was mounted for, fixed for its lifetime.
+  machineId: MachineId | null;
   loadRecord(): Promise<PairingRecord | undefined>;
   // The one shared "read the stored pairing and connect" function — also
   // used by `_layout.tsx` on entry. `shouldConnect` is threaded through to
   // `connectFromStoredPairing`'s own guard (see connect-stored.ts): this
-  // store passes `() => !unpairing && !isClearingPairing()`, checked
+  // store passes `() => !unpairing && !isClearingPairing(machineId)`, checked
   // immediately before the shared function would call `client.connect`, so
   // a reconnect whose keychain read finishes after either this store's own
   // `unpair()` *or* the automatic unpaired handler's clear (final review
-  // R-M2 — unpaired-handler.ts now sets the same app-wide flag) has
+  // R-M2 — `MachineSessions.forget` sets the same per-machine flag) has
   // started can never connect with a pairing that is (or is about to be)
   // cleared.
   connectFromStored(shouldConnect: () => boolean): Promise<ConnectStoredOutcome>;
@@ -148,7 +149,12 @@ export type SettingsStoreDeps = {
   client: RpcClient;
   clock: Clock;
   appVersion: string;
-  unpair(): Promise<void>;
+  /** How many machines this phone holds. Throws when the store did not open. */
+  machineCount(): number;
+  unpair(): Promise<ForgetOutcome>;
+  /** Where that unpair leaves the user: `applyForgetOutcome`. */
+  afterForget(outcome: ForgetOutcome): void;
+  /** A reconnect that found no pairing. */
   navigateToPair(): void;
   // Fix round 1 (Minor): a throwing `disconnect()`, or a subscriber that
   // throws out of `setView`, used to log via a raw `console.error(...,
@@ -160,14 +166,24 @@ export type SettingsStoreDeps = {
   // flow, token handling and registration retries all live in
   // push-registration.ts, not here.
   push: Pick<PushRegistration, "get" | "subscribe" | "setEnabled">;
-  // Phase 0 owner login: the app's one auth session (built in _layout.tsx).
-  auth: Pick<AuthSession, "logout" | "setIdleMs" | "storagePolicyChanged">;
+  // Phase 0 owner login: this machine's auth session (machine-sessions.ts).
+  auth: Pick<AuthSession, "logout" | "storagePolicyChanged">;
+  /** The idle window is one preference: every machine's session takes it. */
+  setIdleMs(ms: number): void;
 };
 
 const TICK_MS = 1_000;
 
 export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
   const listeners = new Set<(view: SettingsView) => void>();
+
+  function hasOtherMachines(): boolean {
+    try {
+      return deps.machineCount() > 1;
+    } catch {
+      return false;
+    }
+  }
 
   let view: SettingsView = {
     language: undefined,
@@ -176,9 +192,9 @@ export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
     idleLockMinutes: DEFAULT_IDLE_LOCK_MINUTES,
     keepSignedIn: false,
     notifications: deps.push.get(),
+    hasOtherMachines: hasOtherMachines(),
     connection: deps.connection.get(),
     appVersion: deps.appVersion,
-    unpairError: false,
     reconnectError: false,
   };
 
@@ -285,7 +301,8 @@ export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
     // function scope — only the projection below, and the tail, reach
     // `view`.
     const laptop: SettingsLaptop = {
-      host: record.host,
+      // A joined record's host and fingerprint are placeholders (decision 16).
+      host: record.name ?? record.host,
       port: record.port,
       deviceId: record.deviceId,
       pairedAt: record.pairedAt,
@@ -293,7 +310,13 @@ export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
     if (record.laptopName !== undefined) {
       laptop.laptopName = record.laptopName;
     }
-    setView({ laptop, fingerprintTail: computeFingerprintTail(record.fingerprint) });
+    setView({
+      laptop,
+      fingerprintTail:
+        record.fingerprint === JOINED_FINGERPRINT
+          ? undefined
+          : computeFingerprintTail(record.fingerprint),
+    });
   }
 
   void loadLanguage();
@@ -334,7 +357,7 @@ export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
   async function setIdleLockMinutes(minutes: IdleLockMinutes): Promise<void> {
     const current = await loadPrefs(deps.prefs, deps.localeTag);
     await savePrefs(deps.prefs, { ...current, idleLockMinutes: minutes });
-    deps.auth.setIdleMs(minutes * 60_000);
+    deps.setIdleMs(minutes * 60_000);
     setView({ idleLockMinutes: minutes });
   }
 
@@ -359,29 +382,16 @@ export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
   // second call while one is already running — meaningful now that the
   // reset is guaranteed to happen, so a second tap after a first one
   // actually runs rather than being refused forever by a stuck flag.
-  // Fix round 1 (Minor): every `setView` call risks a throw from a
-  // subscriber the store doesn't control — swallowed here (and logged with
-  // one fixed string) rather than left to propagate, so nothing downstream
-  // of a bad listener can turn `unpair()`'s promise into a rejection.
-  function safeSetView(patch: Partial<SettingsView>): void {
-    try {
-      setView(patch);
-    } catch {
-      deps.log("settings-store: a subscriber threw while unpairing");
-    }
-  }
-
   async function unpair(): Promise<void> {
     if (unpairing) return;
     unpairing = true;
-    // Shared app-wide flag (pairing-guard.ts): closes the same race for
+    // Shared per-machine flag (pairing-guard.ts): closes the same race for
     // `_layout.tsx`'s /dashboard entry as `unpairing` closes for this
     // store's own `reconnect()` — a back gesture to /dashboard while this
     // clear is still in flight must not reconnect with a pairing that's
     // about to be cleared.
-    setClearingPairing(true);
+    setClearingPairing(deps.machineId, true);
     try {
-      safeSetView({ unpairError: false });
       // Rule 10: a phone can register and clear only its own push token
       // (global-constraints.md) — this is that clear, attempted before the
       // pairing itself is torn down so the laptop still has a live
@@ -401,11 +411,14 @@ export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
       } catch {
         deps.log("settings-store: disconnect() threw before clearing the pairing");
       }
+      let outcome: ForgetOutcome;
       try {
-        await deps.unpair();
+        outcome = await deps.unpair();
       } catch {
-        safeSetView({ unpairError: true });
-        return;
+        // `forget` answers a failed clear, and /pair has the phase for it. A
+        // dep that rejects all the same must not strand the user here.
+        deps.log("settings-store: unpair() threw; taking the failed clear's way");
+        outcome = { kind: "clearFailed" };
       }
       // Disconnects again after the clear resolves: covers a connect that
       // slipped in through some path other than this store's own
@@ -416,18 +429,18 @@ export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
       } catch {
         deps.log("settings-store: disconnect() threw after clearing the pairing");
       }
-      // Fix round 1 (Minor): the tail — `navigateToPair()` is caller-
-      // supplied (app/settings.tsx's `router.replace`) and can throw just
-      // as easily as `disconnect()` can; wrapped for the same reason, so
-      // `unpair()`'s promise never rejects regardless of which step fails.
+      // Fix round 1 (Minor): the tail — `afterForget()` is caller-supplied
+      // (app/settings.tsx's route) and can throw just as easily as
+      // `disconnect()` can; wrapped for the same reason, so `unpair()`'s
+      // promise never rejects regardless of which step fails.
       try {
-        deps.navigateToPair();
+        deps.afterForget(outcome);
       } catch {
-        deps.log("settings-store: navigateToPair() threw after unpair");
+        deps.log("settings-store: afterForget() threw after unpair");
       }
     } finally {
       unpairing = false;
-      setClearingPairing(false);
+      setClearingPairing(deps.machineId, false);
     }
   }
 
@@ -443,7 +456,9 @@ export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
         // only this store's own `unpairing` — a Reconnect tap during that
         // window must not connect with a token that's about to be, or has
         // just been, invalidated.
-        outcome = await deps.connectFromStored(() => !unpairing && !isClearingPairing());
+        outcome = await deps.connectFromStored(
+          () => !unpairing && !isClearingPairing(deps.machineId),
+        );
       } catch {
         // connectFromStoredPairing never throws by contract, but this is a
         // second line of defence so a change there can never turn into an
@@ -461,9 +476,7 @@ export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
         setView({ reconnectError: true });
         return;
       }
-      // "connected": a stale unpair failure from an earlier attempt no
-      // longer applies once a reconnect actually succeeds.
-      setView({ unpairError: false, reconnectError: false });
+      setView({ reconnectError: false });
     })();
   }
 

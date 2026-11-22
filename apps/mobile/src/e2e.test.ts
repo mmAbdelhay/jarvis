@@ -19,7 +19,12 @@ import { createDashboardStore } from "./lib/dashboard-store";
 import { createFakeTransport } from "./lib/fake-transport";
 import type { FakeSocket } from "./lib/fake-transport";
 import { pair } from "./lib/pairing";
-import { clearPairing, loadPairing, savePairing } from "./lib/pairing-record";
+import {
+  clearPairingAt,
+  LEGACY_PAIRING_KEYS,
+  loadPairing,
+  savePairingAt,
+} from "./lib/pairing-record";
 import { createRpcClient } from "./lib/rpc-client";
 import type { SecureStore } from "./lib/secure-store";
 import { createUnpairedHandler } from "./lib/unpaired-handler";
@@ -92,7 +97,7 @@ describe("the pairing-to-revocation scenario, end to end", () => {
     const logs: string[] = [];
     const navigated: string[] = [];
 
-    // --- 1. pair() over /pair; savePairing stores the token only under jarvis.token ---
+    // --- 1. pair() over /pair; savePairingAt stores the token only under jarvis.token ---
     const pairPromise = pair(
       { transport, clock, client: CLIENT_STRING, platform: "native" as const },
       LINK,
@@ -112,7 +117,12 @@ describe("the pairing-to-revocation scenario, end to end", () => {
     expect(pairOutcome.ok).toBe(true);
     if (!pairOutcome.ok) throw new Error("unreachable");
 
-    await savePairing(secureStore, pairOutcome.record, pairOutcome.credential);
+    await savePairingAt(
+      secureStore,
+      LEGACY_PAIRING_KEYS,
+      pairOutcome.record,
+      pairOutcome.credential,
+    );
     expect(secureStore.raw("jarvis.token")).toBe(token);
     const storedRecord = JSON.parse(secureStore.raw("jarvis.pairing") ?? "{}") as Record<
       string,
@@ -139,8 +149,11 @@ describe("the pairing-to-revocation scenario, end to end", () => {
     });
     const dashboardStore = createDashboardStore({ client });
     const unpairedHandler = createUnpairedHandler({
-      clearPairing: () => clearPairing(secureStore),
-      navigateToPair: (outcome) => navigated.push(outcome),
+      forget: async () => {
+        await clearPairingAt(secureStore, LEGACY_PAIRING_KEYS);
+        return { kind: "none" };
+      },
+      afterForget: (outcome) => navigated.push(outcome.kind),
       log: (line) => logs.push(line),
     });
     const connectionStore = createConnectionStore({
@@ -277,7 +290,7 @@ describe("the pairing-to-revocation scenario, end to end", () => {
 
     await flushMicrotasks();
 
-    expect(navigated).toEqual(["cleared"]);
+    expect(navigated).toEqual(["none"]);
     expect(secureStore.raw("jarvis.token")).toBeUndefined();
     expect(secureStore.raw("jarvis.pairing")).toBeUndefined();
     await expect(loadPairing(secureStore)).resolves.toBeUndefined();

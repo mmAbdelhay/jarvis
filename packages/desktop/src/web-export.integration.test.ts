@@ -78,7 +78,7 @@ function get(port: number, path: string): Promise<Reply> {
 }
 
 function csp(bridgePort: number, frameAncestors: string): string {
-  return `default-src 'self'; script-src 'self'; connect-src wss://${NAME}:${bridgePort}; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; frame-src 'self'; frame-ancestors ${frameAncestors}; base-uri 'none'; form-action 'none'`;
+  return `default-src 'self'; script-src 'self'; connect-src 'self' wss://${NAME}:${bridgePort}; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; frame-src 'self'; frame-ancestors ${frameAncestors}; base-uri 'none'; form-action 'none'`;
 }
 
 describe("web export served by the bridge's web listener", () => {
@@ -131,6 +131,7 @@ describe("web export served by the bridge's web listener", () => {
       errorText: (code) => ({ text: `err:${code}`, language: "en" }),
       auditPolicy: () => "never",
       enforceFileModes: ENFORCE_FILE_MODES,
+      hostname: () => "test-host",
       log: (line) => logLines.push(line),
       onDeviceDisconnected: () => {},
       onStatus: () => {},
@@ -142,6 +143,7 @@ describe("web export served by the bridge's web listener", () => {
       sidecarProxy: false,
       tls: {},
       web: { enabled: true, port: 0 },
+      tailnet: { enabled: false, relay: false },
     });
     // With no paired device the bridge only listens while pairing is open.
     expect(await bridge.openPairing()).toBe("opened");

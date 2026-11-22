@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from "vitest";
-import { currentView, showView } from "./views.js";
+import { currentView, setMachineShown, showView } from "./views.js";
 
 // Minimal harness, same shape as app.test.ts's: lay down the ids showView
 // touches and nothing else.
@@ -120,6 +120,17 @@ describe("showView", () => {
     showView("session");
 
     expect(calls).toEqual([false, false]);
+  });
+
+  it("keeps the workspace pages hidden while another machine covers the window", () => {
+    const calls = stubBridge();
+    showView("workspace");
+
+    setMachineShown(true);
+    showView("workspace");
+    setMachineShown(false);
+
+    expect(calls).toEqual([true, false, false, true]);
   });
 
   // app.test.ts's harness does not stub the bridge, and a missing view

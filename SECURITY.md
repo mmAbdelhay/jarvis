@@ -63,6 +63,85 @@ In scope, roughly:
   The bridge can turn itself off (`remote.idleDisableMinutes`) after that many minutes with no paired device connected and no pairing code open; when it does, Jarvis writes `remote.enabled: false` into `jarvis.yaml` itself. In scope is anything that keeps the listener open past that time without an authenticated device, and anything that reopens it without a save.
 
   The audit log at `~/.config/jarvis/remote/audit.log` (0600, one rotation at 5 MiB) records pairings, connections, auth failures, revocations, every mutating call and the first input into each session or pane per connection, refused calls (capped per connection), pushes the laptop queued, and idle shut-offs — by device id and channel name only. In scope is any audit line carrying a token, a secret, an argument, a path, output or a message body.
+- Tailscale access (`remote.tailnet.enabled`, off by default, changeable only
+  at the machine) and the machine views of the desktop app. In scope:
+  - **Join by owner password.** Anyone on your tailnet who can reach the
+    port can try the owner password over `/pair`. It is refused unless the
+    switch is on and a certificate with a DNS name is served. Attempts share
+    one limiter: after 5 wrong passwords every join is refused for 60 s, each
+    further wrong one doubles that, up to 1 h; a success resets it. The state
+    is in memory, so a restart clears it. It is separate from the owner-login
+    limits, so failed joins never count toward the 20 wrong passwords per hour
+    and can never lock out a paired device. Audit lines are `joined-by-password`,
+    `join-failed` and a coalesced `join-refused` (one per minute at most, with
+    a count), by source address, device id and the device name the joining device gave
+    (never the password). Every success raises a desktop alert naming the
+    device (queued in memory by the background service until a desktop app
+    attaches, at most 20, oldest dropped first, when none is open) and, with
+    `remote.push.enabled`, a push to every paired phone that has notifications
+    on, which carries no device name. A joined device is listed
+    with the paired devices and is revoked there. In scope: a join without
+    the password, with the switch off or without a named certificate, one that
+    is not audited, a failed join that counts against a paired device, a join
+    that does not appear in the device list, and a password in any log,
+    audit line or payload. The clients never store the password.
+  - **Funnel guard.** Turning the switch on is refused while Tailscale Funnel
+    exposes the bridge or web port, or when Funnel's settings cannot be read.
+    Jarvis rechecks every 60 s while the switch is on. If Funnel starts
+    exposing either port, every listener closes, paired devices included, until
+    Funnel is off and the switch is turned off and on again. In scope: a
+    listener left open on a Funnel-exposed port.
+  - **Relay and the PROXY header.** In relay mode Jarvis binds `127.0.0.1` and
+    `tailscale serve --proxy-protocol=2` forwards to it, so the real source
+    address comes from a PROXY v2 header. The header is read only in relay mode
+    and only on a listener bound to loopback (the front refuses any other host).
+    It is required there, with no fallback to plain TLS, read before any TLS,
+    within 5 s, with at most 64 connections open at once. Known limit: any process on this
+    machine can connect to that loopback port and claim any source address.
+    Relay mode trusts local processes that far. In scope: honouring the header
+    on a non-loopback listener or outside relay mode.
+  - **Peer file.** While the switch is on and not blocked, the web listener answers
+    `/jarvis-peer.json` with five fields and nothing else: machine name (full
+    DNS name), label, protocol version, bridge port, web port. The Host header
+    must match exactly. With the switch off the connection is closed. In scope:
+    any other field, or an answer with the switch off.
+  - **Machine views.** The desktop opens another machine's page in a
+    `WebContentsView` with its own partition `persist:machine:<name>`,
+    `contextIsolation` on, `nodeIntegration` off, `sandbox` on and no preload,
+    so nothing of Jarvis is exposed to that page. The page is treated as
+    untrusted. It may stay on its own origin `https://<name>:<web port>`; a
+    navigation or redirect elsewhere is blocked, and an `https:` link may open
+    in the system browser, at most once per second. Popups are always denied.
+    Of all permissions only the origin's own audio-only microphone and
+    clipboard writing are allowed; camera, location, notifications and
+    clipboard reading are denied. Certificate errors are never overridden: the
+    view shows a failure instead. The window refuses a protocol version that
+    does not match. The channels that open and close these views are
+    desktop-only and refused from a phone. In scope: a machine view reaching
+    the preload, the Jarvis API or another partition; loading another origin;
+    a popup; any permission beyond the two above; a certificate error ignored.
+  - **Exception: Jarvis windows skip the idle lock and keep their sign-in.**
+    Inside a machine view the web client has no idle lock and stays signed in
+    (the refresh token is stored), so you enter the owner password once. The
+    sign-in still ends after 7 days unused or 30 days after it began (the
+    server's refresh lifetimes, unchanged), and signing out still works. The
+    client knows it is in a machine view from a user-agent token,
+    `JarvisMachineView/1`, which only the desktop host sets, per session, for
+    these views. No other web page can change the user agent the Jarvis client sees on
+    its own origin, and the token must be a whole word. Ordinary browsers and the phone keep today's rules. Why
+    this is accepted: the owner chose one password prompt for a window that is
+    already inside their own signed-in desktop session, and an idle lock
+    there would only repeat the lock of the desktop session the window already
+    sits in. The limit: anyone at
+    the unlocked desktop can use the other machine, with the full access
+    "a paired device is you" describes, until the sign-in is ended or expires.
+    The token is not a secret. A person who sets that user agent in their own
+    browser only turns off their own idle lock. In scope: a normal web page
+    that makes the client skip its idle lock, or the exception applying
+    anywhere but a machine view.
+  - Not covered here: remote control of the other machine beyond what a paired
+    device can do today. That comes in a later release and this section will be
+    extended then.
 - The sidecar reverse proxy (`remote.sidecarProxy`, `/s/{handle}/…` on the
   bridge listener), which fronts `code-server`, DbGate and Headlamp for a
   paired phone. In scope: a sidecar's own loopback port becoming reachable

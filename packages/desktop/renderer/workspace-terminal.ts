@@ -621,6 +621,10 @@ try {
 /** Called once, from initWorkspace. Subscribes to the two streams main
  *  pushes; every pane created later reads from the same subscription rather
  *  than adding one of its own. */
+/** Pane keys whose shell main already started for another device's split;
+ *  startShell must not start a second one. */
+const remoteStartedShells = new Set<string>();
+
 export function initWorkspaceTerminals(): void {
   if (wired) return;
   wired = true;
@@ -640,6 +644,25 @@ export function initWorkspaceTerminals(): void {
     // this is Jarvis speaking, not the pty, so it is no command's output and
     // has no business inside a block.
     paneFor(paneKey)?.terminal.write(`\r\n\x1b[2m[process exited with code ${code}]\x1b[0m\r\n`);
+  });
+
+  // Another device split or closed a pane of a terminal tab: the laptop's
+  // layout follows. Main already started (or killed) the shell.
+  window.jarvis.onTerminalLayout((change) => {
+    if (typeof change !== "object" || change === null) return;
+    const { tabId, paneKey, from } = change;
+    if (typeof tabId !== "string" || typeof paneKey !== "string") return;
+    // Only a pane of this very tab, never the tab's own first pane.
+    if (!paneKey.startsWith(`${tabId}:`)) return;
+    const pane = panes.get(tabId);
+    if (pane === undefined) return;
+    if (change.change === "split") {
+      remoteStartedShells.add(paneKey);
+      const added = pane.tree.addLeaf(paneKey, typeof from === "string" ? from : undefined, "row");
+      if (!added) remoteStartedShells.delete(paneKey);
+    } else if (change.change === "close") {
+      pane.tree.removeLeaf(paneKey);
+    }
   });
 
   // Task 8: the tab menu's own Plans item (bug 2's native menu, desktop-
@@ -1436,6 +1459,8 @@ function makePane(
  */
 function startShell(tabId: string, paneKey: string): Promise<void> | undefined {
   if (paneKey === tabId) return undefined;
+  // Another device split this pane: its shell is already running.
+  if (remoteStartedShells.delete(paneKey)) return undefined;
   try {
     // Everything after the tab id and its colon — see createSplitTree,
     // which is what composed the key.

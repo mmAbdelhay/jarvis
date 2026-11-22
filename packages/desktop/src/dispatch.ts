@@ -30,6 +30,7 @@ import {
 } from "@jarvis/core";
 import type { DockerConfig, PlanCommentStore, PlanFiles, SnippetLanguage } from "@jarvis/platform";
 import { isWithin } from "@jarvis/platform";
+import { randomInt } from "node:crypto";
 import { bracketedSubmit } from "./bracketed.js";
 import {
   type AttachUploadResult,
@@ -54,11 +55,11 @@ import {
 import type { InvokeChannel } from "./channels.js";
 import type { ReviewService } from "./review-service.js";
 import { isAwakeMode, type KeepAwake } from "./keep-awake.js";
+import type { TailnetPeersFinder } from "./tailnet-peers.js";
 import type { IpLocateResult } from "./ip-locate.js";
 import type { TabHost } from "./core/tab-host.js";
 import type { UsageHistory } from "./usage-history.js";
 import type { JarvisConfig } from "./config.js";
-import { parseSessions, type SessionsConfig } from "./sessions-config.js";
 import {
   DESKTOP_OWNER,
   REMOTE_FOLLOW_TAB_PATTERN,
@@ -82,6 +83,7 @@ import {
   type SettingsHandlers,
   type SetupHandlers,
   type TerminalHandlers,
+  type TerminalLayoutChange,
   hasControlCharacter,
 } from "./ipc.js";
 import { errorMessage, MESSAGES } from "./messages.js";
@@ -89,6 +91,7 @@ import type { Notifier } from "./notify.js";
 import { historyPage, parseHistoryPageRequest } from "./history-page.js";
 import { remoteWebUrl } from "./remote-web.js";
 import type { SettingsWriteResult } from "./settings-io.js";
+import { createTailnetSwitch, type TailnetSwitchControls } from "./tailnet-switch.js";
 import type { TailscaleCertResult } from "./tailscale-cert.js";
 import { createTerminalFitOverrides, type TerminalFitOverrides } from "./terminal-fit-overrides.js";
 
@@ -113,9 +116,20 @@ function isRemoteTabTitle(title: unknown): title is string {
   );
 }
 
+/** The most panes a remote device may split a terminal tab into. */
+const MAX_PANES_PER_TAB = 8;
+
 /** `{ ok:false, text: MESSAGES.invalidArgument(language), language }`, named
  *  once so a channel that only needs "the argument was the wrong shape"
  *  (remote:revoke) does not repeat that shape inline. */
+/** A phone's `terminal:history` limit: a whole number from 1 to 500, 100
+ *  when it is not a finite number. The handler would otherwise read
+ *  whatever the phone asked for out of the command log. */
+function clampHistoryLimit(limit: unknown): number {
+  if (typeof limit !== "number" || !Number.isFinite(limit)) return 100;
+  return Math.min(500, Math.max(1, Math.floor(limit)));
+}
+
 export function invalidArgument(language: "ar" | "en"): GitViewResult<never> {
   return { ok: false, text: MESSAGES.invalidArgument(language), language };
 }
@@ -221,7 +235,13 @@ export type ElectronBoundChannel =
   | "background:status"
   | "background:setEnabled"
   | "background:restart"
-  | "background:stopNow";
+  | "background:stopNow"
+  // Tailnet machines: the machine views are this window's own
+  // (machine-views.ts).
+  | "machine:show"
+  | "machine:showLocal"
+  | "machine:bounds"
+  | "machine:close";
 
 export type TableChannel = Exclude<InvokeChannel, ElectronBoundChannel>;
 
@@ -380,6 +400,8 @@ export type DispatchDeps = {
   // write is pinned to whatever `current.remote` already holds on disk,
   // the same discipline disableRemoteOnDisk follows.
   writeConfig(update: (current: JarvisConfig) => JarvisConfig): Promise<SettingsWriteResult>;
+  // The "Tailscale access" switch's reach beyond this table, from compose.ts.
+  tailnet: TailnetSwitchControls;
   // Task 5 (plan panel): the one PlanFiles and one PlanCommentStore
   // instance for the whole app — Tasks 3 and 4's own factories, built once
   // in main.ts and handed in here, the same "exactly one instance" rule
@@ -387,6 +409,9 @@ export type DispatchDeps = {
   plans: {
     files: PlanFiles;
     comments: PlanCommentStore;
+    // The calling pane's own Claude transcript (claude-view.ts's
+    // transcriptOf), so each tab's session plan is its own session's.
+    paneTranscript?(paneKey: string): Promise<string | null | undefined>;
     // plans:list's own `cwd` argument: true only for a path that is both
     // absolute and, right now, an existing directory — the check that
     // decides whether to trust the caller's cwd or fall back to the
@@ -431,6 +456,9 @@ export type DispatchDeps = {
   // Keep awake (Task 18): keep-awake.ts's createKeepAwake, built once in
   // compose.ts — narrowed to the two calls its channels make.
   awake: Pick<KeepAwake, "status" | "set">;
+  // Tailnet machines: tailnet-peers.ts's createTailnetPeers, built once in
+  // compose.ts. Never throws; failures are its `state`.
+  tailnetPeers: Pick<TailnetPeersFinder, "list">;
   // The phone's chat view of a pane (claude-view.ts's handlers, built in
   // compose.ts). Both validate their own arguments.
   claudeView: {
@@ -443,6 +471,10 @@ export type DispatchDeps = {
   attachUpload: {
     attach(deviceId: string, paneKey: unknown, fileId: unknown): Promise<AttachUploadResult>;
   };
+  // Tells the laptop's own window (and any phone watching the tab) that a
+  // remote device split or closed a pane. compose.ts sends it as the
+  // `terminal:layout` push.
+  terminalLayout: { announce(change: TerminalLayoutChange): void };
 };
 
 /** awake:set's argument: an object with `mode` and/or `simulateInput` and
@@ -561,6 +593,14 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
     if (pane === undefined || pane.exited) throw new Error(`${channel}: invalid paneKey`);
     return pane.paneKey;
   }
+
+  const tailnetSwitch = createTailnetSwitch({
+    language: deps.language,
+    hasOwnerPassword: () => deps.remote.ownerStatus().hasPassword,
+    obtainCertificate: () => deps.tailscaleCert.obtain(),
+    writeConfig: deps.writeConfig,
+    controls: deps.tailnet,
+  });
 
   const {
     setup,
@@ -862,17 +902,21 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
         .panes()
         .filter((pane) => pane.paneKey === tabId || pane.paneKey.startsWith(splitPrefix));
     },
-    "editor:open": ([project, root], origin) => {
+    "editor:open": ([project, root, file], origin) => {
       const p = typeof project === "string" ? project : "";
       // Absent means the project directory itself; anything that is not a
       // string is not a root name and must not be treated as one.
       const r = typeof root === "string" ? root : undefined;
-      if (origin.kind !== "remote") return editor.open(p, r);
+      // A file is checked by editor.open itself (resolveWithin, inside the
+      // project); a value that is not a string is refused here, never
+      // coerced into "no file".
+      if (file !== undefined && typeof file !== "string") return invalidArgument(deps.language);
+      if (origin.kind !== "remote") return editor.open(p, r, file);
       // Task 4 rule 2: a remote origin never sees the manager's own
       // loopback URL — only the `/s/<handle>/…` proxy URL deps.sidecars
       // publishes it under, or the reason the phone stays without one.
       return (async () => {
-        const result = await editor.open(p, r);
+        const result = await editor.open(p, r, file);
         if (!result.ok) return result;
         const published = deps.sidecars.publish(origin.deviceId, {
           kind: "editor",
@@ -962,7 +1006,18 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
       docker.restart(project as string, container as string),
     "docker:composeUp": ([project]) => docker.composeUp(project as string),
     "docker:composeDown": ([project]) => docker.composeDown(project as string),
-    "docker:shell": ([project, container]) => docker.shell(project as string, container as string),
+    "docker:shell": ([project, container], origin) => {
+      // The handler checks project membership and the declared container;
+      // a remote caller's arguments are typed here first so nothing but two
+      // strings ever reaches it.
+      if (
+        origin.kind === "remote" &&
+        (typeof project !== "string" || typeof container !== "string")
+      ) {
+        return invalidArgument(deps.language);
+      }
+      return docker.shell(project as string, container as string);
+    },
     "docker:follow": ([tabId, project, container], origin) => {
       if (
         typeof tabId !== "string" ||
@@ -1164,14 +1219,58 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
     },
     // A tab's second (and third…) shell, and the one kill that is not the
     // tab's own — see TerminalHandlers.split/closePane.
-    "terminal:split": ([tabId, paneId]) => {
-      terminal.split(tabId as string, paneId as string);
+    "terminal:split": ([tabId, paneId], origin) => {
+      if (origin.kind !== "remote") {
+        terminal.split(tabId as string, paneId as string);
+        return undefined;
+      }
+      // A remote device never picks the pane id: it becomes part of a shell
+      // key and a leaf key on the laptop, so the host makes one.
+      if (typeof tabId !== "string") return invalidArgument(deps.language);
+      const tab = workspace.state().tabs.find((candidate) => candidate.id === tabId);
+      if (tab?.kind !== "terminal") return invalidArgument(deps.language);
+      const prefix = `${tabId}:`;
+      const count = deps.shells
+        .panes()
+        .filter((pane) => pane.paneKey === tabId || pane.paneKey.startsWith(prefix)).length;
+      if (count >= MAX_PANES_PER_TAB) {
+        return { ok: false, text: MESSAGES.tooManyPanes(deps.language), language: deps.language };
+      }
+      const newPaneId = `p${Array.from({ length: 8 }, () => randomInt(36).toString(36)).join("")}`;
+      const paneKey = `${tabId}:${newPaneId}`;
+      terminal.split(tabId, newPaneId);
+      // A tab with no known directory starts nothing; announcing it would
+      // leave the laptop with a leaf that has no shell behind it.
+      if (!deps.shells.panes().some((pane) => pane.paneKey === paneKey)) {
+        return { ok: false, text: MESSAGES.splitFailed(deps.language), language: deps.language };
+      }
+      deps.terminalLayout.announce({ tabId, change: "split", paneKey });
+      return { ok: true, value: paneKey };
     },
-    "terminal:closePane": ([paneKey]) => {
+    "terminal:closePane": ([paneKey], origin) => {
+      if (origin.kind === "remote") {
+        // Only "<tabId>:<paneId>" of a live pane of an existing terminal
+        // tab. A bare tab id would kill the tab's own shell, which is the
+        // tab's business (workspace:close), not a pane's.
+        if (typeof paneKey !== "string") return invalidArgument(deps.language);
+        const colon = paneKey.indexOf(":");
+        if (colon <= 0 || colon === paneKey.length - 1) return invalidArgument(deps.language);
+        const tabId = paneKey.slice(0, colon);
+        const tab = workspace.state().tabs.find((candidate) => candidate.id === tabId);
+        if (tab?.kind !== "terminal") return invalidArgument(deps.language);
+        if (!deps.shells.panes().some((pane) => pane.paneKey === paneKey)) {
+          return invalidArgument(deps.language);
+        }
+        terminal.closePane(paneKey);
+        fitOverrides.forget(paneKey);
+        deps.terminalLayout.announce({ tabId, change: "close", paneKey });
+        return { ok: true, value: undefined };
+      }
       terminal.closePane(paneKey as string);
       // Bug 8: same reasoning as workspace:close above, for a split's own
       // pane key rather than its tab's.
       fitOverrides.forget(paneKey as string);
+      return undefined;
     },
     "terminal:suggest": ([paneKey, input, path], origin) =>
       terminal.suggest(
@@ -1180,16 +1279,32 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
         path as string | undefined,
         origin.kind === "remote",
       ),
-    "terminal:history": ([paneKey, limit]) => terminal.history(paneKey as string, limit as number),
+    "terminal:history": ([paneKey, limit], origin) =>
+      terminal.history(
+        paneKey as string,
+        origin.kind === "remote" ? clampHistoryLimit(limit) : (limit as number),
+      ),
     "terminal:listDir": ([paneKey, path]) => terminal.listDir(paneKey as string, path as string),
     "terminal:openFile": ([paneKey, path]) => terminal.openFile(paneKey as string, path as string),
-    "terminal:createEntry": ([paneKey, parentPath, name, kind]) =>
-      terminal.createEntry(
+    "terminal:createEntry": ([paneKey, parentPath, name, kind], origin) => {
+      // The handler's own checks (project root containment, a plain new
+      // name) stay; a remote caller's arguments are typed first.
+      if (
+        origin.kind === "remote" &&
+        (typeof paneKey !== "string" ||
+          typeof parentPath !== "string" ||
+          typeof name !== "string" ||
+          (kind !== "file" && kind !== "directory"))
+      ) {
+        return { ok: false, reason: "failed" };
+      }
+      return terminal.createEntry(
         paneKey as string,
         parentPath as string,
         name as string,
         kind as EntryKind,
-      ),
+      );
+    },
     "terminal:renameEntry": ([paneKey, path, newName]) =>
       terminal.renameEntry(paneKey as string, path as string, newName as string),
     "terminal:trashEntry": ([paneKey, path]) =>
@@ -1245,31 +1360,27 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
     "bookmarks:reorder": ([project, urls]) =>
       bookmarks.reorder(project as string, urls as string[]),
     "settings:read": () => settings.read(),
-    // A phone may change one section of jarvis.yaml: `sessions`. Project
-    // roots, agent and binary paths, history locations and the bridge's own
-    // configuration (ruling 28) are the laptop's to decide, so a remote
-    // draft is read for `sessions` alone — field by field, with the rule the
-    // config parser applies — and everything else in it is ignored. The
-    // change is applied inside the serialized config write as an update of
-    // the file as it is then, so a laptop-side change made between the
-    // phone's read and this write is never undone. The desktop path is
-    // unchanged and never calls settings.read() (see settings:read).
+    // A phone saves the whole draft, with one exception: `remote` (the
+    // bridge and its tailnet switch) and `daemon` on disk never change from
+    // a phone. settings.saveFromRemote validates the draft and writes it as
+    // an update of the file as it is then, keeping those two sections from
+    // that file, so a laptop-side change made between the phone's read and
+    // this write is never undone. The desktop path is unchanged and never
+    // calls settings.read() (see settings:read).
     "settings:save": async ([draft], origin) => {
       if (origin.kind !== "remote") return settings.save(draft);
       if (typeof draft !== "object" || draft === null || Array.isArray(draft)) {
         return invalidArgument(deps.language);
       }
-      const raw = (draft as Record<string, unknown>)["sessions"];
-      if (raw === undefined) return invalidArgument(deps.language);
-      let sessions: SessionsConfig;
-      try {
-        sessions = parseSessions(raw);
-      } catch {
-        return invalidArgument(deps.language);
-      }
-      return settings.saveSessions(sessions);
+      return settings.saveFromRemote(draft);
     },
-    "settings:testAgent": ([agent]) => settings.testAgent(agent),
+    // A phone sends an agent id, never a command: the host runs only the
+    // command the on-disk registry holds under that id.
+    "settings:testAgent": async ([agent], origin) => {
+      if (origin.kind !== "remote") return settings.testAgent(agent);
+      if (typeof agent !== "string") return invalidArgument(deps.language);
+      return (await settings.testAgentById(agent)) ?? invalidArgument(deps.language);
+    },
     "settings:restart": () => settings.restart(),
     "projects:list": () => Object.keys(deps.projects),
     // Settings' address picker. Takes no arguments, so there is nothing to
@@ -1452,6 +1563,18 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
       }
       return result;
     },
+    // Desktop-only (remote-policy.ts), refused here again, belt and braces.
+    "remote:tailnetEnable": async ([options], origin) => {
+      const relay = (options as { relay?: unknown } | null | undefined)?.relay;
+      if (origin.kind === "remote" || typeof relay !== "boolean") {
+        return { ...invalidArgument(deps.language), commands: [] };
+      }
+      return tailnetSwitch.enable(relay);
+    },
+    "remote:tailnetDisable": async (_args, origin) => {
+      if (origin.kind === "remote") return { ...invalidArgument(deps.language), commands: [] };
+      return tailnetSwitch.disable();
+    },
 
     // Task 5 (plan panel): main's own read/write/comment surface for a
     // plan file, remote-legal end to end (remote-policy.ts). Every `path`/
@@ -1470,7 +1593,8 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
         deps.plans.isDirectory,
         deps.plans.projectRoots(),
       );
-      return deps.plans.files.list(cwd);
+      const transcript = paneKey === "" ? undefined : await deps.plans.paneTranscript?.(paneKey);
+      return deps.plans.files.list(cwd, transcript);
     },
 
     "plans:read": async ([pathArg]) => {
@@ -1789,5 +1913,7 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
 
     "awake:status": () => deps.awake.status(),
     "awake:set": async ([patchArg]) => deps.awake.set(awakePatch(patchArg)),
+
+    "tailnet:peers": () => deps.tailnetPeers.list(),
   } satisfies Record<TableChannel, Handler>;
 }

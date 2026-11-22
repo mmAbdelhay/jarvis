@@ -17,7 +17,7 @@ import {
   wireDiffModes,
   wireSyncBar,
 } from "./changes.js";
-import { showView, syncHostedView } from "./views.js";
+import { setMachineShown, showView, syncHostedView } from "./views.js";
 import { initReviews, listTerminalPanes, type ReviewsView } from "./reviews-view.js";
 import {
   focusTerminalPane,
@@ -26,6 +26,7 @@ import {
   refreshWorkspaceProjects,
   renderWorkspace,
   reportWorkspaceBounds,
+  restoreWorkspaceViews,
   setBrowserSnapshot,
 } from "./workspace.js";
 import { setTerminalLinksInternal } from "./terminal-links.js";
@@ -40,6 +41,7 @@ import {
 } from "./prayer.js";
 import { initRemoteStatus } from "./remote-status.js";
 import { initKeepAwake } from "./keep-awake.js";
+import { initMachineSwitcher } from "./machine-switcher.js";
 import { initBattery, topbarDate } from "./topbar-status.js";
 import { initTopbarFit } from "./topbar-fit.js";
 import { initFontKeys } from "./terminal-addons.js";
@@ -542,6 +544,21 @@ function wireNav(): void {
   // Keep awake (Task 18): the topbar button. Absent markup is a no-op, and
   // a failed first read only waits for the first awake:changed push.
   void initKeepAwake(window.jarvis).catch(() => undefined);
+  // Tailnet machines: the switcher beside the brand. Absent markup is a
+  // no-op. The workspace pages stay off screen while another machine is up.
+  void initMachineSwitcher({
+    tailnetPeers: () => window.jarvis.tailnetPeers(),
+    showMachine: (target) => window.jarvis.showMachine(target),
+    showLocalMachine: () => window.jarvis.showLocalMachine(),
+    setMachineBounds: (bounds) => window.jarvis.setMachineBounds(bounds),
+    closeMachine: (name) => window.jarvis.closeMachine(name),
+    onMachineState: (cb) => window.jarvis.onMachineState(cb),
+    hideWorkspace: () => setMachineShown(true),
+    restoreWorkspace: () => {
+      setMachineShown(false);
+      restoreWorkspaceViews();
+    },
+  }).catch(() => undefined);
   void initBattery(navigator as Parameters<typeof initBattery>[0]).catch(() => undefined);
   initTopbarFit(document.querySelector<HTMLElement>(".topbar"));
   initFontKeys();

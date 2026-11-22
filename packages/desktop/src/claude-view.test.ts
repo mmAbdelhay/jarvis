@@ -242,6 +242,31 @@ describe("createClaudeViewHandlers.view, caching", () => {
     expect(deps.scanAgents).toHaveBeenCalledTimes(2);
   });
 
+  it("transcriptOf gives the pane's own transcript, null before one exists", async () => {
+    const { transcriptPath: _omit, ...unwritten } = SESSION;
+    const forProcess = vi.fn(async () => unwritten as typeof SESSION);
+    const handlers = createClaudeViewHandlers(
+      fakeDeps({ lookup: { forProcess, retain: vi.fn() } }),
+    );
+    expect(await handlers.transcriptOf("t1")).toBeNull();
+    forProcess.mockResolvedValue(SESSION);
+    expect(await handlers.transcriptOf("t1")).toBe(SESSION.transcriptPath);
+  });
+
+  it("transcriptOf keeps the last transcript once the pane's Claude exits", async () => {
+    let now = 0;
+    const forProcess = vi.fn(async () => SESSION as typeof SESSION | undefined);
+    const handlers = createClaudeViewHandlers(
+      fakeDeps({ now: vi.fn(() => now), lookup: { forProcess, retain: vi.fn() } }),
+    );
+    expect(await handlers.transcriptOf("t1")).toBe(SESSION.transcriptPath);
+    forProcess.mockResolvedValue(undefined);
+    now = PANE_SESSION_TTL_MS;
+    expect(await handlers.transcriptOf("t1")).toBe(SESSION.transcriptPath);
+    handlers.forgetPane("t1");
+    expect(await handlers.transcriptOf("t1")).toBeUndefined();
+  });
+
   it("forgetPane drops the cached session", async () => {
     const deps = fakeDeps();
     const handlers = createClaudeViewHandlers(deps);

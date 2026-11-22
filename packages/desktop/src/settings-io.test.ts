@@ -58,6 +58,7 @@ const draft: JarvisConfig = {
     tls: {},
     push: { enabled: false, includeProjectNames: false },
     web: { enabled: false },
+    tailnet: { enabled: false, relay: false },
     idleDisableMinutes: 0,
   },
   daemon: { enabled: false },
@@ -100,6 +101,7 @@ const fullDraft: JarvisConfig = {
     tls: { certPath: "/certs/m.crt", keyPath: "/certs/m.key" },
     push: { enabled: true, includeProjectNames: true },
     web: { enabled: false },
+    tailnet: { enabled: true, relay: true },
     idleDisableMinutes: 30,
   },
   daemon: { enabled: true },
@@ -364,6 +366,171 @@ describe("writeSettingsFile", () => {
 
     await writeSettingsFile(path, { ...draft, daemon: { enabled: true } });
     expect(parse(await readFile(path, "utf8"))).not.toHaveProperty("daemon");
+  });
+
+  // The Tailscale access switch's alone (tailnet-switch.ts): a Settings draft
+  // read before the switch moved must not move it back.
+  describe("remote.tailnet", () => {
+    const withTailnet = (enabled: boolean, relay = false): JarvisConfig => ({
+      ...draft,
+      remote: { ...draft.remote, tailnet: { enabled, relay } },
+    });
+    const inFile = async (path: string): Promise<JarvisConfig["remote"]["tailnet"]> =>
+      parseConfig(parse(await readFile(path, "utf8"))).remote.tailnet;
+
+    it("a stale draft saying on leaves the file off", async () => {
+      const path = join(await tempDir(), "jarvis.yaml");
+      await writeFile(path, "remote:\n  tailnet:\n    enabled: false\n    relay: true\n");
+
+      await writeSettingsFile(path, withTailnet(true));
+
+      expect(await inFile(path)).toEqual({ enabled: false, relay: true });
+    });
+
+    it("a stale draft saying off leaves the file on", async () => {
+      const path = join(await tempDir(), "jarvis.yaml");
+      await writeFile(path, "remote:\n  tailnet:\n    enabled: true\n    relay: true\n");
+
+      await writeSettingsFile(path, withTailnet(false));
+
+      expect(await inFile(path)).toEqual({ enabled: true, relay: true });
+    });
+
+    it.each([
+      ["no file", undefined],
+      ["no such key", "placeholder: true\n"],
+      ["a value it cannot read", 'remote:\n  tailnet: "yes"\n'],
+      ["text that does not parse", "remote: [\n"],
+    ])("%s reads as off, never the draft's on", async (_name, text) => {
+      const path = join(await tempDir(), "jarvis.yaml");
+      if (text !== undefined) await writeFile(path, text);
+
+      await writeSettingsFile(path, withTailnet(true));
+
+      expect(await inFile(path)).toEqual({ enabled: false, relay: false });
+    });
+
+    it("the rest of a draft's remote section is still saved", async () => {
+      const path = join(await tempDir(), "jarvis.yaml");
+      await writeFile(path, "remote:\n  tailnet:\n    enabled: true\n");
+
+      await writeSettingsFile(path, {
+        ...withTailnet(false),
+        remote: { ...withTailnet(false).remote, port: 7801 },
+      });
+
+      const saved = parseConfig(parse(await readFile(path, "utf8"))).remote;
+      expect(saved.port).toBe(7801);
+      expect(saved.tailnet.enabled).toBe(true);
+    });
+
+    it("a save keeps the record of replaced forwards, whatever the draft says", async () => {
+      const path = join(await tempDir(), "jarvis.yaml");
+      await writeFile(
+        path,
+        [
+          "remote:",
+          "  tailnet:",
+          "    enabled: true",
+          "    relay: true",
+          "    replacedForwards:",
+          "      7717:",
+          "        target: 127.0.0.1:7717",
+          "        proxyProtocol: 1",
+          "",
+        ].join("\n"),
+      );
+      const whole = {
+        enabled: true,
+        relay: true,
+        replacedForwards: { "7717": { target: "127.0.0.1:7717", proxyProtocol: 1 } },
+      };
+
+      await writeSettingsFile(path, withTailnet(true, true));
+      expect(await inFile(path)).toEqual(whole);
+
+      await writeSettingsFile(path, {
+        ...draft,
+        remote: {
+          ...draft.remote,
+          tailnet: {
+            enabled: true,
+            relay: true,
+            replacedForwards: { "7718": { target: "127.0.0.1:7718" } },
+          },
+        },
+      });
+      expect(await inFile(path)).toEqual(whole);
+    });
+
+    it("a save keeps the bind recorded before the enable, whatever the draft says", async () => {
+      const path = join(await tempDir(), "jarvis.yaml");
+      await writeFile(
+        path,
+        [
+          "remote:",
+          "  tailnet:",
+          "    enabled: true",
+          "    bindBeforeEnable: 192.168.1.5",
+          "",
+        ].join("\n"),
+      );
+      const whole = { enabled: true, relay: false, bindBeforeEnable: "192.168.1.5" };
+
+      await writeSettingsFile(path, withTailnet(true));
+      expect(await inFile(path)).toEqual(whole);
+
+      await writeSettingsFile(path, {
+        ...draft,
+        remote: {
+          ...draft.remote,
+          tailnet: { enabled: true, relay: false, bindBeforeEnable: "10.0.0.1" },
+        },
+      });
+      expect(await inFile(path)).toEqual(whole);
+    });
+
+    it("the switch's write of the bind record survives the file", async () => {
+      const path = join(await tempDir(), "jarvis.yaml");
+      const tailnet = { enabled: true, relay: true, bindBeforeEnable: "100.84.17.203" };
+
+      await writeSettingsFile(
+        path,
+        { ...draft, remote: { ...draft.remote, tailnet } },
+        { writesTailnet: true },
+      );
+
+      expect(await inFile(path)).toEqual(tailnet);
+    });
+
+    it("the switch's write of the record survives the file", async () => {
+      const path = join(await tempDir(), "jarvis.yaml");
+      const tailnet = {
+        enabled: true,
+        relay: true,
+        replacedForwards: {
+          "7717": { target: "127.0.0.1:7717" },
+          "7718": { target: "localhost:9000", terminateTls: true },
+        },
+      };
+
+      await writeSettingsFile(
+        path,
+        { ...draft, remote: { ...draft.remote, tailnet } },
+        { writesTailnet: true },
+      );
+
+      expect(await inFile(path)).toEqual(tailnet);
+    });
+
+    it("a write that read the file itself may change it", async () => {
+      const path = join(await tempDir(), "jarvis.yaml");
+      await writeFile(path, "remote:\n  tailnet:\n    enabled: true\n");
+
+      await writeSettingsFile(path, withTailnet(false, true), { writesTailnet: true });
+
+      expect(await inFile(path)).toEqual({ enabled: false, relay: true });
+    });
   });
 
   it("writes a file parseConfig can load back", async () => {
@@ -721,6 +888,7 @@ describe("remote round-trip", () => {
       sidecarProxy: false,
       push: { enabled: false, includeProjectNames: false },
       web: { enabled: false },
+      tailnet: { enabled: false, relay: false },
       idleDisableMinutes: 0,
     });
   });

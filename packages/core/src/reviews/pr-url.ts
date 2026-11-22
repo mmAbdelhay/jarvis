@@ -5,6 +5,8 @@
 // something else, a narrow pane wraps it onto the next line (often behind
 // a box border), and a chunk can end halfway through it. Each pane keeps a
 // short raw tail so a URL cut by a chunk boundary is read whole next time.
+// firstPrRef reads PR links out of plain text, the user's own prompt, and
+// also accepts the forms people paste (a PR's files tab, a comment anchor).
 
 export type PrRef = { repo: string; number: number };
 
@@ -82,6 +84,35 @@ function readUrl(text: string, from: number): string | undefined {
   return undefined;
 }
 
+/** The PR named by the URL starting at `at`, or undefined when it names
+ *  something else (an issue, a comment, a file list). */
+function prRefAt(text: string, at: number, path = PR_PATH): PrRef | undefined {
+  // Sentence punctuation after a URL is not part of it.
+  const url = readUrl(text, at)?.replace(/[.,:;!?)]+$/, "");
+  const match = url === undefined ? null : path.exec(url);
+  if (match === null) return undefined;
+  return { repo: `${match[1]}/${match[2]}`, number: Number(match[3]) };
+}
+
+/** A PR link as people paste one into a prompt: the PR's own page, or any
+ *  page or anchor of it (`/files`, `/commits`, `#discussion_r1`, `?w=1`,
+ *  a trailing `/`). Prompts only: in output such a link is more often a
+ *  comment quoted back than the PR itself. */
+const PR_PROMPT_PATH =
+  /^https:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)\/pull\/(\d+)(?:[/?#].*)?$/;
+
+/** The first PR link in plain text such as a user's prompt. A prompt is
+ *  whole, so a URL at its very end counts. */
+export function firstPrRef(text: string): PrRef | undefined {
+  // A pasted link may be http:// or on www.github.com: same PR.
+  const padded = `${text.replace(/\bhttps?:\/\/(?:www\.)?github\.com\//gi, PREFIX)} `;
+  for (let at = padded.indexOf(PREFIX); at !== -1; at = padded.indexOf(PREFIX, at + 1)) {
+    const ref = prRefAt(padded, at, PR_PROMPT_PATH);
+    if (ref !== undefined) return ref;
+  }
+  return undefined;
+}
+
 export function createPrUrlScanner(): PrUrlScanner {
   const tails = new Map<string, string>();
   const reported = new Map<string, Set<string>>();
@@ -96,11 +127,8 @@ export function createPrUrlScanner(): PrUrlScanner {
       let seen = reported.get(paneKey);
       let found: PrRef | undefined;
       for (let at = text.indexOf(PREFIX); at !== -1; at = text.indexOf(PREFIX, at + 1)) {
-        // Sentence punctuation after a URL is not part of it.
-        const url = readUrl(text, at)?.replace(/[.,:;!?)]+$/, "");
-        const match = url === undefined ? null : PR_PATH.exec(url);
-        if (match === null) continue;
-        const ref = { repo: `${match[1]}/${match[2]}`, number: Number(match[3]) };
+        const ref = prRefAt(text, at);
+        if (ref === undefined) continue;
         const key = `${ref.repo.toLowerCase()}#${ref.number}`;
         if (seen === undefined) {
           seen = new Set();

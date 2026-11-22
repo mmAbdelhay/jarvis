@@ -1,0 +1,28 @@
+{
+  "TCP": {
+    "7717": {
+      "TCPForward": "127.0.0.1:7717"
+    }
+  },
+  "Foreground": {
+    "session-id": {
+      "TCP": {
+        "443": {
+          "HTTPS": true
+        }
+      },
+      "Web": {
+        "machine.tailnet.ts.net:443": {
+          "Handlers": {
+            "/": {
+              "Proxy": "http://127.0.0.1:7717"
+            }
+          }
+        }
+      },
+      "AllowFunnel": {
+        "machine.tailnet.ts.net:443": true
+      }
+    }
+  }
+}

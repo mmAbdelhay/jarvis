@@ -51,8 +51,27 @@ describe("plans:* dispatch: routing", () => {
 
     const result = await call(table, "plans:list", "pane-1", "/repo");
 
-    expect(list).toHaveBeenCalledWith("/repo");
+    expect(list).toHaveBeenCalledWith("/repo", undefined);
     expect(result).toEqual({ session: undefined, planMode: [], repo: [] });
+  });
+
+  it("plans:list reads the calling pane's own Claude transcript", async () => {
+    const list = vi.fn(async () => ({ session: undefined, planMode: [], repo: [] }));
+    const paneTranscript = vi.fn(async () => "/h/.claude/projects/-repo/mine.jsonl");
+    const deps = fakeDeps({
+      plans: {
+        ...fakeDeps().plans,
+        files: { ...fakeDeps().plans.files, list },
+        isDirectory: vi.fn(async () => true),
+        paneTranscript,
+      },
+      terminal: { ...fakeDeps().terminal, paneStartDir: vi.fn(() => "/repo") },
+    });
+
+    await call(createDispatchTable(deps), "plans:list", "pane-1", "/repo");
+
+    expect(paneTranscript).toHaveBeenCalledWith("pane-1");
+    expect(list).toHaveBeenCalledWith("/repo", "/h/.claude/projects/-repo/mine.jsonl");
   });
 
   it("plans:list uses the given cwd when it is inside a configured project root", async () => {
@@ -69,7 +88,7 @@ describe("plans:* dispatch: routing", () => {
 
     await call(table, "plans:list", "pane-1", "/home/user/project/packages/desktop");
 
-    expect(list).toHaveBeenCalledWith("/home/user/project/packages/desktop");
+    expect(list).toHaveBeenCalledWith("/home/user/project/packages/desktop", undefined);
   });
 
   it("plans:list falls back to the pane's own recorded start directory when cwd does not exist", async () => {
@@ -86,7 +105,7 @@ describe("plans:* dispatch: routing", () => {
 
     await call(table, "plans:list", "pane-1", "/does/not/exist");
 
-    expect(list).toHaveBeenCalledWith("/pane/start");
+    expect(list).toHaveBeenCalledWith("/pane/start", undefined);
   });
 
   it("plans:list refuses a cwd outside both the pane's start dir and every project root, even if it exists (stops remote directory probing)", async () => {
@@ -108,7 +127,7 @@ describe("plans:* dispatch: routing", () => {
     // Never even reaches the filesystem check for the out-of-bounds
     // candidate — the containment check runs first.
     expect(isDirectory).not.toHaveBeenCalled();
-    expect(list).toHaveBeenCalledWith("/pane/start");
+    expect(list).toHaveBeenCalledWith("/pane/start", undefined);
   });
 
   it("plans:read returns PlanFiles.read's own value for an allowed path", async () => {

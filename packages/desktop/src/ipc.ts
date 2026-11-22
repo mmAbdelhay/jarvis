@@ -39,6 +39,7 @@ import type {
   ClaudeView,
   PushRegisterResult,
   PushRegistration,
+  TailnetPeers,
   TerminalPaneInfo,
 } from "@jarvis/wire";
 import {
@@ -97,11 +98,13 @@ import { resolveDirectory } from "./completion-source.js";
 import type { CompletionSource } from "./completion-source.js";
 import type { JarvisConfig, TerminalConfig } from "./config.js";
 import type { AwakePatch, AwakeStatus } from "./keep-awake.js";
+import type { MachineTarget, MachineViewState } from "./machine-views.js";
 import type { ChangeResult, DaemonStatus } from "./daemon/mode.js";
 import { MESSAGES } from "./messages.js";
 import type { SnippetLanguage } from "@jarvis/platform";
 import type { RunningCounts, UpdateState } from "./updater.js";
 import type { UsageHistory } from "./usage-history.js";
+import type { TailnetSwitchResult } from "./tailnet-switch.js";
 import type { TailscaleCertResult } from "./tailscale-cert.js";
 import type { IpLocateResult } from "./ip-locate.js";
 import type {
@@ -145,6 +148,9 @@ export type IpcChannels = {
   // `chunk` (ruling 10) — see ShellOutput.
   "terminal:data": { paneKey: string; chunk: string; offset: number };
   "terminal:exit": { paneKey: string; code: number };
+  // Another device split or closed a pane of a terminal tab; the laptop's
+  // own layout follows. Keyed by tab id.
+  "terminal:layout": TerminalLayoutChange;
   // The phone's chat view of a pane (claude-view.ts): "look again", keyed
   // by pane and throttled per pane. The key is the whole payload.
   "terminal:claudeViewChanged": { paneKey: string };
@@ -163,6 +169,18 @@ export const PROVIDER_HEALTH_INTERVAL_MS = 300_000;
 // already localised in the main process, because the renderer has no access
 // to the user's configured language and must never build user-facing strings
 // of its own (Global Constraints: one bilingual message lane).
+/** The push behind `terminal:layout`: a remote device split or closed a pane
+ *  of terminal tab `tabId`. `paneKey` is the full "<tabId>:<paneId>" shell
+ *  key. `from`, when present, is the pane key the new pane sits next to;
+ *  absent means after the tab's last pane. Emitted for remote-origin
+ *  changes only. */
+export type TerminalLayoutChange = {
+  tabId: string;
+  change: "split" | "close";
+  paneKey: string;
+  from?: string;
+};
+
 export type GitViewResult<T> =
   | { ok: true; value: T }
   | { ok: false; text: string; language: "ar" | "en" };
@@ -800,7 +818,7 @@ export type RendererApi = {
   dockerRestart(project: string, container: string): Promise<GitViewResult<void>>;
   dockerComposeUp(project: string): Promise<GitViewResult<void>>;
   dockerComposeDown(project: string): Promise<GitViewResult<void>>;
-  dockerShell(project: string, container: string): Promise<GitViewResult<void>>;
+  dockerShell(project: string, container: string): Promise<GitViewResult<string>>;
   /** Starts (or restarts, if the tab was already following a different
    *  container) a `docker logs -f` for `container`, streamed to `onDockerLog`
    *  tagged with `tabId`. */
@@ -968,6 +986,8 @@ export type RendererApi = {
    *  "<tabId>:<paneId>" for every pane split off it. */
   onTerminalData(cb: (paneKey: string, chunk: string) => void): void;
   onTerminalExit(cb: (paneKey: string, code: number) => void): void;
+  /** Another device split or closed a pane of a terminal tab. */
+  onTerminalLayout(cb: (change: TerminalLayoutChange) => void): void;
   /**
    * A cursor onto one pane's retained output — the same shape and purpose
    * as sessionSnapshot, for a Terminal pane instead of a session. Exists
@@ -1077,6 +1097,10 @@ export type RendererApi = {
    *  click calls this exact same channel — `tailscale cert` renews an
    *  existing name in place. */
   tailscaleCert(): Promise<TailscaleCertResult>;
+  /** Turns Tailscale access on or off (tailnet-switch.ts). Desktop-only by
+   *  policy. */
+  tailnetEnable(options: { relay: boolean }): Promise<TailnetSwitchResult>;
+  tailnetDisable(): Promise<TailnetSwitchResult>;
   /** Phase 1: opens the browser client in the system browser (never inside
    *  Jarvis) — the pairing link while a pairing window is open, otherwise
    *  the root. Takes no URL: main reads it from the bridge's own status.
@@ -1196,6 +1220,23 @@ export type RendererApi = {
   setAwake(patch: AwakePatch): Promise<AwakeStatus>;
   /** The keep-awake status changed; the payload is the new one. */
   onAwakeChanged(cb: (status: AwakeStatus) => void): void;
+  /** The other Jarvis machines on this user's tailnet (tailnet-peers.ts),
+   *  cached for 30 s. */
+  tailnetPeers(): Promise<TailnetPeers>;
+  /** Shows another machine's web client full-window over this one
+   *  (machine-views.ts), creating its view on first use and keeping it alive
+   *  while hidden. Workspace pages are hidden first. A bad target is
+   *  ignored; a protocol mismatch reports phase "version" without loading. */
+  showMachine(target: MachineTarget): Promise<void>;
+  /** Hides every machine view; the renderer restores the workspace pages. */
+  showLocalMachine(): Promise<void>;
+  /** The rectangle reserved for a machine view, in CSS pixels, like
+   *  setWorkspaceBounds. */
+  setMachineBounds(bounds: ReportedRect): Promise<void>;
+  /** Destroys that machine's view; the next showMachine loads it afresh. */
+  closeMachine(name: string): Promise<void>;
+  /** A machine view's load state changed. Returns the unsubscribe. */
+  onMachineState(cb: (state: MachineViewState) => void): () => void;
 };
 
 export type WiringDeps = {
@@ -1370,8 +1411,15 @@ export type EditorHandlers = {
   /** Ensures a code-server instance is running for `project`, rooted at the
    *  configured editor root named `root` (the project directory itself when
    *  omitted), and returns its URL — the renderer then opens that URL as an
-   *  ordinary Workspace browser tab (openTab), same as any other page. */
-  open(project: string, root?: string): Promise<GitViewResult<string>>;
+   *  ordinary Workspace browser tab (openTab), same as any other page.
+   *
+   *  `file`, when given, is an absolute path that must resolve inside the
+   *  project directory by `resolveWithin` (the rule `terminal:openFile`
+   *  applies: `..`, a sibling prefix, a symlink out and a relative path are
+   *  all refused); the returned URL then carries the `openFile` payload for
+   *  the resolved path (`withOpenFilePayload`). It is rooted at the project,
+   *  never at the file's folder. */
+  open(project: string, root?: string, file?: string): Promise<GitViewResult<string>>;
   /** The names of `project`'s configured editor roots, in config order. The
    *  renderer needs them to decide whether the Editor button opens straight
    *  away or offers a choice; it gets names only, never paths. */
@@ -1384,6 +1432,9 @@ export type EditorHandlerDeps = {
   projects: Readonly<Record<string, string>>;
   /** Per-project editor roots, from config. Empty for most projects. */
   editors: Readonly<EditorsConfig>;
+  /** `fs.realpathSync`, for `file` containment. Absent means a `file` is
+   *  always refused: a path that cannot be resolved is not proven inside. */
+  realPath?: (path: string) => string;
   language: "ar" | "en";
 };
 
@@ -1398,9 +1449,33 @@ export function createEditorHandlers(deps: EditorHandlerDeps): EditorHandlers {
       return (deps.editors[project] ?? []).map((entry) => entry.name);
     },
 
-    async open(project, rootName) {
+    async open(project, rootName, file) {
       const projectPath = isString(project) ? deps.projects[project] : undefined;
       if (projectPath === undefined) return fail(MESSAGES.unknownProject(deps.language));
+
+      // A file is checked before anything is started, and the real path it
+      // resolves to is what the payload names — never the caller's string.
+      if (file !== undefined) {
+        if (!isString(file) || deps.realPath === undefined) {
+          return fail(MESSAGES.invalidArgument(deps.language));
+        }
+        // The project's own directory, resolved the same way openFile does,
+        // so a project reached through a symlink still contains its files.
+        const root = resolveWithin(projectPath, projectPath, deps.realPath);
+        const target = root === undefined ? undefined : resolveWithin(root, file, deps.realPath);
+        if (root === undefined || target === undefined) {
+          return fail(MESSAGES.invalidArgument(deps.language));
+        }
+        try {
+          const result = await deps.codeServer.open(root, root);
+          if (result.ok) return { ok: true, value: withOpenFilePayload(result.url, target) };
+          reportSidecarFailure("editor", result.detail);
+          return fail(MESSAGES.editorUnavailable(deps.language));
+        } catch (error) {
+          reportSidecarFailure("editor", error);
+          return fail(MESSAGES.editorUnavailable(deps.language));
+        }
+      }
 
       // The renderer names a root; main resolves it. A name this project
       // does not declare is refused here rather than joined onto the
@@ -1910,7 +1985,9 @@ export type DockerHandlers = {
   restart(project: string, container: string): Promise<GitViewResult<void>>;
   composeUp(project: string): Promise<GitViewResult<void>>;
   composeDown(project: string): Promise<GitViewResult<void>>;
-  shell(project: string, container: string): GitViewResult<void>;
+  /** Opens a terminal tab for the container's shell and returns its tab id
+   *  (a phone needs it to attach to the tab it just made). */
+  shell(project: string, container: string): GitViewResult<string>;
   /** The display names this project declares, for the renderer to decide
    *  whether the Docker button is a live control at all. Mirrors the
    *  existing `ClusterHandlers.names`. */
@@ -2043,7 +2120,7 @@ export function createDockerHandlers(deps: DockerHandlerDeps): DockerHandlers {
       // `exec bash || exec sh`: most images have sh, many have bash, and
       // asking for bash outright fails outright on an alpine container.
       deps.sendInput(tabId, `docker exec -it ${container} sh -c 'exec bash || exec sh'\r`);
-      return { ok: true, value: undefined };
+      return { ok: true, value: tabId };
     },
 
     async containers() {
@@ -3997,11 +4074,15 @@ export type SettingsSaveResult =
 export type SettingsHandlers = {
   read(): Promise<JarvisConfig>;
   save(draft: unknown): Promise<SettingsSaveResult>;
-  /** What a paired phone's settings:save may do: replace the `sessions`
-   *  section of the config as it is on disk right now, nothing else. */
-  saveSessions(sessions: JarvisConfig["sessions"]): Promise<SettingsSaveResult>;
+  /** What a paired phone's settings:save does: the whole draft, validated,
+   *  written over the config as it is on disk right now with `remote` and
+   *  `daemon` kept from that disk copy — the draft's own are ignored. */
+  saveFromRemote(draft: unknown): Promise<SettingsSaveResult>;
   testAgent(agent: unknown): Promise<AgentHealth>;
-  restart(): void;
+  /** A phone's settings:testAgent: tests the agent the on-disk registry
+   *  holds under `id`; undefined for an id it does not hold. */
+  testAgentById(id: string): Promise<AgentHealth | undefined>;
+  restart(): { ok: true } | { ok: false; reason: "no-service" };
 };
 
 export type SettingsHandlerDeps = {
@@ -4012,7 +4093,11 @@ export type SettingsHandlerDeps = {
     draft: JarvisConfig | ((current: JarvisConfig) => JarvisConfig),
   ): Promise<{ ok: true } | { ok: false; detail: string }>;
   run: CommandRunner;
-  restart(): void;
+  /** settings-io.ts's validateDraft, injected like writeConfig: a remote
+   *  draft is checked with the rule the file write applies. */
+  validateDraft(draft: unknown): { ok: true; value: JarvisConfig } | { ok: false; detail: string };
+  /** "no-service" when nothing would start the app or daemon again. */
+  restart(): "no-service" | undefined;
   language: "ar" | "en";
 };
 
@@ -4037,8 +4122,25 @@ export function createSettingsHandlers(deps: SettingsHandlerDeps): SettingsHandl
     // An updater over the config the serialized write itself reads, so a
     // change made on the laptop between the phone's read and this write
     // (the bridge turned off, say) is never overwritten with a stale copy.
-    async saveSessions(sessions) {
-      return saveResult(await deps.writeConfig((current) => ({ ...current, sessions })));
+    // `remote` (the bridge, its tailnet switch) and `daemon` are the
+    // laptop's own: whatever the draft says of them, the file's win.
+    async saveFromRemote(draft) {
+      const validated = deps.validateDraft(draft);
+      if (!validated.ok) {
+        return {
+          ok: false,
+          text: MESSAGES.invalidArgument(deps.language),
+          detail: validated.detail,
+          language: deps.language,
+        };
+      }
+      return saveResult(
+        await deps.writeConfig((current) => ({
+          ...validated.value,
+          remote: current.remote,
+          daemon: current.daemon,
+        })),
+      );
     },
 
     // checkAgent never rejects — a malformed draft agent (missing command,
@@ -4046,6 +4148,16 @@ export function createSettingsHandlers(deps: SettingsHandlerDeps): SettingsHandl
     // broken agent would, rather than needing its own guard here.
     testAgent: (agent) => checkAgent(agent as AgentConfig, deps.run),
 
-    restart: () => deps.restart(),
+    // The command run is the one the config on disk names for this id, not
+    // anything the caller sent. Own properties only: "constructor" is not an
+    // agent.
+    async testAgentById(id) {
+      const { agents } = (await deps.readConfig()).registry;
+      if (!Object.hasOwn(agents, id)) return undefined;
+      return checkAgent({ ...agents[id], id } as AgentConfig, deps.run);
+    },
+
+    restart: () =>
+      deps.restart() === "no-service" ? { ok: false, reason: "no-service" } : { ok: true },
   };
 }

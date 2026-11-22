@@ -16,8 +16,18 @@ export type BannerModel = { key: MessageKey; pairAgain: boolean };
  * sense — every other state either resolves on its own (reconnecting,
  * stale) or already offers its own way forward (offline's retry tap,
  * unpaired's automatic route to /pair).
+ *
+ * `revoked`: this tree came from a revocation that left no machine
+ * (revoked-signal.ts). Its null scope's client is idle, with nothing to say, and
+ * the user at /pair must still be told why.
  */
-export function bannerModel(view: ConnectionView): BannerModel | undefined {
+export function bannerModel(view: ConnectionView, revoked = false): BannerModel | undefined {
+  const model = connectionModel(view);
+  if (model === undefined && revoked) return { key: "conn.unpaired", pairAgain: false };
+  return model;
+}
+
+function connectionModel(view: ConnectionView): BannerModel | undefined {
   if (view.pinMismatch) {
     return { key: "conn.pinMismatch", pairAgain: true };
   }

@@ -53,10 +53,10 @@ import { deviceOrientationPolicy } from "@/lib/app-orientation";
 import type { Language } from "@/lib/i18n";
 import { t } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
-import { loadPairing } from "@/lib/pairing-record";
+import { loadScreenMachine } from "@/lib/machine-store-instance";
+import { useMachineId } from "@/lib/rpc-context";
 import { loadPrefs, savePrefs, type SidecarKind } from "@/lib/prefs";
 import { filePrefsStore } from "@/lib/prefs-file";
-import { expoSecureStore } from "@/lib/secure-store";
 import {
   SIDECAR_ZOOM_MAX,
   SIDECAR_ZOOM_MIN,
@@ -94,6 +94,7 @@ function resolveTitle(
 export default function SidecarViewScreen() {
   const language = useLanguage();
   const router = useRouter();
+  const machineId = useMachineId();
   const insets = useSafeAreaInsets();
   const { url, kind, label } = useLocalSearchParams<{
     url: string;
@@ -124,7 +125,7 @@ export default function SidecarViewScreen() {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const pairing = await loadPairing(expoSecureStore);
+      const pairing = await loadScreenMachine(machineId);
       if (cancelled) return;
       const record = pairing?.record;
       if (record?.name !== undefined) {
@@ -134,7 +135,7 @@ export default function SidecarViewScreen() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [machineId]);
 
   useEffect(() => {
     let cancelled = false;

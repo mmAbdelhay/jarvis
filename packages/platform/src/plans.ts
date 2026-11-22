@@ -66,7 +66,11 @@ export type PlanResult<T> =
     };
 
 export type PlanFiles = {
-  list(cwd: string | undefined): Promise<PlanList>;
+  /** `transcript` is the calling pane's own Claude transcript: a path to
+   *  read its session plan from, null when the pane runs a Claude with no
+   *  transcript yet (no session plan), undefined when unknown (the newest
+   *  transcript for `cwd`, as before). */
+  list(cwd: string | undefined, transcript?: string | null): Promise<PlanList>;
   read(path: string): Promise<PlanResult<PlanDoc>>;
   writeBlock(
     path: string,
@@ -276,10 +280,19 @@ async function findSessionEntry(
   fs: FsDeps,
   bases: readonly string[],
   cwd: string,
+  transcript?: string | null,
 ): Promise<SessionCandidate | null> {
+  if (transcript === null) return null;
   const slug = claudeProjectSlug(cwd);
   let newest: { path: string; mtimeMs: number } | null = null;
-  for (const base of bases) {
+  // The pane's own session, when the caller knows it: two tabs in one
+  // project each show their own plan, never whichever session wrote last.
+  // Only a transcript under one of the known bases is read.
+  if (transcript !== undefined) {
+    if (!bases.some((base) => transcript.startsWith(join(base, "projects") + sep))) return null;
+    newest = { path: transcript, mtimeMs: 0 };
+  }
+  for (const base of transcript === undefined ? bases : []) {
     const dir = join(base, "projects", slug);
     const names = await readdirSafe(fs, dir);
     for (const name of names) {
@@ -298,7 +311,12 @@ async function findSessionEntry(
   }
   if (newest === null) return null;
 
-  const text = await readTail(fs, newest.path, SESSION_TAIL_BYTES);
+  let text: string;
+  try {
+    text = await readTail(fs, newest.path, SESSION_TAIL_BYTES);
+  } catch {
+    return null; // Gone since it was found or named.
+  }
   const matches = [...text.matchAll(PLAN_LINK)];
   for (let i = matches.length - 1; i >= 0; i--) {
     const match = matches[i];
@@ -396,14 +414,14 @@ export function createPlanFiles(deps: {
   }
 
   return {
-    async list(cwd) {
+    async list(cwd, transcript) {
       const bases = anthropicBases(agents(), home);
       const plansDirs = bases.map((base) => join(base, "plans"));
       const planMode = await listPlanMode(fs, plansDirs);
 
       if (cwd === undefined) return { session: undefined, planMode, repo: [] };
 
-      const found = await findSessionEntry(fs, bases, cwd);
+      const found = await findSessionEntry(fs, bases, cwd, transcript);
       let session: PlanEntry | undefined;
       if (found !== null) {
         session = { path: found.path, name: found.name, source: "session", mtimeMs: found.mtimeMs };

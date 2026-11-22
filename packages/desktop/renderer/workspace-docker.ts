@@ -292,7 +292,7 @@ function renderRow(host: HTMLElement, tabId: string, project: string, row: Docke
  *  A dead container, a permission error, a compose file gone bad: none of
  *  these are visible any other way, since the next poll would otherwise be
  *  the only sign anything happened at all. */
-function runAction(action: Promise<GitViewResult<void>>): void {
+function runAction(action: Promise<GitViewResult<unknown>>): void {
   const status = $("workspace-tool-status");
   status.textContent = "";
   status.classList.remove("workspace-tool-status--error");

@@ -188,23 +188,26 @@ describe.skipIf(process.platform === "win32")("linuxSwapScript run", () => {
     expect(await launched(log)).toBe(`${appImage}\n`);
   });
 
-  it("never touches a stale .old when there is no current AppImage", () => {
-    const { appImage, staged, launch } = setup();
+  it("never touches a stale .old when there is no current AppImage", async () => {
+    const { appImage, staged, log, launch } = setup();
     rmSync(appImage);
     writeFileSync(`${appImage}.old`, "stale");
     const result = run(linuxSwapScript({ pid: exitedPid(), appImage, staged, launch }));
     expect(result.status).toBe(0);
     expect(readFileSync(appImage, "utf8")).toBe("new");
     expect(readFileSync(`${appImage}.old`, "utf8")).toBe("stale");
+    // The launcher runs in the background and writes into this directory.
+    expect(await launched(log)).toBe(`${appImage}\n`);
   });
 
-  it("replaces a stale .old left by a failed earlier run", () => {
-    const { appImage, staged, launch } = setup();
+  it("replaces a stale .old left by a failed earlier run", async () => {
+    const { appImage, staged, log, launch } = setup();
     writeFileSync(`${appImage}.old`, "stale");
     const result = run(linuxSwapScript({ pid: exitedPid(), appImage, staged, launch }));
     expect(result.status).toBe(0);
     expect(readFileSync(appImage, "utf8")).toBe("new");
     expect(existsSync(`${appImage}.old`)).toBe(false);
+    expect(await launched(log)).toBe(`${appImage}\n`);
   });
 
   it.skipIf(process.getuid?.() === 0)(

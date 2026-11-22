@@ -7,6 +7,7 @@ import {
   ExtendedKeyUsageExtension,
   KeyUsageFlags,
   KeyUsagesExtension,
+  X509Certificate as PeculiarCertificate,
   X509CertificateGenerator,
 } from "@peculiar/x509";
 import { createHash, createPrivateKey, KeyObject, webcrypto, X509Certificate } from "node:crypto";
@@ -65,6 +66,11 @@ export function dnsNamesOf(certPem: string): string[] {
     names.push(name);
   }
   return names;
+}
+
+/** The certificate's expiry, in epoch milliseconds. Throws on anything that does not parse. */
+export function notAfterOf(certPem: string): number {
+  return new PeculiarCertificate(certPem).notAfter.getTime();
 }
 
 /**

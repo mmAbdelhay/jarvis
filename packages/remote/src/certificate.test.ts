@@ -27,6 +27,7 @@ import {
   fingerprintOf,
   loadCertificate,
   mintSelfSigned,
+  notAfterOf,
 } from "./certificate.js";
 import { memoryFs } from "./fs-double.js";
 import type { RandomBytes } from "./io.js";
@@ -121,6 +122,17 @@ describe("fingerprintOf", () => {
 
     expect(fingerprintOf(cert)).toBe(expected);
     expect(fingerprintOf(cert)).toMatch(/^[0-9a-f]{64}$/);
+  });
+});
+
+describe("notAfterOf", () => {
+  it("is the certificate's expiry, in epoch milliseconds", async () => {
+    const { cert } = await mintSelfSigned(NOW, "0102030405060708");
+    expect(notAfterOf(cert)).toBe(NOW + 3650 * DAY_MS);
+  });
+
+  it("throws on text that is not a certificate", () => {
+    expect(() => notAfterOf("not a certificate")).toThrow();
   });
 });
 

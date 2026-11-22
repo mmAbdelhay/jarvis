@@ -1,10 +1,12 @@
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
+  certificateExpiry,
   defaultCertDir,
   findTailscaleCli,
   issueCertificate,
   obtainCertificate,
+  readTailscaleIps,
   tailnetName,
   type TailscaleCertDeps,
   type TailscaleExec,
@@ -37,6 +39,37 @@ describe("defaultCertDir", () => {
     expect(defaultCertDir({ homedir: () => "/Users/x" })).toBe(
       join("/Users/x", ".config", "jarvis", "tls"),
     );
+  });
+});
+
+describe("certificateExpiry", () => {
+  // A throwaway self-signed certificate: its key was discarded at creation.
+  const PEM = [
+    "-----BEGIN CERTIFICATE-----",
+    "MIIBhjCCAS2gAwIBAgIUWt+B+fq2SdrcAyEspLmvENJf/ScwCgYIKoZIzj0EAwIw",
+    "GTEXMBUGA1UEAwwOZXhwaXJ5LWZpeHR1cmUwHhcNMjYxMTA2MjE0ODI1WhcNMzYx",
+    "MTAzMjE0ODI1WjAZMRcwFQYDVQQDDA5leHBpcnktZml4dHVyZTBZMBMGByqGSM49",
+    "AgEGCCqGSM49AwEHA0IABJMRerZ4iIyqsSVW55ah75K8Uu5mGCSfIwnCebgnG2q6",
+    "rNc6aIyIP1IV7E4B2qn/t6Oy1s8Tk60xkOAtccnTAeujUzBRMB0GA1UdDgQWBBRj",
+    "cjoAyC9c9MrSxru93Ui7z4sqfjAfBgNVHSMEGDAWgBRjcjoAyC9c9MrSxru93Ui7",
+    "z4sqfjAPBgNVHRMBAf8EBTADAQH/MAoGCCqGSM49BAMCA0cAMEQCIDi/BFaylLox",
+    "CTeyUjhhANp5WJchjBzlw6SMAebG8f+mAiBW3IozMrl05N1dgXST2S3I+ghPQCp3",
+    "IOAUo57+GHbBzQ==",
+    "-----END CERTIFICATE-----",
+    "",
+  ].join("\n");
+
+  it("reads notAfter from the file", async () => {
+    const readFile = vi.fn(async () => PEM);
+    expect(await certificateExpiry(readFile, "/tls/x.crt")).toBe(Date.UTC(2036, 10, 3, 21, 48, 25));
+    expect(readFile).toHaveBeenCalledWith("/tls/x.crt");
+  });
+
+  it("rejects for a missing or unparseable file", async () => {
+    await expect(
+      certificateExpiry(() => Promise.reject(new Error("ENOENT")), "/tls/x.crt"),
+    ).rejects.toThrow("ENOENT");
+    await expect(certificateExpiry(async () => "nonsense", "/tls/x.crt")).rejects.toThrow();
   });
 });
 
@@ -124,6 +157,76 @@ describe("tailnetName", () => {
     }));
     const deps = fakeDeps({ exec });
     await expect(tailnetName(deps, "tailscale")).resolves.toBeUndefined();
+  });
+});
+
+describe("the status read", () => {
+  // Real output of `tailscale status --json --peers=false` keeps both fields
+  // and has `Peer: null`; a large tailnet's peers would pass the 1 MB limit.
+  const STATUS = ["status", "--json", "--peers=false"];
+  const reply = {
+    code: 0,
+    stdout: JSON.stringify({
+      Self: { DNSName: "m.tailnet.ts.net.", TailscaleIPs: ["100.84.17.203"] },
+      Peer: null,
+    }),
+    stderr: "",
+  };
+
+  it("leaves peers out for the addresses", async () => {
+    const exec: TailscaleExec = vi.fn(async () => reply);
+    await expect(readTailscaleIps(fakeDeps({ exec }))).resolves.toEqual(["100.84.17.203"]);
+    expect(exec).toHaveBeenCalledWith(expect.any(String), STATUS, expect.anything());
+  });
+
+  it("leaves peers out for the name", async () => {
+    const exec: TailscaleExec = vi.fn(async () => reply);
+    await expect(tailnetName(fakeDeps({ exec }), "tailscale")).resolves.toBe("m.tailnet.ts.net");
+    expect(exec).toHaveBeenCalledWith("tailscale", STATUS, expect.anything());
+  });
+});
+
+describe("readTailscaleIps", () => {
+  const answering = (stdout: string, code = 0) =>
+    fakeDeps({ exec: vi.fn(async () => ({ code, stdout, stderr: "" })) });
+
+  it("reads Self.TailscaleIPs, in order", async () => {
+    const stdout = JSON.stringify({ Self: { TailscaleIPs: ["100.84.17.203", "fd7a:115c::1"] } });
+    await expect(readTailscaleIps(answering(stdout))).resolves.toEqual([
+      "100.84.17.203",
+      "fd7a:115c::1",
+    ]);
+  });
+
+  it.each([
+    ["null, as logged out prints it", { Self: { TailscaleIPs: null } }],
+    ["absent", { Self: {} }],
+    ["no strings", { Self: { TailscaleIPs: [1, null] } }],
+  ])("a list that is %s is a successful read of none", async (_label, status) => {
+    await expect(readTailscaleIps(answering(JSON.stringify(status)))).resolves.toEqual([]);
+  });
+
+  it.each([
+    ["a failed command", answering("{}", 1)],
+    ["output that is not JSON", answering("not json")],
+    ["no Self", answering("{}")],
+    ["a Self that is no object", answering(JSON.stringify({ Self: "me" }))],
+    ["a null document", answering("null")],
+    ["an exec that rejects", fakeDeps({ exec: vi.fn(async () => Promise.reject(new Error("x"))) })],
+  ])("%s is a failed read", async (_label, deps) => {
+    await expect(readTailscaleIps(deps)).resolves.toBeUndefined();
+  });
+
+  it("no CLI is a failed read", async () => {
+    const deps = fakeDeps({
+      platform: "darwin",
+      fs: {
+        access: vi.fn(async () => Promise.reject(new Error("ENOENT"))),
+        mkdir: vi.fn(async () => undefined),
+        chmod: vi.fn(async () => undefined),
+      },
+    });
+    await expect(readTailscaleIps(deps)).resolves.toBeUndefined();
   });
 });
 
