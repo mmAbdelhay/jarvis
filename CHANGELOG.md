@@ -8,6 +8,13 @@ version and the downloads. This file is the index.
 
 ## Unreleased
 
+## [0.1.15] — 2026-11-22
+
+- macOS: turning on Tailscale access no longer fails with "could not read
+  Tailscale's settings". Jarvis's background service ran the Tailscale app's
+  binary, which then started as the GUI instead of the CLI, so every Tailscale
+  read failed (Funnel check, certificate, machine list, relay).
+
 ## [0.1.14] — 2026-11-22
 
 - Tailscale access: a new Settings → Remote access switch (off by default,
