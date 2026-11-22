@@ -8,6 +8,8 @@ version and the downloads. This file is the index.
 
 ## Unreleased
 
+## [0.1.14] — 2026-11-22
+
 - Tailscale access: a new Settings → Remote access switch (off by default,
   changed only at the machine) lets other devices on your tailnet join this
   machine with its owner password. It needs an owner password and a Tailscale
@@ -27,6 +29,15 @@ version and the downloads. This file is the index.
   browser list them too). Those windows keep their sign-in with no idle lock,
   ending after 7 days unused or 30 days total; this exception is described in
   SECURITY.md.
+- Desktop: a terminal pane can be split or closed from another device, and
+  Docker shells, files, Settings and restart can be opened on another machine.
+- Plans: each terminal tab shows its own Claude session's plan; a plan made in
+  a new tab no longer replaces the previous tab's plan in the viewer.
+- Tabs: a PR named in your Claude prompt ("review this <PR link>") names and
+  links the tab, with no age limit; a typed tab name survives restart (#32).
+- Terminal: an option to open terminal links in the system browser (#30), and
+  each editor root keeps the same code-server port (#31).
+  Thanks @mohamedgaber-intake40.
 
 ## [0.1.13] — 2026-11-01
 
