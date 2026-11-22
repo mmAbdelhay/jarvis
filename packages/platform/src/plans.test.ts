@@ -186,14 +186,10 @@ describe("list — session", () => {
     await writeFile(join(plansDir, "tab-b.md"), "# B\n");
     const transcriptDir = join(base, "projects", claudeProjectSlug(cwd));
     await mkdir(transcriptDir, { recursive: true });
+    // Raw text, like the session fixture: the matcher reads `<base>/plans/`
+    // as written, so no join() backslashes or JSON escaping on Windows.
     const naming = (file: string): string =>
-      `${JSON.stringify({
-        type: "assistant",
-        message: {
-          role: "assistant",
-          content: [{ type: "text", text: `Plan: ${join(plansDir, file)}` }],
-        },
-      })}\n`;
+      `{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Plan: ${base}/plans/${file}"}]}}\n`;
     const a = join(transcriptDir, "a.jsonl");
     const b = join(transcriptDir, "b.jsonl");
     await writeFile(a, naming("tab-a.md"));
