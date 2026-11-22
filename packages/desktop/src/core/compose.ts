@@ -2609,6 +2609,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     plans: {
       files: planFiles,
       comments: planComments,
+      paneTranscript: (paneKey) => claudeView.transcriptOf(paneKey),
       // plans:list's own `cwd` argument: true only for an existing,
       // statable directory. Absolute is checked first and cheaply,
       // before ever touching the filesystem for a relative path (or any

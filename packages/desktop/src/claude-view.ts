@@ -60,6 +60,10 @@ export function createClaudeViewHandlers(deps: ClaudeViewDeps): {
   answer(paneKey: unknown, index: unknown, label: unknown): ClaudeAnswerResult;
   /** Drops a pane's cached session (its shell exited). */
   forgetPane(paneKey: string): void;
+  /** The transcript of the Claude session in this pane: its path; null for
+   *  a Claude with no transcript yet; else the last one this pane had, or
+   *  undefined when it never had one. Never throws. */
+  transcriptOf(paneKey: string): Promise<string | null | undefined>;
 } {
   // Pane → its session (or none), reused for PANE_SESSION_TTL_MS (a none
   // for PANE_NONE_TTL_MS) so a push storm does not run ps + lsof per call.
@@ -83,9 +87,15 @@ export function createClaudeViewHandlers(deps: ClaudeViewDeps): {
     return NONE;
   }
 
+  // Pane → the last transcript its Claude had, so a pane whose Claude has
+  // exited keeps showing that session's plan rather than another tab's.
+  const lastTranscript = new Map<string, string>();
+
   /** Keeps the caches to live panes and their sessions. */
   function prune(livePanes: ReadonlySet<string>): void {
     for (const paneKey of sessions.keys()) if (!livePanes.has(paneKey)) sessions.delete(paneKey);
+    for (const paneKey of lastTranscript.keys())
+      if (!livePanes.has(paneKey)) lastTranscript.delete(paneKey);
     const ids = new Set<string>();
     for (const { session } of sessions.values()) if (session) ids.add(session.sessionId);
     for (const id of parsed.keys()) if (!ids.has(id)) parsed.delete(id);
@@ -147,6 +157,21 @@ export function createClaudeViewHandlers(deps: ClaudeViewDeps): {
   return {
     forgetPane(paneKey) {
       sessions.delete(paneKey);
+      lastTranscript.delete(paneKey);
+    },
+
+    async transcriptOf(paneKey) {
+      try {
+        const session = await sessionFor(paneKey);
+        if (session !== undefined) {
+          if (session.transcriptPath === undefined) return null;
+          lastTranscript.set(paneKey, session.transcriptPath);
+          return session.transcriptPath;
+        }
+      } catch {
+        // A failed scan or lookup falls back to what the pane last had.
+      }
+      return lastTranscript.get(paneKey);
     },
 
     async view(paneKey) {

@@ -409,6 +409,9 @@ export type DispatchDeps = {
   plans: {
     files: PlanFiles;
     comments: PlanCommentStore;
+    // The calling pane's own Claude transcript (claude-view.ts's
+    // transcriptOf), so each tab's session plan is its own session's.
+    paneTranscript?(paneKey: string): Promise<string | null | undefined>;
     // plans:list's own `cwd` argument: true only for a path that is both
     // absolute and, right now, an existing directory — the check that
     // decides whether to trust the caller's cwd or fall back to the
@@ -1590,7 +1593,8 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
         deps.plans.isDirectory,
         deps.plans.projectRoots(),
       );
-      return deps.plans.files.list(cwd);
+      const transcript = paneKey === "" ? undefined : await deps.plans.paneTranscript?.(paneKey);
+      return deps.plans.files.list(cwd, transcript);
     },
 
     "plans:read": async ([pathArg]) => {

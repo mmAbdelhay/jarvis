@@ -177,6 +177,65 @@ describe("list — session", () => {
     expect(list.planMode.map((entry) => entry.name).sort()).toEqual(["other-a.md", "other-b.md"]);
   });
 
+  it("reads the pane's own transcript, not the newest one, when given", async () => {
+    const base = await tempDir("session-own-base");
+    const cwd = await tempDir("session-own-cwd");
+    const plansDir = join(base, "plans");
+    await mkdir(plansDir, { recursive: true });
+    await writeFile(join(plansDir, "tab-a.md"), "# A\n");
+    await writeFile(join(plansDir, "tab-b.md"), "# B\n");
+    const transcriptDir = join(base, "projects", claudeProjectSlug(cwd));
+    await mkdir(transcriptDir, { recursive: true });
+    const naming = (file: string): string =>
+      `${JSON.stringify({
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: `Plan: ${join(plansDir, file)}` }],
+        },
+      })}\n`;
+    const a = join(transcriptDir, "a.jsonl");
+    const b = join(transcriptDir, "b.jsonl");
+    await writeFile(a, naming("tab-a.md"));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await writeFile(b, naming("tab-b.md")); // newer: tab B planned last
+
+    const planFiles = createPlanFiles({ agents: agentsFor(base), home: base });
+
+    expect((await planFiles.list(cwd, a)).session?.name).toBe("tab-a.md");
+    expect((await planFiles.list(cwd, b)).session?.name).toBe("tab-b.md");
+    expect((await planFiles.list(cwd)).session?.name).toBe("tab-b.md");
+  });
+
+  it("has no session plan for a pane whose Claude has no transcript yet", async () => {
+    const base = await tempDir("session-null-base");
+    const cwd = await tempDir("session-null-cwd");
+    const plansDir = join(base, "plans");
+    await mkdir(plansDir, { recursive: true });
+    await writeFile(join(plansDir, "x.md"), "# x\n");
+    const transcriptDir = join(base, "projects", claudeProjectSlug(cwd));
+    await mkdir(transcriptDir, { recursive: true });
+    const fixture = (await SESSION_FIXTURE).replaceAll("__BASE__", base).replaceAll("__CWD__", cwd);
+    await writeFile(join(transcriptDir, "other.jsonl"), fixture);
+
+    const planFiles = createPlanFiles({ agents: agentsFor(base), home: base });
+
+    expect((await planFiles.list(cwd, null)).session).toBeUndefined();
+  });
+
+  it("ignores a given transcript outside the known bases, or gone from disk", async () => {
+    const base = await tempDir("session-out-base");
+    const cwd = await tempDir("session-out-cwd");
+    const elsewhere = await tempDir("session-out-elsewhere");
+    const stray = join(elsewhere, "x.jsonl");
+    await writeFile(stray, "{}\n");
+    const planFiles = createPlanFiles({ agents: agentsFor(base), home: base });
+
+    expect((await planFiles.list(cwd, stray)).session).toBeUndefined();
+    const missing = join(base, "projects", claudeProjectSlug(cwd), "gone.jsonl");
+    expect((await planFiles.list(cwd, missing)).session).toBeUndefined();
+  });
+
   it("returns session undefined when there is no transcript for the project", async () => {
     const base = await tempDir("session-none-base");
     const cwd = await tempDir("session-none-cwd");
