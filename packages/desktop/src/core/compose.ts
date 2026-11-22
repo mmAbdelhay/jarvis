@@ -76,6 +76,7 @@ import {
   certificateExpiry,
   obtainCertificate,
   readTailscaleIps,
+  tailscaleCliEnv,
   type TailscaleCertDeps,
 } from "../tailscale-cert.js";
 import { createTailnetPeers, probePeerFile } from "../tailnet-peers.js";
@@ -2406,7 +2407,8 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
   // `platform` is handed in here, the same place defaultHeadlampBinary
   // gets it, rather than read inside tailscale-cert.ts itself.
   const tailscaleCertDeps: TailscaleCertDeps = {
-    exec: (command, args, limits) => runCommandWithLimits(command, args, limits),
+    exec: (command, args, limits) =>
+      runCommandWithLimits(command, args, limits, tailscaleCliEnv(process.env)),
     fs: {
       access: (path) => access(path),
       mkdir: async (path, options) => {
