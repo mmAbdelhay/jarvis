@@ -33,7 +33,7 @@ version and the downloads. This file is the index.
   Docker shells, files, Settings and restart can be opened on another machine.
 - Plans: each terminal tab shows its own Claude session's plan; a plan made in
   a new tab no longer replaces the previous tab's plan in the viewer.
-- Tabs: a PR named in your Claude prompt ("review this <PR link>") names and
+- Tabs: a PR named in your Claude prompt (`review this <PR link>`) names and
   links the tab, with no age limit; a typed tab name survives restart (#32).
 - Terminal: an option to open terminal links in the system browser (#30), and
   each editor root keeps the same code-server port (#31).
