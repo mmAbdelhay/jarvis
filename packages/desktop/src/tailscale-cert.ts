@@ -46,6 +46,18 @@ export type TailscaleCertResult =
     };
 
 const MAC_CLI_PATH = "/Applications/Tailscale.app/Contents/MacOS/Tailscale";
+
+/**
+ * The environment every Tailscale CLI call runs with. On macOS the CLI is the
+ * Tailscale app's own binary, and it decides between CLI and GUI by how it was
+ * started: run from Jarvis's launchd background service it starts as the GUI,
+ * fails ("The Tailscale GUI failed to start") and still exits 0, so every read
+ * fails. `TAILSCALE_BE_CLI=1` makes it the CLI; elsewhere the variable is
+ * ignored. A copy: `env` is not changed.
+ */
+export function tailscaleCliEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return { ...env, TAILSCALE_BE_CLI: "1" };
+}
 const PROBE_LIMITS = { timeoutMs: 5_000, maxOutputBytes: 4_096 };
 const STATUS_LIMITS = { timeoutMs: 10_000, maxOutputBytes: 1_000_000 };
 const CERT_TIMEOUT_MS = 60_000;

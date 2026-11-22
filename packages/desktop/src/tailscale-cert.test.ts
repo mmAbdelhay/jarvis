@@ -8,6 +8,7 @@ import {
   obtainCertificate,
   readTailscaleIps,
   tailnetName,
+  tailscaleCliEnv,
   type TailscaleCertDeps,
   type TailscaleExec,
   type TailscaleFs,
@@ -387,5 +388,23 @@ describe("obtainCertificate", () => {
       keyPath: join("/Users/x", ".config", "jarvis", "tls", "m1.tailnet.ts.net.key"),
       name: "m1.tailnet.ts.net",
     });
+  });
+});
+
+describe("tailscaleCliEnv", () => {
+  it("adds TAILSCALE_BE_CLI=1 so the macOS app binary runs as the CLI under launchd", () => {
+    const env = { PATH: "/usr/bin", HOME: "/Users/x" };
+    expect(tailscaleCliEnv(env)).toEqual({
+      PATH: "/usr/bin",
+      HOME: "/Users/x",
+      TAILSCALE_BE_CLI: "1",
+    });
+  });
+
+  it("returns a copy and leaves the given env unchanged", () => {
+    const env: NodeJS.ProcessEnv = { PATH: "/usr/bin" };
+    const out = tailscaleCliEnv(env);
+    expect(out).not.toBe(env);
+    expect(env.TAILSCALE_BE_CLI).toBeUndefined();
   });
 });
