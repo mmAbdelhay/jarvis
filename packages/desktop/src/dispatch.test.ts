@@ -308,6 +308,11 @@ export function fakeDeps(overrides: Partial<DispatchDeps> = {}): DispatchDeps {
       view: vi.fn(async () => ({ kind: "none" as const })),
       answer: vi.fn(() => ({ ok: true as const })),
     },
+    agentView: {
+      view: vi.fn(async () => ({ kind: "none" as const })),
+      answer: vi.fn(() => ({ ok: true as const })),
+      send: vi.fn(async () => ({ ok: true as const })),
+    },
     attachUpload: {
       attach: vi.fn(async () => ({ ok: true as const, path: ".jarvis/uploads/x.png" })),
     },
@@ -1313,6 +1318,17 @@ describe("dispatch table: api, dialog, voices", () => {
       ok: true,
     });
     expect(deps.claudeView.answer).toHaveBeenCalledWith("t1", 0, "Yes");
+  });
+
+  it("terminal:agentView, agentAnswer and agentSend pass their arguments through", async () => {
+    const deps = fakeDeps();
+    const table = createDispatchTable(deps);
+    expect(await call(table, "terminal:agentView", "t1")).toEqual({ kind: "none" });
+    expect(deps.agentView.view).toHaveBeenCalledWith("t1");
+    expect(await call(table, "terminal:agentAnswer", "t1", 0, "Yes")).toEqual({ ok: true });
+    expect(deps.agentView.answer).toHaveBeenCalledWith("t1", 0, "Yes");
+    expect(await call(table, "terminal:agentSend", "t1", "hello")).toEqual({ ok: true });
+    expect(deps.agentView.send).toHaveBeenCalledWith("t1", "hello");
   });
 
   it("terminal:attachUpload attaches with the authenticated origin's deviceId", async () => {

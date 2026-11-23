@@ -250,7 +250,14 @@ import { writeDaemonEnabled } from "../daemon/config-file.js";
 import { errorMessage, MESSAGES, PRIMARY_LANGUAGE } from "../messages.js";
 import { createPaneScreens } from "../pane-screen.js";
 import { createPaneClaudeLookup } from "../pane-claude-session.js";
+import {
+  createPaneAgentLookup,
+  listCodexRollouts,
+  parseChildPids,
+  parseLsofFileNames,
+} from "../pane-agent-session.js";
 import { createPaneAttach, createPaneAttachCwd } from "../pane-attach.js";
+import { createAgentViewHandlers } from "../agent-view.js";
 import { createClaudeViewHandlers, createClaudeViewNotifier } from "../claude-view.js";
 import { createRecorderDeps, Recorder } from "../recorder.js";
 import { capacityReport, startupReport } from "../startup.js";
@@ -2453,6 +2460,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     onExit: (cb) =>
       shells.onShellExit(({ paneKey }) => {
         claudeView.forgetPane(paneKey);
+        agentView.forgetPane(paneKey);
         cb(paneKey);
       }),
     watch: (dir, cb, onError) => {
@@ -2478,6 +2486,49 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
       home: homedir(),
       readFile: (path) => importFs.readHead(path),
       listTranscripts: (dir) => importFs.listFiles(dir, "claude"),
+    }),
+    readTail: (path) => readFileTail(path, CHAT_TAIL_BYTES),
+    statFile: async (path) => {
+      const { size, mtimeMs } = await stat(path);
+      return { size, mtimeMs };
+    },
+    now: () => Date.now(),
+    notice: (paneKey) => claudeViewNotifier.notice(paneKey),
+    screenText: (paneKey) => paneScreens.screenText(paneKey),
+    write: (paneKey, data) => shells.write(paneKey, data),
+    log: (token) => console.warn(token),
+    follow: (paneKey, transcript) => claudeViewNotifier.follow(paneKey, transcript),
+    forget: (paneKey) => claudeViewNotifier.forget(paneKey),
+  });
+  // The desktop's Chat view of a pane running Claude, Copilot or Codex
+  // (agent-view.ts). The same notifier as the phone's: it only learns of a
+  // pane once an agent is found there.
+  const agentView = createAgentViewHandlers({
+    panes: () => shells.panes(),
+    scanAgents: scanPaneAgents,
+    lookup: createPaneAgentLookup({
+      agents: () => registry.list(),
+      home: homedir(),
+      env: process.env,
+      platform,
+      readFile: (path) => importFs.readHead(path),
+      listTranscripts: (dir) => importFs.listFiles(dir, "claude"),
+      listDir: (path) => readdir(path),
+      childPids: async (pid) => {
+        const out = await runCommand("ps", ["-axo", "pid=,ppid="]);
+        return out.code === 0 ? parseChildPids(out.stdout, pid) : [];
+      },
+      openFiles: async (pids) => {
+        if (pids.length === 0) return [];
+        const out = await runCommand("lsof", ["-p", pids.join(","), "-Fn"]);
+        return parseLsofFileNames(out.stdout);
+      },
+      listRollouts: (dir) =>
+        listCodexRollouts(dir, {
+          readDir: (path) => readdir(path),
+          mtimeMs: async (path) => (await stat(path)).mtimeMs,
+        }),
+      readHead: (path) => importFs.readHead(path),
     }),
     readTail: (path) => readFileTail(path, CHAT_TAIL_BYTES),
     statFile: async (path) => {
@@ -2604,6 +2655,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     awake,
     tailnetPeers,
     claudeView,
+    agentView,
     attachUpload: paneAttach,
     terminalLayout: { announce: (change) => broadcast.send("terminal:layout", change) },
     plans: {

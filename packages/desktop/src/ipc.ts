@@ -30,6 +30,7 @@ import {
   type SystemMetrics,
   type Turn,
 } from "@jarvis/core";
+import type { AgentAnswerResult, AgentSendResult, AgentView } from "./agent-view.js";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { Brain, ReviewComment, WorkspaceState, WorkspaceTab } from "@jarvis/core";
 import type { BindChoice, OwnerStatus, RemoteStatus, SetOwnerPasswordResult } from "@jarvis/remote";
@@ -1011,6 +1012,17 @@ export type RendererApi = {
    *  pane's project (`.jarvis/uploads/`), answering its path relative to
    *  there. A phone's call only: a desktop origin is refused. */
   terminalAttachUpload(paneKey: string, fileId: string): Promise<AttachUploadResult>;
+  /** The desktop's Chat view of a pane running Claude Code, Copilot or
+   *  Codex: the session's recent turns plus the prompt and spinner on its
+   *  screen; `none` when no agent runs there. Never carries prompt keys. */
+  terminalAgentView(paneKey: string): Promise<AgentView>;
+  /** Chooses option `index` of the pane's prompt; the screen is read again
+   *  first and a prompt that is gone or changed is refused. */
+  terminalAgentAnswer(paneKey: string, index: number, label: string): Promise<AgentAnswerResult>;
+  /** Types `text` into the agent in the pane as one bracketed paste and an
+   *  Enter. Refused with `gone` when no agent runs there (never a plain
+   *  shell), `prompt` at a menu, `invalid` for empty or over-long text. */
+  terminalAgentSend(paneKey: string, text: string): Promise<AgentSendResult>;
   onTerminalClaudeViewChanged(cb: (payload: { paneKey: string }) => void): void;
   /** Starts a second shell in the same tab and the same directory, for a
    *  pane the renderer has just split off. */

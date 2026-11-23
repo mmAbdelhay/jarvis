@@ -1,9 +1,10 @@
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { AgentConfig } from "@jarvis/core";
 import type { ExternalAgentProcess } from "@jarvis/platform";
 import {
   createPaneAgentLookup,
+  listCodexRollouts,
   parseChildPids,
   parseLsofFileNames,
   type PaneAgentLookupDeps,
@@ -248,5 +249,38 @@ describe("createPaneAgentLookup", () => {
         createPaneAgentLookup(deps).forProcess(processOf("codex")),
       ).resolves.toBeUndefined();
     });
+  });
+});
+
+describe("listCodexRollouts", () => {
+  it("walks year/month/day newest first, keeps rollouts only, stops at the cap", async () => {
+    const tree = new Map<string, string[]>([
+      ["/s", ["2026", "2025", "note.txt"]],
+      ["/s/2026", ["11"]],
+      ["/s/2026/11", ["22", "23"]],
+      ["/s/2026/11/23", ["rollout-b.jsonl", "rollout-a.jsonl", "other.txt"]],
+      ["/s/2026/11/22", ["rollout-c.jsonl"]],
+      ["/s/2025", ["01"]],
+      ["/s/2025/01", ["01"]],
+      ["/s/2025/01/01", ["rollout-old.jsonl"]],
+    ]);
+    const fs = {
+      readDir: async (path: string) => {
+        const entries = tree.get(path.split("\\").join("/"));
+        if (entries === undefined) throw new Error("ENOENT");
+        return entries;
+      },
+      mtimeMs: async () => 7,
+    };
+    const all = await listCodexRollouts("/s", fs);
+    expect(all.map((file) => file.path.split(sep).slice(-1)[0])).toEqual([
+      "rollout-b.jsonl",
+      "rollout-a.jsonl",
+      "rollout-c.jsonl",
+      "rollout-old.jsonl",
+    ]);
+    expect(all[0]?.mtimeMs).toBe(7);
+    expect(await listCodexRollouts("/s", fs, 2)).toHaveLength(2);
+    expect(await listCodexRollouts("/missing", fs)).toEqual([]);
   });
 });

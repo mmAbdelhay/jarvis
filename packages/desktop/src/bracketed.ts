@@ -40,7 +40,7 @@ const CONTROL_BYTES = /[\u0000-\u0008\u000b-\u001f\u007f\u0080-\u009f]/g;
  * `[201~...` sequence survives as inert printable text with no escape
  * introducer, never a control sequence a terminal would act on.
  */
-function sanitizeForPaste(text: string): string {
+export function sanitizeForPaste(text: string): string {
   const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   return normalized.replace(CONTROL_BYTES, "");
 }

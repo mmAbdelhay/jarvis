@@ -31,6 +31,7 @@ import {
 import type { DockerConfig, PlanCommentStore, PlanFiles, SnippetLanguage } from "@jarvis/platform";
 import { isWithin } from "@jarvis/platform";
 import { randomInt } from "node:crypto";
+import type { AgentAnswerResult, AgentSendResult, AgentView } from "./agent-view.js";
 import { bracketedSubmit } from "./bracketed.js";
 import {
   type AttachUploadResult,
@@ -464,6 +465,14 @@ export type DispatchDeps = {
   claudeView: {
     view(paneKey: unknown): Promise<ClaudeView>;
     answer(paneKey: unknown, index: unknown, label: unknown): ClaudeAnswerResult;
+  };
+  // The desktop's Chat view of a pane running any agent (agent-view.ts's
+  // handlers, built in compose.ts). Desktop-only channels; each validates
+  // its own arguments.
+  agentView: {
+    view(paneKey: unknown): Promise<AgentView>;
+    answer(paneKey: unknown, index: unknown, label: unknown): AgentAnswerResult;
+    send(paneKey: unknown, text: unknown): Promise<AgentSendResult>;
   };
   // pane-attach.ts's createPaneAttach, built in compose.ts over the same
   // upload store remote:uploadFile stages into. `deviceId` is always the
@@ -1204,6 +1213,10 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
     // tap, never trusted from the call (session:answer's rule).
     "terminal:claudeView": ([paneKey]) => deps.claudeView.view(paneKey),
     "terminal:answer": ([paneKey, index, label]) => deps.claudeView.answer(paneKey, index, label),
+    "terminal:agentView": ([paneKey]) => deps.agentView.view(paneKey),
+    "terminal:agentAnswer": ([paneKey, index, label]) =>
+      deps.agentView.answer(paneKey, index, label),
+    "terminal:agentSend": ([paneKey, text]) => deps.agentView.send(paneKey, text),
     // A file this same device staged with remote:uploadFile, copied into
     // the pane's project. Like remote:readJsonUpload, a desktop origin is
     // refused here, not by policy alone, and the owner is always the

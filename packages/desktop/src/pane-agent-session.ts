@@ -221,3 +221,42 @@ export function createPaneAgentLookup(deps: PaneAgentLookupDeps): PaneAgentLooku
     forget: (ids) => claude.forget(ids),
   };
 }
+
+/** The most rollout files one fallback listing looks at. */
+export const MAX_ROLLOUTS = 200;
+
+/**
+ * The rollout files under a Codex sessions directory (`YYYY/MM/DD/rollout-*.jsonl`),
+ * newest day first, each with its mtime. A missing directory is an empty list.
+ */
+export async function listCodexRollouts(
+  dir: string,
+  fs: { readDir(path: string): Promise<string[]>; mtimeMs(path: string): Promise<number> },
+  limit = MAX_ROLLOUTS,
+): Promise<{ path: string; mtimeMs: number }[]> {
+  const found: { path: string; mtimeMs: number }[] = [];
+  async function walk(path: string, depth: number): Promise<void> {
+    if (found.length >= limit) return;
+    let entries: string[];
+    try {
+      entries = (await fs.readDir(path)).sort().reverse();
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (found.length >= limit) return;
+      const child = join(path, entry);
+      if (depth < 3) {
+        if (/^\d+$/.test(entry)) await walk(child, depth + 1);
+      } else if (entry.startsWith("rollout-") && entry.endsWith(".jsonl")) {
+        try {
+          found.push({ path: child, mtimeMs: await fs.mtimeMs(child) });
+        } catch {
+          // Gone between the listing and the stat.
+        }
+      }
+    }
+  }
+  await walk(dir, 0);
+  return found;
+}

@@ -132,6 +132,13 @@ export const CHANNEL_POLICY = {
   "terminal:listDir": "remote",
   "terminal:openFile": "desktop-only",
   "terminal:openFolder": "desktop-only",
+  // The desktop's Chat view of a pane running Claude, Copilot or Codex
+  // (agent-view.ts): reading it, answering its prompt and typing into the
+  // agent all stay on the laptop. The phone has terminal:claudeView and
+  // terminal:answer for Claude only, and its protocol is unchanged.
+  "terminal:agentView": "desktop-only",
+  "terminal:agentAnswer": "desktop-only",
+  "terminal:agentSend": "desktop-only",
   // The file sidebar's writes. Owner decision 2026-10-03: rename and trash
   // are remote — the phone's file list drives them. Both stay inside a
   // configured project root (ipc.ts's resolveWithin/entryWithin, the same

@@ -60,6 +60,12 @@ describe("remote policy", () => {
     // laptop, like terminal:openFile.
     "terminal:openFolder",
     "terminal:openFile",
+    // The desktop's Chat view of an agent pane: typing into an agent and
+    // answering its prompts stay on the laptop (the phone has its own
+    // terminal:claudeView / terminal:answer).
+    "terminal:agentView",
+    "terminal:agentAnswer",
+    "terminal:agentSend",
   ])("denies %s remotely", (channel) => {
     expect(CHANNEL_POLICY[channel as keyof typeof CHANNEL_POLICY]).toBe("desktop-only");
     expect(isRemoteAllowed(channel)).toBe(false);
