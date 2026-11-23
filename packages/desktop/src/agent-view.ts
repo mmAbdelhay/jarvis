@@ -79,6 +79,11 @@ function screenTail(screen: string): string {
 
 export function createAgentViewHandlers(deps: AgentViewDeps): {
   view(paneKey: unknown): Promise<AgentView>;
+  /** The same read as view(), with no outward effect: nothing noticed,
+   *  followed or forgotten, so a pane nobody opened is not marked watched.
+   *  A failed read throws (an Error whose message is a category token)
+   *  instead of answering "none". */
+  peek(paneKey: unknown): Promise<AgentView>;
   answer(paneKey: unknown, index: unknown, label: unknown): AgentAnswerResult;
   send(paneKey: unknown, text: unknown): Promise<AgentSendResult>;
   /** Drops a pane's cached session (its shell exited). */
@@ -107,34 +112,37 @@ export function createAgentViewHandlers(deps: AgentViewDeps): {
     return NONE;
   }
 
-  return {
-    forgetPane: (paneKey) => cache.forget(paneKey),
-
-    async view(paneKey) {
-      try {
-        if (typeof paneKey !== "string") return NONE;
-        const panes = deps.panes();
-        const livePanes = new Set(panes.filter((pane) => !pane.exited).map((pane) => pane.paneKey));
-        chats.retain(cache.prune(livePanes));
-        if (!livePanes.has(paneKey)) return NONE;
-      } catch {
-        return none("panes");
-      }
-      let session: PaneAgentSession | undefined;
-      try {
-        session = await cache.sessionFor(paneKey);
-      } catch (error) {
-        return none(error instanceof Error && error.message === "scan" ? "scan" : "lookup");
-      }
-      if (session === undefined) return NONE;
-      // Only now is a remote or window looking at an agent: a plain
-      // `npm run dev` pane costs no output pushes and no transcript watch.
+  /** view() when `observe`; peek() otherwise. */
+  async function read(paneKey: unknown, observe: boolean): Promise<AgentView> {
+    const fail = (token: string): AgentView => {
+      if (observe) return none(token);
+      throw new Error(token);
+    };
+    try {
+      if (typeof paneKey !== "string") return NONE;
+      const panes = deps.panes();
+      const livePanes = new Set(panes.filter((pane) => !pane.exited).map((pane) => pane.paneKey));
+      chats.retain(cache.prune(livePanes));
+      if (!livePanes.has(paneKey)) return NONE;
+    } catch {
+      return fail("panes");
+    }
+    let session: PaneAgentSession | undefined;
+    try {
+      session = await cache.sessionFor(paneKey);
+    } catch (error) {
+      return fail(error instanceof Error && error.message === "scan" ? "scan" : "lookup");
+    }
+    if (session === undefined) return NONE;
+    // Only now is a remote or window looking at an agent: a plain
+    // `npm run dev` pane costs no output pushes and no transcript watch.
+    const transcriptPath = session.transcriptPath;
+    if (observe) {
       try {
         deps.notice(paneKey);
       } catch {
         log("notice");
       }
-      const transcriptPath = session.transcriptPath;
       if (transcriptPath !== undefined) {
         try {
           deps.follow(paneKey, { dir: dirname(transcriptPath), file: basename(transcriptPath) });
@@ -142,66 +150,72 @@ export function createAgentViewHandlers(deps: AgentViewDeps): {
           log("follow");
         }
       }
-      // The shell can exit while the scan or lookup awaits; see claude-view.ts.
-      try {
-        if (!cache.live(paneKey)) {
-          deps.forget(paneKey);
-          cache.forget(paneKey);
-          return NONE;
-        }
-      } catch {
-        return none("panes");
+    }
+    // The shell can exit while the scan or lookup awaits; see claude-view.ts.
+    try {
+      if (!cache.live(paneKey)) {
+        if (observe) deps.forget(paneKey);
+        cache.forget(paneKey);
+        return NONE;
       }
+    } catch {
+      return fail("panes");
+    }
 
-      let chat: Chat = { turns: [] };
-      if (transcriptPath !== undefined) {
-        try {
-          chat = await chats.get(session.sessionId, transcriptPath, parserFor(session.vendor));
-        } catch {
-          return none("transcript");
-        }
-      }
+    let chat: Chat = { turns: [] };
+    if (transcriptPath !== undefined) {
       try {
-        const screen = deps.screenText(paneKey) ?? "";
-        let mode: ClaudeMode | undefined;
-        let prompt: ReturnType<typeof readPrompt>;
-        let working: string | undefined;
-        let needsTerm = false;
-        if (session.vendor === "anthropic") {
-          const read = readClaudeScreen(screen);
-          ({ prompt, working } = read);
-          mode = read.mode;
-        } else {
-          const tail = screenTail(screen);
-          prompt = readPrompt(tail);
-          if (readAgentInputState(tail, session.vendor) === "busy") working = WORKING_LABEL;
-        }
-        if (prompt === undefined) {
-          needsTerm = readAgentInputState(screenTail(screen), session.vendor) === "approval-prompt";
-        }
-        return {
-          kind: "agent",
-          vendor: session.vendor,
-          sessionId: session.sessionId,
-          ...(session.name === undefined ? {} : { title: session.name }),
-          ...(chat.model === undefined ? {} : { model: chat.model }),
-          ...(mode === undefined ? {} : { mode }),
-          turns: chat.turns,
-          ...(prompt === undefined
-            ? {}
-            : {
-                prompt: {
-                  question: prompt.question,
-                  options: prompt.options.map(({ label }) => ({ label })),
-                },
-              }),
-          ...(needsTerm ? { needsTerm: true as const } : {}),
-          ...(working === undefined ? {} : { working }),
-        };
+        chat = await chats.get(session.sessionId, transcriptPath, parserFor(session.vendor));
       } catch {
-        return none("screen");
+        return fail("transcript");
       }
-    },
+    }
+    try {
+      const screen = deps.screenText(paneKey) ?? "";
+      let mode: ClaudeMode | undefined;
+      let prompt: ReturnType<typeof readPrompt>;
+      let working: string | undefined;
+      let needsTerm = false;
+      if (session.vendor === "anthropic") {
+        const parsed = readClaudeScreen(screen);
+        ({ prompt, working } = parsed);
+        mode = parsed.mode;
+      } else {
+        const tail = screenTail(screen);
+        prompt = readPrompt(tail);
+        if (readAgentInputState(tail, session.vendor) === "busy") working = WORKING_LABEL;
+      }
+      if (prompt === undefined) {
+        needsTerm = readAgentInputState(screenTail(screen), session.vendor) === "approval-prompt";
+      }
+      return {
+        kind: "agent",
+        vendor: session.vendor,
+        sessionId: session.sessionId,
+        ...(session.name === undefined ? {} : { title: session.name }),
+        ...(chat.model === undefined ? {} : { model: chat.model }),
+        ...(mode === undefined ? {} : { mode }),
+        turns: chat.turns,
+        ...(prompt === undefined
+          ? {}
+          : {
+              prompt: {
+                question: prompt.question,
+                options: prompt.options.map(({ label }) => ({ label })),
+              },
+            }),
+        ...(needsTerm ? { needsTerm: true as const } : {}),
+        ...(working === undefined ? {} : { working }),
+      };
+    } catch {
+      return fail("screen");
+    }
+  }
+
+  return {
+    forgetPane: (paneKey) => cache.forget(paneKey),
+    view: (paneKey) => read(paneKey, true),
+    peek: (paneKey) => read(paneKey, false),
 
     // Read again at the moment of answering, never trusted from the call —
     // terminal:answer's rule. The renderer names the option by index and

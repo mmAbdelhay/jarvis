@@ -27,6 +27,9 @@ export type DesktopHost = {
   destroyViews(): void;
   /** An OS notification — a global login lockout or a reused refresh token. */
   showNotification(title: string, body: string): void;
+  /** A plain desktop notice (the Office's raised hand): not a security
+   *  alert. With no app attached it is dropped — never queued, never logged. */
+  showNotice(title: string, body: string): void;
   /** The system browser — remote:openWebClient. */
   openExternal(url: string): Promise<void>;
   /** The file sidebar's Move to Trash — Electron's `shell.trashItem`. The
@@ -89,6 +92,9 @@ export function createHostLink(): HostLink {
       // The title only: it names the event, and the body is for the user.
       console.error(`desktop notification not shown, no app attached: ${title}`);
     },
+    // Dropped when no app is attached: not worth a log line, which would
+    // carry a project name.
+    showNotice: (title, body) => attached?.showNotice(title, body),
     openExternal: (url) =>
       attached === undefined
         ? Promise.reject(new Error("No desktop app is attached to open a browser"))

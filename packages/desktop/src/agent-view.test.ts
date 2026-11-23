@@ -198,6 +198,53 @@ describe("agentView", () => {
   });
 });
 
+describe("agentView peek", () => {
+  it("reads the same view as view() without noticing, following or forgetting", async () => {
+    const seen = fakeDeps("anthropic", CLAUDE_BUSY);
+    const peeked = await createAgentViewHandlers(seen).peek("t1");
+    const viewed = await createAgentViewHandlers(fakeDeps("anthropic", CLAUDE_BUSY)).view("t1");
+    expect(peeked).toEqual(viewed);
+    expect(peeked.kind).toBe("agent");
+    expect(seen.notice).not.toHaveBeenCalled();
+    expect(seen.follow).not.toHaveBeenCalled();
+    expect(seen.forget).not.toHaveBeenCalled();
+  });
+
+  it("is none for a plain pane, an unknown pane and a non-string key", async () => {
+    const handlers = createAgentViewHandlers(fakeDeps(undefined, "$ ls"));
+    expect(await handlers.peek("t1")).toEqual({ kind: "none" });
+    expect(await handlers.peek("gone")).toEqual({ kind: "none" });
+    expect(await handlers.peek(7)).toEqual({ kind: "none" });
+  });
+
+  it("throws, never answers none, when a read fails", async () => {
+    const scan = createAgentViewHandlers(
+      fakeDeps("anthropic", "", {
+        scanAgents: vi.fn(async () => {
+          throw new Error("scan");
+        }),
+      }),
+    );
+    await expect(scan.peek("t1")).rejects.toThrow("scan");
+    const transcript = createAgentViewHandlers(
+      fakeDeps("anthropic", "", {
+        readTail: vi.fn(async () => {
+          throw new Error("disk");
+        }),
+      }),
+    );
+    await expect(transcript.peek("t1")).rejects.toThrow("transcript");
+    const panes = createAgentViewHandlers(
+      fakeDeps("anthropic", "", {
+        panes: vi.fn(() => {
+          throw new Error("x");
+        }),
+      }),
+    );
+    await expect(panes.peek("t1")).rejects.toThrow("panes");
+  });
+});
+
 describe("agentView needsTerm", () => {
   it("flags a menu readPrompt cannot read, without a prompt", async () => {
     const view = await createAgentViewHandlers(fakeDeps("openai", CODEX_MENU)).view("t1");

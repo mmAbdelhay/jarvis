@@ -5870,6 +5870,7 @@
 .office-row__count { margin-inline-start: auto; font-size: 12px; font-weight: 400; color: var(--text-muted); }
 .office-row__hands { padding: 2px 8px; border-radius: 9px; background: var(--warn-quiet); color: var(--warn); font-size: 12px; }
 .office-row__hands[hidden] { display: none; }
+.office-row__hands:empty { display: none; }
 .office-row--closed { opacity: 0.55; color: var(--text-muted); cursor: default; }
 .office-stage { position: relative; flex: 1 1 auto; min-width: 0; overflow: hidden; cursor: grab;
   touch-action: none; user-select: none; }
@@ -5921,6 +5922,15 @@
 .office-sign__hands { margin-inline-start: 6px; padding: 5px 9px; border-radius: 9px; background: var(--warn);
   color: var(--ground); animation: office-pulse 1.6s ease-out infinite; }
 .office-sign__hands[hidden] { display: none; }
+/* Name tags, hand badges and bubbles: one layer after every room, so no
+   neighbouring cubicle or room can cover one. Each seat's group is a 200x150
+   box at the seat's world position, so the offsets below match the seat's. */
+.office-labels { position: absolute; left: 0; top: 0; z-index: 1000; pointer-events: none; }
+.office-seat-labels { position: absolute; width: 200px; height: 150px; pointer-events: none;
+  transition: opacity 0.3s; }
+.office-seat-labels--dim { opacity: 0.35; }
+.office-seat-labels--in { animation: office-seat-in 0.4s ease-out; }
+.office-seat-labels--out { animation: office-seat-out 0.4s ease-in forwards; }
 .office-seat {
   position: absolute;
   width: 200px;
@@ -5965,9 +5975,9 @@
   border-radius: 9px; transform: translateX(-50%); background: var(--surface-dim); color: var(--text-secondary);
   font-size: 11px; line-height: 17px; font-weight: 700; white-space: nowrap; pointer-events: none; }
 .office--near .office-tag { display: block; }
-.office-seat[data-pose="hand"] .office-tag { background: var(--warn-quiet); color: var(--warn); }
-.office-seat[data-pose="dead"] .office-tag { background: var(--bad-quiet); color: var(--bad); }
-.office-seat[data-pose="done"] .office-tag { background: var(--good-quiet); color: var(--good); }
+.office-seat-labels[data-pose="hand"] .office-tag { background: var(--warn-quiet); color: var(--warn); }
+.office-seat-labels[data-pose="dead"] .office-tag { background: var(--bad-quiet); color: var(--bad); }
+.office-seat-labels[data-pose="done"] .office-tag { background: var(--good-quiet); color: var(--good); }
 .office-hand { position: absolute; left: 100px; top: 8px; z-index: 450; display: flex; flex-direction: column;
   align-items: center; gap: 4px; pointer-events: none; white-space: nowrap;
   transform: translate(-50%, -100%) scale(var(--office-inv, 1)); transform-origin: 50% 100%; }

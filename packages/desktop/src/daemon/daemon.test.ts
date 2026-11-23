@@ -306,6 +306,25 @@ describe("daemon host: security alerts", () => {
     expect(logs.join("\n")).not.toContain("body");
   });
 
+  it("drops a non-security notice with no app attached: never queued, never logged", () => {
+    const { daemonHost, pushes, logs } = hostDouble();
+    for (let i = 1; i <= 25; i++) daemonHost.host.showNotice(`Acme ${i}`, "Claude Code");
+    daemonHost.host.showNotification("real alert", "b");
+    expect(pushes).toEqual([]);
+    expect(logs.join("\n")).not.toContain("Acme");
+    // A flood of notices cannot evict a security alert.
+    expect(daemonHost.queuedAlerts().map((alert) => alert.title)).toEqual(["real alert"]);
+    daemonHost.attach(1, { focused: false, awake: true });
+    expect(pushes.map(([channel]) => channel)).toEqual([DAEMON_PUSHES.alert]);
+  });
+
+  it("pushes a notice live to an attached app on its own channel", () => {
+    const { daemonHost, pushes } = hostDouble();
+    daemonHost.attach(1, { focused: false, awake: true });
+    daemonHost.host.showNotice("Acme", "Claude Code");
+    expect(pushes).toEqual([[DAEMON_PUSHES.notice, { title: "Acme", body: "Claude Code" }]]);
+  });
+
   it("flushes the queue, in order, to the next app that attaches, then pushes live", () => {
     const { daemonHost, pushes } = hostDouble();
     daemonHost.host.showNotification("one", "b1");

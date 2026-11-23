@@ -323,6 +323,9 @@ function createDesktopHost(client: CoreClient) {
     showNotification: (title, body) => {
       if (Notification.isSupported()) new Notification({ title, body }).show();
     },
+    showNotice: (title, body) => {
+      if (Notification.isSupported()) new Notification({ title, body }).show();
+    },
     // Phase 1: remote:openWebClient's system browser (dispatch.ts).
     // Only the bridge's own web client, checked against its live status
     // (open-external-guard.ts) — the same rule as the socket adapter's.

@@ -188,6 +188,107 @@ describe("the floor", () => {
   });
 });
 
+describe("the label layer", () => {
+  const layer = () => $("#office-world .office-labels");
+  const asking = {
+    panes: { t1: { agent: "Codex", state: "question" as const, question: "Run it?" } },
+    sessions: {},
+  };
+
+  it("holds every name label, hand badge and bubble in one layer after all rooms, outside every room", () => {
+    const view = setup();
+    view.update(
+      modelOf([tab("t1", "alpha", { kind: "terminal" }), tab("t2", "gamma")], { activity: asking }),
+    );
+    const world = $("#office-world");
+    expect(world.lastElementChild).toBe(layer());
+    const rooms = [...world.querySelectorAll(".office-room")];
+    expect(rooms).toHaveLength(2);
+    expect(layer().querySelectorAll(".office-tag")).toHaveLength(2);
+    expect(layer().querySelectorAll(".office-hand")).toHaveLength(1);
+    expect(layer().querySelectorAll(".office-bubble")).toHaveLength(1);
+    for (const room of rooms) {
+      expect(room.querySelector(".office-tag, .office-hand, .office-bubble")).toBeNull();
+    }
+    expect(layer().getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("keeps the same label nodes across an update, follows a leaver out, and drops the badge when the hand lowers", () => {
+    const view = setup();
+    view.update(
+      modelOf([tab("t1", "alpha", { kind: "terminal" }), tab("t2", "alpha")], { activity: asking }),
+    );
+    const tags = [...layer().querySelectorAll(".office-tag")];
+    const badge = layer().querySelector(".office-hand");
+    view.update(
+      modelOf([tab("t1", "alpha", { kind: "terminal" }), tab("t2", "alpha")], { activity: asking }),
+    );
+    expect([...layer().querySelectorAll(".office-tag")]).toEqual(tags);
+    expect(layer().querySelector(".office-hand")).toBe(badge);
+    view.update(modelOf([tab("t1", "alpha", { kind: "terminal" })], { activity: asking }));
+    settleTimers();
+    expect(layer().querySelectorAll(".office-tag")).toHaveLength(1);
+    view.update(modelOf([tab("t1", "alpha", { kind: "terminal" })]));
+    expect(layer().querySelector(".office-hand")).toBeNull();
+  });
+
+  it("places a seat's labels at its world position and tints them by pose", () => {
+    const view = setup();
+    view.update(modelOf([tab("t1", "alpha", { kind: "terminal" })], { activity: asking }));
+    const seat = seats()[0] as HTMLElement;
+    const room = $(".office-room");
+    const group = layer().firstElementChild as HTMLElement;
+    expect(group.dataset["pose"]).toBe("hand");
+    expect(parseFloat(group.style.left)).toBe(
+      parseFloat(room.style.left) + parseFloat(seat.style.left),
+    );
+    expect(parseFloat(group.style.top)).toBe(
+      parseFloat(room.style.top) + parseFloat(seat.style.top),
+    );
+  });
+
+  it("is stacked above every room, and the old in-room selectors are gone", () => {
+    const rule = /\.office-labels\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+    expect(rule).toMatch(/position:\s*absolute/);
+    expect(rule).toMatch(/pointer-events:\s*none/);
+    expect(rule).toMatch(/z-index:\s*\d{3,}/);
+    expect(css).not.toMatch(/\.office-seat\[data-pose="hand"\]\s+\.office-tag/);
+  });
+});
+
+describe("the sidebar's hands pill", () => {
+  it("is hidden and empty for a room with no hands, and hidden again after a hand lowers", () => {
+    const view = setup();
+    view.update(
+      modelOf([tab("t1", "alpha", { kind: "terminal" }), tab("t2", "gamma")], {
+        activity: { panes: { t1: { agent: "Codex", state: "question" } }, sessions: {} },
+      }),
+    );
+    const pills = () => [...root.querySelectorAll<HTMLElement>(".office-row__hands")];
+    expect(pills().map((pill) => pill.hidden)).toEqual([false, true, true]);
+    view.update(modelOf([tab("t1", "alpha", { kind: "terminal" }), tab("t2", "gamma")]));
+    for (const pill of pills()) {
+      expect(pill.hidden).toBe(true);
+      expect(pill.textContent).toBe("");
+    }
+  });
+
+  it("is never painted when it is hidden or empty, whatever else styles it", () => {
+    const rules = [...css.matchAll(/\.office-row__hands([^{]*)\{([^}]*)\}/g)];
+    const hides = (selector: string) =>
+      rules.some(
+        ([, tail, body]) => (tail ?? "").trim() === selector && /display:\s*none/.test(body ?? ""),
+      );
+    expect(hides("[hidden]")).toBe(true);
+    expect(hides(":empty")).toBe(true);
+    // Nothing else may set a display on the pill.
+    const others = rules.filter(
+      ([, tail]) => !["[hidden]", ":empty"].includes((tail ?? "").trim()),
+    );
+    for (const [, , body] of others) expect(body).not.toMatch(/display\s*:/);
+  });
+});
+
 describe("opening an employee", () => {
   it("opens the tab, the pane or the session it stands for", () => {
     const view = setup();
@@ -294,6 +395,31 @@ describe("the hover card", () => {
     expect(card.hidden).toBe(false);
     seats()[0]?.dispatchEvent(new FocusEvent("blur"));
     expect(card.hidden).toBe(true);
+  });
+});
+
+describe("the hover card's doing row", () => {
+  const cardText = (language: "ar" | "en", state: "busy" | "idle") => {
+    const view = setup({ language });
+    view.update(
+      modelOf([tab("t1", "alpha", { kind: "terminal" })], {
+        activity: {
+          panes: { t1: { agent: "Claude Code", state, doing: "Edit app.ts" } },
+          sessions: {},
+        },
+      }),
+    );
+    seats()[0]?.dispatchEvent(new MouseEvent("mouseenter"));
+    return $("#office-card").textContent ?? "";
+  };
+
+  it("labels the line Doing only while the agent is busy, and Last when it is idle", () => {
+    expect(cardText("en", "busy")).toContain(MESSAGES.officeCardDoing("en"));
+    expect(cardText("en", "idle")).not.toContain(MESSAGES.officeCardDoing("en"));
+    expect(cardText("en", "idle")).toContain(MESSAGES.officeCardLast("en"));
+    expect(cardText("en", "idle")).toContain("Edit app.ts");
+    expect(MESSAGES.officeCardLast("ar")).not.toBe(MESSAGES.officeCardLast("en"));
+    expect(cardText("ar", "idle")).toContain(MESSAGES.officeCardLast("ar"));
   });
 });
 

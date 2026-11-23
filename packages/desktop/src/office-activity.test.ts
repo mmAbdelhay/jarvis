@@ -209,6 +209,102 @@ describe("office activity watcher", () => {
     expect(w.deps.agentView).toHaveBeenCalledTimes(3);
   });
 
+  it("reads only the panes that printed, reusing the others' entries and dropping gone ones", async () => {
+    const w = world();
+    w.live.add("t1");
+    w.live.add("t2");
+    w.views.set("t1", agent());
+    w.views.set("t2", agent({ working: "Crunching" }));
+    const watcher = createOfficeActivity(w.deps);
+    await watcher.read();
+    expect(w.deps.agentView).toHaveBeenCalledTimes(2);
+    watcher.markDirty("t2");
+    await w.advance(OFFICE_SCAN_MS);
+    const reads = vi.mocked(w.deps.agentView).mock.calls.map((call) => call[0]);
+    expect(reads).toEqual(["t1", "t2", "t2"]);
+    expect((await watcher.read()).panes["t1"]?.state).toBe("idle");
+    w.live.delete("t1");
+    watcher.markDirty("t2");
+    await w.advance(OFFICE_SCAN_MS);
+    expect((await watcher.read()).panes["t1"]).toBeUndefined();
+  });
+
+  it("re-reads a pane with an open question every scan, and all panes after a set change", async () => {
+    const w = world();
+    w.live.add("t1");
+    w.live.add("t2");
+    w.views.set("t1", ASKING);
+    w.views.set("t2", agent());
+    const watcher = createOfficeActivity(w.deps);
+    await watcher.read();
+    await w.advance(OFFICE_SCAN_MS);
+    const reads = vi.mocked(w.deps.agentView).mock.calls.map((call) => call[0]);
+    expect(reads).toEqual(["t1", "t2", "t1"]);
+    w.views.set("t1", agent());
+    watcher.markDirty();
+    await w.advance(OFFICE_SCAN_MS);
+    expect(
+      vi
+        .mocked(w.deps.agentView)
+        .mock.calls.slice(3)
+        .map((call) => call[0]),
+    ).toEqual(["t1", "t2"]);
+  });
+
+  it("looks a pane with no agent up at most every 15 s, however much it prints", async () => {
+    const w = world();
+    w.live.add("t1");
+    const watcher = createOfficeActivity(w.deps);
+    await watcher.read();
+    expect(w.deps.agentView).toHaveBeenCalledTimes(1);
+    for (let i = 0; i < 4; i += 1) {
+      watcher.markDirty("t1");
+      await w.advance(OFFICE_SCAN_MS);
+    }
+    expect(w.deps.agentView).toHaveBeenCalledTimes(1);
+    await w.advance(OFFICE_SCAN_MS);
+    expect(w.deps.agentView).toHaveBeenCalledTimes(2);
+    // Nothing printed: no more lookups.
+    await w.advance(60_000);
+    expect(w.deps.agentView).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the previous entry when a read fails, so a hand is not lowered and raised again", async () => {
+    let fail = false;
+    const w = world();
+    w.live.add("t1");
+    w.views.set("t1", ASKING);
+    vi.mocked(w.deps.agentView).mockImplementation(async (paneKey: string) => {
+      if (fail) throw new Error("blip");
+      return w.views.get(paneKey) ?? NONE;
+    });
+    const watcher = createOfficeActivity(w.deps);
+    await watcher.read();
+    expect(w.deps.notify).toHaveBeenCalledTimes(1);
+    fail = true;
+    await w.advance(OFFICE_SCAN_MS);
+    expect((await watcher.read()).panes["t1"]?.state).toBe("question");
+    fail = false;
+    await w.advance(OFFICE_SCAN_MS);
+    expect((await watcher.read()).panes["t1"]?.state).toBe("question");
+    expect(w.deps.emitChanged).toHaveBeenCalledTimes(1);
+    expect(w.deps.notify).toHaveBeenCalledTimes(1);
+  });
+
+  it("reads only the session that printed", async () => {
+    const w = world();
+    w.sessions.push(session("s1"), session("s2"));
+    w.logs.set("s1", "a");
+    w.logs.set("s2", "b");
+    const reader = vi.fn((id: string) => w.logs.get(id) ?? "");
+    const watcher = createOfficeActivity({ ...w.deps, sessionLog: reader });
+    await watcher.read();
+    expect(reader).toHaveBeenCalledTimes(2);
+    watcher.markDirty("s2");
+    await w.advance(OFFICE_SCAN_MS);
+    expect(reader.mock.calls.map((call) => call[0])).toEqual(["s1", "s2", "s2"]);
+  });
+
   it("keeps scanning every 3 s while a question is open, then stops", async () => {
     const w = world();
     w.live.add("t1");

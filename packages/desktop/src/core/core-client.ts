@@ -221,6 +221,7 @@ export function inProcessCoreClient(core: Core, options: InProcessOptions = {}):
         sweepIdleViews: () => host.sweepIdleViews(),
         destroyViews: () => host.destroyViews(),
         showNotification: (...args) => host.showNotification(...wire(args, "showNotification")),
+        showNotice: (...args) => host.showNotice(...wire(args, "showNotice")),
         openExternal: (url) =>
           settle(host.openExternal(wire(url, "openExternal")), "openExternal result"),
         trashItem: (path) => settle(host.trashItem(wire(path, "trashItem")), "trashItem result"),

@@ -185,6 +185,7 @@ export const MESSAGES = {
   officeCardProject: (language: "ar" | "en"): string => (language === "ar" ? "المشروع" : "Project"),
   officeCardAgent: (language: "ar" | "en"): string => (language === "ar" ? "الوكيل" : "Agent"),
   officeCardDoing: (language: "ar" | "en"): string => (language === "ar" ? "يفعل" : "Doing"),
+  officeCardLast: (language: "ar" | "en"): string => (language === "ar" ? "آخر عمل" : "Last"),
   officeCardBranch: (language: "ar" | "en"): string => (language === "ar" ? "الفرع" : "Branch"),
   officeCardChanges: (language: "ar" | "en"): string =>
     language === "ar" ? "التغييرات" : "Changes",

@@ -5,7 +5,11 @@
 // One shared watcher: at most one scan per OFFICE_SCAN_MS, and only if some
 // pane or session printed since the last scan or a question is open — a
 // quiet app, or one with no live pane or session, does no reading at all.
-// Panes are read through the Chat view's own reader (agent-view.ts); sessions
+// A scan reads only the panes and sessions that printed (or have an open
+// question) and reuses every other entry; a pane where no agent was found
+// is looked up again at most every OFFICE_NONE_MS; a failed read keeps the
+// previous entry. Panes are read through the Chat view's own side-effect-free
+// reader (agent-view.ts's peek); sessions
 // Jarvis spawned through readPrompt/readAgentInputState on the tail of their
 // retained output. A change pushes `office:changed` (no content); a pane or
 // session newly asking raises a desktop notification that names the project
@@ -39,11 +43,14 @@ export const EMPTY_OFFICE_ACTIVITY: OfficeActivity = { panes: {}, sessions: {} }
 
 /** At most one scan this often. */
 export const OFFICE_SCAN_MS = 3000;
+/** A pane with no agent is looked up again no sooner than this. */
+export const OFFICE_NONE_MS = 15_000;
 /** A repeat hand for the same target inside this window is not announced. */
 export const OFFICE_NOTIFY_COALESCE_MS = 60_000;
 export const OFFICE_QUESTION_MAX = 200;
 const VIEWING_MAX = 64;
 const KEY_MAX = 200;
+const DIRTY_MAX = 512;
 const TAIL_ROWS = 40;
 const LIVE = new Set(["starting", "running", "waiting"]);
 const VENDOR_NAMES = { anthropic: "Claude Code", github: "Copilot", openai: "Codex" } as const;
@@ -52,7 +59,8 @@ type AgentOf = Extract<AgentView, { kind: "agent" }>;
 
 export type OfficeActivityDeps = {
   panes(): readonly { paneKey: string; exited: boolean }[];
-  /** agent-view.ts's reader: a pane's agent and what its screen shows. */
+  /** agent-view.ts's peek: a pane's agent and what its screen shows, with
+   *  no effect on what is watched. Throws when the read fails. */
   agentView(paneKey: string): Promise<AgentView>;
   /** Every session row; only live ones Jarvis spawned itself are read. */
   sessions(): readonly Session[];
@@ -79,8 +87,9 @@ export type OfficeActivityDeps = {
 export type OfficeWatcher = {
   /** The latest answer; scans first if there is none or output waits. */
   read(): Promise<OfficeActivity>;
-  /** Something printed (or a pane or session came or went). */
-  markDirty(): void;
+  /** `key` (a pane key or session id) printed; no key: something came or
+   *  went, so every pane and session is read. */
+  markDirty(key?: string): void;
   stop(): void;
 };
 
@@ -171,11 +180,15 @@ export function createOfficeActivity(deps: OfficeActivityDeps): OfficeWatcher {
   let latest: OfficeActivity | undefined;
   let signature = "";
   let lastScanAt = Number.NEGATIVE_INFINITY;
-  let dirty = false;
+  let allDirty = false;
+  const dirtyKeys = new Set<string>();
+  /** When each pane last answered "no agent". */
+  const noAgentAt = new Map<string, number>();
   let scanning: Promise<void> | undefined;
   let cancelTimer: (() => void) | undefined;
   let stopped = false;
   const announcedAt = new Map<string, number>();
+  const isDirty = (): boolean => allDirty || dirtyKeys.size > 0;
 
   function log(token: string): void {
     try {
@@ -190,26 +203,63 @@ export function createOfficeActivity(deps: OfficeActivityDeps): OfficeWatcher {
     const wait = Math.max(0, OFFICE_SCAN_MS - (deps.now() - lastScanAt));
     cancelTimer = deps.schedule(() => {
       cancelTimer = undefined;
-      if (dirty || hasQuestion(latest)) void scan();
+      if (isDirty() || hasQuestion(latest)) void scan();
     }, wait);
   }
 
-  async function collect(): Promise<OfficeActivity> {
+  async function collect(all: boolean, dirtyNow: ReadonlySet<string>): Promise<OfficeActivity> {
     const panes: Record<string, OfficeEntry> = {};
     const sessions: Record<string, OfficeEntry> = {};
+    const now = deps.now();
+    const livePanes = new Set<string>();
     for (const pane of deps.panes()) {
       if (pane.exited) continue;
+      const key = pane.paneKey;
+      livePanes.add(key);
+      const previous = latest?.panes[key];
+      const dirtyHere = all || dirtyNow.has(key);
+      const noneAt = noAgentAt.get(key);
+      let read: boolean;
+      if (previous !== undefined) read = dirtyHere || previous.state === "question";
+      else if (noneAt === undefined) read = true;
+      else if (!dirtyHere) read = false;
+      else if (now - noneAt >= OFFICE_NONE_MS) read = true;
+      else {
+        // Printed, but looked up too lately: try again once the wait is over.
+        dirtyKeys.add(key);
+        read = false;
+      }
+      if (!read) {
+        if (previous !== undefined) panes[key] = previous;
+        continue;
+      }
       try {
-        const view = await deps.agentView(pane.paneKey);
-        if (view.kind === "agent") panes[pane.paneKey] = entryOfView(view);
+        const view = await deps.agentView(key);
+        if (view.kind === "agent") {
+          panes[key] = entryOfView(view);
+          noAgentAt.delete(key);
+        } else noAgentAt.set(key, now);
       } catch {
-        panes[pane.paneKey] = { state: "unknown" };
+        // A transient failure keeps what was known, and tries again.
+        panes[key] = previous ?? { state: "unknown" };
+        dirtyKeys.add(key);
         log("pane");
       }
     }
+    for (const key of [...noAgentAt.keys()]) if (!livePanes.has(key)) noAgentAt.delete(key);
     for (const session of deps.sessions()) {
       if (session.origin === "external" || !LIVE.has(session.state)) continue;
       if (session.transcriptPath !== undefined) continue;
+      const previous = latest?.sessions[session.id];
+      if (
+        previous !== undefined &&
+        !all &&
+        !dirtyNow.has(session.id) &&
+        previous.state !== "question"
+      ) {
+        sessions[session.id] = previous;
+        continue;
+      }
       try {
         sessions[session.id] = entryOfSession(
           session,
@@ -217,7 +267,8 @@ export function createOfficeActivity(deps: OfficeActivityDeps): OfficeWatcher {
           deps.sessionLog(session.id),
         );
       } catch {
-        sessions[session.id] = { state: "unknown" };
+        sessions[session.id] = previous ?? { state: "unknown" };
+        dirtyKeys.add(session.id);
         log("session");
       }
     }
@@ -260,11 +311,14 @@ export function createOfficeActivity(deps: OfficeActivityDeps): OfficeWatcher {
 
   function scan(): Promise<void> {
     if (scanning !== undefined) return scanning;
-    dirty = false;
+    const all = allDirty;
+    const dirtyNow = new Set(dirtyKeys);
+    allDirty = false;
+    dirtyKeys.clear();
     lastScanAt = deps.now();
     scanning = (async () => {
       try {
-        const next = await collect();
+        const next = await collect(all, dirtyNow);
         announce(next);
         const nextSignature = JSON.stringify(next);
         latest = next;
@@ -280,7 +334,7 @@ export function createOfficeActivity(deps: OfficeActivityDeps): OfficeWatcher {
         log("scan");
       } finally {
         scanning = undefined;
-        if (dirty || hasQuestion(latest)) arm();
+        if (isDirty() || hasQuestion(latest)) arm();
       }
     })();
     return scanning;
@@ -289,11 +343,13 @@ export function createOfficeActivity(deps: OfficeActivityDeps): OfficeWatcher {
   return {
     async read() {
       if (latest === undefined) await scan();
-      else if (dirty && deps.now() - lastScanAt >= OFFICE_SCAN_MS) await scan();
+      else if (isDirty() && deps.now() - lastScanAt >= OFFICE_SCAN_MS) await scan();
       return latest ?? EMPTY_OFFICE_ACTIVITY;
     },
-    markDirty() {
-      dirty = true;
+    markDirty(key) {
+      if (key === undefined) allDirty = true;
+      else if (dirtyKeys.size < DIRTY_MAX) dirtyKeys.add(key);
+      else allDirty = true;
       arm();
     },
     stop() {

@@ -17,6 +17,9 @@
 //     and flushed, in order, to the next app that attaches. The event itself
 //     is already in the bridge's audit log (locked-out / refresh-reuse); the
 //     daemon log gets the title only, never the body;
+//   - showNotice (the Office's raised hand): a `daemon:notice` push to the
+//     attached apps, and nothing else — with none it is dropped, never
+//     queued with the security alerts and never logged;
 //   - openExternal: forwarded to an attached app, which opens only the
 //     bridge's own web client (open-external-guard.ts). With none it rejects;
 //   - trashItem: forwarded to the one app whose request is running — the
@@ -97,6 +100,11 @@ export function createDaemonHost(deps: {
       if (queue.length > MAX_QUEUED_ALERTS) queue.shift();
       // The title only: it names the event, and the body is for the user.
       deps.log(`security alert queued for the next app, none attached: ${title}`);
+    },
+    showNotice(title, body) {
+      // Live only: dropped with no app, so a flood of these can never evict
+      // a queued security alert, and no project name reaches the log.
+      if (attached.size > 0) deps.push(DAEMON_PUSHES.notice, { title, body });
     },
     openExternal(url) {
       if (attached.size === 0) {

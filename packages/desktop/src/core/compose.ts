@@ -2555,7 +2555,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
   const officeViewing = createOfficeViewing();
   const officeWatcher = createOfficeActivity({
     panes: () => shells.panes(),
-    agentView: (paneKey) => agentView.view(paneKey),
+    agentView: (paneKey) => agentView.peek(paneKey),
     sessions: () => sessions.list(),
     sessionLog: (id) => sessions.log(id),
     vendorOf: (agentId) => registry.list().find((agent) => agent.id === agentId)?.vendor,
@@ -2570,16 +2570,16 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
       return () => clearTimeout(timer);
     },
     emitChanged: () => broadcast.local("office:changed", {}),
-    notify: (title, body) => host.showNotification(title, body),
+    notify: (title, body) => host.showNotice(title, body),
     focused: () => host.isFocused(),
     viewing: () => officeViewing.keys(),
     language: PRIMARY_LANGUAGE,
     log: (token) => console.warn(token),
   });
   const stopOfficeFeeds = [
-    shells.onOutput(() => officeWatcher.markDirty()),
+    shells.onOutput(({ paneKey }) => officeWatcher.markDirty(paneKey)),
     shells.onShellExit(() => officeWatcher.markDirty()),
-    sessions.onOutput(() => officeWatcher.markDirty()),
+    sessions.onOutput(({ sessionId }) => officeWatcher.markDirty(sessionId)),
     sessions.onChange(() => officeWatcher.markDirty()),
   ];
   const paneAttach = createPaneAttach({

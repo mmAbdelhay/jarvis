@@ -245,6 +245,9 @@ type SeatNode = {
   element: HTMLButtonElement;
   worker: HTMLElement;
   glyph: HTMLElement;
+  /** The seat's name tag, hand badge and bubble, drawn in the world's label
+   *  layer (above every room), not inside the seat. */
+  labels: HTMLElement;
   tag: HTMLElement;
   handBadge: HTMLElement | undefined;
   bubble: HTMLElement | undefined;
@@ -291,6 +294,11 @@ export function createOfficeView(options: OfficeViewOptions): OfficeView {
   };
   const stage = $("office-stage");
   const world = $("office-world");
+  // One layer after every room: a name tag, hand badge or bubble is never
+  // covered by a neighbouring cubicle or room, however the rooms overlap.
+  const labelLayer = html("div", "office-labels");
+  labelLayer.setAttribute("aria-hidden", "true");
+  world.append(labelLayer);
   const list = $("office-list");
   const empty = $("office-empty");
   const minimap = $("office-minimap");
@@ -433,10 +441,11 @@ export function createOfficeView(options: OfficeViewOptions): OfficeView {
 
   function markDim(): void {
     for (const node of rooms.values()) {
-      node.element.classList.toggle(
-        "office-room--dim",
-        focusRoom !== undefined && focusRoom !== node.id,
-      );
+      const dim = focusRoom !== undefined && focusRoom !== node.id;
+      node.element.classList.toggle("office-room--dim", dim);
+      for (const seat of node.seats.values()) {
+        seat.labels.classList.toggle("office-seat-labels--dim", dim);
+      }
     }
     for (const [id, row] of rows) {
       row.element.classList.toggle("office-row--on", focusRoom === id);
@@ -566,22 +575,29 @@ export function createOfficeView(options: OfficeViewOptions): OfficeView {
     const worker = html("div", "office-seat__worker");
     const glyph = html("span", "office-seat__glyph mono");
     glyph.setAttribute("aria-hidden", "true");
+    const labels = html("div", "office-seat-labels");
     const tag = html("span", "office-tag");
-    tag.setAttribute("aria-hidden", "true");
-    element.append(hit, seatCube(), worker, seatDesk(), glyph, tag);
+    labels.append(tag);
+    element.append(hit, seatCube(), worker, seatDesk(), glyph);
+    labelLayer.append(labels);
     const hash = hashOf(employee.key);
     element.style.setProperty("--ow-shirt", `var(--office-shirt-${hash % 6})`);
     element.style.setProperty("--ow-skin", `var(--office-skin-${(hash >>> 3) % 4})`);
     element.style.setProperty("--ow-hair", `var(--office-hair-${(hash >>> 5) % 4})`);
     if (animateIn) {
       element.classList.add("office-seat--in");
-      later(() => element.classList.remove("office-seat--in"), OFFICE_WALK_MS);
+      labels.classList.add("office-seat-labels--in");
+      later(() => {
+        element.classList.remove("office-seat--in");
+        labels.classList.remove("office-seat-labels--in");
+      }, OFFICE_WALK_MS);
     }
     const node: SeatNode = {
       key: employee.key,
       element,
       worker,
       glyph,
+      labels,
       tag,
       handBadge: undefined,
       bubble: undefined,
@@ -629,6 +645,9 @@ export function createOfficeView(options: OfficeViewOptions): OfficeView {
     seat.employee = employee;
     const point = seatPoint(node.room.geometry, index);
     seat.world = { x: node.x + point.x, y: node.y + point.y };
+    // The labels live in world coordinates, so they follow their room.
+    seat.labels.style.left = `${seat.world.x - SEAT_W / 2}px`;
+    seat.labels.style.top = `${seat.world.y - 95}px`;
     const sig = JSON.stringify([
       index,
       employee.pose,
@@ -644,6 +663,7 @@ export function createOfficeView(options: OfficeViewOptions): OfficeView {
     seat.element.style.top = `${point.y - 95}px`;
     seat.element.style.zIndex = String(Math.round(point.y / 4));
     seat.element.dataset["pose"] = employee.pose;
+    seat.labels.dataset["pose"] = employee.pose;
     seat.element.setAttribute(
       "aria-label",
       MESSAGES.officeSeatLabel(
@@ -666,7 +686,7 @@ export function createOfficeView(options: OfficeViewOptions): OfficeView {
           html("span", "office-hand__text", MESSAGES.officePose("hand", L)),
           seat.bubble,
         );
-        seat.element.append(seat.handBadge);
+        seat.labels.append(seat.handBadge);
       }
       if (seat.bubble !== undefined) {
         seat.bubble.textContent = employee.question ?? "";
@@ -714,7 +734,7 @@ export function createOfficeView(options: OfficeViewOptions): OfficeView {
       height: room.geometry.height,
     };
     sign.addEventListener("click", () => goToRoom(room.id));
-    world.append(element);
+    world.insertBefore(element, labelLayer);
     return node;
   }
 
@@ -728,7 +748,11 @@ export function createOfficeView(options: OfficeViewOptions): OfficeView {
       if (wanted.has(id)) continue;
       rooms.delete(id);
       node.element.classList.add("office-room--out");
-      for (const seat of node.seats.values()) seat.element.classList.add("office-seat--out");
+      for (const seat of node.seats.values()) {
+        seat.element.classList.add("office-seat--out");
+        seat.labels.classList.add("office-seat-labels--out");
+        later(() => seat.labels.remove(), OFFICE_WALK_MS);
+      }
       later(() => node.element.remove(), OFFICE_WALK_MS);
     }
     next.rooms.forEach((room, roomIndex) => {
@@ -774,7 +798,11 @@ export function createOfficeView(options: OfficeViewOptions): OfficeView {
         if (hover === seat) hideCard(seat);
         seat.element.classList.add("office-seat--out");
         seat.element.disabled = true;
-        later(() => seat.element.remove(), OFFICE_WALK_MS);
+        seat.labels.classList.add("office-seat-labels--out");
+        later(() => {
+          seat.element.remove();
+          seat.labels.remove();
+        }, OFFICE_WALK_MS);
       }
       room.employees.forEach((employee, index) => {
         let seat = node.seats.get(employee.key);
@@ -918,7 +946,11 @@ export function createOfficeView(options: OfficeViewOptions): OfficeView {
     label.dir = "auto";
     card.append(label);
     if (employee.doing !== undefined && employee.doing !== "") {
-      card.append(cardRow(MESSAGES.officeCardDoing(L), employee.doing, "office-card__doing mono"));
+      // The line is the agent's current work only while it is busy; once it
+      // is idle (or asking) it is just the last thing it did.
+      const doingLabel =
+        employee.pose === "typing" ? MESSAGES.officeCardDoing(L) : MESSAGES.officeCardLast(L);
+      card.append(cardRow(doingLabel, employee.doing, "office-card__doing mono"));
     }
     if (employee.question !== undefined && employee.question !== "") {
       card.append(

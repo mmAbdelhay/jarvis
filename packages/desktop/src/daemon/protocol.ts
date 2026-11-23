@@ -77,6 +77,9 @@ export const DAEMON_PUSHES = {
   /** notifyDesktop in daemon mode: the app shows it as an OS notification.
    *  Payload: SecurityAlert. */
   alert: "security:alert",
+  /** A plain desktop notice (the Office's raised hand), live only: with no
+   *  app attached it is dropped, never queued. Payload: { title, body }. */
+  notice: "daemon:notice",
 } as const;
 
 /** The only pushes the app may originate through daemon:broadcast. */
