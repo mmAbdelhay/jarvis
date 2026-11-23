@@ -1080,6 +1080,41 @@ describe("splitting a terminal tab", () => {
     expect(branch?.style.flexDirection).toBe("column");
   });
 
+  describe("the clear button", () => {
+    const clearButton = () => document.querySelector<HTMLButtonElement>(".clear-toggle");
+
+    it("is a labelled button in the panes' band, apart from the sidebar and plan switches", async () => {
+      const { renderWorkspaceTerminals } = await load();
+      renderWorkspaceTerminals([tab()], "tab-1", "acme");
+
+      const button = clearButton();
+      expect(button?.tagName).toBe("BUTTON");
+      expect(button?.type).toBe("button");
+      expect(button?.parentElement?.className).toBe("terminal-split");
+      expect(button?.title).toBe("Clear terminal");
+      expect(button?.getAttribute("aria-label")).toBe("Clear terminal");
+      expect(button?.querySelector("svg")).not.toBeNull();
+      expect(button).not.toBe(document.querySelector(".explorer-toggle"));
+      expect(button).not.toBe(document.querySelector(".plan-toggle"));
+    });
+
+    it("clears the focused pane only, sends nothing to a shell, and gives the keys back", async () => {
+      const { renderWorkspaceTerminals } = await load();
+      renderWorkspaceTerminals([tab()], "tab-1", "acme");
+      await split("d");
+      const sentBefore = calls.filter((entry) => entry.call === "sendTerminalInput").length;
+      const focusedBefore = FakeTerminal.instances[1]?.focused ?? 0;
+
+      clearButton()?.click();
+
+      // The split just made is the focused pane.
+      expect(FakeTerminal.instances[1]?.cleared).toBe(1);
+      expect(FakeTerminal.instances[0]?.cleared).toBe(0);
+      expect(FakeTerminal.instances[1]?.focused).toBeGreaterThan(focusedBefore);
+      expect(calls.filter((entry) => entry.call === "sendTerminalInput")).toHaveLength(sentBefore);
+    });
+  });
+
   // The renderer routes the pty stream by shell key, not by tab: the wrong
   // answer here would put one shell's output into another shell's pane.
   it("writes each pane's output into that pane and no other", async () => {

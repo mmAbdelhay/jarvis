@@ -61,7 +61,12 @@ describe("the Plan, Reviews and file sidebar switches", () => {
       /\.terminal-split:has\(> \.plan-toggle, > \.reviews-toggle, > \.explorer-toggle\) \{ padding-block-start: (\d+)px; \}/,
     );
     expect(Number(band?.[1])).toBeGreaterThanOrEqual(30);
-    for (const toggle of ["plan-toggle", "reviews-toggle", "explorer-toggle"]) {
+    // The clear button starts after the sidebar switch ends (10px + 24px),
+    // so the two never overlap, at either text direction.
+    const start = (name: string) =>
+      Number(css.match(new RegExp(`\\.${name} \\{[^}]*inset-inline-start: (\\d+)px`))?.[1]);
+    expect(start("clear-toggle")).toBeGreaterThanOrEqual(start("explorer-toggle") + 24);
+    for (const toggle of ["plan-toggle", "reviews-toggle", "explorer-toggle", "clear-toggle"]) {
       const rule = css.match(new RegExp(`\\.${toggle} \\{([^}]*)\\}`))?.[1] ?? "";
       const top = Number(rule.match(/inset-block-start: (\d+)px/)?.[1]);
       const height = Number(rule.match(/height: (\d+)px/)?.[1]);

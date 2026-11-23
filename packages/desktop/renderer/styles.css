@@ -2229,6 +2229,13 @@
   .explorer-toggle:focus-visible { opacity: 1; outline: 1px solid var(--accent); }
   .explorer-toggle[aria-pressed="true"] { opacity: 1; color: var(--accent); border-color: var(--accent); }
   .explorer-toggle:disabled { opacity: 0.35; cursor: default; }
+  /* The clear button, right after the sidebar switch (10px + 24px + 8px). */
+  .clear-toggle { position: absolute; inset-block-start: 3px; inset-inline-start: 42px; z-index: 5;
+    width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;
+    padding: 0; border: 1px solid var(--border); border-radius: 6px; background: var(--panel);
+    color: var(--text-muted); font: 13px/1 var(--font-mono); cursor: pointer; opacity: 0.7; }
+  .clear-toggle:hover { opacity: 1; color: var(--text); border-color: var(--accent); }
+  .clear-toggle:focus-visible { opacity: 1; outline: 1px solid var(--accent); }
   .terminal-split-branch { flex: 1 1 0; display: flex; min-width: 0; min-height: 0; }
   .terminal-split-leaf { position: relative; flex: 1 1 0; min-width: 0; min-height: 0;
     overflow: hidden; }

@@ -2286,3 +2286,103 @@ describe("a font change while the live terminal is hidden", () => {
     setTerminalFontBase(12);
   });
 });
+
+// Clearing the whole terminal: the live screen and every frozen block, at
+// once. What it must never do is reach the shell — a running command keeps
+// running, and the line being typed stays.
+describe("a terminal pane's clearAll", () => {
+  function clearPane() {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const sendInput = vi.fn();
+    const p = createPane(host, {
+      sendInput,
+      resize: vi.fn(),
+      attach: async () => "",
+      settings: {
+        blocks: true,
+        inputEditor: true,
+        notifyAfterSeconds: 0,
+        home: "/Users/x",
+        scrollback: 0,
+      },
+      notify: vi.fn(),
+    });
+    return { p, sendInput };
+  }
+
+  const finished = (command: string, exitCode: number) =>
+    `${A}$ ${B}${command}\r\n${C(command)}out\r\n${D(exitCode)}`;
+  const blockElements = (p: { element: HTMLElement }) =>
+    p.element.querySelectorAll(".terminal-blocks > *").length;
+
+  it("removes every block and clears the live terminal", () => {
+    const { p } = clearPane();
+    p.write(`${finished("ls", 0)}${finished("pwd", 0)}${A}$ ${B}`);
+    expect(p.blocks()).toHaveLength(2);
+    expect(blockElements(p)).toBe(2);
+
+    p.clearAll();
+
+    expect(p.blocks()).toHaveLength(0);
+    expect(blockElements(p)).toBe(0);
+    expect(FakeTerminal.instances[0]?.cleared).toBe(1);
+  });
+
+  it("writes nothing to the pty", () => {
+    const { p, sendInput } = clearPane();
+    p.write(`${finished("ls", 0)}${A}$ ${B}`);
+
+    p.clearAll();
+
+    expect(sendInput).not.toHaveBeenCalled();
+  });
+
+  it("leaves a running command running: its block still appears when it ends", () => {
+    const { p } = clearPane();
+    p.write(`${finished("ls", 0)}${A}$ ${B}sleep 9\r\n${C("sleep 9")}`);
+    expect(p.element.dataset["state"]).toBe("running");
+
+    p.clearAll();
+    expect(p.blocks()).toHaveLength(0);
+    expect(p.element.dataset["state"]).toBe("running");
+
+    p.write(`${D(0)}${A}$ ${B}`);
+
+    expect(p.blocks().map((view) => view.record.command)).toEqual(["sleep 9"]);
+    expect(p.blocks()[0]?.element.hidden).toBe(false);
+  });
+
+  it("drops the selection and the filter, so new blocks are visible", () => {
+    const { p } = clearPane();
+    p.write(`${finished("ls", 0)}${finished("false", 1)}${A}$ ${B}`);
+    p.blockNav?.move(1);
+    p.blockNav?.toggleFailedFilter();
+    expect(p.blockNav?.isFiltered()).toBe(true);
+
+    p.clearAll();
+
+    expect(p.blockNav?.selected()).toBeUndefined();
+    expect(p.blockNav?.isFiltered()).toBe(false);
+    p.write(`${finished("echo hi", 0)}${A}$ ${B}`);
+    expect(p.blocks()).toHaveLength(1);
+    expect(p.blocks()[0]?.element.hidden).toBe(false);
+  });
+
+  it("is what the palette's Clear terminal runs", () => {
+    const { p } = clearPane();
+    p.write(`${finished("ls", 0)}${A}$ ${B}`);
+
+    p.openPalette();
+    const input = p.element.querySelector<HTMLInputElement>(".terminal-palette input");
+    if (input === null) throw new Error("no palette input");
+    input.value = "Clear terminal";
+    input.dispatchEvent(new Event("input"));
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }),
+    );
+
+    expect(p.blocks()).toHaveLength(0);
+    expect(FakeTerminal.instances[0]?.cleared).toBe(1);
+  });
+});

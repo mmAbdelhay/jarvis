@@ -325,3 +325,49 @@ describe("initFontKeys", () => {
     expect(terminalFontSize()).toBe(12);
   });
 });
+
+// ⌘K clears the screen. A block pane hands over a `clearAll` that takes its
+// frozen blocks with it; the Session terminal has none and keeps the plain
+// xterm clear.
+describe("enhanceTerminal — the clear-screen chord", () => {
+  const cmdK = { key: "k", metaKey: true };
+
+  it("runs the pane's clearAll instead of clearing xterm alone", () => {
+    const terminal = new FakeTerminal();
+    let all = 0;
+    enhanceTerminal(
+      terminal as never,
+      document.createElement("div"),
+      {
+        sendInput: () => {},
+        openLink: () => {},
+        clearAll: () => (all += 1),
+      },
+      "darwin",
+    );
+
+    const claimed = terminal.pressKey(cmdK);
+
+    expect(claimed).toBe(false);
+    expect(all).toBe(1);
+    expect(terminal.cleared).toBe(0);
+  });
+
+  it("still clears xterm for a terminal with no clearAll", () => {
+    const terminal = new FakeTerminal();
+    enhanceTerminal(
+      terminal as never,
+      document.createElement("div"),
+      {
+        sendInput: () => {},
+        openLink: () => {},
+      },
+      "darwin",
+    );
+
+    const claimed = terminal.pressKey(cmdK);
+
+    expect(claimed).toBe(false);
+    expect(terminal.cleared).toBe(1);
+  });
+});

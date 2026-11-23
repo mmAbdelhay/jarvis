@@ -139,6 +139,32 @@ function sidebarIcon(): SVGSVGElement {
   return svg;
 }
 
+/** An eraser, for the clear button: same 14px stroke icon as the sidebar's. */
+function clearIcon(): SVGSVGElement {
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("width", "14");
+  svg.setAttribute("height", "14");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", "2");
+  svg.setAttribute("stroke-linecap", "round");
+  svg.setAttribute("stroke-linejoin", "round");
+  svg.setAttribute("aria-hidden", "true");
+  const body = document.createElementNS(SVG_NS, "path");
+  body.setAttribute(
+    "d",
+    "m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21",
+  );
+  const base = document.createElementNS(SVG_NS, "path");
+  base.setAttribute("d", "M22 21H7");
+  const edge = document.createElementNS(SVG_NS, "path");
+  edge.setAttribute("d", "m5 11 9 9");
+  svg.append(body, base, edge);
+  return svg;
+}
+
 // ------------------------------------------------------------- Plan panel
 
 /** Adapts plan-panel.ts's `t: (key: MessageKey) => string` to this app's
@@ -946,6 +972,17 @@ function ensurePane(
   explorerToggle.setAttribute("aria-pressed", "false");
   explorerToggle.disabled = true;
 
+  // Clears the focused pane — its live screen and its frozen blocks — and
+  // nothing else: no shell is written to and no other pane is touched. In the
+  // same band as the sidebar switch, just after it. The keys go back to the
+  // pane, or the click would leave them on a button.
+  const clearButton = document.createElement("button");
+  clearButton.type = "button";
+  clearButton.className = "clear-toggle";
+  clearButton.append(clearIcon());
+  clearButton.title = planPanelT("terminalClearButton");
+  clearButton.setAttribute("aria-label", planPanelT("terminalClearButton"));
+
   // The tab's file sidebar, on the left — one for the whole tab, however
   // many panes it is split into, following whichever of them has the
   // focus. Appended before the tree so it sits left of the panes.
@@ -1067,6 +1104,12 @@ function ensurePane(
   }
   explorerToggle.addEventListener("click", toggleExplorer);
   built.element.append(explorerToggle);
+  clearButton.addEventListener("click", () => {
+    const focused = built.focused();
+    focused.clearAll();
+    focused.focus();
+  });
+  built.element.append(clearButton);
 
   /** The focused pane's shell key. Resolved through the same WeakMap the
    *  pty stream is routed by, so it can never name a pane that is gone. */
@@ -1444,6 +1487,7 @@ function makePane(
     // on why this one, unlike ^R, is never gated on the editor or on
     // whether something is running.
     openPalette: () => view.openPalette(),
+    clearAll: () => view.clearAll(),
   });
 
   // The pane's own slot, which a divider drag or a sibling's closing

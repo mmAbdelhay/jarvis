@@ -68,6 +68,8 @@ export const MESSAGES = {
   // and goes through MESSAGES from the start.
   explorerToggle: (language: "ar" | "en"): string =>
     language === "ar" ? "تبديل الشريط الجانبي للملفات" : "Toggle file sidebar",
+  terminalClearButton: (language: "ar" | "en"): string =>
+    language === "ar" ? "مسح الطرفية" : "Clear terminal",
   planPanelToggle: (language: "ar" | "en"): string =>
     language === "ar" ? "تبديل لوحة الخطة" : "Toggle plan panel",
   // ---- Reviews (Task 12): the Terminal tab's dock, its PR link chip and

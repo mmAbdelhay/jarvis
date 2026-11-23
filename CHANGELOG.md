@@ -10,6 +10,9 @@ version and the downloads. This file is the index.
 
 - File sidebar: right-clicking a folder (or the empty area) in the Terminal tab now
   offers "Open in editor", which opens that folder in the project's editor.
+- Terminal: "Clear terminal" (palette, the clear-screen chord and a new button beside the
+  sidebar switch) now removes every command block at once, not just the screen. A
+  running command is not touched.
 
 ## [0.1.14] — 2026-11-22
 

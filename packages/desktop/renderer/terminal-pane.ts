@@ -172,6 +172,9 @@ export type TerminalPane = {
    *  Terminal tab never needs this — its pane and its shell begin and end
    *  together. */
   reset(): void;
+  /** Clears the live terminal and every frozen block at once, writing
+   *  nothing to the shell — see the function itself. */
+  clearAll(): void;
   dispose(): void;
   /** The frozen blocks, oldest first — what Tasks 6, 7 and 12 act on. */
   blocks(): readonly BlockView[];
@@ -756,7 +759,7 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
     actions.push({
       id: "clear",
       label: "Clear terminal",
-      run: () => attempt(() => terminal.clear()),
+      run: clearAll,
     });
     const toggleExplorer = hooks.toggleExplorer;
     if (toggleExplorer !== undefined) {
@@ -1055,6 +1058,19 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
     hooks.notify("Command finished", `${record.command} ${status}`);
   }
 
+  /** Everything on screen except the line being typed: the live terminal
+   *  and every frozen block, with the selection, filter and sticky header
+   *  that pointed at them. Nothing reaches the pty and nothing is killed —
+   *  a running command carries on, and its block is added when it ends,
+   *  into a nav with no filter to hide it. */
+  function clearAll(): void {
+    // The nav first, so the selection is dropped while its block is still
+    // in the list — the order `reset` below relies on too.
+    attempt(() => nav?.reset());
+    for (const view of views.splice(0)) attempt(() => view.element.remove());
+    attempt(() => terminal.clear());
+  }
+
   function freeze(record: BlockRecord): void {
     const view = createBlockView(record, {
       cols: terminal.cols,
@@ -1316,6 +1332,7 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
     // A pane with no layout yet (hidden, or the window minimised) measures
     // as zero and would make the addon throw — refit() guards that.
     refit,
+    clearAll,
     reset: () => {
       // The pane is being pointed at something else entirely (the Session
       // view switching agents), so what the *last* thing's shell proved
