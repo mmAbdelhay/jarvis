@@ -56,6 +56,10 @@ describe("remote policy", () => {
     "plans:openLink",
     // Reviews: opens the laptop's own browser.
     "reviews:openOnGithub",
+    // The file sidebar's "Open in editor" for a folder: opens a tab on the
+    // laptop, like terminal:openFile.
+    "terminal:openFolder",
+    "terminal:openFile",
   ])("denies %s remotely", (channel) => {
     expect(CHANNEL_POLICY[channel as keyof typeof CHANNEL_POLICY]).toBe("desktop-only");
     expect(isRemoteAllowed(channel)).toBe(false);

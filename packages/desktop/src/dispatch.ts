@@ -1286,6 +1286,8 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
       ),
     "terminal:listDir": ([paneKey, path]) => terminal.listDir(paneKey as string, path as string),
     "terminal:openFile": ([paneKey, path]) => terminal.openFile(paneKey as string, path as string),
+    "terminal:openFolder": ([paneKey, path]) =>
+      terminal.openFolder(paneKey as string, path as string),
     "terminal:createEntry": ([paneKey, parentPath, name, kind], origin) => {
       // The handler's own checks (project root containment, a plain new
       // name) stay; a remote caller's arguments are typed first.

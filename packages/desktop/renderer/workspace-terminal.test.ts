@@ -1450,6 +1450,55 @@ describe("the terminal tab's file sidebar", () => {
     expect(opened).toEqual([["tab-1", "/proj/a.ts"]]);
   });
 
+  it("opens a folder through the editor IPC from its context menu, tagged with the pane's key", async () => {
+    const jarvis = (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
+    jarvis["terminalSettings"] = () =>
+      Promise.resolve({ blocks: true, inputEditor: false, notifyAfterSeconds: 0, home: "/h" });
+    jarvis["listTerminalDir"] = () => Promise.resolve([{ name: "src", directory: true }]);
+    const opened: [string, string][] = [];
+    jarvis["openTerminalFolder"] = (paneKey: string, path: string) => {
+      opened.push([paneKey, path]);
+      return Promise.resolve({ ok: true, value: undefined });
+    };
+    const { renderWorkspaceTerminals } = await load();
+    await settle();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    await settle();
+
+    dataListener?.("tab-1", CWD("/proj"));
+    await settle();
+    sidebar()
+      ?.querySelector<HTMLElement>('.file-tree-row[data-directory="true"]')
+      ?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 1, clientY: 1 }));
+    document.querySelector<HTMLButtonElement>(".terminal-explorer-menu-item")?.click();
+    await settle();
+
+    expect(opened).toEqual([["tab-1", "/proj/src"]]);
+  });
+
+  it("swallows a preload without the folder channel", async () => {
+    const jarvis = (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
+    jarvis["terminalSettings"] = () =>
+      Promise.resolve({ blocks: true, inputEditor: false, notifyAfterSeconds: 0, home: "/h" });
+    jarvis["listTerminalDir"] = () => Promise.resolve([{ name: "src", directory: true }]);
+    jarvis["openTerminalFolder"] = () => Promise.reject(new Error("gone"));
+    const { renderWorkspaceTerminals } = await load();
+    await settle();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    await settle();
+
+    dataListener?.("tab-1", CWD("/proj"));
+    await settle();
+    sidebar()
+      ?.querySelector<HTMLElement>('.file-tree-row[data-directory="true"]')
+      ?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 1, clientY: 1 }));
+    expect(() =>
+      document.querySelector<HTMLButtonElement>(".terminal-explorer-menu-item")?.click(),
+    ).not.toThrow();
+    await settle();
+    expect(document.getElementById("workspace-terminal")?.hidden).toBe(false);
+  });
+
   // A refusal — no editor integration, the file outside the project,
   // code-server failing to start — is not this wiring's business to
   // notice: main never rejects, and the terminal must be untouched either

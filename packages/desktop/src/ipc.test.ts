@@ -4256,6 +4256,157 @@ describe("terminal handlers", () => {
     });
   });
 
+  describe.runIf(POSIX_FIXTURES)("openFolder", () => {
+    // `/proj/a.ts` is the only file; reading it as a directory throws, as
+    // readdirSync does with ENOTDIR.
+    const files = {
+      readDir: (path: string) => {
+        if (path.endsWith(".ts")) throw new Error("ENOTDIR");
+        return [];
+      },
+      realPath: (path: string) => path.replace(/\/$/, ""),
+    };
+
+    function opener(
+      overrides: Partial<Pick<TerminalHandlerDeps, "projects" | "files" | "editor">> = {},
+    ): {
+      handlers: ReturnType<typeof createTerminalHandlers>;
+      opened: { projectPath: string; folderPath: string }[];
+      tabs: { project: string; url: string; detail: string | undefined }[];
+    } {
+      const opened: { projectPath: string; folderPath: string }[] = [];
+      const tabs: { project: string; url: string; detail: string | undefined }[] = [];
+      const editor = {
+        open: async (projectPath: string, folderPath: string) => {
+          opened.push({ projectPath, folderPath });
+          return {
+            ok: true as const,
+            url: `http://127.0.0.1:9999/?folder=${encodeURIComponent(folderPath)}&tkn=abc`,
+          };
+        },
+        openTab: (project: string, url: string, detail: string | undefined) => {
+          tabs.push({ project, url, detail });
+        },
+      };
+      const { manager } = shells();
+      const handlers = createTerminalHandlers({
+        shells: manager,
+        openTerminalTab: () => "tab-1",
+        projects: overrides.projects ?? { p: "/proj" },
+        language: "en",
+        terminal: terminalConfig,
+        terminalScrollback: 5000,
+        files: "files" in overrides ? overrides.files : files,
+        editor: "editor" in overrides ? overrides.editor : editor,
+      });
+      return { handlers, opened, tabs };
+    }
+
+    it("opens a folder inside the project: one editor at the project, the folder in the URL", async () => {
+      const { handlers, opened, tabs } = opener();
+      handlers.open("p");
+
+      await expect(handlers.openFolder("tab-1", "/proj/src/deep")).resolves.toEqual({
+        ok: true,
+        value: undefined,
+      });
+
+      // Never rooted at the clicked folder: one code-server per project.
+      expect(opened).toEqual([{ projectPath: "/proj", folderPath: "/proj" }]);
+      expect(tabs).toHaveLength(1);
+      const url = new URL(tabs[0]?.url ?? "");
+      expect(url.searchParams.get("folder")).toBe("/proj/src/deep");
+      // Everything else in the URL survives.
+      expect(url.searchParams.get("tkn")).toBe("abc");
+      expect(tabs[0]?.project).toBe("p");
+      expect(tabs[0]?.detail).toBe("src/deep");
+    });
+
+    it("gives the project's own editor tab (detail undefined) for the project root", async () => {
+      const { handlers, tabs } = opener();
+      handlers.open("p");
+
+      await handlers.openFolder("tab-1", "/proj");
+
+      expect(tabs).toHaveLength(1);
+      expect(tabs[0]?.detail).toBeUndefined();
+      expect(new URL(tabs[0]?.url ?? "").searchParams.get("folder")).toBe("/proj");
+    });
+
+    it("refuses a folder outside the project, opening nothing", async () => {
+      const { handlers, opened, tabs } = opener();
+      handlers.open("p");
+
+      await expect(handlers.openFolder("tab-1", "/etc")).resolves.toEqual({
+        ok: false,
+        text: MESSAGES.editorUnavailable("en"),
+        language: "en",
+      });
+      await expect(handlers.openFolder("tab-1", "/proj-secrets")).resolves.toMatchObject({
+        ok: false,
+      });
+      expect(opened).toEqual([]);
+      expect(tabs).toEqual([]);
+    });
+
+    it("refuses a symlink whose real path leaves the project", async () => {
+      const escaping = {
+        ...files,
+        realPath: (p: string) => (p === "/proj/link" ? "/elsewhere" : p),
+      };
+      const { handlers, opened, tabs } = opener({ files: escaping });
+      handlers.open("p");
+
+      await expect(handlers.openFolder("tab-1", "/proj/link")).resolves.toMatchObject({
+        ok: false,
+      });
+      expect(opened).toEqual([]);
+      expect(tabs).toEqual([]);
+    });
+
+    it("refuses a file path", async () => {
+      const { handlers, opened, tabs } = opener();
+      handlers.open("p");
+
+      await expect(handlers.openFolder("tab-1", "/proj/a.ts")).resolves.toMatchObject({
+        ok: false,
+      });
+      expect(opened).toEqual([]);
+      expect(tabs).toEqual([]);
+    });
+
+    it("refuses non-string arguments, an unknown pane, and a missing integration", async () => {
+      const { handlers } = opener();
+      handlers.open("p");
+      await expect(handlers.openFolder(7 as unknown as string, "/proj")).resolves.toMatchObject({
+        ok: false,
+      });
+      await expect(handlers.openFolder("tab-1", 7 as unknown as string)).resolves.toMatchObject({
+        ok: false,
+      });
+      await expect(handlers.openFolder("nope", "/proj")).resolves.toMatchObject({ ok: false });
+      const noEditor = opener({ editor: undefined });
+      noEditor.handlers.open("p");
+      await expect(noEditor.handlers.openFolder("tab-1", "/proj")).resolves.toMatchObject({
+        ok: false,
+      });
+      const noFiles = opener({ files: undefined });
+      noFiles.handlers.open("p");
+      await expect(noFiles.handlers.openFolder("tab-1", "/proj")).resolves.toMatchObject({
+        ok: false,
+      });
+    });
+
+    it("opens nothing when code-server fails to start", async () => {
+      const failing = { open: async () => ({ ok: false as const }), openTab: vi.fn() };
+      const { handlers } = opener({ editor: failing });
+      handlers.open("p");
+
+      await expect(handlers.openFolder("tab-1", "/proj/src")).resolves.toMatchObject({ ok: false });
+      expect(failing.openTab).not.toHaveBeenCalled();
+    });
+  });
+
   describe.runIf(!POSIX_FIXTURES)("listDir, openFile and chips on Windows", () => {
     // Native fixtures: what resolve() and realpathSync() actually hand the
     // handlers on this platform.

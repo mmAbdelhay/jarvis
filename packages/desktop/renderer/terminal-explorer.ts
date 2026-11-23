@@ -27,6 +27,10 @@ export type TerminalExplorerHooks = {
   list: (paneKey: string, path: string) => Promise<DirEntry[]>;
   /** A file was chosen, in that pane's shell. */
   choose: (paneKey: string, path: string) => void;
+  /** A folder's "Open in editor", in that pane's shell. Absent, the menu
+   *  has no such item — and with no `writes` there is no menu at all, so
+   *  the item needs both. */
+  openFolder?: (paneKey: string, path: string) => void;
   /** The sidebar's writes, and the strings to offer them with. Absent, the
    *  sidebar is read-only: no toolbar, no menu. Every path is checked by
    *  main against the pane's project; these only carry the request. */
@@ -219,6 +223,11 @@ export function createTerminalExplorer(
     closeMenu?.();
     const folder = target === undefined ? rooted.path : target.directory ? target.path : undefined;
     const items: Array<[MessageKey, () => void]> = [];
+    if (folder !== undefined && hooks.openFolder !== undefined) {
+      const open = hooks.openFolder;
+      const paneKey = rooted.paneKey;
+      items.push(["explorerOpenInEditor", () => open(paneKey, folder)]);
+    }
     if (folder !== undefined) {
       items.push(["explorerNewFile", () => create(folder, "file")]);
       items.push(["explorerNewFolder", () => create(folder, "directory")]);

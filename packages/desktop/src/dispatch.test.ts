@@ -88,6 +88,7 @@ export function fakeDeps(overrides: Partial<DispatchDeps> = {}): DispatchDeps {
       history: vi.fn(async () => []),
       listDir: vi.fn(async () => []),
       openFile: vi.fn(async () => ({ ok: true, value: undefined })),
+      openFolder: vi.fn(async () => ({ ok: true, value: undefined })),
       settings: vi.fn(() => ({
         blocks: false,
         inputEditor: false,

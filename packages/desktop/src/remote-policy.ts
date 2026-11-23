@@ -131,6 +131,7 @@ export const CHANNEL_POLICY = {
   "terminal:history": "remote",
   "terminal:listDir": "remote",
   "terminal:openFile": "desktop-only",
+  "terminal:openFolder": "desktop-only",
   // The file sidebar's writes. Owner decision 2026-10-03: rename and trash
   // are remote — the phone's file list drives them. Both stay inside a
   // configured project root (ipc.ts's resolveWithin/entryWithin, the same

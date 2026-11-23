@@ -30,7 +30,7 @@ import {
   type SystemMetrics,
   type Turn,
 } from "@jarvis/core";
-import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { Brain, ReviewComment, WorkspaceState, WorkspaceTab } from "@jarvis/core";
 import type { BindChoice, OwnerStatus, RemoteStatus, SetOwnerPasswordResult } from "@jarvis/remote";
 import type {
@@ -841,6 +841,10 @@ export type RendererApi = {
    *  dialog: the renderer fires this and forgets it, exactly as it already
    *  does for the file listing. */
   openTerminalFile(paneKey: string, path: string): Promise<GitViewResult<void>>;
+  /** A folder chosen in that sidebar, opened in the pane's project's Editor
+   *  — see TerminalHandlers.openFolder. Never rejects and never shows a
+   *  dialog, same as `openTerminalFile`. */
+  openTerminalFolder(paneKey: string, path: string): Promise<GitViewResult<void>>;
   /** A new, empty file or folder named `name` inside `parentPath`, from the
    *  file sidebar — see TerminalHandlers.createEntry. */
   createTerminalEntry(
@@ -2323,6 +2327,15 @@ export type TerminalHandlers = {
    *  `editor` integration configured, or a code-server that fails to start
    *  are all a click that opens nothing. */
   openFile(paneKey: string, path: string): Promise<GitViewResult<void>>;
+  /** A folder from the file sidebar, opened in the Editor. Resolved and
+   *  contained exactly as `openFile` does, and it must really be a
+   *  directory. code-server stays rooted at the **project** — one process
+   *  per project, never one per folder — and the URL's `folder` is
+   *  replaced with the folder, so the workbench opens it. The tab is the
+   *  project's own editor tab for the project root and one per folder
+   *  (`detail` = its path under the project) otherwise. Never rejects and
+   *  never surfaces a dialog, same as `openFile`. */
+  openFolder(paneKey: string, path: string): Promise<GitViewResult<void>>;
   /** A new, empty file or folder, from the file sidebar. `parentPath` goes
    *  through the same resolveWithin boundary listDir applies, `name` must
    *  be a single valid segment (isValidEntryName), and an existing entry
@@ -3129,6 +3142,46 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
       } catch {
         // A code-server that failed to start is a click that opens
         // nothing, never an error dialog over a terminal.
+        return fail();
+      }
+    },
+
+    async openFolder(paneKey, path) {
+      const fail = (): GitViewResult<void> => ({
+        ok: false,
+        text: MESSAGES.editorUnavailable(deps.language),
+        language: deps.language,
+      });
+      // Same checks, in the same order, as openFile — see the notes there.
+      if (!isString(paneKey) || !isString(path)) return fail();
+      const files = deps.files;
+      const editor = deps.editor;
+      if (files === undefined || editor === undefined) return fail();
+      const paneCwd = directories.get(paneKey) ?? directoryOf(paneKey.split(":")[0] ?? paneKey);
+      if (paneCwd === undefined) return fail();
+      const project = projectFor(paneCwd);
+      if (project === undefined) return fail();
+      const root = resolveWithin(project.dir, project.dir, files.realPath);
+      if (root === undefined) return fail();
+      const target = resolveWithin(root, path, files.realPath);
+      if (target === undefined) return fail();
+      try {
+        // A file makes readDir throw, and so does an unreadable folder:
+        // either way there is nothing to open.
+        files.readDir(target);
+        // Still the project's one code-server — never rooted at `target`
+        // (a ~200MB process per folder). Only the URL's `folder` moves.
+        const result = await editor.open(root, root);
+        if (!result.ok) return fail();
+        const url = new URL(result.url);
+        url.searchParams.set("folder", target);
+        // `undefined` is the project's own editor tab, so the project root
+        // and the Editor button converge on one tab; any other folder gets
+        // a tab of its own, reused by the next click on it.
+        const detail = target === root ? undefined : relative(root, target).split(sep).join("/");
+        editor.openTab(project.name, url.toString(), detail);
+        return { ok: true, value: undefined };
+      } catch {
         return fail();
       }
     },

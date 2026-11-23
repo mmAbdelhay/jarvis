@@ -463,7 +463,10 @@ describe("the terminal explorer's header", () => {
 });
 
 describe("the terminal explorer's writes", () => {
-  function build(results: Partial<Record<"create" | "rename" | "trash", unknown>> = {}) {
+  function build(
+    results: Partial<Record<"create" | "rename" | "trash", unknown>> = {},
+    withOpenFolder = true,
+  ) {
     const host = document.createElement("div");
     document.body.append(host);
     const list = vi.fn(async (_paneKey: string, path: string) => listing[path] ?? []);
@@ -473,14 +476,16 @@ describe("the terminal explorer's writes", () => {
       trash: vi.fn(async () => results.trash ?? { ok: true, path: "/proj/x" }),
       t: (key: string) => `«${key}»`,
     };
+    const openFolder = vi.fn();
     const view = createTerminalExplorer(host, "", {
       list,
       choose: vi.fn(),
+      ...(withOpenFolder ? { openFolder } : {}),
       // biome-ignore lint/suspicious/noExplicitAny: the doubles return loose shapes on purpose.
       writes: writes as any,
       pollMs: 0,
     });
-    return { view, list, writes };
+    return { view, list, writes, openFolder };
   }
 
   const menuItems = () =>
@@ -508,20 +513,53 @@ describe("the terminal explorer's writes", () => {
 
     rightClick(view.element.querySelector('[data-path="/proj/src"]'));
     expect(menuItems()).toEqual([
+      "«explorerOpenInEditor»",
       "«explorerNewFile»",
       "«explorerNewFolder»",
       "«explorerRename»",
       "«explorerTrash»",
     ]);
 
+    // A file has no folder to open.
     rightClick(view.element.querySelector('[data-path="/proj/read me.md"]'));
     expect(menuItems()).toEqual(["«explorerRename»", "«explorerTrash»"]);
 
     rightClick(view.element.querySelector(".file-tree"));
-    expect(menuItems()).toEqual(["«explorerNewFile»", "«explorerNewFolder»"]);
+    expect(menuItems()).toEqual([
+      "«explorerOpenInEditor»",
+      "«explorerNewFile»",
+      "«explorerNewFolder»",
+    ]);
 
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     expect(document.querySelector(".terminal-explorer-menu")).toBeNull();
+    view.dispose();
+  });
+
+  it("opens a folder in the editor for the pane it is rooted for", async () => {
+    const { view, openFolder } = build();
+    view.setRoot("tab-1", "/proj");
+    await settle();
+
+    rightClick(view.element.querySelector('[data-path="/proj/src"]'));
+    document.querySelector<HTMLButtonElement>(".terminal-explorer-menu-item")?.click();
+    expect(openFolder).toHaveBeenLastCalledWith("tab-1", "/proj/src");
+    expect(document.querySelector(".terminal-explorer-menu")).toBeNull();
+
+    // The empty area is the sidebar's own root.
+    rightClick(view.element.querySelector(".file-tree"));
+    document.querySelector<HTMLButtonElement>(".terminal-explorer-menu-item")?.click();
+    expect(openFolder).toHaveBeenLastCalledWith("tab-1", "/proj");
+    view.dispose();
+  });
+
+  it("offers no editor item without an openFolder hook", async () => {
+    const { view } = build({}, false);
+    view.setRoot("tab-1", "/proj");
+    await settle();
+
+    rightClick(view.element.querySelector('[data-path="/proj/src"]'));
+    expect(menuItems()).not.toContain("«explorerOpenInEditor»");
     view.dispose();
   });
 
@@ -532,7 +570,9 @@ describe("the terminal explorer's writes", () => {
     list.mockClear();
 
     rightClick(view.element.querySelector('[data-path="/proj/src"]'));
-    document.querySelector<HTMLButtonElement>(".terminal-explorer-menu-item")?.click();
+    [...document.querySelectorAll<HTMLButtonElement>(".terminal-explorer-menu-item")]
+      .find((item) => item.textContent === "«explorerNewFile»")
+      ?.click();
     await settle();
     typeName("new.ts");
     await settle();

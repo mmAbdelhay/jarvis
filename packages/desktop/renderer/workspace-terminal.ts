@@ -982,6 +982,14 @@ function ensurePane(
         // A preload without the channel. Same fallback as `list` above.
       }
     },
+    // "Open in editor" on a folder: the same fire-and-forget as `choose`.
+    openFolder: (paneKey, path) => {
+      try {
+        void window.jarvis.openTerminalFolder(paneKey, path).catch(() => {});
+      } catch {
+        // A preload without the channel. Same fallback as `choose` above.
+      }
+    },
     // New file, New folder, Rename and Move to Trash. Main proves every
     // path inside the pane's project (ipc.ts's createEntry and friends);
     // these only carry the request. A preload without a channel throws

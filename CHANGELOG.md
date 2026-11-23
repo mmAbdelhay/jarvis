@@ -8,6 +8,9 @@ version and the downloads. This file is the index.
 
 ## Unreleased
 
+- File sidebar: right-clicking a folder (or the empty area) in the Terminal tab now
+  offers "Open in editor", which opens that folder in the project's editor.
+
 ## [0.1.14] — 2026-11-22
 
 - Tailscale access: a new Settings → Remote access switch (off by default,

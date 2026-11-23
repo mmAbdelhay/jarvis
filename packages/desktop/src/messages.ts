@@ -571,6 +571,8 @@ export const MESSAGES = {
   explorerNewFile: (language: "ar" | "en"): string => (language === "ar" ? "ملف جديد" : "New file"),
   explorerNewFolder: (language: "ar" | "en"): string =>
     language === "ar" ? "مجلد جديد" : "New folder",
+  explorerOpenInEditor: (language: "ar" | "en"): string =>
+    language === "ar" ? "فتح في المحرر" : "Open in editor",
   explorerRename: (language: "ar" | "en"): string => (language === "ar" ? "إعادة تسمية" : "Rename"),
   explorerTrash: (language: "ar" | "en"): string =>
     language === "ar" ? "نقل إلى سلة المهملات" : "Move to Trash",

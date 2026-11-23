@@ -185,6 +185,7 @@ export const INVOKE_CHANNELS = {
   terminalHistory: "terminal:history",
   listTerminalDir: "terminal:listDir",
   openTerminalFile: "terminal:openFile",
+  openTerminalFolder: "terminal:openFolder",
   createTerminalEntry: "terminal:createEntry",
   renameTerminalEntry: "terminal:renameEntry",
   trashTerminalEntry: "terminal:trashEntry",
