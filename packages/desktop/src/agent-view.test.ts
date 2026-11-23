@@ -198,6 +198,25 @@ describe("agentView", () => {
   });
 });
 
+describe("agentView needsTerm", () => {
+  it("flags a menu readPrompt cannot read, without a prompt", async () => {
+    const view = await createAgentViewHandlers(fakeDeps("openai", CODEX_MENU)).view("t1");
+    expect(view).toMatchObject({ kind: "agent", needsTerm: true });
+    expect(view).not.toHaveProperty("prompt");
+  });
+
+  it("does not flag a readable prompt or an idle agent", async () => {
+    for (const [vendor, screen] of [
+      ["anthropic", CLAUDE_PROMPT],
+      ["openai", CODEX_PROMPT],
+      ["openai", CODEX_IDLE],
+    ] as const) {
+      const view = await createAgentViewHandlers(fakeDeps(vendor, screen)).view("t1");
+      expect(view).not.toHaveProperty("needsTerm");
+    }
+  });
+});
+
 describe("agentAnswer", () => {
   it("types the keys read from the screen now, for the option that still matches", () => {
     const deps = fakeDeps("anthropic", CLAUDE_PROMPT);

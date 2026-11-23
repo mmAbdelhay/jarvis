@@ -5,7 +5,7 @@
 // undefined — two candidates are never guessed between — and nothing here
 // throws. All file and process access is injected.
 
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import type { AgentConfig } from "@jarvis/core";
 import { transcriptDirs, type ExternalAgentProcess } from "@jarvis/platform";
 import {
@@ -158,7 +158,8 @@ export function createPaneAgentLookup(deps: PaneAgentLookupDeps): PaneAgentLooku
       transcriptPath,
       cwd: process.cwd,
     });
-    const under = (path: string): boolean => path.startsWith(sessionsDir);
+    // A path separator closes the prefix: "sessions-old" is not under "sessions".
+    const under = (path: string): boolean => path.startsWith(sessionsDir + sep);
 
     if (deps.platform !== "win32") {
       let open: string[] | undefined;

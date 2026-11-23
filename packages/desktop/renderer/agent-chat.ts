@@ -62,6 +62,11 @@ export type AgentChat = {
 
 /** When after a command starts to look for an agent. */
 export const DETECT_AT_MS: readonly number[] = [1000, 3000, 8000];
+/** After those, how often to keep looking while the command still runs: a
+ *  Codex or Copilot session file may only exist after the first message. */
+export const KEEP_LOOKING_MS = 10000;
+/** How long to wait before asking again after the agent seemed to vanish. */
+const RE_ASK_MS = 2000;
 /** How long after the pane is built to look for a command already running. */
 const RELOAD_CHECK_MS = 1500;
 const MODE_KEY = "jarvis.agentChatMode";
@@ -395,8 +400,27 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
     if (atBottom) feed.scrollTop = feed.scrollHeight;
   }
 
+  function renderNeedsTerm(): void {
+    card.hidden = false;
+    if (cardSig === "needsTerm") return;
+    cardSig = "needsTerm";
+    card.replaceChildren();
+    const question = el("p", "agent-chat__question", t("agentChatNeedsTerm"));
+    question.dir = "auto";
+    const button = el("button", "agent-chat__option", t("agentChatNeedsTermButton"));
+    button.type = "button";
+    button.addEventListener("click", () => setMode("term", true));
+    const choices = el("div", "agent-chat__options");
+    choices.append(button);
+    card.append(question, choices);
+  }
+
   function renderCard(view: AgentOf): void {
     const prompt = view.prompt;
+    if (prompt === undefined && view.needsTerm === true) {
+      renderNeedsTerm();
+      return;
+    }
     if (prompt === undefined) {
       card.hidden = true;
       card.replaceChildren();
@@ -434,10 +458,12 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
   }
 
   function updateComposer(): void {
-    const locked = sending || agent?.prompt !== undefined;
+    const locked = sending || agent?.prompt !== undefined || agent?.needsTerm === true;
     input.disabled = locked;
     sendButton.disabled = locked;
-    for (const button of card.querySelectorAll("button")) button.disabled = answering;
+    for (const button of card.querySelectorAll("button")) {
+      button.disabled = agent?.needsTerm === true ? false : answering;
+    }
   }
 
   function render(view: AgentOf): void {
@@ -453,31 +479,65 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
     cancelDetect = [];
   }
 
-  function apply(view: AgentView): void {
-    if (view.kind !== "agent") {
-      if (agent === undefined) return;
-      const hadFocus = host.contains(document.activeElement);
-      agent = undefined;
-      bar.hidden = true;
-      rows.clear();
-      feed.replaceChildren();
-      card.replaceChildren();
-      card.hidden = true;
-      cardSig = "";
-      showNote(undefined);
-      if (mode === "chat") {
-        options.setChatView(false, undefined);
-        mode = "term";
-        panel.hidden = true;
-        if (hadFocus) options.focusTerm();
-      }
-      for (const which of ["chat", "term"] as const) {
-        tabs[which].setAttribute("aria-selected", String(which === "term"));
-        tabs[which].tabIndex = which === "term" ? 0 : -1;
-      }
-      updateComposer();
+  // The agent was shown and a reply says "none" (or main failed): while the
+  // command still runs that may be a blip, so ask once more before leaving
+  // Chat. The draft in the composer is never touched either way.
+  let lostOnce = false;
+  let cancelReAsk: (() => void) | undefined;
+  function agentMissing(): void {
+    if (agent === undefined) return;
+    if (!lostOnce && options.isRunning?.() === true) {
+      lostOnce = true;
+      cancelReAsk?.();
+      cancelReAsk = schedule(() => {
+        cancelReAsk = undefined;
+        if (!disposed) void load();
+      }, RE_ASK_MS);
       return;
     }
+    dropAgent();
+  }
+
+  function dropAgent(): void {
+    lostOnce = false;
+    cancelReAsk?.();
+    cancelReAsk = undefined;
+    if (agent === undefined) return;
+    const hadFocus = host.contains(document.activeElement);
+    agent = undefined;
+    bar.hidden = true;
+    rows.clear();
+    feed.replaceChildren();
+    card.replaceChildren();
+    card.hidden = true;
+    cardSig = "";
+    showNote(undefined);
+    if (mode === "chat") {
+      options.setChatView(false, undefined);
+      mode = "term";
+      panel.hidden = true;
+      if (hadFocus) options.focusTerm();
+    }
+    for (const which of ["chat", "term"] as const) {
+      tabs[which].setAttribute("aria-selected", String(which === "term"));
+      tabs[which].tabIndex = which === "term" ? 0 : -1;
+    }
+    updateComposer();
+    // A command still running may start (or show) an agent again.
+    if (options.isRunning?.() === true) {
+      stopDetecting();
+      cancelDetect = [schedule(keepLooking, KEEP_LOOKING_MS)];
+    }
+  }
+
+  function apply(view: AgentView): void {
+    if (view.kind !== "agent") {
+      agentMissing();
+      return;
+    }
+    lostOnce = false;
+    cancelReAsk?.();
+    cancelReAsk = undefined;
     const first = agent === undefined;
     agent = view;
     stopDetecting();
@@ -497,7 +557,9 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
       const view = await api.terminalAgentView(paneKey);
       if (!disposed) apply(view);
     } catch {
-      // The view stays as it was; the next ask tries again.
+      // The view stays as it was; the next ask tries again. An agent already
+      // shown counts the failure like a "none".
+      if (!disposed) agentMissing();
     } finally {
       loading = false;
       if (loadAgain && !disposed) {
@@ -509,7 +571,7 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
 
   // ---- sending and answering -------------------------------------------
   async function submit(): Promise<void> {
-    if (sending || agent?.prompt !== undefined) return;
+    if (sending || agent?.prompt !== undefined || agent?.needsTerm === true) return;
     const text = input.value;
     if (text.trim() === "") return;
     sending = true;
@@ -581,6 +643,17 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
         if (!disposed) void load();
       }, ms),
     );
+    const last = DETECT_AT_MS[DETECT_AT_MS.length - 1] ?? 0;
+    cancelDetect.push(schedule(keepLooking, last + KEEP_LOOKING_MS));
+  }
+
+  // After the first looks found nothing: every 10s while a command runs, the
+  // pane shows and the document is visible. Ends on an agent (stopDetecting),
+  // a finished command, or dispose.
+  function keepLooking(): void {
+    if (disposed || agent !== undefined || options.isRunning?.() !== true) return;
+    if (isShown() && document.visibilityState === "visible") void load();
+    cancelDetect = [schedule(keepLooking, KEEP_LOOKING_MS)];
   }
 
   return {
@@ -596,6 +669,7 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
     dispose() {
       disposed = true;
       cancelReload();
+      cancelReAsk?.();
       stopDetecting();
       bar.remove();
       panel.remove();

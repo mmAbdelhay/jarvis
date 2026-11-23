@@ -41,6 +41,9 @@ export type AgentView =
       mode?: ClaudeMode;
       turns: ChatTurn[];
       prompt?: AgentPrompt;
+      /** The agent shows an approval menu readPrompt cannot read (Codex's
+       *  numbered one): it can only be answered in the terminal. */
+      needsTerm?: true;
       working?: string;
     };
 
@@ -163,6 +166,7 @@ export function createAgentViewHandlers(deps: AgentViewDeps): {
         let mode: ClaudeMode | undefined;
         let prompt: ReturnType<typeof readPrompt>;
         let working: string | undefined;
+        let needsTerm = false;
         if (session.vendor === "anthropic") {
           const read = readClaudeScreen(screen);
           ({ prompt, working } = read);
@@ -171,6 +175,9 @@ export function createAgentViewHandlers(deps: AgentViewDeps): {
           const tail = screenTail(screen);
           prompt = readPrompt(tail);
           if (readAgentInputState(tail, session.vendor) === "busy") working = WORKING_LABEL;
+        }
+        if (prompt === undefined) {
+          needsTerm = readAgentInputState(screenTail(screen), session.vendor) === "approval-prompt";
         }
         return {
           kind: "agent",
@@ -188,6 +195,7 @@ export function createAgentViewHandlers(deps: AgentViewDeps): {
                   options: prompt.options.map(({ label }) => ({ label })),
                 },
               }),
+          ...(needsTerm ? { needsTerm: true as const } : {}),
           ...(working === undefined ? {} : { working }),
         };
       } catch {

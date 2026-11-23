@@ -208,6 +208,112 @@ describe("detecting an agent", () => {
     expect(s.q<HTMLElement>(".agent-chat").hidden).toBe(true);
   });
 
+  it("keeps looking every 10s while the command runs, the pane shows and the document is visible", async () => {
+    let running = true;
+    let shown = true;
+    const s = setup({ isRunning: () => running, isShown: () => shown });
+    s.timers.advance(1500); // the reload check starts the looks afresh
+    for (const ms of [1000, 2000, 5000]) {
+      s.timers.advance(ms);
+      await settle();
+    }
+    expect(s.api.terminalAgentView).toHaveBeenCalledTimes(3);
+    s.timers.advance(10000);
+    await settle();
+    expect(s.api.terminalAgentView).toHaveBeenCalledTimes(4);
+    shown = false;
+    s.timers.advance(10000);
+    await settle();
+    expect(s.api.terminalAgentView).toHaveBeenCalledTimes(4);
+    shown = true;
+    s.current.view = agentView();
+    s.timers.advance(10000);
+    await settle();
+    expect(s.api.terminalAgentView).toHaveBeenCalledTimes(5);
+    expect(switchShown(s.host)).toBe(true);
+    s.timers.advance(60000);
+    await settle();
+    expect(s.api.terminalAgentView).toHaveBeenCalledTimes(5);
+    expect(s.timers.pending()).toBe(0);
+    running = false;
+  });
+
+  it("stops looking when the command ends or the pane is disposed", async () => {
+    let running = true;
+    const s = setup({ isRunning: () => running });
+    s.chat.commandStarted();
+    s.timers.advance(8000);
+    await settle();
+    running = false;
+    s.timers.advance(10000);
+    await settle();
+    const calls = s.api.terminalAgentView.mock.calls.length;
+    s.timers.advance(60000);
+    await settle();
+    expect(s.api.terminalAgentView.mock.calls.length).toBe(calls);
+    const other = setup({ isRunning: () => true });
+    other.chat.commandStarted();
+    other.timers.advance(8000);
+    other.chat.dispose();
+    expect(other.timers.pending()).toBe(0);
+  });
+
+  describe("an agent that goes missing from a reply", () => {
+    async function inChat(overrides: Partial<AgentChatOptions> = {}) {
+      const s = setup(overrides, agentView());
+      s.chat.focused();
+      await settle();
+      tab(s.host, "chat").click();
+      return s;
+    }
+
+    it("keeps Chat and the draft on one none while the command runs, drops to Term on a second", async () => {
+      const s = await inChat({ isRunning: () => true });
+      s.q<HTMLTextAreaElement>(".agent-chat__input").value = "my draft";
+      s.current.view = NONE;
+      s.chat.refresh();
+      await settle();
+      expect(switchShown(s.host)).toBe(true);
+      expect(s.q<HTMLElement>(".agent-chat").hidden).toBe(false);
+      s.timers.advance(1999);
+      await settle();
+      expect(switchShown(s.host)).toBe(true);
+      s.timers.advance(1);
+      await settle();
+      expect(switchShown(s.host)).toBe(false);
+      expect(s.q<HTMLElement>(".agent-chat").hidden).toBe(true);
+      expect(s.q<HTMLTextAreaElement>(".agent-chat__input").value).toBe("my draft");
+    });
+
+    it("stays in Chat when the re-ask finds the agent again", async () => {
+      const s = await inChat({ isRunning: () => true });
+      s.current.view = NONE;
+      s.chat.refresh();
+      await settle();
+      s.current.view = agentView();
+      s.timers.advance(2000);
+      await settle();
+      s.current.view = NONE;
+      s.chat.refresh();
+      await settle();
+      expect(switchShown(s.host)).toBe(true);
+      s.timers.advance(2000);
+      await settle();
+      expect(switchShown(s.host)).toBe(false);
+    });
+
+    it("treats a failed read like a none", async () => {
+      const s = await inChat({ isRunning: () => true });
+      s.api.terminalAgentView.mockRejectedValue(new Error("main"));
+      s.chat.refresh();
+      await settle();
+      expect(switchShown(s.host)).toBe(true);
+      s.timers.advance(2000);
+      await settle();
+      expect(switchShown(s.host)).toBe(false);
+    });
+  });
+
   it("ignores a reply that arrives after dispose", async () => {
     const s = setup({}, agentView());
     s.chat.focused();
@@ -479,6 +585,35 @@ describe("the chat", () => {
       await settle();
       expect(s.q<HTMLElement>(".agent-chat__prompt").hidden).toBe(true);
       expect(s.q<HTMLTextAreaElement>(".agent-chat__input").disabled).toBe(false);
+    });
+  });
+
+  describe("a menu only the terminal can answer", () => {
+    it("shows a card with a button to Term and locks the composer", async () => {
+      const s = await open(agentView({ needsTerm: true }));
+      const card = s.q<HTMLElement>(".agent-chat__prompt");
+      expect(card.hidden).toBe(false);
+      expect(card.textContent).toContain("The agent is asking something. Answer it in Term.");
+      expect(s.q<HTMLTextAreaElement>(".agent-chat__input").disabled).toBe(true);
+      card.querySelector<HTMLButtonElement>("button")?.click();
+      expect(tab(s.host, "term").getAttribute("aria-selected")).toBe("true");
+      expect(s.q<HTMLElement>(".agent-chat").hidden).toBe(true);
+      expect(s.focusTerm).toHaveBeenCalled();
+    });
+
+    it("goes away when the menu does", async () => {
+      const s = await open(agentView({ needsTerm: true }));
+      s.current.view = agentView();
+      s.chat.refresh();
+      await settle();
+      expect(s.q<HTMLElement>(".agent-chat__prompt").hidden).toBe(true);
+      expect(s.q<HTMLTextAreaElement>(".agent-chat__input").disabled).toBe(false);
+    });
+
+    it("has Arabic text", () => {
+      expect((MESSAGES.agentChatNeedsTerm as (l: "en" | "ar") => string)("ar")).not.toBe(
+        (MESSAGES.agentChatNeedsTerm as (l: "en" | "ar") => string)("en"),
+      );
     });
   });
 

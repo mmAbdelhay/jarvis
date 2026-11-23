@@ -177,6 +177,17 @@ describe("createPaneAgentLookup", () => {
       ).resolves.toBeUndefined();
     });
 
+    it("does not take a rollout under a sibling directory that shares the prefix", async () => {
+      const sibling = join("/h", ".codex", "sessions-old", "2026", "rollout-x-cccc.jsonl");
+      const { deps } = world({
+        openFiles: async () => [sibling],
+        readHead: async () => meta("cccc", "/w"),
+      });
+      await expect(
+        createPaneAgentLookup(deps).forProcess(processOf("codex")),
+      ).resolves.toBeUndefined();
+    });
+
     it("is undefined when lsof shows two open rollouts", async () => {
       const { deps } = world({ openFiles: async () => [ROLLOUT, OTHER] });
       await expect(
