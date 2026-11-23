@@ -22,6 +22,17 @@ version and the downloads. This file is the index.
   room per project, one cubicle and employee per tab or agent, with a card on hover and
   a raised hand, a notification and a badge when an agent asks a question. Pan and zoom,
   minimap, sidebar of projects. Desktop only; the phone is unchanged.
+- Tabs: right-click a tab (or an employee in the Office, with a right click, the Menu key
+  or Shift+F10) and choose "Open in new window" to move it into a window of its own;
+  "Return to main window", or closing the window, puts it back. A web page, editor,
+  database, cluster, chat or Terminal tab can go (a Terminal keeps its shells, its split
+  layout and any text typed but not yet sent); the API client and Docker tabs stay in the
+  main window for now. Cmd/Ctrl+W in a pop-out returns its tab. Not restored after a restart.
+- Office: a raised hand no longer waits behind or pushes out a security alert when no app is
+  attached to the background service, watching the agents no longer marks every pane as
+  watched or re-reads them all while one is busy, the card says "Last" rather than "Doing"
+  for an idle agent, and name tags, hand badges and bubbles are never hidden behind a
+  neighbouring cubicle.
 - Terminal: the Chat view keeps looking for an agent while its command runs (a Codex or
   Copilot session may only appear after the first message), no longer drops out of Chat
   on one failed read, and shows a card when an agent asks something only the terminal

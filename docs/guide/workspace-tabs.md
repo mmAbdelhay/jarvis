@@ -677,6 +677,22 @@ See **[configuration](configuration.md)** for `historyPath` and
 A request builder over the project's own Bruno collections. See
 **[the API client](api-client.md)**.
 
+## A tab in its own window
+
+Right-click a tab and choose **Open in new window** to move it into a window of
+its own; **Return to main window** (or closing that window, or Cmd/Ctrl+W in it)
+puts it back. A web page, editor, database, cluster, chat or Terminal tab can go.
+The API client and Docker tabs stay in the main window for now.
+
+The tab keeps its place in the strip, marked, and selecting it in the main window
+shows a card with **Show window** and **Bring back here**. A Terminal keeps its
+shells, its split layout and any text typed in its command editor but not yet sent;
+its pane in the main window is rebuilt from the shell's own backlog when it comes
+back. Closing the tab closes its window; quitting or closing the main window closes
+every pop-out. Pop-outs are not restored after a restart. In the Office, an employee
+has the same menu (right click, the Menu key or Shift+F10), and clicking the employee
+of a popped tab brings its window forward.
+
 ## The Office
 
 The chevron beside **Workspace** in the top bar opens a menu with **Tabs** (the

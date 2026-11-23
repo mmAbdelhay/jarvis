@@ -36,11 +36,16 @@ directories:
 # have to be in here. A missing vendor file is not a crash; it is a blank
 # terminal, which is far harder to notice.
 #
+# renderer/popout.html is the second page: one terminal tab in a window of its
+# own (popout.ts). Like index.html it is loaded from the source tree
+# (main.ts's pop-out windows) and reads its script from dist/renderer/popout.js.
+#
 # The .ts sources under renderer/ are deliberately excluded: they are build
 # inputs, they include the test files, and nothing at runtime reads them.
 files:
   - "dist/**/*"
   - "renderer/index.html"
+  - "renderer/popout.html"
   - "renderer/styles.css"
   - "renderer/vendor/**/*"
   - "package.json"
@@ -197,6 +202,7 @@ mac:
     # The shared list above, verbatim — see the note at its end.
     - "dist/**/*"
     - "renderer/index.html"
+    - "renderer/popout.html"
     - "renderer/styles.css"
     - "renderer/vendor/**/*"
     - "package.json"
@@ -255,6 +261,7 @@ win:
     # The shared list above, verbatim — see the note at its end.
     - "dist/**/*"
     - "renderer/index.html"
+    - "renderer/popout.html"
     - "renderer/styles.css"
     - "renderer/vendor/**/*"
     - "package.json"
@@ -309,6 +316,7 @@ linux:
     # The shared list above, verbatim — see the note at its end.
     - "dist/**/*"
     - "renderer/index.html"
+    - "renderer/popout.html"
     - "renderer/styles.css"
     - "renderer/vendor/**/*"
     - "package.json"

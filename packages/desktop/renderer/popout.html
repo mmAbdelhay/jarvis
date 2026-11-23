@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta
+  http-equiv="Content-Security-Policy"
+  content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:"
+/>
+<title>Jarvis</title>
+<link rel="stylesheet" href="vendor/xterm.css" />
+<link rel="stylesheet" href="vendor/fonts.css" />
+<link rel="stylesheet" href="./styles.css" />
+</head>
+<body class="popout">
+<!-- One terminal tab in a window of its own (popout.ts). It draws only that
+     tab: the host tells it which through the window's launch arguments, and
+     it starts none of the main app's services. The CSP above is index.html's,
+     verbatim. -->
+<div id="app" class="popout-root">
+  <div id="workspace-terminal" class="workspace-terminal"></div>
+</div>
+<script type="module" src="../dist/renderer/popout.js"></script>
+</body>
+</html>
