@@ -46,6 +46,9 @@ function pane(
   hooks: {
     onCwd?: (path: string) => void;
     chips?: (path: string) => Promise<import("../src/ipc.js").TerminalChips | undefined>;
+    onCommandStart?: () => void;
+    resize?: (cols: number, rows: number) => void;
+    splitKeys?: import("./terminal-addons.js").SplitKeys;
   } = {},
 ) {
   const host = document.createElement("div");
@@ -58,6 +61,10 @@ function pane(
     notify: vi.fn(),
     ...hooks,
   });
+}
+
+function key(init: KeyboardEventInit): KeyboardEvent {
+  return new KeyboardEvent("keydown", { cancelable: true, bubbles: true, ...init });
 }
 
 beforeEach(() => {
@@ -2384,5 +2391,69 @@ describe("a terminal pane's clearAll", () => {
 
     expect(p.blocks()).toHaveLength(0);
     expect(FakeTerminal.instances[0]?.cleared).toBe(1);
+  });
+});
+
+describe("a terminal pane's chat view", () => {
+  it("tells the caller when a command starts", () => {
+    const onCommandStart = vi.fn();
+    const p = pane(undefined, { onCommandStart });
+    p.write(`${A}$ ${B}claude\r\n`);
+    expect(onCommandStart).not.toHaveBeenCalled();
+    p.write(C("claude"));
+    expect(onCommandStart).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides the terminal without detaching it or resizing the pty", () => {
+    const resize = vi.fn();
+    const p = pane(undefined, { resize });
+    const terminal = FakeTerminal.instances[0];
+    p.setChatView(true, vi.fn());
+    expect(p.element.dataset["view"]).toBe("chat");
+    expect(p.element.querySelector(".terminal-live")).not.toBeNull();
+    // The stylesheet hides exactly what is marked as the terminal's own.
+    const marked = [...p.element.querySelectorAll("[data-term-surface]")].map((n) => n.className);
+    expect(marked).toEqual(
+      expect.arrayContaining([
+        "terminal-sticky-header",
+        "terminal-blocks",
+        "terminal-live",
+        "terminal-chips",
+      ]),
+    );
+    expect(p.element.isConnected).toBe(true);
+    expect(resize).not.toHaveBeenCalled();
+    expect(terminal?.disposed).toBe(false);
+  });
+
+  it("sends focus to the chat while it shows, and back to the terminal after", () => {
+    const p = pane();
+    const terminal = FakeTerminal.instances[0];
+    const focusChat = vi.fn();
+    p.setChatView(true, focusChat);
+    p.focus();
+    expect(focusChat).toHaveBeenCalledTimes(1);
+    expect(terminal?.focused).toBe(0);
+    p.setChatView(false);
+    expect(p.element.dataset["view"]).toBeUndefined();
+    expect(terminal?.focused).toBe(0);
+    p.focus();
+    expect(terminal?.focused).toBe(1);
+  });
+
+  it("keeps the palette and the split chords working from the chat", () => {
+    const closeFocused = vi.fn(() => true);
+    const split = vi.fn();
+    const p = pane(undefined, {
+      splitKeys: { split, closeFocused, focus: vi.fn(), closeTab: vi.fn() },
+    });
+    p.setChatView(true, vi.fn());
+    const palette = key({ key: "p", metaKey: true });
+    expect(p.chatKey(palette)).toBe(false);
+    expect(palette.defaultPrevented).toBe(true);
+    expect(p.element.querySelector(".terminal-palette")).not.toBeNull();
+    const plain = key({ key: "a" });
+    expect(p.chatKey(plain)).toBe(true);
+    expect(plain.defaultPrevented).toBe(false);
   });
 });

@@ -2600,3 +2600,111 @@ describe("the terminal tab's reviews dock", () => {
     expect(document.querySelector(".terminal-chips .reviews-chip")).toBeNull();
   });
 });
+
+// The Chat | Term switch: wired to the pane's command starts, its focus and
+// main's "look again" push, and gone with the pane.
+describe("the agent chat switch", () => {
+  const COMMAND = "\u001b]133;A\u0007$ \u001b]133;B\u0007claude\r\n\u001b]133;C;claude\u0007";
+  let viewListener: ((payload: { paneKey: string }) => void) | undefined;
+  let views: Record<string, unknown>;
+  let asked: string[];
+
+  beforeEach(() => {
+    harness();
+    viewListener = undefined;
+    views = {};
+    asked = [];
+    const jarvis = (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
+    jarvis["terminalSettings"] = () =>
+      Promise.resolve({ blocks: true, inputEditor: false, notifyAfterSeconds: 0, home: "/h" });
+    jarvis["onTerminalClaudeViewChanged"] = (cb: typeof viewListener) => {
+      viewListener = cb;
+    };
+    jarvis["terminalAgentView"] = (paneKey: string) => {
+      asked.push(paneKey);
+      return Promise.resolve(views[paneKey] ?? { kind: "none" });
+    };
+    jarvis["terminalAgentAnswer"] = () => Promise.resolve({ ok: true });
+    jarvis["terminalAgentSend"] = () => Promise.resolve({ ok: true });
+  });
+  afterEach(() => vi.useRealTimers());
+
+  const agent = { kind: "agent", vendor: "openai", sessionId: "s", turns: [] };
+  const bar = (index = 0) => document.querySelectorAll<HTMLElement>(".agent-bar")[index];
+
+  async function started() {
+    const { renderWorkspaceTerminals } = await load();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    vi.useFakeTimers();
+    return renderWorkspaceTerminals;
+  }
+
+  it("shows the switch in the pane that started an agent, after the first ask that finds one", async () => {
+    await started();
+    views["tab-1"] = agent;
+    dataListener?.("tab-1", COMMAND);
+    expect(bar()?.hidden).toBe(true);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(asked).toEqual(["tab-1"]);
+    expect(bar()?.hidden).toBe(false);
+    expect(bar()?.parentElement?.className).toBe("terminal-pane");
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(asked).toEqual(["tab-1"]);
+  });
+
+  it("keeps asking at 3s and 8s for a plain command, and never shows a switch", async () => {
+    await started();
+    dataListener?.("tab-1", COMMAND);
+    await vi.advanceTimersByTimeAsync(9000);
+    expect(asked).toEqual(["tab-1", "tab-1", "tab-1"]);
+    expect(bar()?.hidden).toBe(true);
+  });
+
+  it("refreshes on a push for its own pane only, and only once it knows of an agent", async () => {
+    await started();
+    viewListener?.({ paneKey: "tab-1" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(asked).toEqual([]);
+    views["tab-1"] = agent;
+    dataListener?.("tab-1", COMMAND);
+    await vi.advanceTimersByTimeAsync(1000);
+    viewListener?.({ paneKey: "tab-1" });
+    viewListener?.({ paneKey: "tab-9" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(asked).toEqual(["tab-1", "tab-1"]);
+  });
+
+  it("asks when a pane regains focus", async () => {
+    await started();
+    vi.useRealTimers();
+    const terminal = FakeTerminal.instances[0];
+    terminal?.pressKey({ key: "d", metaKey: true });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    asked.length = 0;
+    const leaves = document.querySelectorAll<HTMLElement>(".terminal-split-leaf");
+    leaves[0]?.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(asked).toEqual(["tab-1"]);
+  });
+
+  it("goes with its pane", async () => {
+    const render = await started();
+    vi.useRealTimers();
+    expect(document.querySelectorAll(".agent-bar")).toHaveLength(1);
+    render([], undefined, "");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(document.querySelectorAll(".agent-bar")).toHaveLength(0);
+  });
+
+  it("is harmless in a preload without the channels", async () => {
+    const jarvis = (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
+    jarvis["onTerminalClaudeViewChanged"] = undefined;
+    jarvis["terminalAgentView"] = undefined;
+    await started();
+    dataListener?.("tab-1", COMMAND);
+    await vi.advanceTimersByTimeAsync(9000);
+    expect(bar()?.hidden).toBe(true);
+  });
+});

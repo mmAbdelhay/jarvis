@@ -1,6 +1,7 @@
 import type { WorkspaceTab } from "@jarvis/core";
 import { LOGIN_TERMINAL_DETAIL } from "../src/login-terminal.js";
 import { MESSAGES, PRIMARY_LANGUAGE, type MessageKey } from "../src/messages.js";
+import { type AgentChat, createAgentChat } from "./agent-chat.js";
 import { enhanceTerminal, handleSplitKey, type SplitKeys } from "./terminal-addons.js";
 import { openTerminalLink } from "./terminal-links.js";
 import { attachCompletion, type Completion } from "./terminal-completion.js";
@@ -97,6 +98,11 @@ function setSessionPlanPath(pane: Pane, path: string | undefined): void {
  *  simply no longer among `tree.panes()`, so a key can never resolve to a
  *  pane that is gone. */
 const paneKeys = new WeakMap<TerminalPane, string>();
+
+/** Each pane's Chat | Term switch, by shell key — what main's "look again"
+ *  push and a pane's regaining focus are routed to. A pane's own entry goes
+ *  when the pane does. */
+const agentChats = new Map<string, AgentChat>();
 
 /** How many commands the command editor's arrows may walk back through.
  *  Long enough to reach this morning's command, short enough that a prompt
@@ -663,6 +669,15 @@ export function initWorkspaceTerminals(): void {
     paneFor(paneKey)?.writeLive(chunk);
   });
 
+  // main says a pane's agent view changed (the transcript grew, the pane
+  // printed). Guarded: a preload without the channel is a terminal with no
+  // chat switch, never one that throws.
+  try {
+    window.jarvis.onTerminalClaudeViewChanged(({ paneKey }) => agentChats.get(paneKey)?.refresh());
+  } catch {
+    // No agent view channel.
+  }
+
   window.jarvis.onTerminalExit((paneKey, code) => {
     // The tab stays open: its scrollback is usually the reason you were
     // there. The shell is gone, and saying so beats a terminal that has
@@ -1081,6 +1096,7 @@ function ensurePane(
     tabId,
     {
       onFocus: (paneKey) => {
+        agentChats.get(paneKey)?.focused();
         const path = lastCwd.get(paneKey);
         // A pane that has never said where it is — a shell with no
         // integration, or one that has not drawn its first prompt yet —
@@ -1309,6 +1325,9 @@ function makePane(
   // the cell grid and the shell's buffered prologue are all its business;
   // what stays here is everything that needs to know which shell this is.
   const view = createPane(element, {
+    // A command began: the moment an agent typed at the prompt may have
+    // started, so the Chat switch looks for one (agent-chat.ts).
+    onCommandStart: () => agentChats.get(paneKey)?.commandStarted(),
     // Every keystroke verbatim, control bytes included — that is what makes
     // Ctrl-C, arrows and Escape work rather than only plain text.
     sendInput: (data) => void window.jarvis.sendTerminalInput(paneKey, data),
@@ -1412,6 +1431,31 @@ function makePane(
   });
   paneKeys.set(view, paneKey);
   const terminal = view.terminal;
+
+  // The Chat | Term switch for a pane running Claude, Copilot or Codex. It
+  // shows only while main reports an agent there. Guarded because it is an
+  // enhancement: a pane that could not build it is still a terminal.
+  try {
+    const chat = createAgentChat({
+      paneKey,
+      host: view.element,
+      api: window.jarvis,
+      t: planPanelT,
+      setChatView: (active, focusChat) => view.setChatView(active, focusChat),
+      focusTerm: () => view.focus(),
+      chatKey: (event) => view.chatKey(event),
+      isRunning: () => view.element.dataset["state"] === "running",
+    });
+    agentChats.set(paneKey, chat);
+    const disposePane = view.dispose;
+    view.dispose = () => {
+      agentChats.delete(paneKey);
+      chat.dispose();
+      disposePane();
+    };
+  } catch {
+    // No chat switch. The terminal is untouched.
+  }
 
   // Autocomplete: a dropdown under the cursor, completing from this user's
   // own shell history. Guarded because it is an enhancement and never a

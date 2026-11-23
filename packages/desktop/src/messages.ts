@@ -70,6 +70,44 @@ export const MESSAGES = {
     language === "ar" ? "تبديل الشريط الجانبي للملفات" : "Toggle file sidebar",
   terminalClearButton: (language: "ar" | "en"): string =>
     language === "ar" ? "مسح الطرفية" : "Clear terminal",
+  agentSwitchLabel: (language: "ar" | "en"): string =>
+    language === "ar" ? "عرض الوكيل" : "Agent view",
+  agentChatTab: (language: "ar" | "en"): string => (language === "ar" ? "محادثة" : "Chat"),
+  agentTermTab: (language: "ar" | "en"): string => (language === "ar" ? "الطرفية" : "Term"),
+  agentChatFeedLabel: (language: "ar" | "en"): string =>
+    language === "ar" ? "المحادثة" : "Conversation",
+  agentChatEmpty: (language: "ar" | "en"): string =>
+    language === "ar" ? "لا توجد رسائل بعد." : "No messages yet.",
+  agentChatWorking: (language: "ar" | "en"): string => (language === "ar" ? "يعمل…" : "Working…"),
+  agentChatQuestionLabel: (language: "ar" | "en"): string =>
+    language === "ar" ? "سؤال من الوكيل" : "Question from the agent",
+  agentChatComposer: (language: "ar" | "en"): string =>
+    language === "ar" ? "اكتب رسالة للوكيل…" : "Message the agent…",
+  agentChatSend: (language: "ar" | "en"): string => (language === "ar" ? "إرسال" : "Send"),
+  agentChatModeDefault: (language: "ar" | "en"): string =>
+    language === "ar" ? "افتراضي" : "Default",
+  agentChatModeAuto: (language: "ar" | "en"): string => (language === "ar" ? "تلقائي" : "Auto"),
+  agentChatModePlan: (language: "ar" | "en"): string => (language === "ar" ? "خطة" : "Plan"),
+  agentChatModeAcceptEdits: (language: "ar" | "en"): string =>
+    language === "ar" ? "قبول التعديلات" : "Accept edits",
+  agentChatSendPrompt: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "الوكيل ينتظر إجابة. أجب عنه أولاً."
+      : "The agent is waiting for an answer. Answer it first.",
+  agentChatSendGone: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "لا يعمل أي وكيل في هذه اللوحة بعد الآن."
+      : "No agent is running in this pane any more.",
+  agentChatSendInvalid: (language: "ar" | "en"): string =>
+    language === "ar" ? "الرسالة فارغة أو طويلة جداً." : "That message is empty or too long.",
+  agentChatSendFailed: (language: "ar" | "en"): string =>
+    language === "ar" ? "تعذر الإرسال. حاول مرة أخرى." : "Could not send. Try again.",
+  agentChatAnswerGone: (language: "ar" | "en"): string =>
+    language === "ar" ? "هذا السؤال لم يعد مفتوحاً." : "That question is no longer open.",
+  agentChatAnswerChanged: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "تغيّر السؤال. اقرأه واختر مجدداً."
+      : "The question changed. Read it and choose again.",
   planPanelToggle: (language: "ar" | "en"): string =>
     language === "ar" ? "تبديل لوحة الخطة" : "Toggle plan panel",
   // ---- Reviews (Task 12): the Terminal tab's dock, its PR link chip and

@@ -13,6 +13,10 @@ version and the downloads. This file is the index.
 - Terminal: "Clear terminal" (palette, the clear-screen chord and a new button beside the
   sidebar switch) now removes every command block at once, not just the screen. A
   running command is not touched.
+- Terminal: a pane running Claude Code, Copilot or Codex now has a Chat | Term switch.
+  Chat shows the conversation as bubbles with the tools used, a question card for
+  permission prompts, and a box to message the agent; Term is the terminal as before,
+  and the choice is remembered. Desktop only — the phone's chat view is unchanged.
 
 ## [0.1.14] — 2026-11-22
 
