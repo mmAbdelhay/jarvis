@@ -905,7 +905,7 @@ function chatTool(name: string, input: unknown): ChatTool {
 }
 
 /** What a tool call ran on, from the first input field that names it. */
-function toolTarget(fields: Record<string, unknown>): string | undefined {
+export function toolTarget(fields: Record<string, unknown>): string | undefined {
   const path = fields["file_path"];
   if (typeof path === "string" && path !== "") return basename(path);
   const command = fields["command"];
