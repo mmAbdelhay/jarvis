@@ -2333,7 +2333,7 @@ export type TerminalHandlers = {
    *  per project, never one per folder — and the URL's `folder` is
    *  replaced with the folder, so the workbench opens it. The tab is the
    *  project's own editor tab for the project root and one per folder
-   *  (`detail` = its path under the project) otherwise. Never rejects and
+   *  (`detail` = "./" and its path under the project) otherwise. Never rejects and
    *  never surfaces a dialog, same as `openFile`. */
   openFolder(paneKey: string, path: string): Promise<GitViewResult<void>>;
   /** A new, empty file or folder, from the file sidebar. `parentPath` goes
@@ -3178,7 +3178,10 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
         // `undefined` is the project's own editor tab, so the project root
         // and the Editor button converge on one tab; any other folder gets
         // a tab of its own, reused by the next click on it.
-        const detail = target === root ? undefined : relative(root, target).split(sep).join("/");
+        // The "./" keeps a folder's tab apart from an `editors:` root of the
+        // same name ("web" is the root's detail, "./web" the folder's).
+        const detail =
+          target === root ? undefined : `./${relative(root, target).split(sep).join("/")}`;
         editor.openTab(project.name, url.toString(), detail);
         return { ok: true, value: undefined };
       } catch {

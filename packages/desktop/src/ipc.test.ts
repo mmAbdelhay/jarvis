@@ -4319,7 +4319,9 @@ describe("terminal handlers", () => {
       // Everything else in the URL survives.
       expect(url.searchParams.get("tkn")).toBe("abc");
       expect(tabs[0]?.project).toBe("p");
-      expect(tabs[0]?.detail).toBe("src/deep");
+      // "./" keeps it apart from an `editors:` root that happens to be named
+      // like the folder.
+      expect(tabs[0]?.detail).toBe("./src/deep");
     });
 
     it("gives the project's own editor tab (detail undefined) for the project root", async () => {
@@ -4566,6 +4568,12 @@ describe("terminal handlers", () => {
 
     it("misses a tab of a different project", () => {
       expect(findEditorTab([tab({ project: "q" })], "p", "src")).toBeUndefined();
+    });
+
+    it("keeps a folder's tab apart from an editor root of the same name", () => {
+      const root = tab({ detail: "web" });
+      expect(findEditorTab([root], "p", "./web")).toBeUndefined();
+      expect(findEditorTab([root], "p", "web")).toBe("t1");
     });
 
     it("misses a tab whose detail names a different folder", () => {
