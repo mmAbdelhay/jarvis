@@ -44,6 +44,7 @@ import { initKeepAwake } from "./keep-awake.js";
 import { initMachineSwitcher } from "./machine-switcher.js";
 import { initBattery, topbarDate } from "./topbar-status.js";
 import { initTopbarFit } from "./topbar-fit.js";
+import { initWorkspaceMenu } from "./workspace-menu.js";
 import { initFontKeys } from "./terminal-addons.js";
 import {
   detectLanguage,
@@ -470,6 +471,15 @@ function wireNav(): void {
     // The page slot has no measurable size until its route is on screen,
     // so the bounds are reported after showView, not before.
     reportWorkspaceBounds();
+  });
+  // The Workspace button's chevron: Tabs (the button's own route) or the
+  // Office. Absent markup (a minimal harness) wires nothing.
+  initWorkspaceMenu({
+    openTabs: () => document.getElementById("nav-workspace")?.click(),
+    openOffice: () => {
+      releaseVoice();
+      showView("office");
+    },
   });
   document.getElementById("nav-settings")?.addEventListener("click", () => {
     releaseVoice();

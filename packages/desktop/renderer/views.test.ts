@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from "vitest";
-import { currentView, setMachineShown, showView } from "./views.js";
+import { currentView, setMachineShown, setWorkspaceMenuOpen, showView } from "./views.js";
 
 // Minimal harness, same shape as app.test.ts's: lay down the ids showView
 // touches and nothing else.
@@ -17,6 +17,7 @@ function layout(): void {
     <div id="view-reviews" hidden></div>
     <div id="view-session" hidden></div>
     <div id="view-workspace" hidden></div>
+    <div id="view-office" hidden></div>
     <div id="view-settings" hidden></div>`;
 }
 
@@ -85,6 +86,35 @@ describe("showView", () => {
     expect(document.getElementById("nav-reviews")?.classList.contains("nav-btn--on")).toBe(true);
     expect(currentView()).toBe("reviews");
     expect(calls.at(-1)).toBe(false);
+  });
+
+  it("shows the Office route, hides the hosted view and keeps Workspace highlighted", () => {
+    const calls = stubBridge();
+    showView("workspace");
+
+    showView("office");
+
+    expect(document.getElementById("view-office")?.hasAttribute("hidden")).toBe(false);
+    expect(document.getElementById("view-workspace")?.hasAttribute("hidden")).toBe(true);
+    expect(document.getElementById("nav-workspace")?.classList.contains("nav-btn--on")).toBe(true);
+    expect(currentView()).toBe("office");
+    expect(calls.at(-1)).toBe(false);
+    showView("workspace");
+    expect(document.getElementById("view-office")?.hasAttribute("hidden")).toBe(true);
+    expect(document.getElementById("nav-workspace")?.classList.contains("nav-btn--on")).toBe(true);
+    showView("dashboard");
+    expect(document.getElementById("nav-workspace")?.classList.contains("nav-btn--on")).toBe(false);
+  });
+
+  it("hides the hosted view while the Workspace menu is open, and brings it back after", () => {
+    const calls = stubBridge();
+    showView("workspace");
+
+    setWorkspaceMenuOpen(true);
+    showView("workspace");
+    setWorkspaceMenuOpen(false);
+
+    expect(calls).toEqual([true, false, false, true]);
   });
 
   it("reports the current view", () => {

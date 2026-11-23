@@ -93,6 +93,16 @@ export const MESSAGES = {
   // The Office (office-activity.ts): a desktop notification when an agent
   // raises a hand. The title names the project (or the Lounge); the body is
   // the agent's name only — never the question.
+  officeMenuLabel: (language: "ar" | "en"): string =>
+    language === "ar" ? "عروض مساحة العمل" : "Workspace views",
+  officeMoreLabel: (language: "ar" | "en"): string =>
+    language === "ar" ? "عروض مساحة العمل" : "Workspace views",
+  officeMoreLabelHands: (hands: number, language: "ar" | "en"): string =>
+    language === "ar"
+      ? `عروض مساحة العمل، ${hands} أيدٍ مرفوعة`
+      : `Workspace views, ${hands} ${hands === 1 ? "hand" : "hands"} raised`,
+  officeMenuTabs: (language: "ar" | "en"): string => (language === "ar" ? "التبويبات" : "Tabs"),
+  officeMenuOffice: (language: "ar" | "en"): string => (language === "ar" ? "المكتب" : "Office"),
   officeLounge: (language: "ar" | "en"): string => (language === "ar" ? "الاستراحة" : "Lounge"),
   officeHandTitle: (project: string, language: "ar" | "en"): string =>
     language === "ar" ? `رُفعت يد في ${project}` : `Hand raised in ${project}`,
