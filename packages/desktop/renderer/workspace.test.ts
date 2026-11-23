@@ -13,6 +13,7 @@ import { FakeFitAddon, FakeTerminal } from "./terminal-double.js";
 vi.mock("./vendor/xterm.mjs", () => ({ Terminal: FakeTerminal }));
 vi.mock("./vendor/addon-fit.mjs", () => ({ FitAddon: FakeFitAddon }));
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
+import { setPoppedTabs } from "./popped.js";
 import {
   focusTerminalPane,
   initWorkspace,
@@ -163,6 +164,8 @@ function harness(): Recorded[] {
       devToolsHooks.closed = cb;
     },
     tabMenu: record("tabMenu"),
+    popoutFocus: record("popoutFocus"),
+    popoutReturn: record("popoutReturn"),
     onTabRename: (cb: (tabId: string) => void) => {
       tabMenuHooks.rename = cb;
     },
@@ -3580,3 +3583,83 @@ function $(id: string): HTMLElement {
   if (element === null) throw new Error(`no #${id}`);
   return element;
 }
+
+describe("a tab shown in another window", () => {
+  let calls: Recorded[];
+
+  beforeEach(() => {
+    setPoppedTabs([]);
+    calls = harness();
+    initWorkspace(["acme", "storefront"]);
+  });
+
+  const placeholder = (): HTMLElement | null => document.getElementById("workspace-popped");
+  const state = (extra: Partial<WorkspaceState["tabs"][number]> = {}): WorkspaceState => ({
+    tabs: [tab({ customTitle: "Docs", ...extra }), tab({ id: "tab-2", title: "Other" })],
+    activeTabId: "tab-1",
+  });
+
+  it("shows a placeholder in its place, with the tab's name as text and the two ways back", () => {
+    setPoppedTabs(["tab-1"]);
+    renderWorkspace(state({ customTitle: "<img src=x onerror=alert(1)>" }));
+    const card = placeholder();
+    expect(card?.hidden).toBe(false);
+    expect(card?.textContent).toContain(MESSAGES.popoutPlaceholderTitle(PRIMARY_LANGUAGE));
+    expect(card?.textContent).toContain("<img src=x onerror=alert(1)>");
+    expect(card?.querySelector("img")).toBeNull();
+    const [show, back] = [...(card?.querySelectorAll("button") ?? [])];
+    expect(show?.textContent).toBe(MESSAGES.popoutShowWindow(PRIMARY_LANGUAGE));
+    expect(back?.textContent).toBe(MESSAGES.popoutBringBack(PRIMARY_LANGUAGE));
+    expect(document.getElementById("workspace-page")?.hidden).toBe(true);
+    expect(document.getElementById("workspace-stage")?.hidden).toBe(true);
+  });
+
+  it("is not there for a tab that is not popped, nor while another tab is active", () => {
+    renderWorkspace(state());
+    expect(placeholder()?.hidden ?? true).toBe(true);
+    setPoppedTabs(["tab-2"]);
+    renderWorkspace(state());
+    expect(placeholder()?.hidden ?? true).toBe(true);
+    expect(document.getElementById("workspace-page")?.hidden).toBe(false);
+  });
+
+  it("shows the window or brings the tab back, by the tab's own id", () => {
+    setPoppedTabs(["tab-1"]);
+    renderWorkspace(state());
+    const [show, back] = [...(placeholder()?.querySelectorAll("button") ?? [])];
+    show?.click();
+    back?.click();
+    expect(calls.filter((c) => c.call === "popoutFocus").map((c) => c.args)).toEqual([["tab-1"]]);
+    expect(calls.filter((c) => c.call === "popoutReturn").map((c) => c.args)).toEqual([["tab-1"]]);
+  });
+
+  it("follows the host: the placeholder goes when the tab comes back, with no new state", () => {
+    renderWorkspace(state());
+    setPoppedTabs(["tab-1"]);
+    expect(placeholder()?.hidden).toBe(false);
+    setPoppedTabs([]);
+    expect(placeholder()?.hidden).toBe(true);
+    expect(document.getElementById("workspace-page")?.hidden).toBe(false);
+  });
+
+  it("marks the chip, in words as well as a mark", () => {
+    setPoppedTabs(["tab-1"]);
+    renderWorkspace(state());
+    const [first, second] = [
+      ...document.querySelectorAll<HTMLElement>("#workspace-tabs .workspace-tab"),
+    ];
+    expect(first?.classList.contains("workspace-tab--popped")).toBe(true);
+    expect(first?.querySelector(".workspace-tab-window")?.getAttribute("title")).toBe(
+      MESSAGES.popoutTabMark(PRIMARY_LANGUAGE),
+    );
+    expect(second?.classList.contains("workspace-tab--popped")).toBe(false);
+    expect(second?.querySelector(".workspace-tab-window")?.hasAttribute("hidden")).toBe(true);
+  });
+
+  it("does not strip the chrome for a full-screen page that is in another window", () => {
+    setPoppedTabs(["tab-1"]);
+    renderWorkspace(state({ pageFullscreen: true }));
+    expect(document.body.classList.contains("page-fullscreen")).toBe(false);
+    document.body.classList.remove("page-fullscreen");
+  });
+});

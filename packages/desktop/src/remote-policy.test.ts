@@ -280,6 +280,24 @@ describe("machine:* policy", () => {
   );
 });
 
+describe("popout:* policy", () => {
+  // A pop-out is a window of the laptop's own: never a phone's.
+  it.each([
+    "popout:open",
+    "popout:return",
+    "popout:focus",
+    "popout:list",
+    "popout:employeeMenu",
+    "popout:ready",
+    "popout:state",
+    "popout:handedOver",
+    "popout:take",
+  ])("keeps %s desktop-only", (channel) => {
+    expect(CHANNEL_POLICY[channel as keyof typeof CHANNEL_POLICY]).toBe("desktop-only");
+    expect(isRemoteAllowed(channel)).toBe(false);
+  });
+});
+
 describe("tailnet:peers policy", () => {
   it("lets a phone read the other machines on the tailnet", () => {
     expect(isRemoteAllowed("tailnet:peers")).toBe(true);

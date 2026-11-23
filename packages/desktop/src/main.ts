@@ -49,6 +49,8 @@ import {
 } from "./updater.js";
 import { webExportDir } from "./web-export.js";
 import { createElectronMachineViewFactory, createElectronViewFactory } from "./electron-view.js";
+import { createPopoutWindowFactory } from "./electron-popout.js";
+import { createPopouts, createViewingAggregate } from "./popout.js";
 import { createMachineViews, type MachineSessionLike } from "./machine-views.js";
 import { PROTOCOL_VERSION } from "@jarvis/wire";
 import { ViewReconciler } from "./view-reconciler.js";
@@ -218,8 +220,12 @@ function createDesktopHost(client: CoreClient) {
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   // Hosted views use persist:project-* partitions and never reach this
   // handler. In the Jarvis session, only geolocation needs caller gating.
+  // Jarvis's own renderers are the main window's and a pop-out's, and
+  // nothing else: the check is by webContents id, against the live windows.
   window.webContents.session.setPermissionRequestHandler((requesting, permission, callback) => {
-    callback(decidePermission(permission, requesting.id === window.webContents.id));
+    const ours =
+      requesting.id === window.webContents.id || popouts.tabOf(requesting.id) !== undefined;
+    callback(decidePermission(permission, ours));
   });
 
   // The Workspace's hosted pages. Each is a native WebContentsView over
@@ -313,9 +319,55 @@ function createDesktopHost(client: CoreClient) {
   const toWindow = rendererSink(window);
   const stopPushes = client.onPush(toWindow);
 
+  // Tabs shown in windows of their own (popout.ts). Their windows get only
+  // the pushes popoutPushAllowed lets through, and what the app counts as
+  // "focused" or "awake" includes them.
+  const mainContentsId = window.webContents.id;
+  const viewing = createViewingAggregate({
+    mainId: mainContentsId,
+    forward: (keys) => {
+      client.invoke("office:viewing", [keys]).catch(() => undefined);
+    },
+  });
+  const popouts = createPopouts({
+    workspace: client.workspace,
+    views,
+    createWindow: createPopoutWindowFactory({
+      preload: fileURLToPath(new URL("preload.cjs", import.meta.url)),
+      preloadArguments: preloadChannelArgs(),
+      popoutHtml: fileURLToPath(new URL("../../renderer/popout.html", import.meta.url)),
+      icon: iconPath("icon.png"),
+      onPush: (listener) => client.onPush(listener),
+    }),
+    resume: async (id) => {
+      await client.invoke("workspace:activate", [id]);
+    },
+    mainSend: (channel, payload) => toWindow(channel, payload),
+    schedule: (fn, ms) => {
+      const timer = setTimeout(fn, ms);
+      return () => clearTimeout(timer);
+    },
+    log: (token) => console.error(token),
+    onFocusChanged: () => refocus(),
+  });
+  views.onPopoutCloseRequested((id) => void popouts.returnTab(id));
+  /** The windows whose viewing keys are held, to forget a closed one's. */
+  const viewingWindows = new Set<number>();
+  function refocus(): void {
+    const live = new Set(popouts.contentsIds());
+    for (const id of [...viewingWindows]) {
+      if (live.has(id)) continue;
+      viewingWindows.delete(id);
+      viewing.forget(id);
+    }
+    viewing.setFocused(window.isFocused() ? mainContentsId : popouts.focusedContentsId());
+  }
+  window.on("focus", refocus);
+  window.on("blur", refocus);
+
   const detach = client.attachHost({
-    isFocused: () => window.isFocused(),
-    isAwake: () => window.isVisible() && !window.isMinimized(),
+    isFocused: () => window.isFocused() || popouts.anyFocused(),
+    isAwake: () => (window.isVisible() && !window.isMinimized()) || popouts.anyAwake(),
     requestFavicon,
     sweepIdleViews: () => views.sweepIdle(),
     destroyViews: () => views.destroy(),
@@ -357,6 +409,9 @@ function createDesktopHost(client: CoreClient) {
   // Detaching first also stops a core timer from calling isFocused() on a
   // destroyed BrowserWindow, which throws.
   window.on("closed", () => {
+    // The pop-outs go with the main window; their pages are views, destroyed
+    // just below with the rest.
+    popouts.closeAll();
     stopPushes();
     detach();
     views.destroy();
@@ -371,7 +426,21 @@ function createDesktopHost(client: CoreClient) {
     toWindow(channel, payload);
   }
 
-  return { window, views, machines, local };
+  // Cmd+Q and every quit that closes windows one by one: a pop-out vetoes
+  // its own close (it returns its tab first), so it must be gone before then.
+  app.on("before-quit", () => popouts.closeAll());
+
+  /** `office:viewing` from any window: kept per window, and only the focused
+   *  window's tabs are forwarded to the core. */
+  function reportViewing(senderId: number, keys: unknown): void {
+    viewingWindows.add(senderId);
+    viewing.report(
+      senderId,
+      Array.isArray(keys) ? keys.filter((key): key is string => typeof key === "string") : [],
+    );
+  }
+
+  return { window, views, machines, local, popouts, reportViewing, mainContentsId };
 }
 
 /**
@@ -447,6 +516,7 @@ app.whenReady().then(async () => {
           }),
       });
     let appWindow: BrowserWindow | undefined;
+    let appPopouts: { closeAll(): void } | undefined;
     const language = PRIMARY_LANGUAGE;
     const appImage = platform === "linux" ? appImageOf(process.env, process.execPath) : undefined;
     const nodeDeps = nodeDaemonModeDeps({
@@ -523,7 +593,9 @@ app.whenReady().then(async () => {
         attached = link;
         client.switchTo(link);
         // Everything the renderer drew came from the old core: it starts
-        // over against the new one, in the same window.
+        // over against the new one, in the same window. Its tabs and shells
+        // are not the new core's, so no pop-out of them can stay.
+        appPopouts?.closeAll();
         appWindow?.webContents.reload();
       },
       async useInProcess() {
@@ -531,6 +603,7 @@ app.whenReady().then(async () => {
         inProcessCore = await startCore();
         client.switchTo(inProcessCoreClient(inProcessCore));
         inProcessCore.startRemote();
+        appPopouts?.closeAll();
         appWindow?.webContents.reload();
       },
       async showError(title, body) {
@@ -559,8 +632,10 @@ app.whenReady().then(async () => {
         : inProcessCoreClient(inProcessCore as Awaited<ReturnType<typeof createCore>>),
       (line) => console.error(line),
     );
-    const { window, views, machines, local } = createDesktopHost(client);
+    const { window, views, machines, local, popouts, reportViewing, mainContentsId } =
+      createDesktopHost(client);
     appWindow = window;
+    appPopouts = popouts;
     focusAppWindow = () => {
       if (window.isDestroyed()) return;
       if (window.isMinimized()) window.restore();
@@ -609,7 +684,14 @@ app.whenReady().then(async () => {
     // through the client in a loop — the renderer's arguments as they
     // came, the origin always the desktop's.
     for (const channel of coreChannels()) {
-      ipcMain.handle(channel, (_event, ...args: unknown[]) => client.invoke(channel, args));
+      // `office:viewing` is kept per window, so a pop-out's tab counts as
+      // viewed only while that window is focused (popout.ts's
+      // createViewingAggregate); the aggregate is what reaches the core.
+      ipcMain.handle(channel, (event, ...args: unknown[]) =>
+        channel === "office:viewing"
+          ? reportViewing(event.sender.id, args[0])
+          : client.invoke(channel, args),
+      );
     }
 
     // The updater (updater.ts): checks at launch (below, once the window is
@@ -668,6 +750,8 @@ app.whenReady().then(async () => {
       buildMenu: (template) => Menu.buildFromTemplate(template),
       views,
       machines,
+      popouts,
+      mainContentsId: () => mainContentsId,
       chooseDock: (dock) => local("workspace:devtoolsDockChosen", dock),
       // Bug 2: the tab menu's Reload is workspace:reload's own view call,
       // and Close runs the dispatch table's workspace:close (terminal

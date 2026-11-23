@@ -48,6 +48,9 @@ export type OfficeViewOptions = {
   /** #view-office, with the skeleton from index.html in it. */
   root: HTMLElement;
   open(target: OfficeTarget): void;
+  /** An employee's context menu (right click, the Menu key, Shift+F10), at a
+   *  point in the window. Only for an employee with a tab. */
+  employeeMenu?(tabId: string, x: number, y: number): void;
   /** The empty state's "Open a tab". */
   openTab(): void;
   language?: "ar" | "en";
@@ -610,6 +613,33 @@ export function createOfficeView(options: OfficeViewOptions): OfficeView {
     element.addEventListener("click", () => {
       if (suppressClick) return;
       open(node.employee.target);
+    });
+    // "Open in new window" / "Return to main window": a native menu, drawn by
+    // the host, for an employee that is a tab (or a pane of one).
+    const menuTab = (): string | undefined => {
+      const target = node.employee.target;
+      return target.type === "session" ? undefined : target.tabId;
+    };
+    element.addEventListener("contextmenu", (event) => {
+      const tabId = menuTab();
+      if (tabId === undefined || options.employeeMenu === undefined) return;
+      event.preventDefault();
+      event.stopPropagation();
+      options.employeeMenu(tabId, event.clientX, event.clientY);
+    });
+    element.addEventListener("keydown", (event) => {
+      const tabId = menuTab();
+      if (tabId === undefined || options.employeeMenu === undefined) return;
+      const menuKey = event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey);
+      if (!menuKey) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const box = element.getBoundingClientRect();
+      options.employeeMenu(
+        tabId,
+        Math.round(box.left + box.width / 2),
+        Math.round(box.top + box.height / 2),
+      );
     });
     const show = (): void => showCard(node);
     const hide = (): void => hideCard(node);

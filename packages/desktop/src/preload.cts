@@ -113,11 +113,23 @@ export type PushAdaptersKeysMatchChannelsTs = AssertTrue<AdapterKeysMatch>;
 // actually has.
 const adaptersByChannel: { [K in PushKey]?: (payload: never) => unknown[] } = pushAdapters;
 
+const POPOUT_FLAG = "--jarvis-popout=";
+
+function popoutTabId(): string | undefined {
+  const arg = process.argv.find((entry) => entry.startsWith(POPOUT_FLAG));
+  if (arg === undefined) return undefined;
+  const id = arg.slice(POPOUT_FLAG.length);
+  return /^[A-Za-z0-9_-]{1,64}$/.test(id) ? id : undefined;
+}
+
 const api: Record<string, unknown> = {
   platform: process.platform,
   // Set by main before the renderer loads — see ensureConfigFile, which
   // reports whether this launch created the config file.
   firstRun: process.argv.includes("--jarvis-first-run"),
+  // Set only for a pop-out window (popout.ts): the tab it draws. A tab id is
+  // "tab-<n>", so anything else on the flag is no tab id at all.
+  popoutTabId: popoutTabId(),
 };
 
 for (const [method, channel] of Object.entries(invokeChannels)) {

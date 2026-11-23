@@ -20,6 +20,9 @@ const DESKTOP_ONLY = new Set([
   "update:state",
   "machine:state",
   "office:changed",
+  "popout:changed",
+  "popout:handover",
+  "popout:focusPane",
 ]);
 
 describe("REMOTE_PUSH_POLICY", () => {

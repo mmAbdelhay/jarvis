@@ -2708,3 +2708,125 @@ describe("the agent chat switch", () => {
     expect(bar()?.hidden).toBe(true);
   });
 });
+
+// A tab shown in another window (popout.ts): the main window's panes for it
+// go (disposing a pane kills no shell and sends no resize — the one owner of
+// the pty's size is the pop-out), and come back from the backlog on return,
+// with the layout and any unsent command-editor text carried explicitly.
+describe("a terminal tab's layout and drafts across a pop-out", () => {
+  const A = "\u001b]133;A\u0007";
+  const B = "\u001b]133;B\u0007";
+  const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+  const SPLIT = {
+    shape: {
+      direction: "row" as const,
+      first: { key: "tab-1" },
+      second: { key: "tab-1:p3" },
+    },
+    drafts: { "tab-1:p3": "git sta" },
+    focused: "tab-1:p3",
+  };
+
+  async function loadWithEditor() {
+    harness("");
+    const jarvis = (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
+    jarvis["terminalSettings"] = () =>
+      Promise.resolve({ blocks: true, inputEditor: true, notifyAfterSeconds: 0, home: "/h" });
+    const mod = await load();
+    await settle();
+    const popped = await import("./popped.js");
+    popped.setPoppedTabs([]);
+    return { ...mod, popped };
+  }
+
+  const editors = () => [
+    ...document.querySelectorAll<HTMLTextAreaElement>("textarea.terminal-input-text"),
+  ];
+
+  it("reads an unsplit tab as its one pane, with the editor's unsent text as a draft", async () => {
+    const { renderWorkspaceTerminals, terminalCarry } = await loadWithEditor();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    await settle();
+    dataListener?.("tab-1", `${A}$ ${B}`);
+    expect(terminalCarry("tab-1")).toEqual({
+      shape: { key: "tab-1" },
+      drafts: {},
+      focused: "tab-1",
+    });
+    const box = editors()[0] as HTMLTextAreaElement;
+    box.value = "git status";
+    expect(terminalCarry("tab-1")).toEqual({
+      shape: { key: "tab-1" },
+      drafts: { "tab-1": "git status" },
+      focused: "tab-1",
+    });
+  });
+
+  it("answers a plain state for a tab it never drew", async () => {
+    const { terminalCarry } = await loadWithEditor();
+    expect(terminalCarry("tab-9")).toEqual({ shape: { key: "tab-9" }, drafts: {} });
+  });
+
+  it("builds a staged layout without starting any shell, and puts the drafts back in their editors", async () => {
+    const { renderWorkspaceTerminals, stageTerminalCarry } = await loadWithEditor();
+    stageTerminalCarry("tab-1", SPLIT);
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    await settle();
+    expect(calls.filter((c) => c.call === "splitTerminal")).toEqual([]);
+    expect(calls.filter((c) => c.call === "closeTerminalPane" || c.call === "closeTab")).toEqual(
+      [],
+    );
+    expect(
+      calls
+        .filter((c) => c.call === "attachTerminal")
+        .map((c) => c.args[0])
+        .sort(),
+    ).toEqual(["tab-1", "tab-1:p3"]);
+    expect(FakeTerminal.instances).toHaveLength(2);
+    await settle();
+    expect(editors().map((box) => box.value)).toEqual(["", "git sta"]);
+    // The next split never reuses p3.
+    const focused = document.querySelector(".terminal-split-leaf.focused");
+    expect(focused?.querySelector("textarea")?.value).toBe("git sta");
+  });
+
+  it("disposes a popped tab's panes without killing a shell or sending a resize, and rebuilds from the backlog on return", async () => {
+    const { renderWorkspaceTerminals, terminalCarry, stageTerminalCarry, popped } =
+      await loadWithEditor();
+    const tabs = [tab()];
+    renderWorkspaceTerminals(tabs, "tab-1", "acme");
+    await settle();
+    const carried = terminalCarry("tab-1");
+    calls.length = 0;
+
+    popped.setPoppedTabs(["tab-1"]);
+    renderWorkspaceTerminals(tabs, "tab-1", "acme");
+    expect(document.querySelectorAll(".workspace-terminal-pane")).toHaveLength(0);
+    expect(document.getElementById("workspace-terminal")?.hidden).toBe(true);
+    expect(FakeTerminal.instances.every((terminal) => terminal.disposed)).toBe(true);
+    window.dispatchEvent(new Event("focus"));
+    expect(
+      calls.filter((c) =>
+        ["resizeTerminal", "closeTerminalPane", "closeTab", "splitTerminal"].includes(c.call),
+      ),
+    ).toEqual([]);
+
+    popped.setPoppedTabs([]);
+    stageTerminalCarry("tab-1", carried);
+    renderWorkspaceTerminals(tabs, "tab-1", "acme");
+    await settle();
+    expect(calls.filter((c) => c.call === "attachTerminal").map((c) => c.args)).toEqual([
+      ["tab-1"],
+    ]);
+    expect(document.querySelectorAll(".workspace-terminal-pane")).toHaveLength(1);
+  });
+
+  it("builds nothing for a popped tab even when it is the active one", async () => {
+    const { renderWorkspaceTerminals, popped } = await loadWithEditor();
+    popped.setPoppedTabs(["tab-1"]);
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    expect(FakeTerminal.instances).toHaveLength(0);
+    expect(calls.filter((c) => c.call === "attachTerminal")).toEqual([]);
+    popped.setPoppedTabs([]);
+  });
+});

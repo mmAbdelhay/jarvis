@@ -348,6 +348,16 @@ export const CHANNEL_POLICY = {
   "machine:showLocal": "desktop-only",
   "machine:bounds": "desktop-only",
   "machine:close": "desktop-only",
+  // Pop-outs are windows of the laptop's own; never a phone's.
+  "popout:open": "desktop-only",
+  "popout:return": "desktop-only",
+  "popout:focus": "desktop-only",
+  "popout:list": "desktop-only",
+  "popout:employeeMenu": "desktop-only",
+  "popout:ready": "desktop-only",
+  "popout:state": "desktop-only",
+  "popout:handedOver": "desktop-only",
+  "popout:take": "desktop-only",
   // The updater replaces and quits the laptop's own app; never a phone's
   // call to make.
   "update:check": "desktop-only",

@@ -29,7 +29,9 @@ export type HostedViewEvent =
   /** This page's DevTools were closed by something other than the renderer
    *  asking — the user closing their undocked window. The renderer is the
    *  side that remembers which tabs have DevTools open, so it has to hear. */
-  | { kind: "devtoolsClosed" };
+  | { kind: "devtoolsClosed" }
+  /** The close chord (Cmd/Ctrl+W) was pressed in a page shown in a pop-out. */
+  | { kind: "popoutClose" };
 
 /** Where a page's DevTools sit: beside the page in the Workspace layout, or
  *  in a window of their own. One choice for every tab, as in Chrome. */
@@ -46,7 +48,15 @@ export function isDevToolsDock(value: unknown): value is DevToolsDock {
  * testable in plain Vitest with no window and no Chromium (see
  * view-reconciler.ts).
  */
+/** A window a hosted view can be moved into. Opaque here — this file holds no
+ *  electron import — and a BrowserWindow in electron-view.ts. */
+export type ViewTarget = object;
+
 export type HostedView = {
+  /** Reparents the view (and its DevTools, popups and full screen with it)
+   *  into `target`, or back into the main window for undefined. The view is
+   *  never destroyed by a move. */
+  moveTo(target: ViewTarget | undefined): void;
   loadURL(url: string): void;
   setBounds(bounds: Rect): void;
   setVisible(visible: boolean): void;

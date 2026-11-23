@@ -1,4 +1,11 @@
-import { BrowserWindow, WebContentsView, desktopCapturer, screen, type Session } from "electron";
+import {
+  BrowserWindow,
+  WebContentsView,
+  desktopCapturer,
+  screen,
+  webContents as allWebContents,
+  type Session,
+} from "electron";
 import {
   bridgeEvents,
   bridgePopupWindow,
@@ -9,6 +16,7 @@ import {
   type PopupPolicy,
   type Rect,
   type ViewFactory,
+  type ViewTarget,
   type WebContentsLike,
 } from "./browser-host.js";
 import type {
@@ -55,6 +63,11 @@ export type ElectronViewOptions = {
  *  every tab of a project, and a session takes one handler. */
 const screenShareSessions = new WeakSet<Session>();
 
+/** The window each hosted page is in right now, by its webContents id: a page
+ *  shown in a pop-out shares the screen of that window's display, and the one
+ *  handler a session takes is installed by whichever view came first. */
+const windowOfContents = new Map<number, () => BrowserWindow>();
+
 /**
  * Lets a hosted page share the screen — "Present now" in Google Meet, and
  * every other getDisplayMedia call. Electron refuses the call outright until
@@ -66,11 +79,19 @@ const screenShareSessions = new WeakSet<Session>();
  * is on is shared, because a picker of our own could not be drawn above the
  * page asking for it (a hosted view paints over the renderer).
  */
-function enableScreenShare(session: Session, window: BrowserWindow): void {
+function enableScreenShare(session: Session, fallback: BrowserWindow): void {
   if (screenShareSessions.has(session)) return;
   screenShareSessions.add(session);
   session.setDisplayMediaRequestHandler(
-    (_request, callback) => {
+    (request, callback) => {
+      let window = fallback;
+      try {
+        const asking = request.frame === null ? undefined : allWebContents.fromFrame(request.frame);
+        const owner = asking === undefined ? undefined : windowOfContents.get(asking.id)?.();
+        if (owner !== undefined && !owner.isDestroyed()) window = owner;
+      } catch {
+        // The window the page was created in.
+      }
       void desktopCapturer
         .getSources({ types: ["screen"] })
         .then((sources) => {
@@ -112,6 +133,8 @@ export function createElectronViewFactory(
   };
 
   return (partition, kind) => {
+    /** The window the page is in: the main one, or a pop-out's. */
+    let host: BrowserWindow = window;
     const view = new WebContentsView({
       webPreferences: {
         partition,
@@ -131,6 +154,20 @@ export function createElectronViewFactory(
     // A focused hosted page receives the accelerator before Jarvis's renderer
     // can see it. Claim it here so Ctrl/Cmd+R reloads this view only.
     contents.on("before-input-event", (event, input) => {
+      // The close chord returns a page that is shown in a pop-out, whatever
+      // its kind: the focused page gets the key before the window does.
+      if (
+        host !== window &&
+        input.type === "keyDown" &&
+        input.key.toLowerCase() === "w" &&
+        (input.control || input.meta) &&
+        !input.alt &&
+        !input.shift
+      ) {
+        event.preventDefault();
+        emit({ kind: "popoutClose" });
+        return;
+      }
       if (kind !== "web") return;
       if (
         input.type !== "keyDown" ||
@@ -149,6 +186,7 @@ export function createElectronViewFactory(
     // covers subframes and survives a partition shared with another view.
     contents.setUserAgent(hostedUserAgent(contents.getUserAgent()));
     enableScreenShare(contents.session, window);
+    windowOfContents.set(contents.id, () => host);
 
     const listeners: ((event: HostedViewEvent) => void)[] = [];
     const emit = (event: HostedViewEvent): void => {
@@ -209,8 +247,8 @@ export function createElectronViewFactory(
       if (undocked === undefined || devTools === undefined) return;
       devToolsWindow = undefined;
       if (!undocked.isDestroyed()) undocked.contentView.removeChildView(devTools);
-      if (!window.isDestroyed()) {
-        window.contentView.addChildView(devTools);
+      if (!host.isDestroyed()) {
+        host.contentView.addChildView(devTools);
         if (devToolsBounds !== undefined) devTools.setBounds(devToolsBounds);
       }
       if (dispose && !undocked.isDestroyed()) {
@@ -229,7 +267,7 @@ export function createElectronViewFactory(
         autoHideMenuBar: true,
       });
       devToolsWindow = undocked;
-      window.contentView.removeChildView(devTools);
+      host.contentView.removeChildView(devTools);
       undocked.contentView.addChildView(devTools);
       devTools.setVisible(true);
       fitDevToolsWindow();
@@ -251,7 +289,8 @@ export function createElectronViewFactory(
      *  in Chrome; docked ones follow the page. */
     const placeDevTools = (): void => {
       if (devTools === undefined) return;
-      if (devToolsWanted && devToolsDock === "undocked") {
+      // In a pop-out there is no layout slot to dock into: undocked there.
+      if (devToolsWanted && (devToolsDock === "undocked" || host !== window)) {
         undock();
         return;
       }
@@ -264,7 +303,7 @@ export function createElectronViewFactory(
         devTools = new WebContentsView({
           webPreferences: { contextIsolation: true, nodeIntegration: false },
         });
-        window.contentView.addChildView(devTools);
+        host.contentView.addChildView(devTools);
         if (devToolsBounds !== undefined) devTools.setBounds(devToolsBounds);
         contents.setDevToolsWebContents(devTools.webContents);
       }
@@ -290,8 +329,8 @@ export function createElectronViewFactory(
         undocked.removeAllListeners("close");
         undocked.contentView.removeChildView(devTools);
         undocked.destroy();
-      } else if (!window.isDestroyed()) {
-        window.contentView.removeChildView(devTools);
+      } else if (!host.isDestroyed()) {
+        host.contentView.removeChildView(devTools);
       }
       devTools.webContents.close();
       devTools = undefined;
@@ -320,8 +359,29 @@ export function createElectronViewFactory(
         // On quit the window is already gone, and removing a child from a
         // destroyed window throws — which used to stop every tab after the
         // first from being closed at all.
-        if (!window.isDestroyed()) window.contentView.removeChildView(view);
+        if (!host.isDestroyed()) host.contentView.removeChildView(view);
+        windowOfContents.delete(contents.id);
         contents.close();
+      },
+      moveTo: (target: ViewTarget | undefined) => {
+        const next = (target as BrowserWindow | undefined) ?? window;
+        if (next === host || next.isDestroyed()) return;
+        const previous = host;
+        const dockedDevTools = devTools !== undefined && devToolsWindow === undefined;
+        // Out of the old window before into the new one, and neither is
+        // destroyed: the page, its DevTools and its popups keep running.
+        if (!previous.isDestroyed()) {
+          previous.contentView.removeChildView(view);
+          if (dockedDevTools && devTools !== undefined) {
+            previous.contentView.removeChildView(devTools);
+          }
+        }
+        host = next;
+        host.contentView.addChildView(view);
+        if (dockedDevTools && devTools !== undefined) host.contentView.addChildView(devTools);
+        // Docked panels have no slot in a pop-out (and a slot again in the
+        // main window): put them where this window's rules say.
+        placeDevTools();
       },
       setDevTools: (open) => {
         if (open === devToolsWanted) return;

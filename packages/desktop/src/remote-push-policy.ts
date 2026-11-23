@@ -102,6 +102,10 @@ export const REMOTE_PUSH_POLICY: {
   "update:state": "desktop-only",
   // This window's own machine views (machine-views.ts).
   "machine:state": "desktop-only",
+  // Pop-outs are this host's own windows (popout.ts).
+  "popout:changed": "desktop-only",
+  "popout:handover": "desktop-only",
+  "popout:focusPane": "desktop-only",
   // Each names a local child process a phone never started.
   "setup:output": "desktop-only",
   "voice:hotkeys": "desktop-only",

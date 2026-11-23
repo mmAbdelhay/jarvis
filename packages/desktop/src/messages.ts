@@ -1573,6 +1573,18 @@ export const MESSAGES = {
   tabMenuClose: (language: "ar" | "en"): string => (language === "ar" ? "إغلاق" : "Close"),
   // Task 8: the tab menu's fourth item, opening this tab's own plan panel.
   tabMenuPlans: (language: "ar" | "en"): string => (language === "ar" ? "الخطط" : "Plans"),
+  tabMenuPopOut: (language: "ar" | "en"): string =>
+    language === "ar" ? "فتح في نافذة جديدة" : "Open in new window",
+  tabMenuPopIn: (language: "ar" | "en"): string =>
+    language === "ar" ? "العودة إلى النافذة الرئيسية" : "Return to main window",
+  popoutPlaceholderTitle: (language: "ar" | "en"): string =>
+    language === "ar" ? "مفتوح في نافذة أخرى" : "Open in another window",
+  popoutShowWindow: (language: "ar" | "en"): string =>
+    language === "ar" ? "إظهار النافذة" : "Show window",
+  popoutBringBack: (language: "ar" | "en"): string =>
+    language === "ar" ? "إعادته إلى هنا" : "Bring back here",
+  popoutTabMark: (language: "ar" | "en"): string =>
+    language === "ar" ? "مفتوح في نافذة أخرى" : "In another window",
   // Ruling P22: gitChanges() always reads the repository's current working
   // tree, never a per-session snapshot. For a session that has already
   // ended, showing that data under its name would repeat exactly the lie

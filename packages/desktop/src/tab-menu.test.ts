@@ -83,4 +83,26 @@ describe("tabMenuTemplate", () => {
       "الخطط",
     ]);
   });
+
+  // Pop-outs: a native item at the end, offered only for a tab that can go.
+  it("appends the pop-out item after a separator only when asked, and wires its click", () => {
+    const callbacks = { onRename: vi.fn(), onReload: vi.fn(), onClose: vi.fn(), onPlans: vi.fn() };
+    const labels = { rename: "Rename", reload: "Reload", close: "Close", plans: "Plans" };
+    const without = tabMenuTemplate(labels, callbacks);
+    expect(without.some((item) => item.type === "separator")).toBe(false);
+    const onPopout = vi.fn();
+    const template = tabMenuTemplate(labels, callbacks, {
+      popout: { label: "Open in new window", onClick: onPopout },
+    });
+    expect(template.map((item) => item.label ?? item.type)).toEqual([
+      "Rename",
+      "Reload",
+      "Close",
+      "Plans",
+      "separator",
+      "Open in new window",
+    ]);
+    (template[5]?.click as (() => void) | undefined)?.();
+    expect(onPopout).toHaveBeenCalledTimes(1);
+  });
 });

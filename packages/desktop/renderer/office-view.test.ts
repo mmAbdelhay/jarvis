@@ -54,14 +54,18 @@ let root: HTMLElement;
 let opened: OfficeTarget[];
 let openedTab: number;
 
+let menus: { tabId: string; x: number; y: number }[];
+
 function setup(options: { language?: "ar" | "en"; visible?: () => boolean } = {}) {
   document.body.innerHTML = skeleton();
   root = document.getElementById("view-office") as HTMLElement;
   opened = [];
   openedTab = 0;
+  menus = [];
   const view = createOfficeView({
     root,
     open: (target) => opened.push(target),
+    employeeMenu: (tabId, x, y) => menus.push({ tabId, x, y }),
     openTab: () => {
       openedTab += 1;
     },
@@ -185,6 +189,98 @@ describe("the floor", () => {
     expect(openedTab).toBe(1);
     view.update(modelOf([tab("t1", "alpha")]));
     expect($("#office-empty").hidden).toBe(true);
+  });
+});
+
+describe("an employee's menu", () => {
+  const tabsAndSession = () =>
+    modelOf([tab("t1", "alpha"), tab("t2", "alpha", { kind: "terminal" })], {
+      sessions: [
+        {
+          id: "s1",
+          project: "alpha",
+          projectPath: "/p",
+          agentId: "claude",
+          state: "running",
+          summary: "x",
+          startedAt: NOW - 60_000,
+          lastActivityAt: NOW,
+        },
+      ],
+      activity: {
+        panes: { "t2:p9": { agent: "Claude Code", state: "question", question: "ok?" } },
+        sessions: {},
+      },
+    });
+
+  it("opens on a right click at the pointer, for the tab or pane's tab, and does not open the tab", () => {
+    const view = setup();
+    view.update(tabsAndSession());
+    const [web, terminal] = seats();
+    const first = new MouseEvent("contextmenu", {
+      bubbles: true,
+      cancelable: true,
+      clientX: 30,
+      clientY: 40,
+    });
+    web?.dispatchEvent(first);
+    terminal?.dispatchEvent(
+      new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 5, clientY: 6 }),
+    );
+    expect(first.defaultPrevented).toBe(true);
+    expect(menus).toEqual([
+      { tabId: "t1", x: 30, y: 40 },
+      { tabId: "t2", x: 5, y: 6 },
+    ]);
+    expect(opened).toEqual([]);
+  });
+
+  it("opens from the keyboard with the Menu key and with Shift+F10, at the seat", () => {
+    const view = setup();
+    view.update(tabsAndSession());
+    const web = seats()[0] as HTMLElement;
+    web.getBoundingClientRect = () => ({
+      left: 100,
+      top: 200,
+      width: 40,
+      height: 20,
+      right: 140,
+      bottom: 220,
+      x: 100,
+      y: 200,
+      toJSON: () => ({}),
+    });
+    const menuKey = new KeyboardEvent("keydown", {
+      key: "ContextMenu",
+      bubbles: true,
+      cancelable: true,
+    });
+    web.dispatchEvent(menuKey);
+    web.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "F10", shiftKey: true, bubbles: true, cancelable: true }),
+    );
+    expect(menuKey.defaultPrevented).toBe(true);
+    expect(menus).toEqual([
+      { tabId: "t1", x: 120, y: 210 },
+      { tabId: "t1", x: 120, y: 210 },
+    ]);
+    web.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "F10", bubbles: true, cancelable: true }),
+    );
+    web.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
+    );
+    expect(menus).toHaveLength(2);
+  });
+
+  it("is not offered for a session, which has no tab to move", () => {
+    const view = setup();
+    view.update(tabsAndSession());
+    const session = seats()[2] as HTMLElement;
+    const event = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+    session.dispatchEvent(event);
+    expect(menus).toEqual([]);
+    expect(event.defaultPrevented).toBe(false);
   });
 });
 

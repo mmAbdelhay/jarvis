@@ -110,10 +110,32 @@ describe("preload.cts (the real file, run in Node)", () => {
       new Set([
         "platform",
         "firstRun",
+        "popoutTabId",
         ...Object.keys(INVOKE_CHANNELS),
         ...Object.keys(PUSH_CHANNELS),
       ]),
     );
+  });
+
+  it("(a2) knows the tab it is the pop-out of from its launch arguments, and only a plausible one", async () => {
+    process.argv.push(...preloadChannelArgs());
+    await loadPreload();
+    expect((await exposedApi()).popoutTabId).toBeUndefined();
+
+    for (const [arg, expected] of [
+      ["--jarvis-popout=tab-12", "tab-12"],
+      ["--jarvis-popout=", undefined],
+      ["--jarvis-popout=has space", undefined],
+      ["--jarvis-popout=a:b", undefined],
+      [`--jarvis-popout=${"x".repeat(100)}`, undefined],
+    ] as const) {
+      vi.resetModules();
+      process.argv = [...ORIGINAL_ARGV, ...preloadChannelArgs(), arg];
+      const { contextBridge } = await electronMocks();
+      contextBridge.exposeInMainWorld.mockClear();
+      await loadPreload();
+      expect((await exposedApi()).popoutTabId).toBe(expected);
+    }
   });
 
   it("(b) forwards an invoke call's channel and args exactly", async () => {

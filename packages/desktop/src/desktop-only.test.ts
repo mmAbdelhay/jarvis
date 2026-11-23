@@ -458,6 +458,157 @@ function fakeDesktopDeps(): DesktopOnlyDeps {
       setBounds: vi.fn(),
       close: vi.fn(),
     },
+    popouts: fakePopouts(),
+    mainContentsId: () => 1,
     language: "en" as const,
   };
 }
+
+function fakePopouts(): DesktopOnlyDeps["popouts"] {
+  return {
+    open: vi.fn(async () => ({ ok: true as const, already: false })),
+    returnTab: vi.fn(async () => true),
+    focus: vi.fn(() => true),
+    list: vi.fn(() => ["t1"]),
+    isPopped: vi.fn((tabId: string) => tabId === "t1"),
+    canPopOut: vi.fn((tabId: string) => tabId !== "api1"),
+    tabOf: vi.fn((contentsId: number) => (contentsId === 7 ? "t1" : undefined)),
+    ready: vi.fn((contentsId: number) => (contentsId === 7 ? { tabId: "t1" } : undefined)),
+    reportState: vi.fn(),
+    provideState: vi.fn(),
+    takeReturned: vi.fn(() => undefined),
+  };
+}
+
+describe("pop-out channels", () => {
+  const MAIN = { sender: { id: 1 } };
+  const POPOUT = { sender: { id: 7 } };
+  const STRANGER = { sender: { id: 99 } };
+
+  function listeners(deps: DesktopOnlyDeps) {
+    const handle = vi.fn();
+    registerDesktopOnly({ ...deps, handle });
+    return (channel: string) =>
+      handle.mock.calls.find(([c]) => c === channel)![1] as (
+        event: unknown,
+        ...args: unknown[]
+      ) => Promise<unknown> | unknown;
+  }
+
+  it("registers every popout channel, desktop-only", () => {
+    for (const channel of [
+      "popout:open",
+      "popout:return",
+      "popout:focus",
+      "popout:list",
+      "popout:employeeMenu",
+      "popout:ready",
+      "popout:state",
+      "popout:handedOver",
+      "popout:take",
+    ] as const) {
+      expect(ELECTRON_BOUND_CHANNELS).toContain(channel);
+      expect(CHANNEL_POLICY[channel]).toBe("desktop-only");
+    }
+  });
+
+  it("lets only the main window open, focus, list, take and ask for the employee menu", async () => {
+    const deps = fakeDesktopDeps();
+    const listener = listeners(deps);
+    expect(await listener("popout:open")(MAIN, "t1")).toEqual({ ok: true, already: false });
+    expect(deps.popouts.open).toHaveBeenCalledWith("t1");
+    for (const event of [POPOUT, STRANGER, {}, null]) {
+      expect(await listener("popout:open")(event, "t1")).toEqual({ ok: false, reason: "invalid" });
+      expect(listener("popout:focus")(event, "t1")).toBe(false);
+      expect(listener("popout:list")(event)).toEqual([]);
+      expect(listener("popout:take")(event, "t1")).toBeUndefined();
+    }
+    expect(deps.popouts.open).toHaveBeenCalledTimes(1);
+    expect(listener("popout:focus")(MAIN, "t1", "t1:p1")).toBe(true);
+    expect(deps.popouts.focus).toHaveBeenCalledWith("t1", "t1:p1");
+    expect(listener("popout:list")(MAIN)).toEqual(["t1"]);
+    listener("popout:take")(MAIN, "t1");
+    expect(deps.popouts.takeReturned).toHaveBeenCalledWith("t1");
+  });
+
+  it("lets the main window return any popped tab, a pop-out only its own", async () => {
+    const deps = fakeDesktopDeps();
+    const listener = listeners(deps);
+    await listener("popout:return")(MAIN, "t1");
+    await listener("popout:return")(MAIN, "t2");
+    expect(deps.popouts.returnTab).toHaveBeenNthCalledWith(1, "t1");
+    expect(deps.popouts.returnTab).toHaveBeenNthCalledWith(2, "t2");
+    await listener("popout:return")(POPOUT, "t1");
+    expect(deps.popouts.returnTab).toHaveBeenCalledTimes(3);
+    expect(await listener("popout:return")(POPOUT, "t2")).toBe(false);
+    expect(await listener("popout:return")(STRANGER, "t1")).toBe(false);
+    expect(deps.popouts.returnTab).toHaveBeenCalledTimes(3);
+  });
+
+  it("tells a pop-out only about itself and takes state only from the window asked", () => {
+    const deps = fakeDesktopDeps();
+    const listener = listeners(deps);
+    expect(listener("popout:ready")(POPOUT)).toEqual({ tabId: "t1" });
+    expect(listener("popout:ready")(STRANGER)).toBeUndefined();
+    expect(listener("popout:ready")(MAIN)).toBeUndefined();
+    listener("popout:state")(POPOUT, { shape: { key: "t1" } });
+    listener("popout:state")(STRANGER, { shape: { key: "t1" } });
+    expect(deps.popouts.reportState).toHaveBeenCalledTimes(1);
+    expect(deps.popouts.reportState).toHaveBeenCalledWith(7, { shape: { key: "t1" } });
+
+    listener("popout:handedOver")(MAIN, "t1", { shape: { key: "t1" } });
+    expect(deps.popouts.provideState).toHaveBeenLastCalledWith("main", "t1", {
+      shape: { key: "t1" },
+    });
+    listener("popout:handedOver")(POPOUT, "t1", "x");
+    expect(deps.popouts.provideState).toHaveBeenLastCalledWith(7, "t1", "x");
+    listener("popout:handedOver")(POPOUT, "t2", "x");
+    listener("popout:handedOver")(STRANGER, "t1", "x");
+    expect(deps.popouts.provideState).toHaveBeenCalledTimes(2);
+  });
+
+  it("pops the employee menu at the point, labelled by whether the tab is popped, and only for a tab that can go", async () => {
+    const popup = vi.fn();
+    let template: MenuItemConstructorOptions[] = [];
+    const buildMenu = vi.fn((built: MenuItemConstructorOptions[]) => {
+      template = built;
+      return { popup };
+    });
+    const deps = { ...fakeDesktopDeps(), buildMenu };
+    const listener = listeners(deps);
+    listener("popout:employeeMenu")(MAIN, "t2", 10.6, 20.2);
+    expect(template.map((item) => item.label)).toEqual(["Open in new window"]);
+    expect(popup).toHaveBeenCalledWith({ window: deps.window, x: 11, y: 20 });
+    (template[0]?.click as (() => void) | undefined)?.();
+    expect(deps.popouts.open).toHaveBeenCalledWith("t2");
+
+    listener("popout:employeeMenu")(MAIN, "t1", 1, 2);
+    expect(template.map((item) => item.label)).toEqual(["Return to main window"]);
+    (template[0]?.click as (() => void) | undefined)?.();
+    expect(deps.popouts.returnTab).toHaveBeenCalledWith("t1");
+
+    buildMenu.mockClear();
+    listener("popout:employeeMenu")(MAIN, "api1", 1, 2);
+    listener("popout:employeeMenu")(MAIN, 5, 1, 2);
+    listener("popout:employeeMenu")(MAIN, "t2", Number.NaN, 2);
+    listener("popout:employeeMenu")(POPOUT, "t2", 1, 2);
+    expect(buildMenu).not.toHaveBeenCalled();
+  });
+
+  it("adds Open in new window or Return to main window to the tab chip's menu", () => {
+    let template: MenuItemConstructorOptions[] = [];
+    const buildMenu = vi.fn((built: MenuItemConstructorOptions[]) => {
+      template = built;
+      return { popup: vi.fn() };
+    });
+    const deps = { ...fakeDesktopDeps(), buildMenu };
+    const listener = listeners(deps);
+    listener("workspace:tabMenu")(MAIN, "t2", 1, 2);
+    expect(template.at(-1)?.label).toBe("Open in new window");
+    listener("workspace:tabMenu")(MAIN, "t1", 1, 2);
+    expect(template.at(-1)?.label).toBe("Return to main window");
+    listener("workspace:tabMenu")(MAIN, "api1", 1, 2);
+    expect(template.map((item) => item.label)).not.toContain("Open in new window");
+    (template.at(-1)?.click as (() => void) | undefined)?.();
+  });
+});

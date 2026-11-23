@@ -109,6 +109,8 @@ import type { UsageHistory } from "./usage-history.js";
 import type { TailnetSwitchResult } from "./tailnet-switch.js";
 import type { TailscaleCertResult } from "./tailscale-cert.js";
 import type { IpLocateResult } from "./ip-locate.js";
+import type { OpenResult } from "./popout.js";
+import type { PopoutTerminalState } from "./popout-state.js";
 import type {
   DeliveryOutcome,
   ReviewListItem,
@@ -1264,6 +1266,37 @@ export type RendererApi = {
   closeMachine(name: string): Promise<void>;
   /** A machine view's load state changed. Returns the unsubscribe. */
   onMachineState(cb: (state: MachineViewState) => void): () => void;
+  /** The tab id this window is the pop-out of, from its launch arguments;
+   *  undefined in the main window. */
+  popoutTabId: string | undefined;
+  /** Opens a tab in a window of its own (the main window only). For a
+   *  terminal it first asks this window for the tab's layout and drafts —
+   *  see onPopoutHandover. */
+  popoutOpen(tabId: string): Promise<OpenResult>;
+  /** Brings a popped tab back (the main window: any; a pop-out: its own). */
+  popoutReturn(tabId: string): Promise<boolean>;
+  /** Focuses a popped tab's window, and a pane in it. */
+  popoutFocus(tabId: string, paneKey?: string): Promise<boolean>;
+  /** The tab ids shown in pop-outs now. */
+  popoutList(): Promise<string[]>;
+  /** Pops the native "Open in new window" / "Return to main window" menu for
+   *  an Office employee, at (x, y). */
+  popoutEmployeeMenu(tabId: string, x: number, y: number): Promise<void>;
+  /** A pop-out asks what it starts from: its tab and, for a terminal, the
+   *  layout and drafts handed over. */
+  popoutReady(): Promise<{ tabId: string; state?: PopoutTerminalState } | undefined>;
+  /** A pop-out's latest layout and drafts, kept by the host for the return. */
+  popoutReportState(state: PopoutTerminalState): Promise<void>;
+  /** The answer to onPopoutHandover. */
+  popoutHandedOver(tabId: string, state: PopoutTerminalState): Promise<void>;
+  /** What a returned terminal tab carried back; handed over once. */
+  popoutTakeReturned(tabId: string): Promise<PopoutTerminalState | undefined>;
+  /** The popped tab ids changed. */
+  onPopoutChanged(cb: (tabIds: string[]) => void): () => void;
+  /** The host needs this window's layout and drafts for a tab, now. */
+  onPopoutHandover(cb: (tabId: string) => void): () => void;
+  /** Focus a pane of the tab this pop-out shows. */
+  onPopoutFocusPane(cb: (paneKey: string) => void): () => void;
 };
 
 export type WiringDeps = {

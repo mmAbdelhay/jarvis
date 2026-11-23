@@ -8,6 +8,7 @@ import {
   type HostedViewEvent,
   type Rect,
   type ViewFactory,
+  type ViewTarget,
 } from "./browser-host.js";
 import { TabHost, type PageFact } from "./core/tab-host.js";
 import { ViewReconciler, type TabReports } from "./view-reconciler.js";
@@ -27,7 +28,12 @@ class FakeView implements HostedView {
   wentForward = 0;
   reloaded = 0;
   #listeners: ((event: HostedViewEvent) => void)[] = [];
+  /** Every window the view was handed to, in order; undefined is the main one. */
+  moves: (ViewTarget | undefined)[] = [];
 
+  moveTo(target: ViewTarget | undefined): void {
+    this.moves.push(target);
+  }
   loadURL(url: string): void {
     this.loaded.push(url);
   }
@@ -1491,5 +1497,126 @@ describe("Workspace terminal tabs", () => {
     host.navigate(id, "https://github.com");
 
     expect(host.state().tabs[0]?.url).toBe("");
+  });
+});
+
+describe("ViewReconciler pop-outs", () => {
+  const WINDOW: ViewTarget = { name: "pop-out" };
+  let created: FakeView[];
+  let calls: Reported[];
+  let reconciler: ViewReconciler;
+  let now: number;
+
+  beforeEach(() => {
+    created = [];
+    now = 0;
+    const recorded = recordingReports();
+    calls = recorded.calls;
+    reconciler = new ViewReconciler(
+      () => {
+        const view = new FakeView();
+        created.push(view);
+        return view;
+      },
+      recorded.reports,
+      { suspendAfterMs: 1000, now: () => now },
+    );
+    reconciler.setVisible(true);
+    reconciler.apply(snapshot([tab("a"), tab("b")], "b"));
+  });
+
+  it("moves the view into the window, sized to it, and keeps it visible whatever the main window does", () => {
+    expect(reconciler.popOut("a", WINDOW, { x: 0, y: 0, width: 640, height: 480 })).toBe(true);
+    const a = created[0] as FakeView;
+    expect(a.moves).toEqual([WINDOW]);
+    expect(a.bounds).toEqual({ x: 0, y: 0, width: 640, height: 480 });
+    expect(a.visible).toBe(true);
+    reconciler.hideAll();
+    reconciler.setVisible(false);
+    expect(a.visible).toBe(true);
+    reconciler.apply(snapshot([tab("a"), tab("b")], "b"));
+    expect(a.visible).toBe(true);
+    expect(created[1]?.visible).toBe(false);
+  });
+
+  it("is not told the main window's bounds and follows its own window's", () => {
+    reconciler.popOut("a", WINDOW, { x: 0, y: 0, width: 640, height: 480 });
+    reconciler.setBounds({ x: 10, y: 20, width: 800, height: 600 });
+    expect(created[0]?.bounds).toEqual({ x: 0, y: 0, width: 640, height: 480 });
+    expect(created[1]?.bounds).toEqual({ x: 10, y: 20, width: 800, height: 600 });
+    reconciler.setPoppedBounds("a", { x: 0, y: 0, width: 700, height: 500 });
+    expect(created[0]?.bounds).toEqual({ x: 0, y: 0, width: 700, height: 500 });
+    expect(created[1]?.bounds).toEqual({ x: 10, y: 20, width: 800, height: 600 });
+  });
+
+  it("is never suspended while popped", () => {
+    reconciler.popOut("a", WINDOW, { x: 0, y: 0, width: 1, height: 1 });
+    now = 10_000;
+    reconciler.sweepIdle();
+    expect(calls.filter((call) => call.call === "suspend")).toEqual([]);
+    reconciler.popIn("a");
+    reconciler.setVisible(true);
+    now = 20_000;
+    reconciler.sweepIdle();
+    expect(calls).toContainEqual({ call: "suspend", id: "a" });
+  });
+
+  it("brings the view back to the main window with the main bounds, then hides it unless active", () => {
+    reconciler.setBounds({ x: 10, y: 20, width: 800, height: 600 });
+    reconciler.popOut("a", WINDOW, { x: 0, y: 0, width: 640, height: 480 });
+    reconciler.popIn("a");
+    const a = created[0] as FakeView;
+    expect(a.moves).toEqual([WINDOW, undefined]);
+    expect(a.bounds).toEqual({ x: 10, y: 20, width: 800, height: 600 });
+    expect(a.visible).toBe(false);
+    expect(reconciler.isPopped("a")).toBe(false);
+  });
+
+  it("refuses a tab with no page, an unknown tab and a second window for one tab", () => {
+    reconciler.apply(snapshot([tab("a"), tab("t", { kind: "terminal", url: "" })], "a"));
+    expect(reconciler.popOut("t", WINDOW, { x: 0, y: 0, width: 1, height: 1 })).toBe(false);
+    expect(reconciler.popOut("nope", WINDOW, { x: 0, y: 0, width: 1, height: 1 })).toBe(false);
+    expect(reconciler.popOut("a", WINDOW, { x: 0, y: 0, width: 1, height: 1 })).toBe(true);
+    expect(reconciler.popOut("a", { name: "other" }, { x: 0, y: 0, width: 1, height: 1 })).toBe(
+      false,
+    );
+  });
+
+  it("puts a page built later (a resumed tab) straight into its window", () => {
+    reconciler.apply(snapshot([tab("a", { suspended: true }), tab("b")], "b"));
+    expect(created[0]?.destroyed).toBe(true);
+    expect(reconciler.popOut("a", WINDOW, { x: 0, y: 0, width: 640, height: 480 })).toBe(true);
+    reconciler.apply(snapshot([tab("a"), tab("b")], "a"));
+    const rebuilt = created[2] as FakeView;
+    expect(rebuilt.moves).toEqual([WINDOW]);
+    expect(rebuilt.bounds).toEqual({ x: 0, y: 0, width: 640, height: 480 });
+    expect(rebuilt.visible).toBe(true);
+  });
+
+  it("destroys a popped view when its tab closes and forgets the window", () => {
+    reconciler.popOut("a", WINDOW, { x: 0, y: 0, width: 1, height: 1 });
+    reconciler.apply(snapshot([tab("b")], "b"));
+    expect(created[0]?.destroyed).toBe(true);
+    expect(reconciler.isPopped("a")).toBe(false);
+  });
+
+  it("tells the listener when the user presses the close chord in a popped page, and ignores it otherwise", () => {
+    const closed: string[] = [];
+    reconciler.onPopoutCloseRequested((id) => closed.push(id));
+    created[0]?.emit({ kind: "popoutClose" });
+    expect(closed).toEqual([]);
+    reconciler.popOut("a", WINDOW, { x: 0, y: 0, width: 1, height: 1 });
+    created[0]?.emit({ kind: "popoutClose" });
+    expect(closed).toEqual(["a"]);
+    reconciler.popIn("a");
+    created[0]?.emit({ kind: "popoutClose" });
+    expect(closed).toEqual(["a"]);
+  });
+
+  it("leaves a popped page's DevTools out of the main layout's slot", () => {
+    reconciler.popOut("a", WINDOW, { x: 0, y: 0, width: 1, height: 1 });
+    reconciler.setDevToolsBounds({ x: 1, y: 2, width: 3, height: 4 });
+    expect(created[0]?.devToolsBounds).toBeUndefined();
+    expect(created[1]?.devToolsBounds).toEqual({ x: 1, y: 2, width: 3, height: 4 });
   });
 });

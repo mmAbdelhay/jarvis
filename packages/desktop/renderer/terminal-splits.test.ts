@@ -427,3 +427,65 @@ describe("telling its owner which pane has the focus", () => {
     expect(keyOf(split.focused())).toBe("tab-1:p1");
   });
 });
+
+describe("the layout a tree carries", () => {
+  beforeEach(() => {
+    made = [];
+    killed = [];
+    document.body.innerHTML = "";
+  });
+
+  it("describes an unsplit tab as its one pane and a split tab as nested halves", () => {
+    const { tree: built } = tree();
+    expect(built.shape()).toEqual({ key: "tab-1" });
+    built.split("row");
+    built.split("column");
+    expect(built.shape()).toEqual({
+      direction: "row",
+      first: { key: "tab-1" },
+      second: { direction: "column", first: { key: "tab-1:p1" }, second: { key: "tab-1:p2" } },
+    });
+  });
+
+  it("rebuilds exactly that layout, panes keyed as given, focus on the one named", () => {
+    const shape = {
+      direction: "column" as const,
+      first: {
+        direction: "row" as const,
+        first: { key: "tab-1" },
+        second: { key: "tab-1:p3" },
+      },
+      second: { key: "tab-1:p5" },
+    };
+    const host = document.createElement("div");
+    document.body.append(host);
+    const built = createSplitTree(host, makePane, "tab-1", {
+      restore: shape,
+      focusKey: "tab-1:p5",
+    });
+    expect(built.shape()).toEqual(shape);
+    expect(built.panes().map(keyOf)).toEqual(["tab-1", "tab-1:p3", "tab-1:p5"]);
+    expect(keyOf(built.focused())).toBe("tab-1:p5");
+    expect(killed).toEqual([]);
+  });
+
+  it("never reuses a pane id a restored layout already holds", () => {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const built = createSplitTree(host, makePane, "tab-1", {
+      restore: { direction: "row", first: { key: "tab-1" }, second: { key: "tab-1:p4" } },
+    });
+    built.split("row");
+    expect(built.panes().map(keyOf).sort()).toEqual(["tab-1", "tab-1:p4", "tab-1:p5"]);
+  });
+
+  it("can start from a layout whose first pane is not the tab's own (the tab's own was closed)", () => {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const built = createSplitTree(host, makePane, "tab-1", {
+      restore: { direction: "row", first: { key: "tab-1:p2" }, second: { key: "tab-1:p3" } },
+    });
+    expect(built.panes().map(keyOf)).toEqual(["tab-1:p2", "tab-1:p3"]);
+    expect(made.some((entry) => entry.key === "tab-1")).toBe(false);
+  });
+});

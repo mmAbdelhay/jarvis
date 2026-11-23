@@ -18,6 +18,8 @@ import {
   type LinkChip,
   type ReviewsDock,
 } from "./reviews-dock.js";
+import { isPopped } from "./popped.js";
+import { plainTerminalState, type PopoutTerminalState } from "../src/popout-state.js";
 import { createPane, type TerminalPane } from "./terminal-pane.js";
 import { createSplitTree, MIN_PANE_PX, type SplitTree } from "./terminal-splits.js";
 
@@ -110,6 +112,42 @@ const agentChats = new Map<string, AgentChat>();
 const HISTORY_LIMIT = 200;
 
 const panes = new Map<string, Pane>();
+
+/** Layouts staged for the next pane built for a tab: what came back from a
+ *  pop-out (see stageTerminalCarry). */
+const stagedCarry = new Map<string, PopoutTerminalState>();
+/** Command-editor text waiting for its pane's attach to settle, by pane key. */
+const pendingDrafts = new Map<string, string>();
+
+/**
+ * Everything about a tab's panes that main cannot rebuild: how it is split,
+ * which pane has the focus, and the text typed into a command editor but not
+ * yet sent. The shells and their output are main's (and come back through the
+ * attach backlog); text sent to a shell without an editor is already in the
+ * pty. Plain for a tab this window never drew.
+ */
+export function terminalCarry(tabId: string): PopoutTerminalState {
+  const entry = panes.get(tabId);
+  if (entry === undefined) return plainTerminalState(tabId);
+  const drafts: Record<string, string> = {};
+  for (const leaf of entry.tree.panes()) {
+    const key = paneKeys.get(leaf);
+    const text = leaf.readInput();
+    if (key !== undefined && text !== undefined && text !== "") drafts[key] = text;
+  }
+  const focused = paneKeys.get(entry.tree.focused());
+  return {
+    shape: entry.tree.shape(),
+    drafts,
+    ...(focused === undefined ? {} : { focused }),
+  };
+}
+
+/** The next pane built for `tabId` takes this layout and drafts (every pane in
+ *  it attaches to the shell it already has; none is started). */
+export function stageTerminalCarry(tabId: string, state: PopoutTerminalState): void {
+  stagedCarry.set(tabId, state);
+}
 
 /** The file sidebar switch's glyph: a window with its left column ruled
  *  off. Drawn rather than typed — no text glyph for it matches the plan
@@ -806,7 +844,12 @@ export function renderWorkspaceTerminals(
   selectedProject: string,
 ): void {
   const host = $("workspace-terminal");
-  const live = new Set(tabs.filter((tab) => tab.kind === "terminal").map((tab) => tab.id));
+  // A tab shown in another window is not drawn here: its panes are disposed
+  // (no shell is killed, no size sent) and rebuilt from the backlog when it
+  // comes back.
+  const live = new Set(
+    tabs.filter((tab) => tab.kind === "terminal" && !isPopped(tab.id)).map((tab) => tab.id),
+  );
 
   // A tab that is gone takes its terminal with it. The shell is already
   // being reaped by main's own close handler.
@@ -836,7 +879,9 @@ export function renderWorkspaceTerminals(
   // A terminal is the renderer's own DOM, so it applies the same rule here
   // rather than going on showing another project's shell.
   const showing =
-    active?.kind === "terminal" && active.project === selectedProject ? active.id : undefined;
+    active?.kind === "terminal" && active.project === selectedProject && !isPopped(active.id)
+      ? active.id
+      : undefined;
   host.hidden = showing === undefined;
 
   // The AWS login tab is the one terminal in Jarvis drawn without blocks —
@@ -1073,6 +1118,17 @@ function ensurePane(
    *  may be minutes old. */
   const lastCwd = new Map<string, string>();
 
+  // A layout carried back from a pop-out: its panes' shells exist already.
+  const carried = stagedCarry.get(tabId);
+  stagedCarry.delete(tabId);
+  if (carried !== undefined) {
+    for (const key of carriedKeys(carried)) {
+      remoteStartedShells.add(key);
+      const draft = carried.drafts[key];
+      if (draft !== undefined) pendingDrafts.set(key, draft);
+    }
+  }
+
   const built = createSplitTree(
     element,
     (paneKey, paneHost) =>
@@ -1108,6 +1164,12 @@ function ensurePane(
       ),
     tabId,
     {
+      ...(carried === undefined
+        ? {}
+        : {
+            restore: carried.shape,
+            ...(carried.focused === undefined ? {} : { focusKey: carried.focused }),
+          }),
       onFocus: (paneKey) => {
         agentChats.get(paneKey)?.focused();
         const path = lastCwd.get(paneKey);
@@ -1285,6 +1347,19 @@ function ensurePane(
   return pane;
 }
 
+function carriedKeys(state: PopoutTerminalState): string[] {
+  const keys: string[] = [];
+  const walk = (shape: PopoutTerminalState["shape"]): void => {
+    if ("key" in shape) keys.push(shape.key);
+    else {
+      walk(shape.first);
+      walk(shape.second);
+    }
+  };
+  walk(state.shape);
+  return keys;
+}
+
 /**
  * One leaf of a tab's tree: a whole terminal pane, with its own blocks, its
  * own editor and its own autocomplete, talking to the shell keyed
@@ -1372,10 +1447,21 @@ function makePane(
     // exists, so a slow or unknown key here never leaves the pane blank.
     // What stops a chunk from landing twice is terminal-pane.ts's own
     // write-gate on its attach promise, not this wait.
-    attach: () =>
-      started === undefined
-        ? window.jarvis.attachTerminal(paneKey)
-        : started.then(() => window.jarvis.attachTerminal(paneKey)),
+    attach: () => {
+      const attached =
+        started === undefined
+          ? window.jarvis.attachTerminal(paneKey)
+          : started.then(() => window.jarvis.attachTerminal(paneKey));
+      const draft = pendingDrafts.get(paneKey);
+      if (draft === undefined) return attached;
+      pendingDrafts.delete(paneKey);
+      // Text typed in this pane's command editor before it moved: put back
+      // once the backlog (and with it the prompt) has been drawn.
+      return attached.then((backlog) => {
+        setTimeout(() => view.applyInput(draft), 0);
+        return backlog;
+      });
+    },
     settings,
     // What the command editor's arrows walk: Jarvis's own command log,
     // never zsh's line editor. Guarded because a preload without the

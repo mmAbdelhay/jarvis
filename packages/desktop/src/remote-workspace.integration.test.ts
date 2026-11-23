@@ -912,6 +912,7 @@ describe("remote-workspace.integration: a phone-opened terminal", () => {
         setDevToolsDock: vi.fn(),
         hasPlayingVideo: vi.fn(async () => false),
         requestPictureInPicture: vi.fn(),
+        moveTo: vi.fn(),
       };
       created.push(view);
       return view;

@@ -48,7 +48,9 @@ import { initTopbarFit } from "./topbar-fit.js";
 import { initWorkspaceMenu } from "./workspace-menu.js";
 import { initOffice, type Office } from "./office-view.js";
 import type { OfficeTarget } from "./office-model.js";
-import { runningTerminalTabs } from "./workspace-terminal.js";
+import { runningTerminalTabs, stageTerminalCarry, terminalCarry } from "./workspace-terminal.js";
+import { focusPopped, initMainPopouts, viewingKeys } from "./popout-main.js";
+import { isPopped, onPoppedChange } from "./popped.js";
 import { initFontKeys } from "./terminal-addons.js";
 import {
   detectLanguage,
@@ -420,6 +422,9 @@ function openOfficeTarget(target: OfficeTarget): void {
     if (session !== undefined) void openSession(session);
     return;
   }
+  // A tab shown in another window: that window comes forward, on the pane
+  // that asked, rather than a placeholder here.
+  if (focusPopped(window.jarvis, target, isPopped)) return;
   if (target.type === "pane" && focusTerminalPane(target.paneKey)) return;
   openWorkspaceTab(target.tabId);
 }
@@ -427,13 +432,12 @@ function openOfficeTarget(target: OfficeTarget): void {
 /** Tells main which tab or session this window shows, so a hand raised for
  *  exactly that one is not announced twice. */
 function reportViewing(): void {
-  const keys: string[] = [];
-  const name = currentView();
-  if (name === "workspace" && activeTabId !== undefined) keys.push(activeTabId);
-  else if (name === "session") {
-    const id = openSessionId();
-    if (id !== undefined) keys.push(id);
-  }
+  const keys = viewingKeys({
+    view: currentView(),
+    activeTabId,
+    sessionId: openSessionId(),
+    popped: isPopped,
+  });
   try {
     void Promise.resolve(window.jarvis.officeViewing(keys)).catch(() => undefined);
   } catch {
@@ -527,6 +531,16 @@ function wireNav(): void {
       running: runningTerminalTabs,
       onHands: (count) => workspaceMenu?.setHands(count),
       open: openOfficeTarget,
+      // "Open in new window" / "Return to main window", a native menu.
+      employeeMenu: (tabId, x, y) => {
+        try {
+          void Promise.resolve(window.jarvis.popoutEmployeeMenu(tabId, x, y)).catch(
+            () => undefined,
+          );
+        } catch {
+          // A host without pop-outs.
+        }
+      },
       openTab: () => {
         document.getElementById("nav-workspace")?.click();
         document.getElementById("workspace-new-tab")?.click();
@@ -536,6 +550,7 @@ function wireNav(): void {
     office.setSessions(latestSessions);
     // Main holds back a hand-raised notice for what this window shows.
     onViewChange(reportViewing);
+    onPoppedChange(reportViewing);
   } catch {
     // The Office's own markup is absent in this harness.
   }
@@ -632,6 +647,14 @@ function wireNav(): void {
   initTopbarFit(document.querySelector<HTMLElement>(".topbar"));
   initFontKeys();
 
+  // Tabs shown in windows of their own: answer the host's request for a
+  // terminal's layout and drafts, and take them back on return. Before the
+  // first workspace render, so a popped tab is never drawn here at all.
+  try {
+    void initMainPopouts(window.jarvis, { carry: terminalCarry, stage: stageTerminalCarry });
+  } catch {
+    // A harness or host without pop-outs.
+  }
   window.jarvis.onWorkspace((state) => {
     renderWorkspace(state);
     office?.setWorkspace(state);

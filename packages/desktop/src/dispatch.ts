@@ -243,7 +243,17 @@ export type ElectronBoundChannel =
   | "machine:show"
   | "machine:showLocal"
   | "machine:bounds"
-  | "machine:close";
+  | "machine:close"
+  // Pop-outs: windows of this host (popout.ts).
+  | "popout:open"
+  | "popout:return"
+  | "popout:focus"
+  | "popout:list"
+  | "popout:employeeMenu"
+  | "popout:ready"
+  | "popout:state"
+  | "popout:handedOver"
+  | "popout:take";
 
 export type TableChannel = Exclude<InvokeChannel, ElectronBoundChannel>;
 

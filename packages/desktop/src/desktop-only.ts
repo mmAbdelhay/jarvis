@@ -13,6 +13,7 @@ import { isMachineTarget, type MachineViews } from "./machine-views.js";
 import { errorMessage, MESSAGES } from "./messages.js";
 import type { DesktopOnlyChannel } from "./remote-policy.js";
 import { tabMenuTemplate } from "./tab-menu.js";
+import type { Popouts } from "./popout.js";
 import type { Updater } from "./updater.js";
 import { toDeviceIndependent } from "./view-bounds.js";
 import type { ViewReconciler } from "./view-reconciler.js";
@@ -51,6 +52,15 @@ export const ELECTRON_BOUND_CHANNELS: readonly (ElectronBoundChannel & DesktopOn
   "machine:showLocal",
   "machine:bounds",
   "machine:close",
+  "popout:open",
+  "popout:return",
+  "popout:focus",
+  "popout:list",
+  "popout:employeeMenu",
+  "popout:ready",
+  "popout:state",
+  "popout:handedOver",
+  "popout:take",
 ];
 
 /** plans:openLink's own gate (Task 8, controller ruling). main's own
@@ -135,7 +145,33 @@ export type DesktopOnlyDeps = {
   /** Tailnet machines: other machines' web clients over this window
    *  (machine-views.ts). */
   machines: Pick<MachineViews, "show" | "showLocal" | "setBounds" | "close">;
+  /** Tabs in windows of their own (popout.ts). */
+  popouts: Pick<
+    Popouts,
+    | "open"
+    | "returnTab"
+    | "focus"
+    | "list"
+    | "isPopped"
+    | "canPopOut"
+    | "tabOf"
+    | "ready"
+    | "reportState"
+    | "provideState"
+    | "takeReturned"
+  >;
+  /** The main window's webContents id: which calls are the main renderer's. */
+  mainContentsId: () => number;
 };
+
+/** The webContents id of whoever made an IPC call, or undefined. */
+function senderId(event: unknown): number | undefined {
+  if (typeof event !== "object" || event === null) return undefined;
+  const sender = (event as { sender?: unknown }).sender;
+  if (typeof sender !== "object" || sender === null) return undefined;
+  const id = (sender as { id?: unknown }).id;
+  return typeof id === "number" ? id : undefined;
+}
 
 function isReportedRect(value: unknown): value is ReportedRect {
   if (typeof value !== "object" || value === null) return false;
@@ -192,6 +228,17 @@ export function registerDesktopOnly(deps: DesktopOnlyDeps): void {
   // the contextmenu event, so the menu opens exactly where the user
   // right-clicked rather than wherever the cursor happens to be when this
   // IPC round trip lands.
+  /** The pop-out item: opens the tab in a window of its own, or brings it back. */
+  const popoutItem = (tabId: string): { label: string; onClick: () => void } =>
+    deps.popouts.isPopped(tabId)
+      ? {
+          label: MESSAGES.tabMenuPopIn(deps.language),
+          onClick: () => void deps.popouts.returnTab(tabId),
+        }
+      : {
+          label: MESSAGES.tabMenuPopOut(deps.language),
+          onClick: () => void deps.popouts.open(tabId),
+        };
   deps.handle("workspace:tabMenu", (_event, tabId, x, y) => {
     if (typeof tabId !== "string") return;
     if (typeof x !== "number" || !Number.isFinite(x)) return;
@@ -209,7 +256,10 @@ export function registerDesktopOnly(deps: DesktopOnlyDeps): void {
         onClose: () => deps.closeTab(tabId),
         onPlans: () => deps.startTabPlans(tabId),
       },
-      { showPlans: deps.isTerminalTab(tabId) },
+      {
+        showPlans: deps.isTerminalTab(tabId),
+        ...(deps.popouts.canPopOut(tabId) ? { popout: popoutItem(tabId) } : {}),
+      },
     );
     deps.buildMenu(template).popup({ window: deps.window, x: Math.round(x), y: Math.round(y) });
   });
@@ -288,5 +338,53 @@ export function registerDesktopOnly(deps: DesktopOnlyDeps): void {
   });
   deps.handle("machine:close", (_event, name) => {
     if (typeof name === "string") deps.machines.close(name);
+  });
+
+  // Pop-outs (popout.ts). Every argument crosses an untyped IPC boundary and
+  // every caller is checked by its webContents id: the main renderer drives
+  // them, and a pop-out speaks only for its own tab.
+  const fromMain = (event: unknown): boolean => senderId(event) === deps.mainContentsId();
+  deps.handle("popout:open", (event, tabId) =>
+    fromMain(event) ? deps.popouts.open(tabId) : { ok: false, reason: "invalid" },
+  );
+  deps.handle("popout:return", (event, tabId) => {
+    if (typeof tabId !== "string") return false;
+    const id = senderId(event);
+    if (id === undefined) return false;
+    if (id !== deps.mainContentsId() && deps.popouts.tabOf(id) !== tabId) return false;
+    return deps.popouts.returnTab(tabId);
+  });
+  deps.handle("popout:focus", (event, tabId, paneKey) =>
+    fromMain(event) ? deps.popouts.focus(tabId, paneKey) : false,
+  );
+  deps.handle("popout:list", (event) => (fromMain(event) ? deps.popouts.list() : []));
+  deps.handle("popout:take", (event, tabId) =>
+    fromMain(event) && typeof tabId === "string" ? deps.popouts.takeReturned(tabId) : undefined,
+  );
+  deps.handle("popout:employeeMenu", (event, tabId, x, y) => {
+    if (!fromMain(event) || typeof tabId !== "string") return;
+    if (typeof x !== "number" || !Number.isFinite(x)) return;
+    if (typeof y !== "number" || !Number.isFinite(y)) return;
+    if (!deps.popouts.canPopOut(tabId)) return;
+    const item = popoutItem(tabId);
+    deps
+      .buildMenu([{ label: item.label, click: item.onClick }])
+      .popup({ window: deps.window, x: Math.round(x), y: Math.round(y) });
+  });
+  deps.handle("popout:ready", (event) => {
+    const id = senderId(event);
+    return id === undefined ? undefined : deps.popouts.ready(id);
+  });
+  deps.handle("popout:state", (event, state) => {
+    const id = senderId(event);
+    if (id !== undefined && deps.popouts.tabOf(id) !== undefined) {
+      deps.popouts.reportState(id, state);
+    }
+  });
+  deps.handle("popout:handedOver", (event, tabId, state) => {
+    const id = senderId(event);
+    if (id === undefined || typeof tabId !== "string") return;
+    if (id === deps.mainContentsId()) deps.popouts.provideState("main", tabId, state);
+    else if (deps.popouts.tabOf(id) === tabId) deps.popouts.provideState(id, tabId, state);
   });
 }
