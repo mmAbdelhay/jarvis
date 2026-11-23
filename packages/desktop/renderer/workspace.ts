@@ -259,6 +259,19 @@ export function focusTerminalPane(paneKey: string): boolean {
   return true;
 }
 
+/**
+ * Shows the tab `tabId` on the Workspace route — the Office's way to an
+ * employee that is a tab. Its project follows (renderWorkspace selects the
+ * project of a newly active tab). False when no open tab has that id.
+ */
+export function openWorkspaceTab(tabId: string): boolean {
+  const tab = latest.tabs.find((candidate) => candidate.id === tabId);
+  if (tab === undefined) return false;
+  void window.jarvis.activateTab(tab.id);
+  document.getElementById("nav-workspace")?.click();
+  return true;
+}
+
 /** Brings the hosted pages back after another tailnet machine was shown.
  *  machine:show hid them the way a project switch does (hideAll), and only
  *  an activate reveals them again — so the active tab is re-activated, but

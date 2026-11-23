@@ -43,6 +43,14 @@ const NAV: Record<ViewName, string> = {
 
 let view: ViewName = "dashboard";
 
+const viewListeners = new Set<(name: ViewName) => void>();
+
+/** Runs `listener` after every route change. Returns its removal. */
+export function onViewChange(listener: (name: ViewName) => void): () => void {
+  viewListeners.add(listener);
+  return () => viewListeners.delete(listener);
+}
+
 export function currentView(): ViewName {
   return view;
 }
@@ -74,6 +82,13 @@ export function showView(name: ViewName): void {
   }
 
   syncHostedView();
+  for (const listener of [...viewListeners]) {
+    try {
+      listener(name);
+    } catch {
+      // A listener's failure must not undo the route change.
+    }
+  }
 }
 
 /** Set while another tailnet machine covers the window (machine-switcher.ts):

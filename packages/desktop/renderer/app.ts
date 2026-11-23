@@ -17,12 +17,13 @@ import {
   wireDiffModes,
   wireSyncBar,
 } from "./changes.js";
-import { setMachineShown, showView, syncHostedView } from "./views.js";
+import { currentView, onViewChange, setMachineShown, showView, syncHostedView } from "./views.js";
 import { initReviews, listTerminalPanes, type ReviewsView } from "./reviews-view.js";
 import {
   focusTerminalPane,
   initWorkspace,
   NEW_TAB_URL,
+  openWorkspaceTab,
   refreshWorkspaceProjects,
   renderWorkspace,
   reportWorkspaceBounds,
@@ -45,6 +46,9 @@ import { initMachineSwitcher } from "./machine-switcher.js";
 import { initBattery, topbarDate } from "./topbar-status.js";
 import { initTopbarFit } from "./topbar-fit.js";
 import { initWorkspaceMenu } from "./workspace-menu.js";
+import { initOffice, type Office } from "./office-view.js";
+import type { OfficeTarget } from "./office-model.js";
+import { runningTerminalTabs } from "./workspace-terminal.js";
 import { initFontKeys } from "./terminal-addons.js";
 import {
   detectLanguage,
@@ -101,6 +105,10 @@ let latestSessions: Session[] = [];
 // so it never treats "everything in it" as newly started.
 let hadFirstSessionsUpdate = false;
 let latestChanges = new Map<string, SessionChanges>();
+/** The Office (office-view.ts), fed by the same pushes as the rest of the app. */
+let office: Office | undefined;
+/** The active tab, for telling main which tab this window shows. */
+let activeTabId: string | undefined;
 /** The configured projects, for the Dashboard's centre when nothing is
  *  running. Filled once at startup, from the same call that wires the
  *  Workspace's project selector. */
@@ -293,6 +301,7 @@ window.jarvis.onSessions((sessions) => {
     void refreshPrompts(live, () => renderSessions(latestSessions));
   }, 2500);
   latestSessions = sessions;
+  office?.setSessions(sessions);
   renderSessions(latestSessions);
   renderRunningPill(latestSessions);
   updateSessionHeader(latestSessions);
@@ -403,6 +412,35 @@ wireSessionsRefresh($("dashboard-sessions-refresh"));
 wireCoreStage();
 renderEmptyState();
 
+/** What an Office employee opens: its tab, the pane that asked, or its session. */
+function openOfficeTarget(target: OfficeTarget): void {
+  releaseVoice();
+  if (target.type === "session") {
+    const session = latestSessions.find((candidate) => candidate.id === target.sessionId);
+    if (session !== undefined) void openSession(session);
+    return;
+  }
+  if (target.type === "pane" && focusTerminalPane(target.paneKey)) return;
+  openWorkspaceTab(target.tabId);
+}
+
+/** Tells main which tab or session this window shows, so a hand raised for
+ *  exactly that one is not announced twice. */
+function reportViewing(): void {
+  const keys: string[] = [];
+  const name = currentView();
+  if (name === "workspace" && activeTabId !== undefined) keys.push(activeTabId);
+  else if (name === "session") {
+    const id = openSessionId();
+    if (id !== undefined) keys.push(id);
+  }
+  try {
+    void Promise.resolve(window.jarvis.officeViewing(keys)).catch(() => undefined);
+  } catch {
+    // A harness without the channel.
+  }
+}
+
 function wireNav(): void {
   // Leaving the Session view hands speech back to the brain: while a
   // session's terminal is open, ⌥Space types into that agent, and once it
@@ -474,13 +512,33 @@ function wireNav(): void {
   });
   // The Workspace button's chevron: Tabs (the button's own route) or the
   // Office. Absent markup (a minimal harness) wires nothing.
-  initWorkspaceMenu({
+  const workspaceMenu = initWorkspaceMenu({
     openTabs: () => document.getElementById("nav-workspace")?.click(),
     openOffice: () => {
       releaseVoice();
       showView("office");
+      office?.show();
     },
   });
+  try {
+    office = initOffice({
+      root: $("view-office"),
+      api: window.jarvis,
+      running: runningTerminalTabs,
+      onHands: (count) => workspaceMenu?.setHands(count),
+      open: openOfficeTarget,
+      openTab: () => {
+        document.getElementById("nav-workspace")?.click();
+        document.getElementById("workspace-new-tab")?.click();
+      },
+    });
+    office.setProjects(knownProjects);
+    office.setSessions(latestSessions);
+    // Main holds back a hand-raised notice for what this window shows.
+    onViewChange(reportViewing);
+  } catch {
+    // The Office's own markup is absent in this harness.
+  }
   document.getElementById("nav-settings")?.addEventListener("click", () => {
     releaseVoice();
     showView("settings");
@@ -535,6 +593,7 @@ function wireNav(): void {
         .then((projects) => {
           knownProjects = projects;
           setKnownProjects(projects);
+          office?.setProjects(projects);
           refreshWorkspaceProjects(projects);
           renderSessions(latestSessions);
         })
@@ -573,7 +632,12 @@ function wireNav(): void {
   initTopbarFit(document.querySelector<HTMLElement>(".topbar"));
   initFontKeys();
 
-  window.jarvis.onWorkspace((state) => renderWorkspace(state));
+  window.jarvis.onWorkspace((state) => {
+    renderWorkspace(state);
+    office?.setWorkspace(state);
+    activeTabId = state.activeTabId;
+    reportViewing();
+  });
   // No catch here would be an unhandled rejection in the renderer on any
   // failure downstream of the IPC call — including, as app.test.ts's
   // minimal harness proved, a DOM that has not laid down the workspace
@@ -583,6 +647,7 @@ function wireNav(): void {
     .then((projects) => {
       knownProjects = projects;
       setKnownProjects(projects);
+      office?.setProjects(projects);
       initWorkspace(projects);
       // The centre may already have rendered its empty state before this
       // resolved; with the names in hand it has something to say.

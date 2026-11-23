@@ -34,7 +34,16 @@ describe("design tokens", () => {
     // Set from JS rather than declared here — the renderer writes
     // --tab-color inline as each tab's own accent, and terminal-font.ts
     // writes --terminal-font-size on the root (its uses carry a fallback).
-    const setAtRuntime = new Set(["--tab-color", "--terminal-font-size"]);
+    // office-view.ts writes --office-inv (one over the zoom, so signs keep a
+    // constant screen size) and each employee's --ow-shirt/skin/hair.
+    const setAtRuntime = new Set([
+      "--tab-color",
+      "--terminal-font-size",
+      "--office-inv",
+      "--ow-shirt",
+      "--ow-skin",
+      "--ow-hair",
+    ]);
     const used = new Set([...css.matchAll(/var\((--[a-z0-9-]+)/g)].map((match) => match[1]));
     const undeclared = [...used].filter(
       (name) => !declared.has(name) && !setAtRuntime.has(name as string),

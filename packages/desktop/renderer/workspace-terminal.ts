@@ -766,6 +766,19 @@ export function focusTerminalLeaf(paneKey: string): void {
   }
 }
 
+/** The tabs whose shell is running a command right now, as this window knows
+ *  it (a pane's `data-state` is "running"). The Office reads it to stand a
+ *  plain shell's employee up typing; main cannot tell. */
+export function runningTerminalTabs(): Set<string> {
+  const running = new Set<string>();
+  for (const [tabId, entry] of panes) {
+    if (entry.tree.panes().some((leaf) => leaf.element.dataset["state"] === "running")) {
+      running.add(tabId);
+    }
+  }
+  return running;
+}
+
 /**
  * The pane drawing `paneKey`'s shell, or undefined for a shell this window
  * has no pane for.

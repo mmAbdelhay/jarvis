@@ -681,7 +681,35 @@
   <!-- The Office (office-view.ts): one room per project, one employee per
        tab. The skeleton is filled by the module; nothing here is text from
        an agent or a tab. -->
-  <div class="main main--office" id="view-office" hidden></div>
+  <div class="main main--office" id="view-office" hidden>
+    <header class="office-bar">
+      <h2 id="office-title" class="office-title">Office</h2>
+      <span id="office-summary" class="office-summary mono"></span>
+      <span id="office-hands" class="office-handspill" hidden></span>
+    </header>
+    <div class="office-body">
+      <aside id="office-side" class="office-side">
+        <button id="office-home" class="office-btn" type="button">Show whole office</button>
+        <span id="office-side-hint" class="office-side__hint">Projects, raised hands first</span>
+        <div id="office-list" class="office-list"></div>
+      </aside>
+      <section id="office-stage" class="office-stage" aria-label="Office floor">
+        <div id="office-world" class="office-world"></div>
+        <div id="office-empty" class="office-empty" hidden>
+          <span id="office-empty-title" class="office-empty__title">Nobody is in yet</span>
+          <button id="office-empty-open" class="office-btn office-btn--primary" type="button">Open a tab</button>
+        </div>
+        <div id="office-card" class="office-card" role="tooltip" hidden></div>
+      </section>
+      <div id="office-zoom" class="office-zoom">
+        <button id="office-zoom-out" class="office-btn office-btn--square" type="button" aria-label="Zoom out">-</button>
+        <button id="office-zoom-in" class="office-btn office-btn--square" type="button" aria-label="Zoom in">+</button>
+      </div>
+      <div id="office-minimap" class="office-minimap" aria-hidden="true" hidden>
+        <div id="office-minimap-view" class="office-minimap__view"></div>
+      </div>
+    </div>
+  </div>
   <!-- /Office view -->
 
   <div class="main main--settings" id="view-settings" hidden>

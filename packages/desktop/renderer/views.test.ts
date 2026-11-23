@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from "vitest";
-import { currentView, setMachineShown, setWorkspaceMenuOpen, showView } from "./views.js";
+import {
+  currentView,
+  onViewChange,
+  setMachineShown,
+  setWorkspaceMenuOpen,
+  showView,
+} from "./views.js";
 
 // Minimal harness, same shape as app.test.ts's: lay down the ids showView
 // touches and nothing else.
@@ -115,6 +121,22 @@ describe("showView", () => {
     setWorkspaceMenuOpen(false);
 
     expect(calls).toEqual([true, false, false, true]);
+  });
+
+  it("tells listeners about each route change, and survives one that throws", () => {
+    stubBridge();
+    const seen: string[] = [];
+    const stop = onViewChange(() => {
+      throw new Error("boom");
+    });
+    const stopSeen = onViewChange((name) => seen.push(name));
+    showView("office");
+    showView("workspace");
+    stop();
+    stopSeen();
+    showView("dashboard");
+    expect(seen).toEqual(["office", "workspace"]);
+    expect(currentView()).toBe("dashboard");
   });
 
   it("reports the current view", () => {

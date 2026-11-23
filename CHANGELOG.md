@@ -18,6 +18,15 @@ version and the downloads. This file is the index.
   permission prompts, and a box to message the agent; Term is the terminal as before,
   and the choice is remembered. Desktop only — the phone's chat view is unchanged.
 
+- Office: a new view under the Workspace button's chevron (Tabs | Office). One isometric
+  room per project, one cubicle and employee per tab or agent, with a card on hover and
+  a raised hand, a notification and a badge when an agent asks a question. Pan and zoom,
+  minimap, sidebar of projects. Desktop only; the phone is unchanged.
+- Terminal: the Chat view keeps looking for an agent while its command runs (a Codex or
+  Copilot session may only appear after the first message), no longer drops out of Chat
+  on one failed read, and shows a card when an agent asks something only the terminal
+  can answer.
+
 ## [0.1.14] — 2026-11-22
 
 - Tailscale access: a new Settings → Remote access switch (off by default,

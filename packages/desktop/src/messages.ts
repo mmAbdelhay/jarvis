@@ -103,6 +103,101 @@ export const MESSAGES = {
       : `Workspace views, ${hands} ${hands === 1 ? "hand" : "hands"} raised`,
   officeMenuTabs: (language: "ar" | "en"): string => (language === "ar" ? "التبويبات" : "Tabs"),
   officeMenuOffice: (language: "ar" | "en"): string => (language === "ar" ? "المكتب" : "Office"),
+  // The Office view (renderer/office-view.ts).
+  officeTitle: (language: "ar" | "en"): string => (language === "ar" ? "المكتب" : "Office"),
+  officeShowAll: (language: "ar" | "en"): string =>
+    language === "ar" ? "إظهار المكتب كله" : "Show whole office",
+  officeProjectsHint: (language: "ar" | "en"): string =>
+    language === "ar" ? "المشاريع، والأيدي المرفوعة أولاً" : "Projects, raised hands first",
+  officeSidebarLabel: (language: "ar" | "en"): string =>
+    language === "ar" ? "مشاريع المكتب" : "Office projects",
+  officeStageLabel: (language: "ar" | "en"): string =>
+    language === "ar" ? "أرضية المكتب" : "Office floor",
+  officeMinimapLabel: (language: "ar" | "en"): string =>
+    language === "ar" ? "خريطة مصغرة للمكتب" : "Office minimap",
+  officeSummary: (
+    employees: number,
+    open: number,
+    closed: number,
+    language: "ar" | "en",
+  ): string =>
+    language === "ar"
+      ? `${employees} موظفاً، ${open} مشاريع مفتوحة، ${closed} مغلقة`
+      : `${employees} ${employees === 1 ? "employee" : "employees"}, ${open} open ${open === 1 ? "project" : "projects"}, ${closed} closed`,
+  officeHandsPill: (hands: number, language: "ar" | "en"): string =>
+    language === "ar" ? `${hands} أيدٍ مرفوعة` : `${hands} ${hands === 1 ? "hand" : "hands"} raised`,
+  officeHandsText: (hands: number, language: "ar" | "en"): string =>
+    language === "ar"
+      ? `${hands} ${hands === 1 ? "يد" : "أيدٍ"}`
+      : `${hands} ${hands === 1 ? "hand" : "hands"}`,
+  officeClosedWord: (language: "ar" | "en"): string => (language === "ar" ? "مغلق" : "closed"),
+  officeZoomIn: (language: "ar" | "en"): string => (language === "ar" ? "تكبير" : "Zoom in"),
+  officeZoomOut: (language: "ar" | "en"): string => (language === "ar" ? "تصغير" : "Zoom out"),
+  officeEmptyTitle: (language: "ar" | "en"): string =>
+    language === "ar" ? "لا أحد هنا بعد" : "Nobody is in yet",
+  officeEmptyAction: (language: "ar" | "en"): string =>
+    language === "ar" ? "افتح تبويباً" : "Open a tab",
+  officePose: (pose: string, language: "ar" | "en"): string => {
+    const names: Record<string, [string, string]> = {
+      typing: ["working", "يعمل"],
+      hand: ["needs you", "يحتاجك"],
+      idle: ["idle", "خامل"],
+      walking: ["arriving", "يصل"],
+      done: ["done", "انتهى"],
+      dead: ["stopped", "توقف"],
+      asleep: ["asleep", "نائم"],
+    };
+    const pair = names[pose] ?? names["idle"] ?? ["idle", "خامل"];
+    return language === "ar" ? pair[1] : pair[0];
+  },
+  officeKind: (kind: string, language: "ar" | "en"): string => {
+    const names: Record<string, [string, string]> = {
+      claude: ["Claude", "Claude"],
+      codex: ["Codex", "Codex"],
+      copilot: ["Copilot", "Copilot"],
+      agent: ["Agent", "وكيل"],
+      terminal: ["Terminal", "طرفية"],
+      editor: ["Editor", "محرر"],
+      browser: ["Browser", "متصفح"],
+      database: ["Database", "قاعدة بيانات"],
+      api: ["API", "API"],
+      cluster: ["Cluster", "عنقود"],
+      docker: ["Docker", "Docker"],
+      chat: ["Chat", "دردشة"],
+    };
+    const pair = names[kind] ?? names["agent"] ?? ["Agent", "وكيل"];
+    return language === "ar" ? pair[1] : pair[0];
+  },
+  officeSeatLabel: (
+    kind: string,
+    label: string,
+    room: string,
+    pose: string,
+    language: "ar" | "en",
+  ): string =>
+    language === "ar"
+      ? `${MESSAGES.officeKind(kind, language)}: ${label} في ${room}، ${MESSAGES.officePose(pose, language)}`
+      : `${MESSAGES.officeKind(kind, language)}: ${label} in ${room}, ${MESSAGES.officePose(pose, language)}`,
+  officeRoomLabel: (name: string, count: number, hands: number, language: "ar" | "en"): string =>
+    language === "ar"
+      ? `${name}، ${count} موظفاً${hands > 0 ? `، ${hands} أيدٍ مرفوعة` : ""}`
+      : `${name}, ${count} ${count === 1 ? "employee" : "employees"}${hands > 0 ? `, ${hands} ${hands === 1 ? "hand" : "hands"} raised` : ""}`,
+  officeCardProject: (language: "ar" | "en"): string => (language === "ar" ? "المشروع" : "Project"),
+  officeCardAgent: (language: "ar" | "en"): string => (language === "ar" ? "الوكيل" : "Agent"),
+  officeCardDoing: (language: "ar" | "en"): string => (language === "ar" ? "يفعل" : "Doing"),
+  officeCardBranch: (language: "ar" | "en"): string => (language === "ar" ? "الفرع" : "Branch"),
+  officeCardChanges: (language: "ar" | "en"): string =>
+    language === "ar" ? "التغييرات" : "Changes",
+  officeCardLastActive: (language: "ar" | "en"): string =>
+    language === "ar" ? "آخر نشاط" : "Last active",
+  officeCardQuestion: (language: "ar" | "en"): string =>
+    language === "ar" ? "السؤال" : "Question",
+  officeCardOpenTab: (language: "ar" | "en"): string =>
+    language === "ar" ? "انقر لفتح هذا التبويب" : "Click to open this tab",
+  officeCardOpenPane: (language: "ar" | "en"): string =>
+    language === "ar" ? "انقر لفتح هذه اللوحة" : "Click to open this pane",
+  officeCardOpenSession: (language: "ar" | "en"): string =>
+    language === "ar" ? "انقر لفتح هذه الجلسة" : "Click to open this session",
   officeLounge: (language: "ar" | "en"): string => (language === "ar" ? "الاستراحة" : "Lounge"),
   officeHandTitle: (project: string, language: "ar" | "en"): string =>
     language === "ar" ? `رُفعت يد في ${project}` : `Hand raised in ${project}`,

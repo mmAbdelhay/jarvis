@@ -676,3 +676,20 @@ See **[configuration](configuration.md)** for `historyPath` and
 
 A request builder over the project's own Bruno collections. See
 **[the API client](api-client.md)**.
+
+## The Office
+
+The chevron beside **Workspace** in the top bar opens a menu with **Tabs** (the
+Workspace as above) and **Office**. The Office draws one room per project with
+open tabs, one cubicle and one employee per tab (a Terminal tab's split panes
+are one employee), and one more for each agent running without a tab. Tabs and
+agents with no project sit in a **Lounge** room. Projects with nothing open are
+not drawn; they are listed last in the sidebar.
+
+Hover or focus an employee for a card: what it is, its project, the agent and
+model, what it is doing, its branch and changes, and when it was last active.
+Click it to open that tab, pane or session. An agent that stops to ask a question
+raises its hand, and Jarvis shows a desktop notification naming the project and
+the agent — never the question itself. The badge on the Office item counts the
+raised hands. Drag to pan, scroll or pinch to zoom, **Show whole office** to see
+everything. The Office is desktop-only: it is never offered to another device.
