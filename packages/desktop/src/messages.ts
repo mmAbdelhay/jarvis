@@ -90,6 +90,13 @@ export const MESSAGES = {
       : "The agent is asking something. Answer it in Term.",
   agentChatNeedsTermButton: (language: "ar" | "en"): string =>
     language === "ar" ? "افتح الطرفية" : "Switch to Term",
+  // The Office (office-activity.ts): a desktop notification when an agent
+  // raises a hand. The title names the project (or the Lounge); the body is
+  // the agent's name only — never the question.
+  officeLounge: (language: "ar" | "en"): string => (language === "ar" ? "الاستراحة" : "Lounge"),
+  officeHandTitle: (project: string, language: "ar" | "en"): string =>
+    language === "ar" ? `رُفعت يد في ${project}` : `Hand raised in ${project}`,
+  officeAnAgent: (language: "ar" | "en"): string => (language === "ar" ? "وكيل" : "An agent"),
   agentChatModeDefault: (language: "ar" | "en"): string =>
     language === "ar" ? "افتراضي" : "Default",
   agentChatModeAuto: (language: "ar" | "en"): string => (language === "ar" ? "تلقائي" : "Auto"),

@@ -49,6 +49,7 @@ describe("the channel table", () => {
       "git:counts",
       "machine:state",
       "metrics:update",
+      "office:changed",
       "plans:changed",
       "providers:update",
       "remote:update",

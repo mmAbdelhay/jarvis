@@ -31,6 +31,7 @@ import {
   type Turn,
 } from "@jarvis/core";
 import type { AgentAnswerResult, AgentSendResult, AgentView } from "./agent-view.js";
+import type { OfficeActivity } from "./office-activity.js";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { Brain, ReviewComment, WorkspaceState, WorkspaceTab } from "@jarvis/core";
 import type { BindChoice, OwnerStatus, RemoteStatus, SetOwnerPasswordResult } from "@jarvis/remote";
@@ -155,6 +156,9 @@ export type IpcChannels = {
   // The phone's chat view of a pane (claude-view.ts): "look again", keyed
   // by pane and throttled per pane. The key is the whole payload.
   "terminal:claudeViewChanged": { paneKey: string };
+  // The Office's activity changed (office-activity.ts). No content: the
+  // renderer asks office:activity again.
+  "office:changed": Record<string, never>;
 };
 
 /**
@@ -1024,6 +1028,13 @@ export type RendererApi = {
    *  shell), `prompt` at a menu, `invalid` for empty or over-long text. */
   terminalAgentSend(paneKey: string, text: string): Promise<AgentSendResult>;
   onTerminalClaudeViewChanged(cb: (payload: { paneKey: string }) => void): void;
+  /** What each agent pane and Jarvis session is doing, for the Office:
+   *  state, question, what it is doing. Desktop only. */
+  officeActivity(): Promise<OfficeActivity>;
+  /** Tells main which tabs and session this window shows, so a hand raised
+   *  for one of them is not announced. Desktop only. */
+  officeViewing(keys: string[]): Promise<void>;
+  onOfficeChanged(cb: () => void): void;
   /** Starts a second shell in the same tab and the same directory, for a
    *  pane the renderer has just split off. */
   splitTerminal(tabId: string, paneId: string): Promise<void>;

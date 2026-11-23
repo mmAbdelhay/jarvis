@@ -258,6 +258,7 @@ import {
 } from "../pane-agent-session.js";
 import { createPaneAttach, createPaneAttachCwd } from "../pane-attach.js";
 import { createAgentViewHandlers } from "../agent-view.js";
+import { createOfficeActivity, createOfficeViewing } from "../office-activity.js";
 import { createClaudeViewHandlers, createClaudeViewNotifier } from "../claude-view.js";
 import { createRecorderDeps, Recorder } from "../recorder.js";
 import { capacityReport, startupReport } from "../startup.js";
@@ -2192,6 +2193,10 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     });
     // The chat view's transcript watches and its pending pushes.
     safely("claude view", () => claudeViewNotifier.stop());
+    safely("office", () => {
+      officeWatcher.stop();
+      for (const stopFeed of stopOfficeFeeds) stopFeed();
+    });
     // One headless terminal per pane that printed.
     safely("pane screens", () => paneScreens.dispose());
     // A recording started but never stopped holds ffmpeg — and the
@@ -2543,6 +2548,40 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     follow: (paneKey, transcript) => claudeViewNotifier.follow(paneKey, transcript),
     forget: (paneKey) => claudeViewNotifier.forget(paneKey),
   });
+  // The Office (office-activity.ts): one shared watcher over every agent
+  // pane and Jarvis session. Quiet until something prints; its changes go to
+  // this window only (never a phone), and a raised hand is a desktop
+  // notification that names the agent, not the question.
+  const officeViewing = createOfficeViewing();
+  const officeWatcher = createOfficeActivity({
+    panes: () => shells.panes(),
+    agentView: (paneKey) => agentView.view(paneKey),
+    sessions: () => sessions.list(),
+    sessionLog: (id) => sessions.log(id),
+    vendorOf: (agentId) => registry.list().find((agent) => agent.id === agentId)?.vendor,
+    projectOf: (target) =>
+      workspace.state().tabs.find((tab) => tab.id === target)?.project ||
+      sessions.list().find((session) => session.id === target)?.project ||
+      null,
+    now: () => Date.now(),
+    schedule: (fn, ms) => {
+      const timer = setTimeout(fn, ms);
+      timer.unref();
+      return () => clearTimeout(timer);
+    },
+    emitChanged: () => broadcast.local("office:changed", {}),
+    notify: (title, body) => host.showNotification(title, body),
+    focused: () => host.isFocused(),
+    viewing: () => officeViewing.keys(),
+    language: PRIMARY_LANGUAGE,
+    log: (token) => console.warn(token),
+  });
+  const stopOfficeFeeds = [
+    shells.onOutput(() => officeWatcher.markDirty()),
+    shells.onShellExit(() => officeWatcher.markDirty()),
+    sessions.onOutput(() => officeWatcher.markDirty()),
+    sessions.onChange(() => officeWatcher.markDirty()),
+  ];
   const paneAttach = createPaneAttach({
     uploads: uploadStore,
     cwdFor: createPaneAttachCwd({
@@ -2656,6 +2695,10 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     tailnetPeers,
     claudeView,
     agentView,
+    office: {
+      read: () => officeWatcher.read(),
+      setViewing: (keys) => officeViewing.set(keys),
+    },
     attachUpload: paneAttach,
     terminalLayout: { announce: (change) => broadcast.send("terminal:layout", change) },
     plans: {

@@ -139,6 +139,10 @@ export const CHANNEL_POLICY = {
   "terminal:agentView": "desktop-only",
   "terminal:agentAnswer": "desktop-only",
   "terminal:agentSend": "desktop-only",
+  // The Office (office-activity.ts): what each agent is doing and which tabs
+  // this window shows. Never run for a phone.
+  "office:activity": "desktop-only",
+  "office:viewing": "desktop-only",
   // The file sidebar's writes. Owner decision 2026-10-03: rename and trash
   // are remote — the phone's file list drives them. Both stay inside a
   // configured project root (ipc.ts's resolveWithin/entryWithin, the same

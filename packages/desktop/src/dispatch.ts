@@ -32,6 +32,7 @@ import type { DockerConfig, PlanCommentStore, PlanFiles, SnippetLanguage } from 
 import { isWithin } from "@jarvis/platform";
 import { randomInt } from "node:crypto";
 import type { AgentAnswerResult, AgentSendResult, AgentView } from "./agent-view.js";
+import type { OfficeActivity } from "./office-activity.js";
 import { bracketedSubmit } from "./bracketed.js";
 import {
   type AttachUploadResult,
@@ -473,6 +474,12 @@ export type DispatchDeps = {
     view(paneKey: unknown): Promise<AgentView>;
     answer(paneKey: unknown, index: unknown, label: unknown): AgentAnswerResult;
     send(paneKey: unknown, text: unknown): Promise<AgentSendResult>;
+  };
+  // The Office's watcher and window-viewing keys (office-activity.ts, built
+  // in compose.ts). Desktop-only channels.
+  office: {
+    read(): Promise<OfficeActivity>;
+    setViewing(keys: unknown): void;
   };
   // pane-attach.ts's createPaneAttach, built in compose.ts over the same
   // upload store remote:uploadFile stages into. `deviceId` is always the
@@ -1217,6 +1224,10 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
     "terminal:agentAnswer": ([paneKey, index, label]) =>
       deps.agentView.answer(paneKey, index, label),
     "terminal:agentSend": ([paneKey, text]) => deps.agentView.send(paneKey, text),
+    "office:activity": () => deps.office.read(),
+    "office:viewing": ([keys]) => {
+      deps.office.setViewing(keys);
+    },
     // A file this same device staged with remote:uploadFile, copied into
     // the pane's project. Like remote:readJsonUpload, a desktop origin is
     // refused here, not by policy alone, and the owner is always the

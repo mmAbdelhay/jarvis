@@ -108,6 +108,8 @@ export const REMOTE_PUSH_POLICY: {
   // Local to this window only (remote-access.ts's onStatus, ruling 36) — the
   // wire protocol has no message that carries a RemoteStatus at all.
   "remote:update": "desktop-only",
+  // The Office's activity changed; this window's own.
+  "office:changed": "desktop-only",
 
   "metrics:update": { kind: "latest" },
   "sessions:update": { kind: "latest" },

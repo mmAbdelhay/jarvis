@@ -313,6 +313,10 @@ export function fakeDeps(overrides: Partial<DispatchDeps> = {}): DispatchDeps {
       answer: vi.fn(() => ({ ok: true as const })),
       send: vi.fn(async () => ({ ok: true as const })),
     },
+    office: {
+      read: vi.fn(async () => ({ panes: {}, sessions: {} })),
+      setViewing: vi.fn(),
+    },
     attachUpload: {
       attach: vi.fn(async () => ({ ok: true as const, path: ".jarvis/uploads/x.png" })),
     },
@@ -1318,6 +1322,14 @@ describe("dispatch table: api, dialog, voices", () => {
       ok: true,
     });
     expect(deps.claudeView.answer).toHaveBeenCalledWith("t1", 0, "Yes");
+  });
+
+  it("office:activity and office:viewing reach the watcher", async () => {
+    const deps = fakeDeps();
+    const table = createDispatchTable(deps);
+    expect(await call(table, "office:activity")).toEqual({ panes: {}, sessions: {} });
+    await call(table, "office:viewing", ["t1"]);
+    expect(deps.office.setViewing).toHaveBeenCalledWith(["t1"]);
   });
 
   it("terminal:agentView, agentAnswer and agentSend pass their arguments through", async () => {

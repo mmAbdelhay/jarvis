@@ -19,6 +19,7 @@ const DESKTOP_ONLY = new Set([
   "remote:update",
   "update:state",
   "machine:state",
+  "office:changed",
 ]);
 
 describe("REMOTE_PUSH_POLICY", () => {

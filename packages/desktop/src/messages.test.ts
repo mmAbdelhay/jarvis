@@ -55,10 +55,15 @@ describe("MESSAGES", () => {
       MESSAGES.agentChatSendFailed,
       MESSAGES.agentChatAnswerGone,
       MESSAGES.agentChatAnswerChanged,
+      MESSAGES.agentChatNeedsTerm,
+      MESSAGES.agentChatNeedsTermButton,
+      MESSAGES.officeLounge,
+      MESSAGES.officeAnAgent,
       MESSAGES.unknownAgent,
       MESSAGES.cannotEditLiveSessionState,
     ];
     for (const message of unary) expect(message("ar")).not.toBe(message("en"));
+    expect(MESSAGES.officeHandTitle("x", "ar")).not.toBe(MESSAGES.officeHandTitle("x", "en"));
     expect(MESSAGES.prayerDenied("Alexandria", "ar")).not.toBe(
       MESSAGES.prayerDenied("Alexandria", "en"),
     );
