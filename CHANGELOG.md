@@ -45,6 +45,10 @@ version and the downloads. This file is the index.
   on one failed read, and shows a card when an agent asks something only the terminal
   can answer.
 - Terminal agents: a Claude turn whose spinner shows several words is read as working.
+- macOS: turning on Tailscale access no longer fails with "could not read
+  Tailscale's settings". Jarvis's background service ran the Tailscale app's
+  binary, which then started as the GUI instead of the CLI, so every Tailscale
+  read failed (Funnel check, certificate, machine list, relay).
 
 ## [0.1.14] — 2026-11-22
 
