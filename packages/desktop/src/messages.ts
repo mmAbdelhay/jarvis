@@ -85,9 +85,7 @@ export const MESSAGES = {
     language === "ar" ? "اكتب رسالة للوكيل…" : "Message the agent…",
   agentChatSend: (language: "ar" | "en"): string => (language === "ar" ? "إرسال" : "Send"),
   agentChatNeedsTerm: (language: "ar" | "en"): string =>
-    language === "ar"
-      ? "الوكيل يسأل شيئاً. أجب عنه في الطرفية."
-      : "The agent is asking something. Answer it in Term.",
+    language === "ar" ? "الوكيل يسأل شيئاً." : "The agent is asking something.",
   agentChatNeedsTermButton: (language: "ar" | "en"): string =>
     language === "ar" ? "افتح الطرفية" : "Switch to Term",
   // The Office (office-activity.ts): a desktop notification when an agent

@@ -43,7 +43,9 @@ describe("the side panel", () => {
       `vendor/material-icons/icons/${fileIconFor("total.js")}`,
       `vendor/material-icons/icons/${fileIconFor("total.test.js")}`,
     ]);
-    expect(side.querySelector("[role='progressbar']")?.getAttribute("aria-valuenow")).toBe("38");
+    // The label says "62% left", so the bar is 62% full, not 38%.
+    expect(side.querySelector("[role='progressbar']")?.getAttribute("aria-valuenow")).toBe("62");
+    expect(side.querySelector<HTMLElement>(".ac-meter__fill")?.style.inlineSize).toBe("62%");
     expect(side.querySelectorAll(".ac-todo--done")).toHaveLength(2);
   });
 

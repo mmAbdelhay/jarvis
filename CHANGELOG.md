@@ -8,6 +8,12 @@ version and the downloads. This file is the index.
 
 ## Unreleased
 
+- Terminal: the Chat view finds more agents. A Codex session shows up even when a background
+  Codex process holds its log, and appears empty before its first message (so does Copilot's);
+  an agent found late still gets its Chat tab; the `/` list includes plugin skills named by
+  path, plugins synced from claude.ai and nested synced skills, with descriptions left-aligned.
+  An agent pane has one header row in Chat and Term (Clear is in it), the context bar matches
+  its "left" label, and a menu only the terminal can answer opens a taller terminal.
 - Terminal: the Chat view of a pane running Claude Code, Copilot or Codex is redesigned so a
   session never needs Term. A single header row (files toggle, title, search, Chat | Term), a
   centred conversation with edit and command cards (diffs, output, Copy), grouped read and

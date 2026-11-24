@@ -130,6 +130,10 @@ describe("the agent chat's layout", () => {
     );
   });
 
+  it("left-aligns command descriptions in the space after the name", () => {
+    expect(ruleBodyFor(".ac-menu__row .ac-menu__note")).toMatch(/text-align\s*:\s*start/);
+  });
+
   it("pads the header row at its sides, the same in Chat and Term", () => {
     expect(ruleBodyFor(".agent-bar")).toMatch(/padding-inline\s*:\s*var\(--s3\)/);
   });

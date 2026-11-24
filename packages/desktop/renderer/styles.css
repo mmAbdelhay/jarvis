@@ -2744,7 +2744,11 @@
   .ac-menu__group { padding: 8px 12px 2px; color: var(--text-muted); font-size: 12px; letter-spacing: 0.04em; }
   .ac-menu__mark { background: transparent; color: var(--accent); font-weight: 600; }
   .ac-menu__hint { color: var(--text-muted); font-size: 13px; white-space: nowrap; }
-  .ac-menu__row .ac-menu__note { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ac-menu__row .ac-menu__note { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; text-align: start; }
+  /* The names share one column, so the descriptions line up after it. */
+  .ac-menu--suggest .ac-menu__row > :is(.ac-menu__label, .ac-menu__hint) { flex: none; }
+  .ac-menu--suggest .ac-menu__label { min-inline-size: 13rem; }
   .ac-menu__source { flex: none; padding: 1px 6px; border: 1px solid var(--border); border-radius: 6px;
     color: var(--text-muted); font-size: 11px; }
   .ac-menu--long .ac-menu__row { content-visibility: auto; contain-intrinsic-size: auto 40px; }

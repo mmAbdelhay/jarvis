@@ -151,6 +151,16 @@ describe("the terminal drawer", () => {
     );
   });
 
+  it("makes the slot tall enough for the whole menu: 60% of the pane, never under 260px", async () => {
+    const s = await open(agentView({ needsTerm: true }));
+    const pane = s.q<HTMLElement>(".agent-chat");
+    Object.defineProperty(pane, "clientHeight", { configurable: true, value: 900 });
+    s.api.terminalAgentChat.mockResolvedValue(agentView({ needsTerm: true }) as never);
+    s.chat.refresh();
+    await settle();
+    expect(s.q<HTMLElement>(".ac-drawer-slot").style.height).toBe("540px");
+  });
+
   it("opens for a multi-choice menu, and never types into the terminal on its own", async () => {
     const s = await open(
       agentView({

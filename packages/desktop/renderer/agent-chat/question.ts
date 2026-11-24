@@ -215,6 +215,10 @@ export function createQuestion(options: QuestionOptions): QuestionCard {
     const want = wantsDrawer(view);
     if (want) {
       slot.hidden = false;
+      // Tall enough for the whole menu, its title line included, where the
+      // pane allows: 60% of the pane, never under the default.
+      const pane = element.closest<HTMLElement>(".agent-chat")?.clientHeight ?? 0;
+      slot.style.height = pane > 0 ? `${Math.max(260, Math.floor(pane * 0.6))}px` : "";
       if (!drawer.isOpen()) {
         // Never takes the keys by itself: someone typing would answer the menu.
         if (!drawer.open(slot)) slot.hidden = true;

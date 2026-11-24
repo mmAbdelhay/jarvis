@@ -128,12 +128,13 @@ export function createMenu(options: {
         hint.dir = "auto";
         row.append(hint);
       }
-      row.append(el("span", "ac-spacer"));
       if (item.note !== undefined && item.note !== "") {
+        // Left-aligned, in the space after the name; it takes the room the
+        // spacer would, so the tag still ends the row.
         const note = el("span", "ac-menu__note", item.note);
         note.title = item.title ?? item.note;
         row.append(note);
-      }
+      } else row.append(el("span", "ac-spacer"));
       if (item.tag !== undefined && item.tag !== "") {
         row.append(el("span", "ac-menu__source", item.tag));
       }

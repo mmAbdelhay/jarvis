@@ -174,15 +174,16 @@ export function buildSection(
       section.append(button);
     }
   } else if (data.context?.leftPercent !== undefined) {
-    const used = Math.min(100, Math.max(0, 100 - data.context.leftPercent));
+    // The label says what is left, so the fill is what is left.
+    const left = Math.min(100, Math.max(0, data.context.leftPercent));
     const track = el("div", "ac-meter");
     track.setAttribute("role", "progressbar");
     track.setAttribute("aria-valuemin", "0");
     track.setAttribute("aria-valuemax", "100");
-    track.setAttribute("aria-valuenow", String(used));
+    track.setAttribute("aria-valuenow", String(left));
     track.setAttribute("aria-label", headingOf("context", data, t));
     const fill = el("div", "ac-meter__fill");
-    fill.style.inlineSize = `${used}%`;
+    fill.style.inlineSize = `${left}%`;
     track.append(fill);
     section.append(track);
   }
