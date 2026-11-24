@@ -74,6 +74,11 @@ describe("remote policy", () => {
     "terminal:agentFiles",
     "terminal:agentAttach",
     "terminal:agentOpenFile",
+    // Dictation opens the laptop's own microphone: never for a phone.
+    "terminal:dictateStart",
+    "terminal:dictateKeep",
+    "terminal:dictateFinish",
+    "terminal:dictateCancel",
     // The Office: never read for a phone.
     "office:activity",
     "office:viewing",

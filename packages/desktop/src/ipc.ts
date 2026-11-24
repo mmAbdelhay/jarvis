@@ -33,6 +33,7 @@ import {
 import type { AgentAttachResult } from "./agent-attach.js";
 import type { AgentChatView } from "./agent-chat-doc.js";
 import type { AgentCommandResult, AgentModeResult, AgentStopResult } from "./agent-controls.js";
+import type { DictationFinish, DictationKeep, DictationStart } from "./dictation.js";
 import type { AgentCommandInfo, AgentFileHit, AgentOpenFileResult } from "./agent-suggest.js";
 import type { AgentAnswerResult, AgentSendResult, AgentView } from "./agent-view.js";
 import type { OfficeActivity } from "./office-activity.js";
@@ -1055,6 +1056,14 @@ export type RendererApi = {
   ): Promise<AgentAttachResult>;
   /** Opens an edited file in the editor, inside the pane's project only. */
   terminalAgentOpenFile(paneKey: string, path: string): Promise<AgentOpenFileResult>;
+  /** Starts the microphone for the pane's chat composer. One at a time, and
+   *  never while the voice turn records. Answers the id every later call needs. */
+  terminalDictateStart(paneKey: string): Promise<DictationStart>;
+  /** Renews the lease (every 5 s); without it the recording stops after 15 s. */
+  terminalDictateKeep(id: string): Promise<DictationKeep>;
+  /** Stops and transcribes: the text, for the composer. Never sends it. */
+  terminalDictateFinish(id: string): Promise<DictationFinish>;
+  terminalDictateCancel(id: string): Promise<{ ok: boolean }>;
   onTerminalClaudeViewChanged(cb: (payload: { paneKey: string }) => void): void;
   /** What each agent pane and Jarvis session is doing, for the Office:
    *  state, question, what it is doing. Desktop only. */

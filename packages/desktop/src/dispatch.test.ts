@@ -329,6 +329,12 @@ export function fakeDeps(overrides: Partial<DispatchDeps> = {}): DispatchDeps {
       })),
       openFile: vi.fn(async () => ({ ok: true as const })),
     },
+    dictation: {
+      start: vi.fn(async () => ({ ok: true as const, id: "d1" })),
+      keep: vi.fn(() => ({ ok: true as const })),
+      finish: vi.fn(async () => ({ ok: true as const, text: "hi", language: "en" })),
+      cancel: vi.fn(() => ({ ok: true })),
+    },
     office: {
       read: vi.fn(async () => ({ panes: {}, sessions: {} })),
       setViewing: vi.fn(),
@@ -1379,6 +1385,23 @@ describe("dispatch table: api, dialog, voices", () => {
     expect(deps.agentChat.attach).toHaveBeenCalledWith("t1", file);
     await call(table, "terminal:agentOpenFile", "t1", "src/a.ts");
     expect(deps.agentChat.openFile).toHaveBeenCalledWith("t1", "src/a.ts");
+  });
+
+  it("terminal:dictate* pass their arguments through", async () => {
+    const deps = fakeDeps();
+    const table = createDispatchTable(deps);
+    expect(await call(table, "terminal:dictateStart", "t1")).toEqual({ ok: true, id: "d1" });
+    expect(deps.dictation.start).toHaveBeenCalledWith("t1");
+    expect(await call(table, "terminal:dictateKeep", "d1")).toEqual({ ok: true });
+    expect(deps.dictation.keep).toHaveBeenCalledWith("d1");
+    expect(await call(table, "terminal:dictateFinish", "d1")).toEqual({
+      ok: true,
+      text: "hi",
+      language: "en",
+    });
+    expect(deps.dictation.finish).toHaveBeenCalledWith("d1");
+    expect(await call(table, "terminal:dictateCancel", "d1")).toEqual({ ok: true });
+    expect(deps.dictation.cancel).toHaveBeenCalledWith("d1");
   });
 
   it("terminal:agentView, agentAnswer and agentSend pass their arguments through", async () => {

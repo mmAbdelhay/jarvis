@@ -267,6 +267,7 @@ import { createAgentViewHandlers } from "../agent-view.js";
 import { createOfficeActivity, createOfficeViewing } from "../office-activity.js";
 import { createOfficeScreen } from "../office-screen.js";
 import { createClaudeViewHandlers, createClaudeViewNotifier } from "../claude-view.js";
+import { createDictation, createDictationRecorder } from "../dictation.js";
 import { createRecorderDeps, Recorder } from "../recorder.js";
 import { capacityReport, startupReport } from "../startup.js";
 import { createTerminalFitOverrides } from "../terminal-fit-overrides.js";
@@ -2209,6 +2210,8 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     // A recording started but never stopped holds ffmpeg — and the
     // microphone — open indefinitely.
     safely("recorder", () => recorder.abort());
+    // Dictation's own recording, and its private temp directory.
+    safely("dictation", () => dictation.dispose());
     // Sessions still "starting"/"running"/"waiting" never reach
     // SessionManager#update's endedAt-setting branch on their own once
     // the window is gone, so their history() rows would stay wrong
@@ -2367,7 +2370,43 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
 
   const recorder = new Recorder(createRecorderDeps(platform));
 
+  // The chat composer's dictation (dictation.ts). It shares the microphone
+  // with the voice turn: each refuses while the other records.
+  const DICTATION_TRANSCRIBE_MS = 180_000;
+  const dictation = createDictation({
+    makeRecorder: () =>
+      createDictationRecorder({
+        recorder: createRecorderDeps(platform),
+        makeDir: async () => {
+          const dir = await mkdtemp(join(tmpdir(), "jarvis-dictation-"));
+          await chmod(dir, 0o700);
+          return dir;
+        },
+        removeDir: (dir) => rm(dir, { recursive: true, force: true }),
+      }),
+    transcribe: (wavPath) =>
+      transcribe(wavPath, config.whisper, (command, args) =>
+        limitedWhisperRunner(command, args, DICTATION_TRANSCRIBE_MS),
+      ),
+    schedule: (fn, ms) => {
+      const timer = setTimeout(fn, ms);
+      return () => clearTimeout(timer);
+    },
+    busy: () => recorder.isRecording(),
+    hostsAgent: async (paneKey) => {
+      try {
+        if (!agentSessions.live(paneKey)) return false;
+        return (await agentSessions.session(paneKey, true)) !== undefined;
+      } catch {
+        return false;
+      }
+    },
+    log: (token) => console.warn(`[dictation] ${token}`),
+  });
+
   function startVoice(): void {
+    // One microphone: a dictation in progress keeps it.
+    if (dictation.active()) return;
     recorder.start();
     broadcast.send("voice:listening", true);
   }
@@ -2854,6 +2893,12 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     claudeView,
     agentView,
     agentChat: agentChatApi,
+    dictation: {
+      start: (paneKey) => dictation.start(paneKey),
+      keep: (id) => dictation.keep(id),
+      finish: (id) => dictation.finish(id),
+      cancel: (id) => dictation.cancel(id),
+    },
     office: {
       read: () => officeWatcher.read(),
       setViewing: (keys) => officeViewing.set(keys),
@@ -2913,9 +2958,10 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
   async function limitedWhisperRunner(
     command: string,
     args: string[],
+    timeoutMs: number = TRANSCRIBE_TIMEOUT_MS,
   ): Promise<{ code: number; stdout: string; stderr: string }> {
     const result = await runCommandWithLimits(command, args, {
-      timeoutMs: TRANSCRIBE_TIMEOUT_MS,
+      timeoutMs,
       maxOutputBytes: 1_048_576,
     });
     const forceFailure = result.timedOut || result.truncated;

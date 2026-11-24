@@ -101,7 +101,10 @@ function setup(
     busy: () => busy,
     hostsAgent: async (key) => key === "t1" && options.agent !== false,
     log: (token) => logs.push(token),
-    randomId: () => `id${(n += 1)}`,
+    randomId: () => {
+      n += 1;
+      return `id${n}`;
+    },
   });
   const live = (ms: number) => timers.filter((t) => !t.cancelled && t.ms === ms);
   return {
@@ -227,7 +230,14 @@ describe("finish", () => {
   });
 
   it("answers silence for empty text and for whole-text non-speech marks", async () => {
-    for (const text of ["", "  ", "[BLANK_AUDIO]", "(music)", "[Music] (Music)", "\n[ Silence ]\n"]) {
+    for (const text of [
+      "",
+      "  ",
+      "[BLANK_AUDIO]",
+      "(music)",
+      "[Music] (Music)",
+      "\n[ Silence ]\n",
+    ]) {
       const s = setup({ transcript: { text, language: "en" } });
       const id = await begin(s);
       const finishing = s.dictation.finish(id);

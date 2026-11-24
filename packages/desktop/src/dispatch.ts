@@ -34,6 +34,7 @@ import { randomInt } from "node:crypto";
 import type { AgentAttachResult } from "./agent-attach.js";
 import type { AgentChatView } from "./agent-chat-doc.js";
 import type { AgentCommandResult, AgentModeResult, AgentStopResult } from "./agent-controls.js";
+import type { DictationFinish, DictationKeep, DictationStart } from "./dictation.js";
 import type { AgentCommandInfo, AgentFileHit, AgentOpenFileResult } from "./agent-suggest.js";
 import type { AgentAnswerResult, AgentSendResult, AgentView } from "./agent-view.js";
 import type { OfficeActivity } from "./office-activity.js";
@@ -504,6 +505,14 @@ export type DispatchDeps = {
     files(paneKey: unknown, query: unknown): Promise<{ files: AgentFileHit[] }>;
     attach(paneKey: unknown, file: unknown): Promise<AgentAttachResult>;
     openFile(paneKey: unknown, path: unknown): Promise<AgentOpenFileResult>;
+  };
+  // Dictation into the chat composer (dictation.ts, built in compose.ts).
+  // Desktop-only channels; each validates its own arguments.
+  dictation: {
+    start(paneKey: unknown): Promise<DictationStart>;
+    keep(id: unknown): DictationKeep;
+    finish(id: unknown): Promise<DictationFinish>;
+    cancel(id: unknown): { ok: boolean };
   };
   // The Office's watcher and window-viewing keys (office-activity.ts, built
   // in compose.ts). Desktop-only channels.
@@ -1264,6 +1273,10 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
     "terminal:agentFiles": ([paneKey, query]) => deps.agentChat.files(paneKey, query),
     "terminal:agentAttach": ([paneKey, file]) => deps.agentChat.attach(paneKey, file),
     "terminal:agentOpenFile": ([paneKey, path]) => deps.agentChat.openFile(paneKey, path),
+    "terminal:dictateStart": ([paneKey]) => deps.dictation.start(paneKey),
+    "terminal:dictateKeep": ([id]) => deps.dictation.keep(id),
+    "terminal:dictateFinish": ([id]) => deps.dictation.finish(id),
+    "terminal:dictateCancel": ([id]) => deps.dictation.cancel(id),
     "office:activity": () => deps.office.read(),
     "office:screen": ([target]) => deps.office.screen(target),
     "office:viewing": ([keys]) => {

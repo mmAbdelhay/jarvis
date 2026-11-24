@@ -42,9 +42,7 @@ export type DictationDeps = {
 };
 
 export type DictationStart = { ok: true; id: string } | { ok: false; reason: "busy" | "failed" };
-export type DictationKeep =
-  | { ok: true; capped?: true }
-  | { ok: false; reason: "gone" | "failed" };
+export type DictationKeep = { ok: true; capped?: true } | { ok: false; reason: "gone" | "failed" };
 export type DictationFinish =
   | { ok: true; text: string; language: string }
   | { ok: false; reason: "silence" | "failed" | "gone" };
@@ -52,11 +50,13 @@ export type DictationFinish =
 const NON_SPEECH =
   /[[(]\s*(?:blank[_ ]audio|silence|silent|music|noise|background noise|applause|laughter|laughs|laughing|inaudible|no speech|sound|sounds)\s*[\])]/gi;
 
-// Built from strings so the control characters stay escaped in the source.
-const CSI = new RegExp("\\u001b\\[[0-?]*[ -/]*[@-~]", "g");
-const STRING_SEQUENCE = new RegExp("\\u001b[\\]P^_X][^\\u0007\\u001b]*(?:\\u0007|\\u001b\\\\)?|\\u001b", "g");
-const LINE_BREAKS = new RegExp("[\\r\\n\\t\\u2028\\u2029]", "g");
-const CONTROLS = new RegExp("[\\u0000-\\u001f\\u007f-\\u009f]", "g");
+// biome-ignore lint/suspicious/noControlCharactersInRegex: escape sequences are what these patterns strip.
+const CSI = /\u001b\[[0-?]*[ -/]*[@-~]/g;
+// biome-ignore lint/suspicious/noControlCharactersInRegex: escape sequences are what these patterns strip.
+const STRING_SEQUENCE = /\u001b[\]P^_X][^\u0007\u001b]*(?:\u0007|\u001b\\)?|\u001b/g;
+const LINE_BREAKS = /[\r\n\t\u2028\u2029]/g;
+// biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are what this pattern strips.
+const CONTROLS = /[\u0000-\u001f\u007f-\u009f]/g;
 
 /** Whisper's text made safe for a text box: no control characters or escape
  *  sequences, newlines as spaces, nothing when it is only non-speech marks. */
