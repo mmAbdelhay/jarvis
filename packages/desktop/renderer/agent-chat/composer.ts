@@ -140,6 +140,8 @@ export type ComposerOptions = {
   /** Earlier messages sent to this agent, oldest first. */
   history(): string[];
   note(message: string | undefined): void;
+  /** A message went out: the feed follows it to the bottom. */
+  sent?(): void;
   /** An action answered "gone": the agent has left. */
   gone?(): void;
   /** Something was sent or changed: look at the agent again. */
@@ -623,6 +625,7 @@ export function createComposer(options: ComposerOptions): Composer {
       paintChips();
       grow();
       options.note(undefined);
+      options.sent?.();
     } else if (!threw) {
       // What was typed stays; the reason is shown.
       options.note(t(SEND_REFUSALS[outcome.reason]));

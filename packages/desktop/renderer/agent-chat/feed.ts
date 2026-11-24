@@ -18,6 +18,8 @@ import {
 
 /** How close to the bottom still counts as "at the bottom", in px. */
 const BOTTOM_SLACK_PX = 24;
+/** A scroll within this long of a wheel, touch or key is the reader's. */
+const USER_SCROLL_MS = 500;
 /** A turn shorter than this has no "Worked for" line. */
 const MIN_TURN_MS = 10_000;
 /** How close to the top asks for the page before. */
@@ -115,8 +117,32 @@ export function createFeed(options: FeedOptions): Feed {
     jump.hidden = true;
   }
 
+  // Only the reader moves the feed off the bottom: a wheel, a touch, a key, or a
+  // drag of the scrollbar. A scroll the layout causes (rows measured under
+  // content-visibility, a card appearing) is not one, and must not unpin.
+  let userAt = Number.NEGATIVE_INFINITY;
+  let dragging = false;
+  const byUser = (): boolean => dragging || Date.now() - userAt < USER_SCROLL_MS;
+  const mark = (): void => {
+    userAt = Date.now();
+  };
+  scroller.addEventListener("wheel", mark, { passive: true });
+  scroller.addEventListener("touchmove", mark, { passive: true });
+  scroller.addEventListener("keydown", (event) => {
+    if (["PageUp", "PageDown", "Home", "End", "ArrowUp", "ArrowDown", " "].includes(event.key))
+      mark();
+  });
+  scroller.addEventListener("pointerdown", (event) => {
+    // A press on the scroller itself (its scrollbar), not on a row's button.
+    if (event.target === scroller) dragging = true;
+  });
+  document.addEventListener("pointerup", () => {
+    dragging = false;
+  });
   scroller.addEventListener("scroll", () => {
-    stuck = atBottom();
+    if (atBottom()) stuck = true;
+    else if (byUser()) stuck = false;
+    else if (stuck) scrollToBottom();
     jump.hidden = stuck;
     if (scroller.scrollTop <= TOP_SLACK_PX && lastState?.older === "more") options.loadOlder();
   });

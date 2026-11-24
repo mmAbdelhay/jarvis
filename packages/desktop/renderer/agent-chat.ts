@@ -274,6 +274,7 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
     },
     note: showNote,
     changed: () => void load(),
+    sent: () => feed.scrollToBottom(),
     // An action that answers "gone" proves the agent left: look again and,
     // if it is still not there, leave Chat at once.
     gone: () => {

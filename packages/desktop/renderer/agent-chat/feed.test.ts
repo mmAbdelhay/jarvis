@@ -419,6 +419,7 @@ describe("paging", () => {
       expect(request).toEqual({ before: "cursor-1" });
       return agentView({ page: { items: [user("a", "a"), reply("b", "b")], older: "cursor-0" } });
     });
+    feed.dispatchEvent(new WheelEvent("wheel", { deltaY: -100 }));
     feed.dispatchEvent(new Event("scroll"));
     await settle();
     await settle();
@@ -443,6 +444,7 @@ describe("paging", () => {
       expect(request).toEqual({ before: "cursor-0" });
       return agentView({ page: { items: [] } });
     });
+    feed.dispatchEvent(new WheelEvent("wheel", { deltaY: -100 }));
     feed.dispatchEvent(new Event("scroll"));
     await settle();
   });
@@ -499,6 +501,7 @@ describe("the reader's scroll", () => {
     expect(s.q<HTMLElement>(".ac-jump").hidden).toBe(true);
 
     state.scrollTop = 100; // the user scrolled up to read
+    feed.dispatchEvent(new WheelEvent("wheel", { deltaY: -100 }));
     feed.dispatchEvent(new Event("scroll"));
     s.current.view = more(2);
     s.chat.refresh();
@@ -532,6 +535,7 @@ describe("the reader's scroll", () => {
       expect(state.scrollTop).toBe(1000);
       expect(s.q<HTMLElement>(".ac-jump").hidden).toBe(true);
       state.scrollTop = 100;
+      feed.dispatchEvent(new WheelEvent("wheel", { deltaY: -100 }));
       feed.dispatchEvent(new Event("scroll"));
       state.clientHeight = 50;
       for (const cb of callbacks) cb();
@@ -539,5 +543,41 @@ describe("the reader's scroll", () => {
     } finally {
       delete (globalThis as unknown as { ResizeObserver?: unknown }).ResizeObserver;
     }
+  });
+
+  it("is not unpinned by a scroll the layout caused (rows measured, cards shown), only by the reader", async () => {
+    const s = await open();
+    const feed = s.q<HTMLElement>(".agent-chat__feed");
+    const state = geometry(feed, { scrollHeight: 1000, clientHeight: 200, scrollTop: 800 });
+    feed.dispatchEvent(new Event("scroll"));
+    // Rows below the fold are measured and the content grows: the browser
+    // reports a scroll with no wheel, key or drag behind it.
+    state.scrollHeight = 1400;
+    feed.dispatchEvent(new Event("scroll"));
+    expect(state.scrollTop).toBe(1400);
+    expect(s.q<HTMLElement>(".ac-jump").hidden).toBe(true);
+    // The reader scrolls up with the wheel: now it unpins.
+    state.scrollTop = 600;
+    feed.dispatchEvent(new WheelEvent("wheel", { deltaY: -100 }));
+    feed.dispatchEvent(new Event("scroll"));
+    expect(state.scrollTop).toBe(600);
+    expect(s.q<HTMLElement>(".ac-jump").hidden).toBe(false);
+  });
+
+  it("pins to the bottom whenever a message is sent, even from far up", async () => {
+    const s = await open();
+    const feed = s.q<HTMLElement>(".agent-chat__feed");
+    const state = geometry(feed, { scrollHeight: 1000, clientHeight: 200, scrollTop: 100 });
+    feed.dispatchEvent(new WheelEvent("wheel", { deltaY: -100 }));
+    feed.dispatchEvent(new Event("scroll"));
+    const input = s.q<HTMLTextAreaElement>(".agent-chat__input");
+    input.value = "hello";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
+    );
+    await settle();
+    expect(state.scrollTop).toBe(1000);
+    expect(s.q<HTMLElement>(".ac-jump").hidden).toBe(true);
   });
 });
