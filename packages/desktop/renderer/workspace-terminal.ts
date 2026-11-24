@@ -1,7 +1,7 @@
 import type { WorkspaceTab } from "@jarvis/core";
 import { LOGIN_TERMINAL_DETAIL } from "../src/login-terminal.js";
 import { MESSAGES, PRIMARY_LANGUAGE, type MessageKey } from "../src/messages.js";
-import { type AgentChat, createAgentChat } from "./agent-chat.js";
+import { type AgentChat, createAgentChat, forgetAgentDraft } from "./agent-chat.js";
 import { enhanceTerminal, handleSplitKey, type SplitKeys } from "./terminal-addons.js";
 import { openTerminalLink } from "./terminal-links.js";
 import { attachCompletion, type Completion } from "./terminal-completion.js";
@@ -717,6 +717,7 @@ export function initWorkspaceTerminals(): void {
   }
 
   window.jarvis.onTerminalExit((paneKey, code) => {
+    forgetAgentDraft(paneKey);
     // The tab stays open: its scrollback is usually the reason you were
     // there. The shell is gone, and saying so beats a terminal that has
     // silently stopped responding. It goes straight to the live terminal:

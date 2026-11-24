@@ -34,7 +34,33 @@ const MAX_ATTACHMENTS = 10;
 const MAX_INPUT_PX = 220;
 const FILES_DEBOUNCE_MS = 120;
 const COMMANDS_TTL_MS = 60_000;
-const DRAFT_KEY = "jarvis.agentChatDraft.";
+/** What an older version kept on disk: removed whenever a composer is built. */
+const OLD_DRAFT_PREFIX = "jarvis.agentChatDraft.";
+/** Unsent text per pane, in memory only: it survives a tab switch and a pane rebuilt in
+ *  this window, and is never written anywhere (it may hold anything). */
+const drafts = new Map<string, string>();
+
+/** The pane's shell is gone for good: its unsent text goes with it. */
+export function forgetAgentDraft(paneKey: string): void {
+  drafts.delete(paneKey);
+}
+
+function purgeOldDrafts(storage: StorageLike | undefined): void {
+  try {
+    const where = storage as
+      | (StorageLike & { length?: number; key?(i: number): string | null })
+      | undefined;
+    if (where?.key === undefined || where.length === undefined) return;
+    const stale: string[] = [];
+    for (let at = 0; at < where.length; at++) {
+      const name = where.key(at);
+      if (name?.startsWith(OLD_DRAFT_PREFIX)) stale.push(name);
+    }
+    for (const name of stale) where.removeItem?.(name);
+  } catch {
+    // Nothing to remove.
+  }
+}
 const MODES: readonly ClaudeMode[] = ["default", "acceptEdits", "plan", "auto"];
 const MODE_LABELS: Record<ClaudeMode, MessageKey> = {
   default: "agentChatModeDefault",
@@ -256,19 +282,11 @@ export function createComposer(options: ComposerOptions): Composer {
     }
   };
   function saveDraft(): void {
-    try {
-      const where = store();
-      if (input.value === "") where?.removeItem?.(`${DRAFT_KEY}${options.paneKey}`);
-      else where?.setItem(`${DRAFT_KEY}${options.paneKey}`, input.value);
-    } catch {
-      // A draft is a convenience.
-    }
+    if (input.value === "") drafts.delete(options.paneKey);
+    else drafts.set(options.paneKey, input.value);
   }
-  try {
-    input.value = store()?.getItem(`${DRAFT_KEY}${options.paneKey}`) ?? "";
-  } catch {
-    // No draft.
-  }
+  purgeOldDrafts(store());
+  input.value = drafts.get(options.paneKey) ?? "";
 
   function grow(): void {
     input.style.height = "auto";
@@ -574,6 +592,8 @@ export function createComposer(options: ComposerOptions): Composer {
     }
     const message = messageText();
     if (message.trim() === "") return;
+    const sentText = input.value;
+    const sentFiles = new Set(attachments.map((item) => item.id));
     if (view?.working !== undefined && view.caps.queue !== true) {
       options.note(t("agentChatBusyNoQueue"));
       return;
@@ -592,8 +612,10 @@ export function createComposer(options: ComposerOptions): Composer {
     }
     sending = false;
     if (outcome.ok) {
-      input.value = "";
-      attachments = [];
+      // Only what went out: typing and files added meanwhile stay.
+      if (input.value === sentText) input.value = "";
+      else if (input.value.startsWith(sentText)) input.value = input.value.slice(sentText.length);
+      attachments = attachments.filter((item) => !sentFiles.has(item.id));
       historyAt = undefined;
       saveDraft();
       paintChips();
@@ -604,7 +626,8 @@ export function createComposer(options: ComposerOptions): Composer {
       options.note(t(SEND_REFUSALS[outcome.reason]));
     }
     paintButtons();
-    input.focus();
+    // Back to the box only if the keys were still here or nowhere.
+    if (document.activeElement === input || document.activeElement === document.body) input.focus();
     options.changed();
   }
 

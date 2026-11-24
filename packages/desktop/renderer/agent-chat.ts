@@ -607,4 +607,5 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
   };
 }
 
+export { forgetAgentDraft } from "./agent-chat/composer.js";
 export type { AgentSendResult, AgentChatView };

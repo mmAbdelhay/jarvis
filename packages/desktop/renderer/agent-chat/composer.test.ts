@@ -4,10 +4,20 @@
 // and `@` listboxes, history, drafts and attachments.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MessageKey } from "../../src/messages.js";
-import { agentView, open, press, settle, t, typeInto, type Setup } from "./fixture.js";
-import { prettyModel } from "./composer.js";
+import {
+  agentView,
+  memoryStorage,
+  open,
+  press,
+  settle,
+  t,
+  typeInto,
+  type Setup,
+} from "./fixture.js";
+import { forgetAgentDraft, prettyModel } from "./composer.js";
 
 beforeEach(() => {
+  forgetAgentDraft("t1");
   document.body.replaceChildren();
 });
 
@@ -333,15 +343,64 @@ describe("history and drafts", () => {
     expect(press(input(s), "ArrowUp").defaultPrevented).toBe(false);
   });
 
-  it("keeps the draft in storage per pane and restores it, and clears it once sent", async () => {
+  it("keeps the draft in memory per pane, never on disk, and a rebuilt pane gets it back", async () => {
     const first = await open();
     typeInto(first, "half a thought");
-    expect(first.storage.store.get("jarvis.agentChatDraft.t1")).toBe("half a thought");
-    const second = await open(agentView(), { storage: first.storage });
+    expect([...first.storage.store.keys()].some((k) => k.includes("Draft"))).toBe(false);
+    first.chat.dispose();
+    const second = await open(agentView());
     expect(input(second).value).toBe("half a thought");
     press(input(second), "Enter");
     await settle();
-    expect(first.storage.store.has("jarvis.agentChatDraft.t1")).toBe(false);
+    const third = await open(agentView());
+    expect(input(third).value).toBe("");
+  });
+
+  it("drops a pane's draft when its shell is gone", async () => {
+    const first = await open();
+    typeInto(first, "stale");
+    forgetAgentDraft("t1");
+    const second = await open(agentView());
+    expect(input(second).value).toBe("");
+  });
+
+  it("removes drafts an older version left in storage", async () => {
+    const storage = memoryStorage({
+      "jarvis.agentChatDraft.t1": "old",
+      "jarvis.agentChatMode": "chat",
+    });
+    const s = await open(agentView(), { storage });
+    expect(input(s).value).toBe("");
+    expect(storage.store.has("jarvis.agentChatDraft.t1")).toBe(false);
+    expect(storage.store.get("jarvis.agentChatMode")).toBe("chat");
+  });
+
+  it("clears only what was sent: text and files added while the send is in flight stay", async () => {
+    const s = await open();
+    let release: (value: { ok: true }) => void = () => {};
+    send(s).mockImplementationOnce(() => new Promise((resolve) => (release = resolve)));
+    s.api.pathForFile.mockImplementation((f: File) => `/p/${f.name}`);
+    const picker = s.q<HTMLInputElement>('input[type="file"]');
+    const pick = async (name: string) => {
+      Object.defineProperty(picker, "files", {
+        configurable: true,
+        value: [file(name, "text/plain")],
+      });
+      picker.dispatchEvent(new Event("change"));
+      await settle();
+    };
+    await pick("one.txt");
+    typeInto(s, "first");
+    press(input(s), "Enter");
+    await settle();
+    typeInto(s, "first and more");
+    await pick("two.txt");
+    release({ ok: true });
+    await settle();
+    expect(input(s).value).toBe(" and more");
+    expect([...s.host.querySelectorAll(".ac-attachment__name")].map((n) => n.textContent)).toEqual([
+      "two.txt",
+    ]);
   });
 });
 

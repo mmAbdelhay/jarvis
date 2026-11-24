@@ -105,6 +105,10 @@ export function memoryStorage(initial: Record<string, string> = {}) {
     getItem: (key: string) => store.get(key) ?? null,
     setItem: (key: string, value: string) => void store.set(key, value),
     removeItem: (key: string) => void store.delete(key),
+    get length() {
+      return store.size;
+    },
+    key: (index: number) => [...store.keys()][index] ?? null,
     store,
   };
 }
