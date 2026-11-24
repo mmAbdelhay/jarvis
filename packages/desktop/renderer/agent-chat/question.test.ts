@@ -4,6 +4,7 @@
 // transcript's own record read-only beside them, and the pane's live terminal
 // shown inside the card for a menu only the terminal can answer.
 import { beforeEach, describe, expect, it } from "vitest";
+import { splitBody } from "./question.js";
 import { agentView, open, press, setup, settle, t, tab } from "./fixture.js";
 
 beforeEach(() => {
@@ -283,5 +284,27 @@ describe("the terminal drawer", () => {
     expect(
       (s.q(".agent-chat__prompt").textContent?.match(/Run this command\?/g) ?? []).length,
     ).toBe(1);
+  });
+
+  it("renders the screen's label line as a caption and the command alone as code", async () => {
+    const s = await open(
+      agentView({
+        prompt: {
+          kind: "single",
+          question: "Proceed?",
+          body: "Bash command\n  npm run migrate\n  --dry",
+          options: [{ label: "Yes", highlighted: true }],
+        },
+      }),
+    );
+    expect(s.q(".ac-question__caption").textContent).toBe("Bash command");
+    expect(s.q(".ac-question__command").textContent).toBe("npm run migrate\n--dry");
+  });
+
+  it("splits only an unambiguous label", () => {
+    expect(splitBody("npm run migrate")).toEqual({ code: "npm run migrate" });
+    expect(splitBody("ls -la\nfoo")).toEqual({ code: "ls -la\nfoo" });
+    expect(splitBody("Bash command\n  ls")).toEqual({ caption: "Bash command", code: "ls" });
+    expect(splitBody("Bash command")).toEqual({ code: "Bash command" });
   });
 });

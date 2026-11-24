@@ -34,6 +34,28 @@ export type QuestionCard = {
   shown(): boolean;
 };
 
+/** The screen's label line above a command ("Bash command") as a caption, the
+ *  command alone as code: only when the first line is a short words-only label
+ *  and something follows it, so a real one-line command is never split. */
+export function splitBody(body: string): { caption?: string; code: string } {
+  const lines = body.split("\n");
+  const first = lines[0]?.trim() ?? "";
+  const rest = lines.slice(1);
+  if (rest.some((row) => row.trim() !== "") && /^[A-Z][A-Za-z]*(?: [A-Za-z]+){0,3}$/.test(first)) {
+    const indent = Math.min(
+      ...rest.filter((row) => row.trim() !== "").map((row) => row.length - row.trimStart().length),
+    );
+    return {
+      caption: first,
+      code: rest
+        .map((row) => row.slice(indent))
+        .join("\n")
+        .trim(),
+    };
+  }
+  return { code: body };
+}
+
 function details(asking: ChatAsking, t: Translate, title: string): HTMLElement | undefined {
   if (asking.questions === undefined || asking.questions.length === 0) return undefined;
   const box = el("details", "ac-question__details");
@@ -108,7 +130,10 @@ export function createQuestion(options: QuestionOptions): QuestionCard {
       for (const block of renderMarkdown(view.asking.plan, options.code)) plan.append(block);
       element.append(plan);
     } else if (prompt?.body !== undefined && prompt.body !== "") {
-      const command = renderCode(prompt.body);
+      const parts = splitBody(prompt.body);
+      if (parts.caption !== undefined)
+        element.append(el("span", "ac-question__caption", parts.caption));
+      const command = renderCode(parts.code);
       command.classList.add("ac-question__command");
       element.append(command);
     }
