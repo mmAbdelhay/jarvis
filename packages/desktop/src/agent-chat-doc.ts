@@ -144,6 +144,8 @@ export type AgentChatView =
       asking?: ChatAsking;
       /** The whole file is still being read: side data fills in later. */
       deriving?: true;
+      /** This read failed; the page is the last good one (empty if none). */
+      readFailed?: true;
       caps: AgentChatCaps;
     };
 
@@ -232,6 +234,9 @@ export function createAgentChatHandlers(deps: AgentChatDeps): {
   const syncBytes = deps.limits?.syncBytes ?? 2 * MB;
   const chunk = deps.limits?.chunkBytes ?? MB;
   const entries = new Map<string, Entry>();
+  type AgentView = Extract<AgentChatView, { kind: "agent" }>;
+  /** The last good reply per pane, shown again when a read fails. */
+  const lastGood = new Map<string, AgentView>();
   let tick = 0;
 
   function log(token: string): void {
@@ -489,13 +494,22 @@ export function createAgentChatHandlers(deps: AgentChatDeps): {
     cached: () => entries.size,
     forgetPane(paneKey) {
       for (const [id, entry] of entries) if (entry.paneKey === paneKey) entries.delete(id);
+      lastGood.delete(paneKey);
     },
 
     async chat(paneKey, request) {
+      let known: PaneAgentSession | undefined;
       try {
-        if (typeof paneKey !== "string" || !deps.sessions.live(paneKey)) return { kind: "none" };
+        if (typeof paneKey !== "string" || !deps.sessions.live(paneKey)) {
+          if (typeof paneKey === "string") lastGood.delete(paneKey);
+          return { kind: "none" };
+        }
         const session = await deps.sessions.session(paneKey);
-        if (session === undefined || !deps.sessions.live(paneKey)) return { kind: "none" };
+        if (session === undefined || !deps.sessions.live(paneKey)) {
+          lastGood.delete(paneKey);
+          return { kind: "none" };
+        }
+        known = session;
         try {
           deps.notice(paneKey);
         } catch {
@@ -537,7 +551,7 @@ export function createAgentChatHandlers(deps: AgentChatDeps): {
               }
             : undefined;
         const needsTerm = menu?.kind === "unreadable" || (menu === undefined && state.needsTerm);
-        return {
+        const view: AgentView = {
           kind: "agent",
           vendor: session.vendor,
           sessionId: session.sessionId,
@@ -567,9 +581,31 @@ export function createAgentChatHandlers(deps: AgentChatDeps): {
           ...(deriving ? { deriving: true as const } : {}),
           caps: CAPS[session.vendor],
         };
+        lastGood.set(paneKey, view);
+        return view;
       } catch {
         log("read");
-        return { kind: "none" };
+        // A transient failure must not make the chat vanish: the last good
+        // reply (or an empty one for the same agent) says the read failed.
+        const previous = typeof paneKey === "string" ? lastGood.get(paneKey) : undefined;
+        if (
+          previous !== undefined &&
+          (known === undefined || known.sessionId === previous.sessionId)
+        ) {
+          return { ...previous, readFailed: true };
+        }
+        if (known === undefined) return { kind: "none" };
+        return {
+          kind: "agent",
+          vendor: known.vendor,
+          sessionId: known.sessionId,
+          ...(known.name === undefined ? {} : { title: known.name }),
+          page: { items: [] },
+          agents: [],
+          files: [],
+          caps: CAPS[known.vendor],
+          readFailed: true,
+        };
       }
     },
   };

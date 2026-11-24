@@ -356,11 +356,31 @@ describe("agentChat", () => {
     expect(t.handlers.cached()).toBeLessThanOrEqual(8);
   });
 
+  it("answers the agent with readFailed, not none, when a read fails: the last page stays", async () => {
+    const t = setup(userLine(1) + userLine(2));
+    const good = agent(await t.handlers.chat("t1"));
+    vi.mocked(t.deps.statFile).mockRejectedValue(new Error("secret/path"));
+    const failed = agent(await t.handlers.chat("t1"));
+    expect(failed.readFailed).toBe(true);
+    expect(ids(failed)).toEqual(ids(good));
+    expect(failed.sessionId).toBe(good.sessionId);
+    expect(good.readFailed).toBeUndefined();
+    vi.mocked(t.deps.statFile).mockImplementation(async () => ({ size: 1, mtimeMs: 1, ino: 1 }));
+    expect(agent(await t.handlers.chat("t1")).readFailed).toBeUndefined();
+  });
+
+  it("answers an empty agent view with readFailed when the very first read fails", async () => {
+    const t = setup(userLine(1));
+    vi.mocked(t.deps.statFile).mockRejectedValue(new Error("x"));
+    const view = agent(await t.handlers.chat("t1"));
+    expect(view).toMatchObject({ readFailed: true, vendor: "anthropic", page: { items: [] } });
+  });
+
   it("logs only tokens and never throws when a read fails", async () => {
     const t = setup(userLine(1));
     vi.mocked(t.deps.statFile).mockRejectedValue(new Error("secret/path"));
     const view = await t.handlers.chat("t1");
-    expect(view).toEqual({ kind: "none" });
+    expect(view.kind).toBe("agent");
     for (const call of vi.mocked(t.deps.log).mock.calls)
       expect(String(call[0])).not.toContain("secret");
   });
