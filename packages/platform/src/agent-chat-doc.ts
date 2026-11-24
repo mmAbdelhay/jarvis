@@ -33,11 +33,24 @@ import {
 
 export type ChatDiffLine = { sign: " " | "+" | "-"; text: string };
 
-/** A message. `divider` marks a compaction; its text is never the summary. */
+/** A message. `images` counts pictures sent with it, never their bytes. */
 export type ChatMessageItem = {
   id: string;
-  kind: "user" | "text" | "divider";
+  kind: "user" | "text";
   text: string;
+  images?: number;
+  at?: number;
+};
+
+/**
+ * A marker between items. It carries no words: the renderer translates the
+ * event. `label` is only ever a sub-agent's own label.
+ */
+export type ChatDividerItem = {
+  id: string;
+  kind: "divider";
+  event: "compacted" | "interrupted" | "agentDone";
+  label?: string;
   at?: number;
 };
 
@@ -52,17 +65,18 @@ export type ChatToolItem = {
   diff?: ChatDiffLine[];
   output?: string;
   outputCut?: boolean;
-  state: "running" | "ok" | "error";
+  /** `ended`: no result was ever recorded, so how it finished is unknown. */
+  state: "running" | "ok" | "error" | "ended";
   at?: number;
   endAt?: number;
 };
 
-export type ChatItem = ChatMessageItem | ChatToolItem;
+export type ChatItem = ChatMessageItem | ChatDividerItem | ChatToolItem;
 export type ChatTodo = { text: string; state: "done" | "active" | "open" };
 export type ChatAgent = {
   id: string;
   label: string;
-  state: "running" | "done";
+  state: "running" | "done" | "failed";
   startedAt?: number;
   endedAt?: number;
 };
@@ -239,7 +253,7 @@ function createStore(maxItems: number): Store {
       }
       const settled = kept.map((item, i) =>
         item.kind === "tool" && item.state === "running" && i < lastMessage
-          ? { ...item, state: "ok" as const }
+          ? { ...item, state: "ended" as const }
           : { ...item },
       );
       return { items: settled, ...extra };
@@ -252,7 +266,11 @@ function createReader(
   handle: (record: Record<string, unknown>, line: string) => void,
   build: () => ChatDoc,
 ): ChatDocReader {
-  let pending = "";
+  // The unfinished last line is kept as parts and joined only when it ends,
+  // so a long record arriving in small chunks is never re-split or re-read.
+  let parts: string[] = [];
+  let length = 0;
+  let consumed = false;
   let skipping = false;
   const run = (line: string): void => {
     if (line.trim() === "") return;
@@ -279,27 +297,46 @@ function createReader(
         skipping = false;
         text = text.slice(at + 1);
       }
-      const joined = pending + text;
-      const lines = joined.split("\n");
-      pending = lines.pop() ?? "";
-      for (const line of lines) run(line);
+      let start = 0;
+      for (;;) {
+        const end = text.indexOf("\n", start);
+        if (end === -1) break;
+        const line =
+          parts.length === 0 ? text.slice(start, end) : parts.join("") + text.slice(start, end);
+        parts = [];
+        length = 0;
+        if (consumed) consumed = false;
+        else run(line);
+        start = end + 1;
+      }
+      const rest = start === 0 ? text : text.slice(start);
+      if (rest !== "") {
+        parts.push(rest);
+        length += rest.length;
+        if (length > MAX_LINE_CHARS) {
+          parts = [];
+          length = 0;
+          consumed = false;
+          skipping = true;
+        }
+      }
+    },
+    doc() {
       // A last record with no newline yet that is already whole is read now;
-      // a partial object never parses, so nothing is read twice or early.
-      if (pending.endsWith("}") || pending.endsWith("} ")) {
+      // a partial object never parses, and it is not read again at its newline.
+      if (!consumed && length > 0 && (parts.at(-1) ?? "").trimEnd().endsWith("}")) {
+        const joined = parts.join("");
+        parts = [joined];
         try {
-          JSON.parse(pending);
-          run(pending);
-          pending = "";
+          JSON.parse(joined);
+          run(joined);
+          consumed = true;
         } catch {
           // still partial
         }
       }
-      if (pending.length > MAX_LINE_CHARS) {
-        pending = "";
-        skipping = true;
-      }
+      return build();
     },
-    doc: build,
   };
 }
 
@@ -321,8 +358,31 @@ function addMessage(
   kind: ChatMessageItem["kind"],
   text: string,
   at: number | undefined,
+  images?: number,
 ): void {
-  store.add({ id, kind, text, ...(at !== undefined ? { at } : {}) });
+  store.add({
+    id,
+    kind,
+    text,
+    ...(images !== undefined && images > 0 ? { images } : {}),
+    ...(at !== undefined ? { at } : {}),
+  });
+}
+
+function addDivider(
+  store: Store,
+  id: string,
+  event: ChatDividerItem["event"],
+  at: number | undefined,
+  label?: string,
+): void {
+  store.add({
+    id,
+    kind: "divider",
+    event,
+    ...(label !== undefined ? { label } : {}),
+    ...(at !== undefined ? { at } : {}),
+  });
 }
 
 function newTool(
@@ -442,6 +502,26 @@ function patchDiff(patch: unknown): ChatDiffLine[] | undefined {
   return diff.length === 0 ? undefined : diff.slice(0, MAX_DIFF_LINES);
 }
 
+const REMINDER = /<system-reminder>[\s\S]*?<\/system-reminder>/g;
+const NOTIFICATION = /<task-notification>[\s\S]*?<\/task-notification>/g;
+
+/**
+ * What a user record's text really is. Injected text (system reminders, a
+ * task notification, local-command output) is never the user's words; an
+ * interruption becomes a divider. Undefined when nothing is left.
+ */
+function userText(
+  raw: string,
+  onNotification: (notification: string) => void,
+): { text: string; interrupted: boolean } | undefined {
+  for (const found of raw.matchAll(NOTIFICATION)) onNotification(found[0]);
+  const text = raw.replaceAll(NOTIFICATION, "").replaceAll(REMINDER, "").trim();
+  if (text === "" || isLocalCommandNoise(text)) return undefined;
+  if (text.startsWith("[Request interrupted by user")) return { text: "", interrupted: true };
+  const words = readableCommand(text).trim();
+  return words === "" ? undefined : { text: words, interrupted: false };
+}
+
 export function createClaudeDocReader(options: ChatDocOptions = {}): ChatDocReader {
   const store = createStore(options.maxItems ?? DEFAULT_MAX_ITEMS);
   const files = createFiles();
@@ -450,7 +530,9 @@ export function createClaudeDocReader(options: ChatDocOptions = {}): ChatDocRead
   let model: string | undefined;
   let tokens: number | undefined;
   let written: ChatTodo[] | undefined;
-  const tasks: (ChatTodo | null)[] = [];
+  // Tasks in creation order; `num` is the id the CLI printed in the result.
+  const tasks: { todo: ChatTodo | null; callId: string; num?: number }[] = [];
+  const background = new Set<string>();
   let todoSource: "write" | "tasks" | undefined;
 
   const call = (block: Record<string, unknown>, fallbackId: string, at: number | undefined) => {
@@ -481,21 +563,23 @@ export function createClaudeDocReader(options: ChatDocOptions = {}): ChatDocRead
     } else if (name === "TaskCreate") {
       const subject = str(input?.["subject"]) ?? str(input?.["description"]);
       if (subject !== undefined) {
-        tasks.push({ text: clean(subject, 500), state: "open" });
+        tasks.push({ todo: { text: clean(subject, 500), state: "open" }, callId: id });
         todoSource = "tasks";
       }
     } else if (name === "TaskUpdate") {
-      const index = Number(input?.["taskId"]) - 1;
-      const task = Number.isInteger(index) ? tasks[index] : undefined;
-      if (task !== undefined && task !== null) {
+      const wanted = Number(input?.["taskId"]);
+      const byNumber = tasks.find((task) => task.num === wanted);
+      const byOrder = tasks[wanted - 1];
+      const task = byNumber ?? (byOrder?.num === undefined ? byOrder : undefined);
+      if (task?.todo != null) {
         const status = input?.["status"];
-        if (status === "deleted") tasks[index] = null;
+        if (status === "deleted") task.todo = null;
         else {
           const state = todoState(status);
-          if (state !== undefined) task.state = state;
+          if (state !== undefined) task.todo.state = state;
+          const subject = str(input?.["subject"]);
+          if (subject !== undefined) task.todo.text = clean(subject, 500);
         }
-        const subject = str(input?.["subject"]);
-        if (subject !== undefined && tasks[index] !== null) task.text = clean(subject, 500);
         todoSource = "tasks";
       }
     } else if (name === "Task" || name === "Agent") {
@@ -520,7 +604,12 @@ export function createClaudeDocReader(options: ChatDocOptions = {}): ChatDocRead
     }
   };
 
-  const result = (block: Record<string, unknown>, at: number | undefined, patch: unknown): void => {
+  const result = (
+    block: Record<string, unknown>,
+    at: number | undefined,
+    meta: Record<string, unknown> | undefined,
+  ): void => {
+    const patch = meta?.["structuredPatch"];
     const id = str(block["tool_use_id"]);
     if (id === undefined) return;
     const failed = block["is_error"] === true;
@@ -532,10 +621,20 @@ export function createClaudeDocReader(options: ChatDocOptions = {}): ChatDocRead
       const diff = patchDiff(patch);
       if (diff !== undefined && !failed) tool.diff = diff;
     }
+    const task = tasks.find((entry) => entry.callId === id);
+    if (task !== undefined) {
+      const number = /#(\d+)/.exec(toolResultText(block["content"]));
+      if (number?.[1] !== undefined) task.num = Number(number[1]);
+    }
     const agent = agentById.get(id);
     if (agent !== undefined) {
-      agent.state = "done";
-      if (at !== undefined) agent.endedAt = at;
+      // A background agent's result only says it started.
+      if (meta?.["status"] === "async_launched" || meta?.["isAsync"] === true) {
+        background.add(id);
+      } else {
+        agent.state = failed ? "failed" : "done";
+        if (at !== undefined) agent.endedAt = at;
+      }
     }
     if (failed) files.undo(id);
   };
@@ -559,37 +658,62 @@ export function createClaudeDocReader(options: ChatDocOptions = {}): ChatDocRead
       }
     }
     if (role === "user" && fields["isCompactSummary"] === true) {
-      addMessage(store, `${uuid}:0`, "divider", "Conversation compacted", at);
+      addDivider(store, `${uuid}:0`, "compacted", at);
       return;
     }
     const kind = role === "user" ? "user" : "text";
-    const content = body["content"];
-    if (typeof content === "string") {
-      if (isLocalCommandNoise(content)) return;
-      const text = readableCommand(content).trim();
-      if (text !== "") addMessage(store, `${uuid}:0`, kind, clean(text), at);
-      return;
-    }
+    const raw = body["content"];
+    const content = typeof raw === "string" ? [{ type: "text", text: raw }] : raw;
     if (!Array.isArray(content)) return;
-    const patch = asRecord(fields["toolUseResult"])?.["structuredPatch"];
+    const meta = asRecord(fields["toolUseResult"]);
     const results = content.filter((b) => asRecord(b)?.["type"] === "tool_result").length;
-    content.forEach((raw, index) => {
-      const block = asRecord(raw);
+    const firstImage = content.findIndex((b) => asRecord(b)?.["type"] === "image");
+    let images =
+      role === "user" ? content.filter((b) => asRecord(b)?.["type"] === "image").length : 0;
+    const message = (index: number, text: string): void => {
+      addMessage(store, `${uuid}:${index}`, kind, clean(text), at, images);
+      images = 0;
+    };
+    content.forEach((item, index) => {
+      const block = asRecord(item);
       if (block === undefined) return;
       const type = block["type"];
       if (type === "text" && typeof block["text"] === "string") {
-        const text = readableCommand(block["text"]).trim();
-        if (text !== "") addMessage(store, `${uuid}:${index}`, kind, clean(text), at);
+        if (role === "assistant") {
+          const text = readableCommand(block["text"]).trim();
+          if (text !== "") message(index, text);
+          return;
+        }
+        const text = userText(block["text"], (note) => endAgent(note, uuid, index, at));
+        if (text === undefined) return;
+        if (text.interrupted) addDivider(store, `${uuid}:${index}`, "interrupted", at);
+        else message(index, text.text);
       } else if (type === "tool_use" && role === "assistant") {
         call(block, `${uuid}:${index}`, at);
       } else if (type === "tool_result") {
-        result(block, at, results === 1 ? patch : undefined);
+        result(block, at, results === 1 ? meta : undefined);
       }
     });
+    if (images > 0) message(Math.max(firstImage, 0), "");
+  };
+
+  /** A background agent's end, from the CLI's own task notification. */
+  const endAgent = (note: string, uuid: string, index: number, at: number | undefined): void => {
+    const id = /<tool-use-id>\s*([^<]*?)\s*<\/tool-use-id>/.exec(note)?.[1];
+    const status = /<status>\s*([^<]*?)\s*<\/status>/.exec(note)?.[1];
+    const agent = id === undefined ? undefined : agentById.get(id);
+    if (agent === undefined || id === undefined || !background.has(id)) return;
+    background.delete(id);
+    agent.state = status === "completed" ? "done" : "failed";
+    if (at !== undefined) agent.endedAt = at;
+    addDivider(store, `${uuid}:${index}`, "agentDone", at, agent.label);
   };
 
   const build = (): ChatDoc => {
-    const todos = todoSource === "tasks" ? tasks.filter((t): t is ChatTodo => t !== null) : written;
+    const todos =
+      todoSource === "tasks"
+        ? tasks.flatMap((task) => (task.todo === null ? [] : [task.todo]))
+        : written;
     const doc = store.doc({ agents: agents.map((a) => ({ ...a })), files: files.list() });
     return withOptional(
       doc,
@@ -710,6 +834,57 @@ function unifiedDiffCounts(diff: unknown): { added: number; removed: number } | 
   return { added, removed };
 }
 
+/** Older rollouts' shell-style function names. */
+const EXEC_NAMES = new Set([
+  "shell",
+  "exec",
+  "exec_command",
+  "shell_command",
+  "container.exec",
+  "local_shell",
+]);
+
+/** A call's output: plain text, or JSON with `output` and `metadata.exit_code`. */
+function codexOutput(raw: unknown): { text: string; failed: boolean } {
+  if (typeof raw !== "string") return { text: "", failed: false };
+  if (raw.startsWith("{")) {
+    try {
+      const fields = asRecord(JSON.parse(raw));
+      if (fields !== undefined && typeof fields["output"] === "string") {
+        const exit = asRecord(fields["metadata"])?.["exit_code"];
+        return { text: fields["output"], failed: typeof exit === "number" && exit !== 0 };
+      }
+    } catch {
+      // plain text that begins with a brace
+    }
+  }
+  return { text: raw, failed: false };
+}
+
+/** The files of an apply_patch body, each with its diff lines and counts. */
+function patchFiles(
+  patch: string,
+): { path: string; added: number; removed: number; diff: ChatDiffLine[] }[] {
+  const out: { path: string; added: number; removed: number; diff: ChatDiffLine[] }[] = [];
+  let current: (typeof out)[number] | undefined;
+  for (const row of patch.split("\n")) {
+    const header = /^\*\*\* (?:Update|Add|Delete) File:\s*(.+?)\s*$/.exec(row);
+    if (header?.[1] !== undefined) {
+      current = { path: header[1], added: 0, removed: 0, diff: [] };
+      out.push(current);
+      continue;
+    }
+    if (current === undefined || row.startsWith("*** ") || row.startsWith("@@")) continue;
+    const sign = row[0];
+    if (sign !== " " && sign !== "+" && sign !== "-") continue;
+    if (sign === "+") current.added++;
+    if (sign === "-") current.removed++;
+    if (current.diff.length < MAX_DIFF_LINES)
+      current.diff.push({ sign, text: clean(row.slice(1), 2000) });
+  }
+  return out;
+}
+
 export function createCodexDocReader(options: ChatDocOptions = {}): ChatDocReader {
   const max = options.maxItems ?? DEFAULT_MAX_ITEMS;
   // Newer rollouts record item_completed events; older ones only response_item
@@ -717,6 +892,8 @@ export function createCodexDocReader(options: ChatDocOptions = {}): ChatDocReade
   const fromItems = createStore(max);
   const fromResponses = createStore(max);
   const files = createFiles();
+  const responseFiles = createFiles();
+  const patchCalls = new Map<string, ChatToolItem[]>();
   let sawItem = false;
   let model: string | undefined;
   let tokens: number | undefined;
@@ -809,11 +986,19 @@ export function createCodexDocReader(options: ChatDocOptions = {}): ChatDocReade
       if (words === "") return;
       if (role === "user" && INJECTED_PREFIXES.some((prefix) => words.startsWith(prefix))) return;
       addMessage(fromResponses, `${id}:0`, role === "user" ? "user" : "text", clean(words), at);
-    } else if (
-      type === "response_item" &&
-      payload["type"] === "function_call" &&
-      payload["name"] === "update_plan"
-    ) {
+    } else if (type === "response_item") {
+      handleResponse(payload, id, at);
+    }
+  };
+
+  const handleResponse = (
+    payload: Record<string, unknown>,
+    id: string,
+    at: number | undefined,
+  ): void => {
+    const kind = payload["type"];
+    const callId = str(payload["call_id"]);
+    if (kind === "function_call" && payload["name"] === "update_plan") {
       const args = copilotArguments(payload["arguments"]);
       const steps = args?.["plan"];
       if (!Array.isArray(steps)) return;
@@ -822,16 +1007,69 @@ export function createCodexDocReader(options: ChatDocOptions = {}): ChatDocReade
         const fieldsOfStep = asRecord(step);
         const text = str(fieldsOfStep?.["step"]);
         const state = todoState(fieldsOfStep?.["status"]);
-        if (text !== undefined && state !== undefined)
+        if (text !== undefined && state !== undefined) {
           todos.push({ text: clean(text, 500), state });
+        }
       }
       plan = todos;
+    } else if (kind === "function_call" && EXEC_NAMES.has(String(payload["name"]))) {
+      const args = copilotArguments(payload["arguments"]);
+      const raw = args?.["command"] ?? args?.["cmd"];
+      const command = Array.isArray(raw)
+        ? raw.filter((part) => typeof part === "string").join(" ")
+        : str(raw);
+      const parts: Partial<ChatToolItem> = {};
+      const target = commandTarget(raw);
+      if (target !== undefined) parts.target = clean(target, 400);
+      if (command !== undefined) parts.command = clean(command, MAX_COMMAND_CHARS);
+      fromResponses.add(newTool(callId ?? `${id}:0`, "exec", at, parts));
+    } else if (kind === "function_call_output" && callId !== undefined) {
+      const tool = fromResponses.toolById.get(callId);
+      if (tool === undefined) return;
+      const result = codexOutput(payload["output"]);
+      tool.state = result.failed ? "error" : "ok";
+      if (at !== undefined) tool.endAt = at;
+      setOutput(tool, result.text);
+    } else if (
+      (kind === "custom_tool_call" || kind === "function_call") &&
+      payload["name"] === "apply_patch"
+    ) {
+      const args = copilotArguments(payload["arguments"]);
+      const input = typeof payload["input"] === "string" ? payload["input"] : args?.["input"];
+      if (typeof input !== "string") return;
+      const made: ChatToolItem[] = [];
+      patchFiles(input).forEach((file, index) => {
+        responseFiles.touch(file.path, file.added, file.removed);
+        const tool = newTool(`${callId ?? id}:${index}`, "edit", at, {
+          target: basename(file.path),
+          path: file.path,
+          ...(file.diff.length > 0 ? { diff: file.diff } : {}),
+        });
+        fromResponses.add(tool);
+        made.push(tool);
+      });
+      if (callId !== undefined && made.length > 0) {
+        patchCalls.set(callId, made);
+        if (patchCalls.size > 500) patchCalls.delete(patchCalls.keys().next().value as string);
+      }
+    } else if (
+      (kind === "custom_tool_call_output" || kind === "function_call_output") &&
+      callId !== undefined
+    ) {
+      const made = patchCalls.get(callId);
+      if (made === undefined) return;
+      for (const tool of made) {
+        tool.state = "ok";
+        if (at !== undefined) tool.endAt = at;
+      }
+      const result = codexOutput(payload["output"]);
+      if (made[0] !== undefined) setOutput(made[0], result.text);
     }
   };
 
   const build = (): ChatDoc => {
     const store = sawItem ? fromItems : fromResponses;
-    const doc = store.doc({ agents: [], files: files.list() });
+    const doc = store.doc({ agents: [], files: (sawItem ? files : responseFiles).list() });
     return withOptional(
       doc,
       model,

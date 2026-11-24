@@ -94,14 +94,14 @@ describe("parseClaudeDoc", () => {
     });
   });
 
-  it("settles a call with no result once the conversation moved on, and leaves the last one running", () => {
+  it("shows a call with no result as ended (outcome unknown), never ok, and leaves the last one running", () => {
     const doc = parseClaudeDoc(
       [
         assistant("a1", [toolUse("t1", "Bash", { command: "a" }), { type: "text", text: "go" }]),
         assistant("a2", [toolUse("t2", "Bash", { command: "b" })]),
       ].join("\n"),
     );
-    expect(tools(doc).map((t) => t.state)).toEqual(["ok", "running"]);
+    expect(tools(doc).map((t) => t.state)).toEqual(["ended", "running"]);
   });
 
   it("takes a diff from structuredPatch, else from the old and new strings", () => {
@@ -259,7 +259,7 @@ describe("parseClaudeDoc", () => {
       ].join("\n"),
     );
     expect(doc.items).toEqual([
-      { id: "c:0", kind: "divider", text: "Conversation compacted", at: Date.parse(T0) },
+      { id: "c:0", kind: "divider", event: "compacted", at: Date.parse(T0) },
       { id: "r:0", kind: "user", text: "/plan x", at: Date.parse(T0) },
     ]);
     expect(JSON.stringify(doc)).not.toContain("SUMMARY WORDS");
@@ -302,8 +302,212 @@ describe("parseClaudeDoc", () => {
       assistant("a2", [{ type: "text", text: "done" }]),
     ].join("\n");
     const phone = parseChatTranscript(text).turns.map((turn) => turn.text);
-    const doc = parseClaudeDoc(text).items.flatMap((i) => (i.kind === "tool" ? [] : [i.text]));
+    const doc = parseClaudeDoc(text).items.flatMap((i) =>
+      i.kind === "tool" || i.kind === "divider" ? [] : [i.text],
+    );
     expect(doc).toEqual(phone.filter((t) => t !== ""));
+  });
+});
+
+describe("parseClaudeDoc: injected records, images, background agents, tasks", () => {
+  it("never shows injected text as the user's words", () => {
+    const doc = parseClaudeDoc(
+      [
+        user(
+          "a",
+          "<task-notification><tool-use-id>zz</tool-use-id><status>completed</status></task-notification>",
+        ),
+        user("b", [{ type: "text", text: "<system-reminder>be good</system-reminder>" }]),
+        user("c", [{ type: "text", text: "real words <system-reminder>hidden</system-reminder>" }]),
+        user("d", "[Request interrupted by user for tool use]"),
+        user("e", [{ type: "text", text: "<local-command-stdout>x</local-command-stdout>" }]),
+      ].join("\n"),
+    );
+    expect(doc.items).toEqual([
+      { id: "c:0", kind: "user", text: "real words", at: Date.parse(T0) },
+      { id: "d:0", kind: "divider", event: "interrupted", at: Date.parse(T0) },
+    ]);
+  });
+
+  it("counts images on a user message and shows an image-only message, never the bytes", () => {
+    const img = {
+      type: "image",
+      source: { type: "base64", media_type: "image/png", data: "AAAA" },
+    };
+    const doc = parseClaudeDoc(
+      [user("a", [img, { type: "text", text: "look" }, img]), user("b", [img])].join("\n"),
+    );
+    expect(doc.items).toEqual([
+      { id: "a:1", kind: "user", text: "look", images: 2, at: Date.parse(T0) },
+      { id: "b:0", kind: "user", text: "", images: 1, at: Date.parse(T0) },
+    ]);
+    expect(JSON.stringify(doc)).not.toContain("AAAA");
+  });
+
+  it("keeps a background sub-agent running until its task notification", () => {
+    const doc = parseClaudeDoc(
+      [
+        assistant("a", [
+          toolUse("s1", "Task", { description: "bg" }),
+          toolUse("s2", "Task", { description: "fg" }),
+        ]),
+        user("u1", [toolResult("s1", "launched")], { toolUseResult: { status: "async_launched" } }),
+        user("u2", [toolResult("s2", "launched")], { toolUseResult: { isAsync: true } }),
+        user(
+          "u3",
+          "<task-notification><tool-use-id>s1</tool-use-id><status>completed</status></task-notification>",
+          { timestamp: T1 },
+        ),
+      ].join("\n"),
+    );
+    expect(doc.agents.map((a) => [a.id, a.state])).toEqual([
+      ["s1", "done"],
+      ["s2", "running"],
+    ]);
+    expect(doc.agents[0]?.endedAt).toBe(Date.parse(T1));
+    expect(doc.items.filter((i) => i.kind === "divider")).toEqual([
+      { id: "u3:0", kind: "divider", event: "agentDone", label: "bg", at: Date.parse(T1) },
+    ]);
+  });
+
+  it("marks a failed background agent", () => {
+    const doc = parseClaudeDoc(
+      [
+        assistant("a", [toolUse("s1", "Task", { description: "bg" })]),
+        user("u1", [toolResult("s1", "x")], { toolUseResult: { status: "async_launched" } }),
+        user(
+          "u3",
+          "<task-notification><tool-use-id>s1</tool-use-id><status>failed</status></task-notification>",
+        ),
+      ].join("\n"),
+    );
+    expect(doc.agents[0]?.state).toBe("failed");
+  });
+
+  it("maps TaskUpdate ids from the TaskCreate result text, creation order as fallback", () => {
+    const doc = parseClaudeDoc(
+      [
+        assistant("a", [
+          toolUse("c1", "TaskCreate", { subject: "first" }),
+          toolUse("c2", "TaskCreate", { subject: "second" }),
+        ]),
+        user("r1", [toolResult("c1", "Task #7 created successfully: first")]),
+        user("r2", [toolResult("c2", "Task #8 created successfully: second")]),
+        assistant("b", [toolUse("u1", "TaskUpdate", { taskId: "8", status: "completed" })]),
+      ].join("\n"),
+    );
+    expect(doc.todos).toEqual([
+      { text: "first", state: "open" },
+      { text: "second", state: "done" },
+    ]);
+  });
+});
+
+describe("parseCodexDoc: older rollouts' function calls", () => {
+  const resp = (payload: Record<string, unknown>): string =>
+    line({ timestamp: T0, type: "response_item", payload });
+
+  it("reads shell calls and their outputs by call_id", () => {
+    const doc = parseCodexDoc(
+      [
+        resp({ type: "message", role: "user", content: [{ type: "input_text", text: "go" }] }),
+        resp({
+          type: "function_call",
+          name: "shell",
+          call_id: "k1",
+          arguments: JSON.stringify({ command: ["bash", "-lc", "ls\nmore"] }),
+        }),
+        resp({
+          type: "function_call_output",
+          call_id: "k1",
+          output: JSON.stringify({ output: "a.txt", metadata: { exit_code: 0 } }),
+        }),
+        resp({
+          type: "function_call",
+          name: "shell",
+          call_id: "k2",
+          arguments: JSON.stringify({ command: ["false"] }),
+        }),
+        resp({ type: "function_call_output", call_id: "k2", output: "plain text out" }),
+        resp({
+          type: "function_call",
+          name: "shell",
+          call_id: "k3",
+          arguments: JSON.stringify({ command: ["x"] }),
+        }),
+        resp({
+          type: "function_call_output",
+          call_id: "k3",
+          output: JSON.stringify({ output: "no", metadata: { exit_code: 2 } }),
+        }),
+      ].join("\n"),
+    );
+    expect(tools(doc)).toMatchObject([
+      {
+        id: "k1",
+        tool: "exec",
+        command: "bash -lc ls\nmore",
+        target: "bash -lc ls",
+        output: "a.txt",
+        state: "ok",
+      },
+      { id: "k2", output: "plain text out", state: "ok" },
+      { id: "k3", output: "no", state: "error" },
+    ]);
+    expect(doc.items[0]).toMatchObject({ kind: "user", text: "go" });
+  });
+
+  it("keeps update_plan as to-dos only and reads apply_patch as files with diff lines", () => {
+    const patch =
+      "*** Begin Patch\n*** Update File: src/a.ts\n@@\n keep\n-old\n+new\n+more\n*** Add File: b.txt\n+hello\n*** End Patch";
+    const doc = parseCodexDoc(
+      [
+        resp({
+          type: "function_call",
+          name: "update_plan",
+          call_id: "p",
+          arguments: JSON.stringify({ plan: [{ step: "a", status: "pending" }] }),
+        }),
+        resp({ type: "custom_tool_call", name: "apply_patch", call_id: "k", input: patch }),
+        resp({ type: "custom_tool_call_output", call_id: "k", output: "Done!" }),
+      ].join("\n"),
+    );
+    expect(doc.todos).toEqual([{ text: "a", state: "open" }]);
+    expect(tools(doc).map((t) => [t.tool, t.path])).toEqual([
+      ["edit", "src/a.ts"],
+      ["edit", "b.txt"],
+    ]);
+    expect(tools(doc)[0]?.diff).toEqual([
+      { sign: " ", text: "keep" },
+      { sign: "-", text: "old" },
+      { sign: "+", text: "new" },
+      { sign: "+", text: "more" },
+    ]);
+    expect(doc.files).toEqual([
+      { path: "src/a.ts", added: 2, removed: 1 },
+      { path: "b.txt", added: 1, removed: 0 },
+    ]);
+  });
+});
+
+describe("reader buffering", () => {
+  it("reads a whole last record on doc() without reading it twice", () => {
+    const reader = createClaudeDocReader();
+    const record = user("u1", "one");
+    reader.push(record);
+    expect(reader.doc().items).toHaveLength(1);
+    reader.push(`\n${user("u2", "two")}`);
+    reader.push("\n");
+    expect(reader.doc().items.map((i) => i.id)).toEqual(["u1:0", "u2:0"]);
+  });
+
+  it("does not re-join a growing partial line on each push", () => {
+    const reader = createClaudeDocReader();
+    const big = `{"type":"user","uuid":"b","message":{"content":"${"x".repeat(200_000)}`;
+    const started = Date.now();
+    for (let i = 0; i < 400; i++) reader.push(big.slice(i * 500, i * 500 + 500));
+    expect(Date.now() - started).toBeLessThan(500);
+    expect(reader.doc().items).toEqual([]);
   });
 });
 
@@ -418,7 +622,9 @@ describe("parseCopilotDoc", () => {
         event("user.message", { content: "real" }),
       ].join("\n"),
     );
-    expect(doc.items.map((i) => (i.kind === "tool" ? "" : i.text))).toEqual(["real"]);
+    expect(doc.items.map((i) => (i.kind === "tool" || i.kind === "divider" ? "" : i.text))).toEqual(
+      ["real"],
+    );
   });
 
   it("is chunk independent and has the phone's turns", () => {
@@ -522,7 +728,9 @@ describe("parseCodexDoc", () => {
       message("assistant", "hi"),
     ].join("\n");
     const doc = parseCodexDoc(text);
-    expect(doc.items.map((i) => (i.kind === "tool" ? "" : i.text))).toEqual(["hello", "hi"]);
+    expect(doc.items.map((i) => (i.kind === "tool" || i.kind === "divider" ? "" : i.text))).toEqual(
+      ["hello", "hi"],
+    );
     const reader = createCodexDocReader();
     for (let i = 0; i < text.length; i += 11) reader.push(text.slice(i, i + 11));
     expect(reader.doc()).toEqual(doc);
