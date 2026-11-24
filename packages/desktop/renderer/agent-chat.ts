@@ -42,6 +42,10 @@ export type AgentChatOptions = {
     | "terminalAgentFiles"
     | "terminalAgentAttach"
     | "terminalAgentOpenFile"
+    | "terminalDictateStart"
+    | "terminalDictateKeep"
+    | "terminalDictateFinish"
+    | "terminalDictateCancel"
   > & {
     /** The existing safe external-open path (main allows http, https, mailto only). */
     plansOpenLink(url: string): unknown;
@@ -256,6 +260,16 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
       commands: () => api.terminalAgentCommands(paneKey),
       files: (query) => api.terminalAgentFiles(paneKey, query),
       attach: (file) => api.terminalAgentAttach(paneKey, file),
+      ...(typeof api.terminalDictateStart !== "function"
+        ? {}
+        : {
+            dictate: {
+              start: () => api.terminalDictateStart(paneKey),
+              keep: (id: string) => api.terminalDictateKeep(id),
+              finish: (id: string) => api.terminalDictateFinish(id),
+              cancel: (id: string) => api.terminalDictateCancel(id),
+            },
+          }),
       ...(api.pathForFile === undefined
         ? {}
         : { pathForFile: (file: File) => api.pathForFile?.(file) ?? "" }),
@@ -443,6 +457,8 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
     cancelWatch?.();
     cancelWatch = undefined;
     if (agent === undefined) return;
+    // Nothing to write into: a dictation in progress ends with the agent.
+    composer.cancelDictation();
     const hadFocus = host.contains(document.activeElement);
     agent = undefined;
     items = [];
@@ -648,6 +664,7 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
       stopDetecting();
       sizeObserver?.disconnect();
       feed.dispose();
+      composer.dispose();
       drawer.close();
       bar.remove();
       panel.remove();

@@ -286,6 +286,37 @@ export const MESSAGES = {
     language === "ar" ? "السياق: استُخدم {n} رمزاً" : "Context {n} tokens used",
   agentChatCopied: (language: "ar" | "en"): string => (language === "ar" ? "تم النسخ" : "Copied"),
   agentChatCopy: (language: "ar" | "en"): string => (language === "ar" ? "نسخ" : "Copy"),
+  agentChatDictate: (language: "ar" | "en"): string =>
+    language === "ar" ? "إملاء بالصوت" : "Dictate",
+  agentChatDictateFinish: (language: "ar" | "en"): string =>
+    language === "ar" ? "إنهاء الإملاء" : "Finish dictation",
+  agentChatDictateTip: (language: "ar" | "en"): string =>
+    language === "ar" ? "{label}، {keys}" : "{label} ({keys})",
+  agentChatDictateRecording: (language: "ar" | "en"): string =>
+    language === "ar" ? "جارٍ التسجيل" : "Recording",
+  agentChatDictateDone: (language: "ar" | "en"): string => (language === "ar" ? "تم" : "Done"),
+  agentChatDictateCancel: (language: "ar" | "en"): string =>
+    language === "ar" ? "إلغاء" : "Cancel",
+  agentChatDictateWriting: (language: "ar" | "en"): string =>
+    language === "ar" ? "جارٍ الكتابة…" : "Writing it down…",
+  agentChatDictateStarted: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "بدأ التسجيل. اضغط تم عند الانتهاء."
+      : "Recording started. Choose Done when you finish.",
+  agentChatDictateInserted: (language: "ar" | "en"): string =>
+    language === "ar" ? "أُضيف النص إلى الرسالة." : "The text was added to your message.",
+  agentChatDictateBusy: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "الميكروفون مشغول الآن. حاول بعد قليل."
+      : "The microphone is busy. Try again in a moment.",
+  agentChatDictateSilence: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "لم يُسمع شيء. تحقق من الميكروفون وإذنه."
+      : "Nothing heard. Check the microphone and its permission.",
+  agentChatDictateFailed: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "يحتاج الإملاء إلى ffmpeg وwhisper. انظر الإعدادات > الأدوات."
+      : "Dictation needs ffmpeg and whisper. See Settings > Tools.",
   agentChatCurrent: (language: "ar" | "en"): string => (language === "ar" ? "الحالي" : "Current"),
   agentChatDeriving: (language: "ar" | "en"): string =>
     language === "ar" ? "جارٍ قراءة الجلسة كاملة…" : "Reading the whole session…",

@@ -27,6 +27,8 @@ import {
   tokens,
   type Translate,
 } from "./dom.js";
+import { hostPlatform } from "../keys.js";
+import { clockText, createDictationControl, type DictationApi } from "./dictation.js";
 import { createMenu, type MenuItem } from "./menus.js";
 
 /** The most one send carries, as agentSend counts it. */
@@ -40,6 +42,16 @@ const OLD_DRAFT_PREFIX = "jarvis.agentChatDraft.";
 /** Unsent text per pane, in memory only: it survives a tab switch and a pane rebuilt in
  *  this window, and is never written anywhere (it may hold anything). */
 const drafts = new Map<string, string>();
+
+/** The composer each pane shows now, so text that arrives for a composer that
+ *  was rebuilt meanwhile still lands in the one on screen. */
+const liveInsert = new Map<string, (text: string) => void>();
+
+/** Adds to a pane's unsent text while no composer is there to show it. */
+function appendAgentDraft(paneKey: string, text: string): void {
+  const had = drafts.get(paneKey) ?? "";
+  drafts.set(paneKey, had === "" || /\s$/.test(had) ? `${had}${text}` : `${had} ${text}`);
+}
 
 /** The pane's shell is gone for good: its unsent text goes with it. */
 export function forgetAgentDraft(paneKey: string): void {
@@ -126,6 +138,8 @@ export type ComposerApi = {
   files(query: string): Promise<{ files: AgentFileHit[] }>;
   attach(file: { name: string; bytes: Uint8Array }): Promise<AgentAttachResult>;
   pathForFile?(file: File): string;
+  /** Dictation into the box; without it there is no mic button. */
+  dictate?: DictationApi;
 };
 
 export type ComposerOptions = {
@@ -158,6 +172,11 @@ export type Composer = {
   /** Whether the keys are in the box. */
   hasFocus(): boolean;
   addFiles(files: readonly File[]): Promise<void>;
+  /** Ends a dictation in progress (the agent left). */
+  cancelDictation(): void;
+  /** The pane is destroyed: a recording ends, a transcription in flight
+   *  still lands in the pane's draft. */
+  dispose(): void;
 };
 
 type Attachment = {
@@ -235,6 +254,11 @@ export function createComposer(options: ComposerOptions): Composer {
   attach.append(icon(ICONS.plus, 14));
   attach.setAttribute("aria-label", t("agentChatAttach"));
   attach.title = t("agentChatAttach");
+  const mic = el("button", "ac-iconbutton ac-mic");
+  mic.type = "button";
+  mic.hidden = api.dictate === undefined;
+  mic.setAttribute("aria-pressed", "false");
+  mic.append(icon(ICONS.mic, 14));
   const modeButton = el("button", "ac-textbutton ac-modebutton");
   modeButton.type = "button";
   modeButton.setAttribute("aria-haspopup", "listbox");
@@ -249,6 +273,7 @@ export function createComposer(options: ComposerOptions): Composer {
   sendButton.type = "submit";
   bar.append(
     attach,
+    mic,
     modeButton,
     modelButton,
     el("span", "ac-spacer"),
@@ -256,14 +281,39 @@ export function createComposer(options: ComposerOptions): Composer {
     stopButton,
     sendButton,
   );
+  // The recording strip: words as well as the red dot, so colour is not alone.
+  const dictationBar = el("div", "ac-dictation");
+  dictationBar.hidden = true;
+  dictationBar.dataset["state"] = "idle";
+  const dictationDot = el("span", "ac-dictation__dot");
+  dictationDot.setAttribute("aria-hidden", "true");
+  const dictationLabel = el("span", "ac-dictation__label");
+  const dictationTime = el("span", "ac-dictation__time");
+  const dictationDone = el(
+    "button",
+    "ac-small-button ac-dictation__done",
+    t("agentChatDictateDone"),
+  );
+  dictationDone.type = "button";
+  const dictationCancel = el(
+    "button",
+    "ac-small-button ac-dictation__cancel",
+    t("agentChatDictateCancel"),
+  );
+  dictationCancel.type = "button";
+  const dictationLive = el("div", "ac-sr-only ac-dictation__live");
+  dictationLive.setAttribute("role", "status");
+  dictationLive.setAttribute("aria-live", "polite");
   element.append(
     chipRow,
     input,
+    dictationBar,
     bar,
     suggest.element,
     modeMenu.element,
     modelMenu.element,
     fileInput,
+    dictationLive,
   );
 
   // ---- state ----
@@ -278,6 +328,10 @@ export function createComposer(options: ComposerOptions): Composer {
   let token = 0;
   let cancelFiles: (() => void) | undefined;
   let mention: { start: number; end: number } | undefined;
+  /** True while dictated text goes in: the input handler must not read a
+   *  leading `/` or an `@` in it as a menu. */
+  let quiet = false;
+  let gone = false;
 
   const store = (): StorageLike | undefined => {
     try {
@@ -307,12 +361,183 @@ export function createComposer(options: ComposerOptions): Composer {
     const working = view?.working !== undefined;
     const queue = working && view?.caps.queue === true;
     sendButton.textContent = queue ? t("agentChatQueue") : t("agentChatSend");
-    sendButton.disabled = sending || locked;
+    sendButton.disabled = sending || locked || (dictation?.state() ?? "idle") !== "idle";
     stopButton.hidden = !(working && view?.caps.stop === true);
     input.disabled = locked;
     attach.disabled = locked || view?.caps.attach === false;
     attach.hidden = view?.caps.attach === false;
+    paintMic();
   }
+
+  const shortcut = (): string => (hostPlatform() === "darwin" ? "⌘⇧M" : "Ctrl+Shift+M");
+  function paintMic(): void {
+    const state = dictation?.state() ?? "idle";
+    const recording = state === "recording";
+    const label = t(recording ? "agentChatDictateFinish" : "agentChatDictate");
+    mic.setAttribute("aria-pressed", String(recording));
+    mic.setAttribute("aria-label", label);
+    mic.title = fmt(t("agentChatDictateTip"), { label, keys: shortcut() });
+    mic.disabled = (locked && !recording) || state === "starting" || state === "transcribing";
+  }
+
+  let paintedState: string | undefined;
+  function paintDictation(): void {
+    const state = dictation?.state() ?? "idle";
+    dictationBar.hidden = state === "idle" || state === "starting";
+    if (state !== paintedState) {
+      paintedState = state;
+      dictationBar.dataset["state"] = state;
+      if (state === "recording") {
+        dictationLabel.textContent = t("agentChatDictateRecording");
+        dictationBar.replaceChildren(
+          dictationDot,
+          dictationLabel,
+          dictationTime,
+          dictationDone,
+          dictationCancel,
+        );
+      } else if (state === "transcribing") {
+        dictationLabel.textContent = t("agentChatDictateWriting");
+        dictationBar.replaceChildren(dictationDot, dictationLabel, dictationCancel);
+      }
+    }
+    dictationTime.textContent = clockText(dictation?.elapsed() ?? 0);
+    paintButtons();
+  }
+
+  // ---- dictation ----
+  const NOTES = {
+    busy: "agentChatDictateBusy",
+    silence: "agentChatDictateSilence",
+    failed: "agentChatDictateFailed",
+  } as const;
+  const SAYS = {
+    started: "agentChatDictateStarted",
+    writing: "agentChatDictateWriting",
+    inserted: "agentChatDictateInserted",
+  } as const;
+
+  /** Puts dictated words at the caret (over a selection) with one space where
+   *  either side needs it. An undoable insert where the browser offers one;
+   *  never a menu, never a send. */
+  function insertDictated(raw: string): void {
+    const text = raw.trim();
+    if (text === "") return;
+    const start = input.selectionStart ?? input.value.length;
+    const end = input.selectionEnd ?? start;
+    const before = input.value.slice(0, start);
+    const after = input.value.slice(end);
+    const piece = `${before !== "" && !/\s$/.test(before) ? " " : ""}${text}${
+      after !== "" && !/^\s/.test(after) ? " " : ""
+    }`;
+    quiet = true;
+    try {
+      const holder = document.activeElement;
+      if (
+        !input.disabled &&
+        (holder === null || holder === document.body || element.contains(holder))
+      ) {
+        input.focus();
+      }
+      input.setSelectionRange(start, end);
+      let inserted = false;
+      if (!input.disabled && document.activeElement === input) {
+        try {
+          inserted = document.execCommand?.("insertText", false, piece) === true;
+        } catch {
+          inserted = false;
+        }
+      }
+      if (!inserted) {
+        input.setRangeText(piece, start, end, "end");
+        input.dispatchEvent(
+          new InputEvent("input", { bubbles: true, inputType: "insertText", data: piece }),
+        );
+      }
+    } finally {
+      quiet = false;
+    }
+    closeSuggest();
+    saveDraft();
+    grow();
+  }
+
+  function deliverDictated(text: string): void {
+    if (!gone) {
+      insertDictated(text);
+      return;
+    }
+    const other = liveInsert.get(options.paneKey);
+    if (other !== undefined && other !== insertDictated) other(text);
+    else appendAgentDraft(options.paneKey, text.trim());
+  }
+
+  const dictation =
+    api.dictate === undefined
+      ? undefined
+      : createDictationControl({
+          api: api.dictate,
+          schedule: options.schedule,
+          now: options.now,
+          deliver: deliverDictated,
+          changed: paintDictation,
+          announce: (what) => {
+            dictationLive.textContent = what === "none" ? "" : t(SAYS[what]);
+          },
+          fail: (reason) => options.note(t(NOTES[reason])),
+        });
+  if (api.dictate !== undefined) liveInsert.set(options.paneKey, insertDictated);
+
+  mic.addEventListener("click", () => {
+    options.note(undefined);
+    dictation?.toggle();
+  });
+  dictationDone.addEventListener("click", () => dictation?.finish());
+  dictationCancel.addEventListener("click", () => dictation?.cancel());
+  // Capture: while dictating, Escape and Enter belong to dictation first.
+  element.addEventListener(
+    "keydown",
+    (event) => {
+      const state = dictation?.state() ?? "idle";
+      if (state === "idle" || event.isComposing || event.keyCode === 229) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        dictation?.cancel();
+        return;
+      }
+      if (
+        event.key === "Enter" &&
+        event.target === input &&
+        !event.shiftKey &&
+        !event.altKey &&
+        !event.ctrlKey &&
+        !event.metaKey
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (state === "recording") dictation?.finish();
+      }
+    },
+    true,
+  );
+  options.dropTarget.addEventListener(
+    "keydown",
+    (event) => {
+      if (dictation === undefined || event.isComposing) return;
+      const mod = hostPlatform() === "darwin" ? event.metaKey : event.ctrlKey;
+      if (!mod || !event.shiftKey || event.altKey || event.key.toLowerCase() !== "m") return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (!mic.disabled) {
+        options.note(undefined);
+        dictation.toggle();
+      }
+    },
+    true,
+  );
+  const onPageHide = (): void => dictation?.cancel();
+  window.addEventListener("pagehide", onPageHide);
 
   function paintChips(): void {
     chipRow.replaceChildren();
@@ -589,7 +814,7 @@ export function createComposer(options: ComposerOptions): Composer {
   }
 
   async function submit(): Promise<void> {
-    if (sending || locked) return;
+    if (sending || locked || (dictation?.state() ?? "idle") !== "idle") return;
     if (uploading()) {
       options.note(t("agentChatWaitUpload"));
       return;
@@ -645,7 +870,8 @@ export function createComposer(options: ComposerOptions): Composer {
     historyAt = undefined;
     saveDraft();
     grow();
-    refreshSuggestions();
+    if (quiet) closeSuggest();
+    else refreshSuggestions();
   });
   input.addEventListener("click", refreshSuggestions);
   input.addEventListener("blur", () => closeSuggest());
@@ -785,6 +1011,13 @@ export function createComposer(options: ComposerOptions): Composer {
     value: () => input.value,
     hasFocus: () => document.activeElement === input,
     addFiles,
+    cancelDictation: () => dictation?.cancel(),
+    dispose() {
+      gone = true;
+      window.removeEventListener("pagehide", onPageHide);
+      dictation?.detach();
+      if (liveInsert.get(options.paneKey) === insertDictated) liveInsert.delete(options.paneKey);
+    },
     update(next, isLocked, narrow = false) {
       view = next;
       locked = isLocked;

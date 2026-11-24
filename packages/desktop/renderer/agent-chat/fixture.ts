@@ -129,6 +129,10 @@ export type Setup = {
     | "terminalAgentFiles"
     | "terminalAgentAttach"
     | "terminalAgentOpenFile"
+    | "terminalDictateStart"
+    | "terminalDictateKeep"
+    | "terminalDictateFinish"
+    | "terminalDictateCancel"
     | "plansOpenLink"
     | "pathForFile",
     AnyMock
@@ -194,6 +198,19 @@ export function setup(
       ref: `/private/${file.name}`,
     })),
     terminalAgentOpenFile: vi.fn(async () => ({ ok: true as const })),
+    terminalDictateStart: vi.fn(async (_paneKey: string) => ({
+      ok: true as const,
+      id: "d1",
+    })) as unknown as AgentChatOptions["api"]["terminalDictateStart"],
+    terminalDictateKeep: vi.fn(async (_id: string) => ({
+      ok: true as const,
+    })) as unknown as AgentChatOptions["api"]["terminalDictateKeep"],
+    terminalDictateFinish: vi.fn(async (_id: string) => ({
+      ok: true as const,
+      text: "hello world",
+      language: "en",
+    })) as unknown as AgentChatOptions["api"]["terminalDictateFinish"],
+    terminalDictateCancel: vi.fn(async (_id: string) => ({ ok: true })),
     plansOpenLink: vi.fn(async () => undefined),
     pathForFile: vi.fn((_file: File) => ""),
   } satisfies Record<string, unknown>;
