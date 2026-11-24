@@ -211,16 +211,19 @@ function clearIcon(): SVGSVGElement {
 
 // ------------------------------------------------------------- Chat header
 
-/** The tab's toolbar strip (files, clear, plan, Reviews) is hidden while every
- *  pane of the tab shows its Chat: the chat's own header row carries the useful
- *  ones, so there is one row, not two. In Term, or with a mix, it stays. */
+/** The tab's toolbar strip (files, clear, plan, Reviews) goes while the pane
+ *  in front shows an agent's own header row (Chat or Term alike): that row
+ *  carries the same actions, so there is one row, not two. The pane in front
+ *  is the only pane, or the focused one; a mixed split keeps the strip when
+ *  the focus is on a plain terminal. */
 function syncChatOnly(split: HTMLElement | null): void {
   if (split === null) return;
   const panes = [...split.querySelectorAll<HTMLElement>(".terminal-pane")];
-  split.toggleAttribute(
-    "data-chat-only",
-    panes.length > 0 && panes.every((pane) => pane.dataset["view"] === "chat"),
-  );
+  const front =
+    panes.length === 1
+      ? panes[0]
+      : (panes.find((pane) => pane.contains(document.activeElement)) ?? undefined);
+  split.toggleAttribute("data-chat-only", front?.dataset["agentHeader"] === "on");
 }
 
 /** Presses one of the tab toolbar's own buttons: the handler stays where it is. */
@@ -1198,6 +1201,9 @@ function ensurePane(
           }),
       onFocus: (paneKey) => {
         agentChats.get(paneKey)?.focused();
+        syncChatOnly(
+          tree?.element.closest<HTMLElement>(".terminal-split") ?? tree?.element ?? null,
+        );
         const path = lastCwd.get(paneKey);
         // A pane that has never said where it is — a shell with no
         // integration, or one that has not drawn its first prompt yet —
@@ -1571,9 +1577,14 @@ function makePane(
         view.setChatView(active, focusChat);
         syncChatOnly(view.element.closest<HTMLElement>(".terminal-split"));
       },
+      onHeader: () => syncChatOnly(view.element.closest<HTMLElement>(".terminal-split")),
       toolbar: {
         reviews: () => tabToggle(view.element, ".reviews-toggle"),
         menu: () => tabToggle(view.element, ".plan-toggle"),
+        clear: () => {
+          view.clearAll();
+          view.focus();
+        },
       },
       liveScreen: () => view.liveScreen(),
       focusTerm: () => view.focus(),

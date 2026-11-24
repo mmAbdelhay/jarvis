@@ -30,7 +30,7 @@ export type Shell = {
 export function createShell(options: {
   t: Translate;
   toggleFiles?: (() => void) | undefined;
-  toolbar?: { reviews(): void; menu(): void } | undefined;
+  toolbar?: { reviews(): void; menu(): void; clear?(): void } | undefined;
   onTab(mode: Mode, byUser: boolean): void;
   currentMode(): Mode;
 }): Shell {
@@ -82,6 +82,7 @@ export function createShell(options: {
     tabs[next].focus();
   });
   const toolbar = options.toolbar;
+  let clear: HTMLButtonElement | undefined;
   if (toolbar !== undefined) {
     const reviews = el("button", "ac-bar__text ac-bar__reviews", t("reviewsDockToggleText"));
     reviews.type = "button";
@@ -94,6 +95,15 @@ export function createShell(options: {
     menu.title = t("planPanelToggle");
     menu.addEventListener("click", () => toolbar.menu());
     actions.append(reviews, menu);
+    const clearAction = toolbar.clear;
+    if (clearAction !== undefined) {
+      // The terminal's own Clear, in the one header row; Term only.
+      clear = el("button", "ac-bar__text ac-bar__clear", t("terminalClearButton"));
+      clear.type = "button";
+      clear.hidden = true;
+      clear.addEventListener("click", () => clearAction());
+      actions.prepend(clear);
+    }
   }
   bar.append(title, vendor, el("span", "ac-spacer"), actions, tablist);
 
@@ -120,6 +130,7 @@ export function createShell(options: {
     lower,
     side,
     setSelected(mode) {
+      if (clear !== undefined) clear.hidden = mode !== "term";
       for (const which of ["chat", "term"] as const) {
         const selected = which === mode;
         tabs[which].setAttribute("aria-selected", String(selected));

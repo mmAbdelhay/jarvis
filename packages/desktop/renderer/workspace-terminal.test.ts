@@ -2706,13 +2706,13 @@ describe("the agent chat switch", () => {
     expect(asked).toEqual(["tab-1"]);
   });
 
-  it("hides the tab's own toolbar strip while its only pane shows Chat, and brings it back in Term", async () => {
+  it("hides the tab's own toolbar strip while its only pane has the agent header, in Chat and in Term", async () => {
     await started();
     views["tab-1"] = agent;
     dataListener?.("tab-1", COMMAND);
     await vi.advanceTimersByTimeAsync(1000);
     const split = document.querySelector<HTMLElement>(".terminal-split");
-    expect(split?.hasAttribute("data-chat-only")).toBe(false);
+    expect(split?.hasAttribute("data-chat-only")).toBe(true);
     document.querySelector<HTMLButtonElement>('.agent-switch__tab[data-mode="chat"]')?.click();
     expect(split?.hasAttribute("data-chat-only")).toBe(true);
     // The header carries Reviews and the menu, wired to the tab's own buttons.
@@ -2721,8 +2721,13 @@ describe("the agent chat switch", () => {
     reviews?.addEventListener("click", pressed);
     document.querySelector<HTMLButtonElement>(".ac-bar__reviews")?.click();
     expect(pressed).toHaveBeenCalledTimes(1);
+    expect(document.querySelector<HTMLElement>(".ac-bar__clear")?.hidden).toBe(true);
     document.querySelector<HTMLButtonElement>('.agent-switch__tab[data-mode="term"]')?.click();
-    expect(split?.hasAttribute("data-chat-only")).toBe(false);
+    expect(split?.hasAttribute("data-chat-only")).toBe(true);
+    // Clear is in the header row in Term, and clears the pane.
+    const clear = document.querySelector<HTMLButtonElement>(".ac-bar__clear");
+    expect(clear?.hidden).toBe(false);
+    expect(() => clear?.click()).not.toThrow();
   });
 
   it("goes with its pane", async () => {

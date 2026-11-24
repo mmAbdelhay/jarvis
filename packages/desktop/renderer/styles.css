@@ -2483,7 +2483,7 @@
      which refit() declines to fit, so the pty keeps its size. The palette,
      find bar and completion dropdown are not marked and keep working. */
   .agent-bar { flex: 0 0 auto; display: flex; align-items: center; gap: var(--s3); min-height: 44px;
-    padding-block-end: var(--s2); margin-block-end: var(--s2); border-bottom: 1px solid var(--border);
+    padding-inline: var(--s3); padding-block-end: var(--s2); margin-block-end: var(--s2); border-bottom: 1px solid var(--border);
     color: var(--text-secondary); font: 14px/1.4 var(--font-ui); white-space: nowrap; }
   .agent-bar[hidden] { display: none; }
   .ac-bar__title { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text);

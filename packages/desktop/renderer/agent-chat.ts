@@ -69,7 +69,9 @@ export type AgentChatOptions = {
   toggleFiles?: () => void;
   /** The tab's other toolbar actions, which the header carries while the chat
    *  shows (the tab's own strip is hidden then): Reviews and the menu. */
-  toolbar?: { reviews(): void; menu(): void };
+  toolbar?: { reviews(): void; menu(): void; clear?(): void };
+  /** The header row appeared or went (the tab's own toolbar gives way to it). */
+  onHeader?(shown: boolean): void;
   /** The pane's live terminal rows, for the drawer's window onto them. */
   liveScreen?: () => { rows: number; anchor: number } | undefined;
   now?: () => number;
@@ -427,6 +429,16 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
   }
 
   // ---- reading ----------------------------------------------------------
+  function markHeader(shown: boolean): void {
+    if (shown) host.dataset["agentHeader"] = "on";
+    else delete host.dataset["agentHeader"];
+    try {
+      options.onHeader?.(shown);
+    } catch {
+      // Only a layout hint.
+    }
+  }
+
   function stopDetecting(): void {
     for (const cancel of cancelDetect) cancel();
     cancelDetect = [];
@@ -467,6 +479,7 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
     items = [];
     older = undefined;
     bar.hidden = true;
+    markHeader(false);
     drawer.close();
     feed.setItems([], { now: now(), older: "none" });
     showNote(undefined);
@@ -526,6 +539,7 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
     stopDetecting();
     watchAgent();
     bar.hidden = false;
+    markHeader(true);
     if (first && remembered() === "chat") setMode("chat", false);
     else if (mode === "chat")
       render(view.readFailed === true && sameSession ? (agent as AgentOf) : view);
@@ -683,6 +697,7 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
       drawer.close();
       bar.remove();
       panel.remove();
+      delete host.dataset["agentHeader"];
     },
   };
 }

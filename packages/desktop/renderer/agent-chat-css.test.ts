@@ -130,6 +130,10 @@ describe("the agent chat's layout", () => {
     );
   });
 
+  it("pads the header row at its sides, the same in Chat and Term", () => {
+    expect(ruleBodyFor(".agent-bar")).toMatch(/padding-inline\s*:\s*var\(--s3\)/);
+  });
+
   it("gives every chat scroller a themed thumb on a transparent track (classic scrollbars show a white track otherwise)", () => {
     const selectors = [
       ".agent-chat__feed",
