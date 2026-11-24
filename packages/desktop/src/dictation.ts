@@ -13,6 +13,10 @@ export const DICTATION_LEASE_MS = 15_000;
 export const DICTATION_CAP_MS = 5 * 60_000;
 /** After the cap, how long the clip waits for its finish before deletion. */
 export const DICTATION_HOLD_MS = 60_000;
+/** A stop that has not settled by then fails: the process is killed. */
+export const DICTATION_STOP_MS = 5_000;
+/** How long disposing waits for the recording process to end before it removes the files. */
+const DISPOSE_WAIT_MS = 4_000;
 /** The most text one dictation hands back. */
 export const DICTATION_MAX_CHARS = 20_000;
 
@@ -85,6 +89,9 @@ type Session = {
   recorder?: DictationRecorder;
   path?: string;
   stopping?: Promise<string>;
+  stopTimedOut?: boolean;
+  released?: boolean;
+  cancelStop?: () => void;
   cancelLease?: () => void;
   cancelCap?: () => void;
   cancelHold?: () => void;
@@ -99,6 +106,8 @@ export function createDictation(deps: DictationDeps) {
     session.cancelLease?.();
     session.cancelCap?.();
     session.cancelHold?.();
+    session.cancelStop?.();
+    session.cancelStop = undefined;
     session.cancelLease = undefined;
     session.cancelCap = undefined;
     session.cancelHold = undefined;
@@ -107,6 +116,8 @@ export function createDictation(deps: DictationDeps) {
   /** Ends the session on every path: timers, microphone, files, the slot. */
   function release(session: Session): void {
     clearTimers(session);
+    if (session.released === true) return;
+    session.released = true;
     if (current === session) current = undefined;
     const recorder = session.recorder;
     if (recorder === undefined) return;
@@ -136,8 +147,19 @@ export function createDictation(deps: DictationDeps) {
     session.cancelCap?.();
     session.cancelLease = undefined;
     session.cancelCap = undefined;
-    session.stopping = recorder.stop().then(
+    const timedOut = new Promise<never>((_resolve, reject) => {
+      session.cancelStop = deps.schedule(() => {
+        deps.log("stop-timeout");
+        session.stopTimedOut = true;
+        // Frees the slot and kills the process that ignored the stop.
+        release(session);
+        reject(new Error("stop timed out"));
+      }, DICTATION_STOP_MS);
+    });
+    session.stopping = Promise.race([recorder.stop(), timedOut]).then(
       (path) => {
+        session.cancelStop?.();
+        session.cancelStop = undefined;
         if (current === session) {
           session.phase = "stopped";
           session.path = path;
@@ -145,6 +167,8 @@ export function createDictation(deps: DictationDeps) {
         return path;
       },
       (error: unknown) => {
+        session.cancelStop?.();
+        session.cancelStop = undefined;
         if (current === session) session.phase = "failed";
         throw error;
       },
@@ -250,7 +274,7 @@ export function createDictation(deps: DictationDeps) {
         path = await stopOnce(session);
       } catch {
         deps.log("stop");
-        const mine = current === session;
+        const mine = current === session || session.stopTimedOut === true;
         release(session);
         return { ok: false, reason: mine ? "failed" : "gone" };
       }
@@ -295,6 +319,8 @@ export async function createDictationRecorder(options: {
   recorder: RecorderDeps;
   makeDir(): Promise<string>;
   removeDir(dir: string): Promise<void>;
+  /** Resolves after `ms`; for the wait on a process that will not end. */
+  delay?(ms: number): Promise<void>;
 }): Promise<DictationRecorder> {
   const dir = await options.makeDir();
   let settle: (result: RecordingResult) => void = () => undefined;
@@ -317,6 +343,15 @@ export async function createDictationRecorder(options: {
     ended,
     dispose: async () => {
       recorder.abort();
+      // The process may still be writing: the directory goes after it ends
+      // (bounded, so a process that never ends cannot hold this forever).
+      const wait =
+        options.delay ??
+        ((ms: number) =>
+          new Promise<void>((resolve) => {
+            setTimeout(resolve, ms).unref?.();
+          }));
+      await Promise.race([ended, wait(DISPOSE_WAIT_MS)]);
       await options.removeDir(dir);
     },
   };

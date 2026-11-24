@@ -163,6 +163,8 @@ export type ComposerOptions = {
   changed(): void;
   /** Files may also be dropped anywhere on this element. */
   dropTarget: HTMLElement;
+  /** False while the pane is hidden (another tab or route); a recording ends then. */
+  visible?: () => boolean;
 };
 
 export type Composer = {
@@ -175,6 +177,8 @@ export type Composer = {
   addFiles(files: readonly File[]): Promise<void>;
   /** Ends a dictation in progress (the agent left). */
   cancelDictation(): void;
+  /** The chat is no longer in view: a recording is finished, its words go to the draft. */
+  paneHidden(): void;
   /** The pane is destroyed: a recording ends, a transcription in flight
    *  still lands in the pane's draft. */
   dispose(): void;
@@ -495,11 +499,22 @@ export function createComposer(options: ComposerOptions): Composer {
           schedule: options.schedule,
           now: options.now,
           deliver: deliverDictated,
-          changed: paintDictation,
+          changed: () => {
+            if (gone) return;
+            paintDictation();
+            // The pane went away under a recording (a tab, a route): the
+            // microphone must not stay on where nobody sees it.
+            if (dictation?.state() === "recording" && options.visible?.() === false) {
+              dictation.finish();
+            }
+          },
           announce: (what) => {
+            if (gone) return;
             dictationLive.textContent = what === "none" ? "" : t(SAYS[what]);
           },
-          fail: (reason) => options.note(t(NOTES[reason])),
+          fail: (reason) => {
+            if (!gone) options.note(t(NOTES[reason]));
+          },
         });
   if (api.dictate !== undefined) liveInsert.set(options.paneKey, insertDictated);
 
@@ -536,21 +551,18 @@ export function createComposer(options: ComposerOptions): Composer {
     },
     true,
   );
-  options.dropTarget.addEventListener(
-    "keydown",
-    (event) => {
-      if (dictation === undefined || event.isComposing) return;
-      const mod = hostPlatform() === "darwin" ? event.metaKey : event.ctrlKey;
-      if (!mod || !event.shiftKey || event.altKey || event.key.toLowerCase() !== "m") return;
-      event.preventDefault();
-      event.stopPropagation();
-      if (!mic.disabled) {
-        options.note(undefined);
-        dictation.toggle();
-      }
-    },
-    true,
-  );
+  const onShortcut = (event: KeyboardEvent): void => {
+    if (dictation === undefined || event.isComposing) return;
+    const mod = hostPlatform() === "darwin" ? event.metaKey : event.ctrlKey;
+    if (!mod || !event.shiftKey || event.altKey || event.key.toLowerCase() !== "m") return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (!mic.disabled) {
+      options.note(undefined);
+      dictation.toggle();
+    }
+  };
+  options.dropTarget.addEventListener("keydown", onShortcut, true);
   const onPageHide = (): void => dictation?.cancel();
   window.addEventListener("pagehide", onPageHide);
 
@@ -652,22 +664,25 @@ export function createComposer(options: ComposerOptions): Composer {
     void addFiles(files);
   });
   const dropped = (event: DragEvent): File[] => Array.from(event.dataTransfer?.files ?? []);
-  options.dropTarget.addEventListener("dragover", (event) => {
+  const onDragOver = (event: DragEvent): void => {
     if (event.dataTransfer?.types?.includes("Files") === true) {
       event.preventDefault();
       options.dropTarget.dataset["dropping"] = "true";
     }
-  });
-  options.dropTarget.addEventListener("dragleave", () => {
+  };
+  const onDragLeave = (): void => {
     delete options.dropTarget.dataset["dropping"];
-  });
-  options.dropTarget.addEventListener("drop", (event) => {
+  };
+  const onDrop = (event: DragEvent): void => {
     delete options.dropTarget.dataset["dropping"];
     const files = dropped(event);
     if (files.length === 0) return;
     event.preventDefault();
     void addFiles(files);
-  });
+  };
+  options.dropTarget.addEventListener("dragover", onDragOver);
+  options.dropTarget.addEventListener("dragleave", onDragLeave);
+  options.dropTarget.addEventListener("drop", onDrop);
 
   // ---- suggestions ----
   function closeSuggest(): void {
@@ -1150,9 +1165,18 @@ export function createComposer(options: ComposerOptions): Composer {
     hasFocus: () => document.activeElement === input,
     addFiles,
     cancelDictation: () => dictation?.cancel(),
+    paneHidden() {
+      const state = dictation?.state();
+      if (state === "recording") dictation?.finish();
+      else if (state === "starting") dictation?.cancel();
+    },
     dispose() {
       gone = true;
       window.removeEventListener("pagehide", onPageHide);
+      options.dropTarget.removeEventListener("keydown", onShortcut, true);
+      options.dropTarget.removeEventListener("dragover", onDragOver);
+      options.dropTarget.removeEventListener("dragleave", onDragLeave);
+      options.dropTarget.removeEventListener("drop", onDrop);
       dictation?.detach();
       if (liveInsert.get(options.paneKey) === insertDictated) liveInsert.delete(options.paneKey);
     },

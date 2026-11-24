@@ -6,6 +6,7 @@ import {
   DICTATION_CAP_MS,
   DICTATION_HOLD_MS,
   DICTATION_LEASE_MS,
+  DICTATION_STOP_MS,
   type DictationRecorder,
 } from "./dictation.js";
 
@@ -524,5 +525,101 @@ describe("createDictationRecorder", () => {
     await rec.dispose();
     expect(d.calls).toContain("kill");
     expect(d.calls).toContain("rm-dir /tmp/jarvis-dictation-x");
+  });
+});
+
+describe("a recorder whose stop never settles", () => {
+  it("fails the finish after 5 seconds, kills the process, and frees the slot", async () => {
+    const s = setup();
+    const id = await begin(s);
+    const finishing = s.dictation.finish(id);
+    await tick();
+    const timer = s.live(DICTATION_STOP_MS)[0];
+    expect(timer).toBeDefined();
+    timer?.fn();
+    expect(await finishing).toEqual({ ok: false, reason: "failed" });
+    expect(s.recorders[0]?.aborted).toBe(true);
+    expect(s.recorders[0]?.disposed).toBe(1);
+    expect(s.dictation.active()).toBe(false);
+    expect(await s.dictation.start("t1")).toMatchObject({ ok: true });
+  });
+
+  it("also frees the microphone when the cap's stop hangs", async () => {
+    const s = setup();
+    await begin(s);
+    s.live(DICTATION_CAP_MS)[0]?.fn();
+    await tick();
+    s.live(DICTATION_STOP_MS)[0]?.fn();
+    await tick();
+    expect(s.recorders[0]?.aborted).toBe(true);
+    expect(s.dictation.active()).toBe(false);
+  });
+
+  it("does not time out a stop that settles", async () => {
+    const s = setup();
+    const id = await begin(s);
+    const finishing = s.dictation.finish(id);
+    await tick();
+    s.recorders[0]?.stopResult.resolve("/x.wav");
+    await tick();
+    expect(s.live(DICTATION_STOP_MS)).toHaveLength(0);
+    expect(await finishing).toMatchObject({ ok: true });
+  });
+});
+
+describe("createDictationRecorder disposal", () => {
+  function hungDeps() {
+    const calls: string[] = [];
+    let settle: (r: { error?: string }) => void = () => undefined;
+    let wake: () => void = () => undefined;
+    return {
+      calls,
+      settle: (r: { error?: string }) => settle(r),
+      wake: () => wake(),
+      options: {
+        recorder: {
+          tmpDir: "/unused",
+          deleteFile: async () => undefined,
+          spawnRecorder: () => ({
+            kill: () => void calls.push("kill"),
+            done: new Promise<{ error?: string }>((resolve) => {
+              settle = resolve;
+            }),
+          }),
+        },
+        makeDir: async () => "/tmp/jarvis-dictation-y",
+        removeDir: async (d: string) => void calls.push(`rm-dir ${d}`),
+        delay: (ms: number) => {
+          calls.push(`delay ${ms}`);
+          return new Promise<void>((resolve) => {
+            wake = resolve;
+          });
+        },
+      },
+    };
+  }
+
+  it("waits for the process to end before it removes the directory", async () => {
+    const d = hungDeps();
+    const rec = await createDictationRecorder(d.options);
+    rec.start();
+    const disposing = rec.dispose();
+    await tick();
+    expect(d.calls.some((c) => c.startsWith("rm-dir"))).toBe(false);
+    d.settle({});
+    await disposing;
+    expect(d.calls).toContain("rm-dir /tmp/jarvis-dictation-y");
+  });
+
+  it("gives up waiting after 4 seconds", async () => {
+    const d = hungDeps();
+    const rec = await createDictationRecorder(d.options);
+    rec.start();
+    const disposing = rec.dispose();
+    await tick();
+    expect(d.calls).toContain("delay 4000");
+    d.wake();
+    await disposing;
+    expect(d.calls).toContain("rm-dir /tmp/jarvis-dictation-y");
   });
 });

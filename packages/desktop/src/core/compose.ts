@@ -268,6 +268,7 @@ import { createOfficeActivity, createOfficeViewing } from "../office-activity.js
 import { createOfficeScreen } from "../office-screen.js";
 import { createClaudeViewHandlers, createClaudeViewNotifier } from "../claude-view.js";
 import { createDictation, createDictationRecorder } from "../dictation.js";
+import { createMicGuard } from "../mic-guard.js";
 import { createRecorderDeps, Recorder } from "../recorder.js";
 import { capacityReport, startupReport } from "../startup.js";
 import { createTerminalFitOverrides } from "../terminal-fit-overrides.js";
@@ -2373,6 +2374,13 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
   // The chat composer's dictation (dictation.ts). It shares the microphone
   // with the voice turn: each refuses while the other records.
   const DICTATION_TRANSCRIBE_MS = 180_000;
+  // One microphone: whichever of voice and dictation holds it, the other waits.
+  const micGuard = createMicGuard({
+    dictationActive: () => dictation.active(),
+    voiceRecording: () => recorder.isRecording(),
+    startRecording: () => recorder.start(),
+    announce: (listening) => broadcast.send("voice:listening", listening),
+  });
   const dictation = createDictation({
     makeRecorder: () =>
       createDictationRecorder({
@@ -2392,7 +2400,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
       const timer = setTimeout(fn, ms);
       return () => clearTimeout(timer);
     },
-    busy: () => recorder.isRecording(),
+    busy: () => micGuard.voiceHoldsMicrophone(),
     hostsAgent: async (paneKey) => {
       try {
         if (!agentSessions.live(paneKey)) return false;
@@ -2405,10 +2413,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
   });
 
   function startVoice(): void {
-    // One microphone: a dictation in progress keeps it.
-    if (dictation.active()) return;
-    recorder.start();
-    broadcast.send("voice:listening", true);
+    micGuard.startVoice();
   }
 
   // Alt+Space / Alt+Shift+Space is a press-to-start / press-to-stop-and-send

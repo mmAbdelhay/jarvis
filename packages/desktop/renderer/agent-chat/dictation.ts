@@ -148,7 +148,8 @@ export function createDictationControl(options: {
       }
       options.announce("none");
       options.changed();
-      if (answer.reason !== "gone") options.fail(answer.reason);
+      // "gone" is not silence: the words are lost, so it says so (a cancel never gets here).
+      options.fail(answer.reason === "gone" ? "failed" : answer.reason);
     })();
   }
 

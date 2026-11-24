@@ -13,12 +13,18 @@ export type RecordingResult = { error?: string };
 
 export type RecorderDeps = {
   spawnRecorder(outputPath: string): {
-    kill(): void;
+    /** Asks the recording to end; `force` ends it whether it answers or not. */
+    kill(force?: boolean): void;
     done: Promise<RecordingResult>;
   };
   tmpDir: string;
   deleteFile(path: string): Promise<void>;
+  /** Runs `fn` after `ms`; the returned function cancels it. */
+  schedule?(fn: () => void, ms: number): () => void;
 };
+
+/** How long an aborted recording gets to end before it is killed outright. */
+const ABORT_FORCE_MS = 3000;
 
 /**
  * How ffmpeg is asked for the microphone.
@@ -117,7 +123,7 @@ export function createRecorderDeps(platform: NodeJS.Platform): RecorderDeps {
         child.on("close", () => settle({}));
       });
 
-      return { kill: () => child.kill("SIGINT"), done };
+      return { kill: (force) => child.kill(force === true ? "SIGKILL" : "SIGINT"), done };
     },
     deleteFile: (path: string) =>
       unlink(path).then(
@@ -172,7 +178,7 @@ function listDshowDevices(): Promise<string[]> {
  * ffmpeg that does not answer.
  */
 function spawnWindowsRecorder(outputPath: string): {
-  kill(): void;
+  kill(force?: boolean): void;
   done: Promise<RecordingResult>;
 } {
   let child: ReturnType<typeof spawn> | undefined;
@@ -212,10 +218,14 @@ function spawnWindowsRecorder(outputPath: string): {
   });
 
   return {
-    kill: () => {
+    kill: (force) => {
       stopped = true;
       const running = child;
       if (running === undefined) return;
+      if (force === true) {
+        running.kill();
+        return;
+      }
       try {
         running.stdin?.write("q\n");
       } catch {
@@ -228,14 +238,22 @@ function spawnWindowsRecorder(outputPath: string): {
   };
 }
 
+function realSchedule(fn: () => void, ms: number): () => void {
+  const timer = setTimeout(fn, ms);
+  timer.unref?.();
+  return () => clearTimeout(timer);
+}
+
 export class Recorder {
   readonly #deps: RecorderDeps;
   #active:
     | {
         path: string;
-        process: { kill(): void; done: Promise<RecordingResult> };
+        process: { kill(force?: boolean): void; done: Promise<RecordingResult> };
       }
     | undefined;
+  /** A process stop() asked to end that has not yet: what abort() must still kill. */
+  #stopping: { kill(force?: boolean): void; done: Promise<RecordingResult> } | undefined;
 
   constructor(deps: RecorderDeps) {
     this.#deps = deps;
@@ -259,8 +277,16 @@ export class Recorder {
     const active = this.#active;
     if (active === undefined) throw new Error("Not recording");
     this.#active = undefined;
-    active.process.kill();
-    const result = await active.process.done;
+    const process = active.process;
+    this.#stopping = process;
+    void process.done.then(
+      () => {
+        if (this.#stopping === process) this.#stopping = undefined;
+      },
+      () => undefined,
+    );
+    process.kill();
+    const result = await process.done;
     if (result.error !== undefined) throw new Error(result.error);
     return active.path;
   }
@@ -273,10 +299,24 @@ export class Recorder {
   // exits.
   abort(): void {
     const active = this.#active;
-    if (active === undefined) return;
+    if (active === undefined) {
+      // A stop() whose process ignored the first signal: end it for good.
+      const hung = this.#stopping;
+      this.#stopping = undefined;
+      hung?.kill(true);
+      return;
+    }
     this.#active = undefined;
     active.process.kill();
-    void active.process.done.then(() => this.#deps.deleteFile(active.path));
+    let ended = false;
+    const cancel = (this.#deps.schedule ?? realSchedule)(() => {
+      if (!ended) active.process.kill(true);
+    }, ABORT_FORCE_MS);
+    void active.process.done.then(() => {
+      ended = true;
+      cancel();
+      return this.#deps.deleteFile(active.path);
+    });
   }
 
   // Recorder owns the wav file it creates (the path is derived from its

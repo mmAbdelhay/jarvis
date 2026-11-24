@@ -3,7 +3,7 @@
 // Dictation in the composer: the mic button, the recording bar, the keys, and
 // where the finished text lands. It never sends, never writes to the agent.
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { agentView, open, press, settle, t, typeInto, type Setup } from "./fixture.js";
+import { agentView, open, press, settle, t, tab, typeInto, type Setup } from "./fixture.js";
 import { forgetAgentDraft } from "./composer.js";
 
 beforeEach(() => {
@@ -387,16 +387,108 @@ describe("refusals", () => {
     expect(bar(s).hidden).toBe(true);
   });
 
-  it("a finish that is gone says nothing", async () => {
+  it("a finish that is gone says it failed, so the words are not lost without a word", async () => {
     const s = await recording();
     finish(s).mockResolvedValueOnce({ ok: false, reason: "gone" });
     button(s, "done").click();
     await settle();
-    expect(s.q<HTMLElement>(".agent-chat__note").hidden).toBe(true);
+    expect(s.q(".agent-chat__note").textContent).toBe(t("agentChatDictateFailed"));
     expect(bar(s).hidden).toBe(true);
+  });
+
+  it("a finish answered after the person cancelled says nothing", async () => {
+    const s = await recording();
+    let release: (value: unknown) => void = () => undefined;
+    finish(s).mockReturnValueOnce(new Promise((resolve) => (release = resolve)));
+    button(s, "done").click();
+    await settle();
+    button(s, "cancel").click();
+    release({ ok: false, reason: "gone" });
+    await settle();
+    expect(s.q<HTMLElement>(".agent-chat__note").hidden).toBe(true);
   });
 
   it("mentions the real path to setup", () => {
     expect(t("agentChatDictateFailed")).toContain("Settings > Tools");
+  });
+});
+
+describe("a pane that is no longer shown", () => {
+  const hiddenSetup = async () => {
+    const state = { shown: true };
+    const s = await open(agentView(), { isShown: () => state.shown });
+    mic(s).click();
+    await settle();
+    return { s, state };
+  };
+
+  it("finishes the recording when its tab or route is hidden, words into the draft", async () => {
+    const { s, state } = await hiddenSetup();
+    state.shown = false;
+    s.timers.advance(1000);
+    await settle();
+    expect(finish(s)).toHaveBeenCalledWith("d1");
+    expect(input(s).value).toBe("hello world");
+    expect(sendMock(s)).not.toHaveBeenCalled();
+  });
+
+  it("finishes at once when the chat is switched to the terminal", async () => {
+    const { s } = await hiddenSetup();
+    tab(s.host, "term").click();
+    await settle();
+    expect(finish(s)).toHaveBeenCalledWith("d1");
+    expect(input(s).value).toBe("hello world");
+  });
+
+  it("does not finish for a minimised window", async () => {
+    const { s } = await hiddenSetup();
+    Object.defineProperty(document, "visibilityState", { value: "hidden", configurable: true });
+    try {
+      for (let i = 0; i < 3; i++) s.timers.advance(1000);
+      await settle();
+      expect(finish(s)).not.toHaveBeenCalled();
+    } finally {
+      Reflect.deleteProperty(document, "visibilityState");
+    }
+  });
+});
+
+describe("a destroyed composer", () => {
+  it("drops the shortcut listener with the pane", async () => {
+    const s = await open();
+    const panel = s.q(".agent-chat");
+    s.chat.dispose();
+    press(panel, "m", { metaKey: true, shiftKey: true });
+    await settle();
+    expect(start(s)).not.toHaveBeenCalled();
+  });
+
+  it("is not touched by words that arrive afterwards", async () => {
+    const s = await recording({ text: "so far" });
+    let release: (value: unknown) => void = () => undefined;
+    finish(s).mockReturnValueOnce(new Promise((resolve) => (release = resolve)));
+    button(s, "done").click();
+    await settle();
+    const liveNode = live(s);
+    const noteNode = s.q<HTMLElement>(".agent-chat__note");
+    const box = input(s);
+    s.chat.dispose();
+    const before = [liveNode.textContent, noteNode.textContent, box.value];
+    release({ ok: true, text: "later", language: "en" });
+    await settle();
+    expect([liveNode.textContent, noteNode.textContent, box.value]).toEqual(before);
+  });
+
+  it("leaves the words in the draft for a composer built later when none is live", async () => {
+    const s = await recording({ text: "keep" });
+    let release: (value: unknown) => void = () => undefined;
+    finish(s).mockReturnValueOnce(new Promise((resolve) => (release = resolve)));
+    button(s, "done").click();
+    await settle();
+    s.chat.dispose();
+    release({ ok: true, text: "this", language: "en" });
+    await settle();
+    document.body.replaceChildren();
+    expect(input(await open()).value).toBe("keep this");
   });
 });

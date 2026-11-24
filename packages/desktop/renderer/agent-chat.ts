@@ -301,6 +301,7 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
       void load();
     },
     dropTarget: panel,
+    visible: isShown,
   });
 
   shell.actions.append(search.toggle, side.toggle);
@@ -339,6 +340,8 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
       if (agent !== undefined) render(agent);
       if (hadFocus) focusComposer();
     } else {
+      // The chat leaves the screen: a recording ends, its words go to the draft.
+      composer.paneHidden();
       drawer.close();
       options.setChatView(false, undefined);
       if (hadFocus) options.focusTerm();
