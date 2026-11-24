@@ -115,4 +115,12 @@ describe("readClaudeScreen", () => {
   it("does not expose a spinner while a permission menu is active", () => {
     expect(readClaudeScreen(`✻ Crunching…\n${MENU}`).working).toBeUndefined();
   });
+
+  it("reads a spinner label of several words, as shown for a task in progress", () => {
+    const rule = "─".repeat(40);
+    const screen = ["✻ Writing the range query… (12s · ↓ 640 tokens)", "", rule, "❯", rule].join(
+      "\n",
+    );
+    expect(readClaudeScreen(screen).working).toBe("Writing the range query… 12s");
+  });
 });

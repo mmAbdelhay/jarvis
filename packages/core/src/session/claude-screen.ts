@@ -3,7 +3,7 @@ import { type PendingPrompt, readPrompt, stripAnsi } from "./awaiting-input.js";
 
 export type ClaudeMode = "default" | "auto" | "plan" | "acceptEdits";
 
-const SPINNER_ROW = /^\s*[✻✶✳✢·✽*]\s+(\S+….*)$/;
+const SPINNER_ROW = /^\s*[✻✶✳✢·✽*]\s+(\S.*….*)$/;
 
 // Claude's status row opens on its mode glyph: "⏸ plan mode on", "⏵⏵ auto
 // mode on", "⏵⏵ accept edits on". The same words without the glyph — in the
