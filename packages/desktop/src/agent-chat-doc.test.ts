@@ -181,6 +181,31 @@ describe("agentChat", () => {
     expect(agent(await shrunk.handlers.chat("t1")).reset).toBe(true);
   });
 
+  it("never mixes two files into one reader when the file is replaced during a read", async () => {
+    const t = setup(userLine(1) + userLine(2));
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const real = vi.mocked(t.deps.readRange).getMockImplementation();
+    vi.mocked(t.deps.readRange).mockImplementationOnce(async (path, start, length) => {
+      // The bytes are those of the file as it was when the read began.
+      const old = real === undefined ? Buffer.alloc(0) : await real(path, start, length);
+      await gate;
+      return old;
+    });
+    const first = t.handlers.chat("t1");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    t.replace(userLine(8) + userLine(9));
+    const second = t.handlers.chat("t1");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    release();
+    const views = [agent(await first), agent(await second)];
+    for (const view of views) expect(ids(view)).not.toContain("u1:0");
+    const later = agent(await t.handlers.chat("t1"));
+    expect(ids(later)).toEqual(["u8:0", "u9:0"]);
+  });
+
   it("reads a large file in chunks off the first reply, deriving until ready, one read at a time", async () => {
     const body = Array.from({ length: 60 }, (_, i) => userLine(i)).join("");
     const todo = asstLine(99, [

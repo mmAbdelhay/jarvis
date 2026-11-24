@@ -164,6 +164,8 @@ type Entry = {
   reading: Promise<void> | undefined;
   /** The reader was restarted since the last reply. */
   restarted: boolean;
+  /** The file shrank or was replaced: only the running read restarts, between reads. */
+  restartWanted: boolean;
   used: number;
   doc: { offset: number; value: ChatDoc } | undefined;
 };
@@ -264,8 +266,16 @@ export function createAgentChatHandlers(deps: AgentChatDeps): {
     entry.offset = 0;
     entry.ready = false;
     entry.restarted = true;
+    entry.restartWanted = false;
     entry.doc = undefined;
   }
+
+  const replacedOrShrunk = (
+    entry: Entry,
+    stat: { size: number; ino?: number | undefined },
+  ): boolean =>
+    stat.size < entry.offset ||
+    (entry.ino !== undefined && stat.ino !== undefined && stat.ino !== entry.ino);
 
   /** Feeds every byte appended since the last read; one run at a time. */
   function advance(entry: Entry): Promise<void> {
@@ -273,24 +283,27 @@ export function createAgentChatHandlers(deps: AgentChatDeps): {
     const run = (async () => {
       for (let again = 0; again < 4; again++) {
         const stat = await deps.statFile(entry.path);
-        if (
-          stat.size < entry.offset ||
-          (entry.ino !== undefined && stat.ino !== undefined && stat.ino !== entry.ino)
-        ) {
-          restart(entry);
-        }
+        if (entry.restartWanted || replacedOrShrunk(entry, stat)) restart(entry);
         entry.ino = stat.ino;
         while (entry.offset < stat.size) {
           const length = Math.min(chunk, stat.size - entry.offset);
           const bytes = await deps.readRange(entry.path, entry.offset, length);
+          // The file was replaced while this read ran: its bytes are another
+          // file's, so they never reach the reader.
+          if (entry.restartWanted) break;
           if (bytes.length === 0) break;
           entry.reader.push(entry.decoder.write(bytes));
           entry.offset += bytes.length;
         }
+        if (entry.restartWanted) continue;
         const after = await deps.statFile(entry.path);
+        if (replacedOrShrunk(entry, after)) {
+          entry.restartWanted = true;
+          continue;
+        }
         if (after.size <= entry.offset) break;
       }
-      entry.ready = true;
+      entry.ready = !entry.restartWanted;
       entry.doc = undefined;
     })();
     const tracked = run.finally(() => {
@@ -330,6 +343,7 @@ export function createAgentChatHandlers(deps: AgentChatDeps): {
         ready: false,
         reading: undefined,
         restarted: false,
+        restartWanted: false,
         used: 0,
         doc: undefined,
       };
@@ -340,7 +354,11 @@ export function createAgentChatHandlers(deps: AgentChatDeps): {
     const stat = await deps.statFile(path);
     const behind = stat.size - entry.offset;
     const replaced = entry.ino !== undefined && stat.ino !== undefined && stat.ino !== entry.ino;
-    if (stat.size < entry.offset || replaced) restart(entry);
+    if (stat.size < entry.offset || replaced) {
+      // Never restarted here: a read may be running. The next read does it.
+      entry.restartWanted = true;
+      entry.ready = false;
+    }
     if (!entry.ready && stat.size > syncBytes) {
       // Too big to wait for: the first reply comes from the tail, the rest is
       // read in the background and announced when done.
@@ -358,6 +376,8 @@ export function createAgentChatHandlers(deps: AgentChatDeps): {
         .catch(() => log("read"));
     } else {
       await advance(entry);
+      // A read that was already running ended before it saw the change.
+      for (let again = 0; again < 3 && entry.restartWanted; again++) await advance(entry);
     }
     return { entry, doc: currentDoc(entry), deriving: !entry.ready };
   }
