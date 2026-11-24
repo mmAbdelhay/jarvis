@@ -731,3 +731,97 @@ describe("skills synced from claude.ai", () => {
     ]);
   });
 });
+
+describe("plugin skills by path, synced plugins, nested synced skills", () => {
+  const CWD = join("/", "work", "app");
+  const chain = (...parts: string[]): Record<string, Node> =>
+    Object.assign({}, ...parts.map((_, at) => dir(...parts.slice(0, at + 1))));
+  const PLUGIN = join(CONFIG, "plugins", "cache", "acme", "mattpack", "1.0.0");
+
+  it("lists the skills a manifest names by path (nested directories), as plugin:skill", async () => {
+    const t = setup(
+      {
+        ...dir(CWD),
+        ...dir(CONFIG, "plugins"),
+        ...file(
+          join(CONFIG, "plugins", "installed_plugins.json"),
+          JSON.stringify({
+            plugins: { "mattpack@acme": [{ scope: "user", installPath: PLUGIN }] },
+          }),
+        ),
+        ...file(
+          join(CONFIG, "settings.json"),
+          JSON.stringify({ enabledPlugins: { "mattpack@acme": true } }),
+        ),
+        ...dir(PLUGIN, ".claude-plugin"),
+        ...file(
+          join(PLUGIN, ".claude-plugin", "plugin.json"),
+          JSON.stringify({
+            name: "mattpack",
+            skills: ["./skills/engineering/ask-matt", "./skills/misc/tdd", "../escape"],
+            commands: "./extra/go.md",
+          }),
+        ),
+        ...dir(PLUGIN, "skills", "engineering", "ask-matt"),
+        ...file(join(PLUGIN, "skills", "engineering", "ask-matt", "SKILL.md"), "Ask Matt"),
+        ...dir(PLUGIN, "skills", "misc", "tdd"),
+        ...file(
+          join(PLUGIN, "skills", "misc", "tdd", "SKILL.md"),
+          "---\ndescription: Red green\n---\n",
+        ),
+        ...dir(PLUGIN, "skills", "misc", "hidden"),
+        ...file(
+          join(PLUGIN, "skills", "misc", "hidden", "SKILL.md"),
+          "---\nuser-invocable: false\n---\n",
+        ),
+        ...dir(PLUGIN, "extra"),
+        ...file(join(PLUGIN, "extra", "go.md"), "Go"),
+      },
+      { cwd: CWD },
+    );
+    const out = names(await t.suggest.commands("t1"), "plugin").sort();
+    expect(out).toEqual(["mattpack:ask-matt", "mattpack:go", "mattpack:tdd"]);
+  });
+
+  it("lists synced plugins as <plugin>:<name>, named by plugin.json or the part before ~", async () => {
+    const root = join(CONFIG, "plugins", "synced", "u1_u2");
+    // root and its parents are made by chain() below.
+    const t = setup(
+      {
+        ...dir(CWD),
+        ...chain(root, "alpha~abc", "skills", "pitch"),
+        ...file(join(root, "alpha~abc", "skills", "pitch", "SKILL.md"), "Pitch"),
+        ...chain(root, "alpha~abc", "commands"),
+        ...file(join(root, "alpha~abc", "commands", "run.md"), "Run"),
+        ...chain(root, "beta~def", ".claude-plugin"),
+        ...file(
+          join(root, "beta~def", ".claude-plugin", "plugin.json"),
+          JSON.stringify({ name: "named" }),
+        ),
+        ...chain(root, "beta~def", "skills", "x"),
+        ...file(join(root, "beta~def", "skills", "x", "SKILL.md"), "X"),
+      },
+      { cwd: CWD },
+    );
+    expect(names(await t.suggest.commands("t1"), "plugin").sort()).toEqual([
+      "alpha:pitch",
+      "alpha:run",
+      "named:x",
+    ]);
+  });
+
+  it("finds synced skills at any depth under synced/", async () => {
+    const t = setup(
+      {
+        ...dir(CWD),
+        ...chain(CONFIG, "skills", "synced", "a", "b", "deep"),
+        ...file(join(CONFIG, "skills", "synced", "a", "b", "deep", "SKILL.md"), "Deep"),
+        ...chain(CONFIG, "skills", "synced", "c", "flat"),
+        ...file(join(CONFIG, "skills", "synced", "c", "flat", "SKILL.md"), "Flat"),
+      },
+      { cwd: CWD },
+    );
+    const out = await t.suggest.commands("t1");
+    expect(names(out, "skill").sort()).toEqual(["deep", "flat"]);
+  });
+});

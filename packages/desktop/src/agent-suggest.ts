@@ -237,21 +237,127 @@ export function createAgentSuggest(deps: AgentSuggestDeps): {
     return out;
   }
 
-  /** Skills synced from claude.ai: `<dir>/<id>/<name>/SKILL.md`, one level of ids, no symlinks. */
-  async function syncedSkills(dir: string, realBase: string): Promise<AgentCommandInfo[]> {
+  /**
+   * Skill directories under `dir`, however deep they nest (bounded): a
+   * directory holding a SKILL.md is a skill and is not searched further;
+   * `dir` itself may be one. Symlinks are never followed.
+   */
+  async function skillTree(
+    dir: string,
+    realBase: string,
+    options: { prefix?: string; source?: AgentCommandInfo["source"]; maxDepth?: number } = {},
+  ): Promise<AgentCommandInfo[]> {
     const out: AgentCommandInfo[] = [];
-    let ids: Entry[];
-    try {
-      if (!isWithin(await deps.fs.realpath(dir), realBase)) return out;
-      ids = (await deps.fs.readdir(dir)).slice(0, MAX_ENTRIES);
-    } catch {
-      return out;
+    const maxDepth = options.maxDepth ?? 4;
+    let visited = 0;
+    const walk = async (path: string, depth: number): Promise<void> => {
+      if (out.length >= MAX_COMMANDS || visited++ > MAX_ENTRIES) return;
+      let entries: Entry[];
+      try {
+        if (!isWithin(await deps.fs.realpath(path), realBase)) return;
+        entries = (await deps.fs.readdir(path)).slice(0, MAX_ENTRIES);
+      } catch {
+        return;
+      }
+      if (entries.some((entry) => entry.isFile && entry.name === "SKILL.md")) {
+        try {
+          const meta = parseCommandFile(await deps.fs.readHead(join(path, "SKILL.md"), HEAD_BYTES));
+          if (meta.hidden) return;
+          const name = `${options.prefix ?? ""}${meta.name ?? basename(path)}`;
+          if (NAME.test(name)) out.push(row(name, meta, options.source ?? "skill"));
+        } catch {
+          // Unreadable: no row.
+        }
+        return;
+      }
+      if (depth >= maxDepth) return;
+      for (const entry of entries) {
+        if (entry.isSymlink || !entry.isDirectory || entry.name.startsWith(".")) continue;
+        await walk(join(path, entry.name), depth + 1);
+      }
+    };
+    await walk(dir, 0);
+    return out;
+  }
+
+  /** Skills synced from claude.ai: one or more directory levels of ids, then the skill. */
+  async function syncedSkills(dir: string, realBase: string): Promise<AgentCommandInfo[]> {
+    return skillTree(dir, realBase, { maxDepth: 4 });
+  }
+
+  /** The commands and skills of one plugin directory, as `<plugin>:<name>`. */
+  async function pluginContents(
+    installPath: string,
+    real: string,
+    pluginName: string,
+    manifest: Record<string, unknown> | undefined,
+  ): Promise<AgentCommandInfo[]> {
+    const out: AgentCommandInfo[] = [];
+    const listed = (field: unknown): string[] =>
+      (typeof field === "string" ? [field] : Array.isArray(field) ? field : [])
+        .filter((item): item is string => typeof item === "string")
+        .slice(0, 64)
+        .map((item) => resolve(installPath, item))
+        .filter((path) => isWithin(path, resolve(installPath)));
+    const prefix = `${pluginName}:`;
+    const commandPaths = [join(installPath, "commands"), ...listed(manifest?.["commands"])];
+    for (const path of commandPaths) {
+      if (path.endsWith(".md")) {
+        try {
+          if (!isWithin(await deps.fs.realpath(path), real)) continue;
+        } catch {
+          continue;
+        }
+        const meta = await metaOf(path);
+        const name = `${prefix}${meta.name ?? basename(path).slice(0, -3)}`;
+        if (!meta.hidden && NAME.test(name)) out.push(row(name, meta, "plugin"));
+      } else {
+        out.push(...(await commandFiles(path, real, "plugin", prefix)));
+      }
     }
-    for (const id of ids) {
-      if (out.length >= MAX_COMMANDS) break;
-      if (id.isSymlink || !id.isDirectory) continue;
-      out.push(...(await skillDirs(join(dir, id.name), realBase)));
+    const skillPaths = [join(installPath, "skills"), ...listed(manifest?.["skills"])];
+    for (const path of skillPaths) {
+      out.push(...(await skillTree(path, real, { prefix, source: "plugin" })));
     }
+    return out.slice(0, MAX_COMMANDS);
+  }
+
+  /** Plugins synced from claude.ai: `<config>/plugins/synced/<id>/<plugin>~<suffix>/`. */
+  async function syncedPlugins(config: string, realBase: string): Promise<AgentCommandInfo[]> {
+    const root = join(config, "plugins", "synced");
+    const out: AgentCommandInfo[] = [];
+    let plugins = 0;
+    const looksLikePlugin = (entries: Entry[]): boolean =>
+      entries.some(
+        (entry) =>
+          entry.isDirectory && [".claude-plugin", "skills", "commands"].includes(entry.name),
+      );
+    const walk = async (path: string, depth: number): Promise<void> => {
+      let entries: Entry[];
+      try {
+        if (!isWithin(await deps.fs.realpath(path), realBase)) return;
+        entries = (await deps.fs.readdir(path)).slice(0, MAX_ENTRIES);
+      } catch {
+        return;
+      }
+      if (depth > 0 && looksLikePlugin(entries)) {
+        if (plugins++ >= 200) return;
+        const manifest = await readJson(join(path, ".claude-plugin", "plugin.json"));
+        const declared = manifest?.["name"];
+        const fromDir = basename(path).split("~")[0] ?? "";
+        const pluginName = typeof declared === "string" && NAME.test(declared) ? declared : fromDir;
+        if (NAME.test(pluginName))
+          out.push(...(await pluginContents(path, realBase, pluginName, manifest)));
+        return;
+      }
+      if (depth >= 3) return;
+      for (const entry of entries) {
+        if (out.length >= MAX_COMMANDS) return;
+        if (entry.isSymlink || !entry.isDirectory) continue;
+        await walk(join(path, entry.name), depth + 1);
+      }
+    };
+    await walk(root, 0);
     return out;
   }
 
@@ -340,22 +446,7 @@ export function createAgentSuggest(deps: AgentSuggestDeps): {
       const real = await realOrUndefined(installPath);
       if (real === undefined) continue;
       const manifest = await readJson(join(installPath, ".claude-plugin", "plugin.json"));
-      const listed = (field: unknown): string[] =>
-        (typeof field === "string" ? [field] : Array.isArray(field) ? field : [])
-          .filter((item): item is string => typeof item === "string")
-          .slice(0, 8)
-          .map((item) => resolve(installPath, item))
-          .filter((path) => isWithin(path, resolve(installPath)));
-      const commandDirs = [join(installPath, "commands"), ...listed(manifest?.["commands"])];
-      const skillRoots = [join(installPath, "skills"), ...listed(manifest?.["skills"])];
-      for (const commandDir of commandDirs) {
-        out.push(...(await commandFiles(commandDir, real, "plugin", `${pluginName}:`)));
-      }
-      for (const skillRoot of skillRoots) {
-        out.push(
-          ...(await skillDirs(skillRoot, real, { prefix: `${pluginName}:`, source: "plugin" })),
-        );
-      }
+      out.push(...(await pluginContents(installPath, real, pluginName, manifest)));
     }
     return out;
   }
@@ -383,6 +474,7 @@ export function createAgentSuggest(deps: AgentSuggestDeps): {
           found.push(...(await skillDirs(join(config, "skills"), realBase, { follow: true })));
           found.push(...(await syncedSkills(join(config, "skills", "synced"), realBase)));
           found.push(...(await claudePlugins(config, cwd, chain)));
+          found.push(...(await syncedPlugins(config, realBase)));
         }
       }
     } else if (session.vendor === "openai") {
