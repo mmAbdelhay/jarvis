@@ -1300,6 +1300,10 @@ export type RendererApi = {
   /** The tab id this window is the pop-out of, from its launch arguments;
    *  undefined in the main window. */
   popoutTabId: string | undefined;
+  /** The real path of a File the user picked or dropped, "" when it has none
+   *  (a pasted image). Synchronous: the Chat composer sends a path as it is
+   *  and uploads only what has no path. */
+  pathForFile?(file: File): string;
   /** Opens a tab in a window of its own (the main window only). For a
    *  terminal it first asks this window for the tab's layout and drafts —
    *  see onPopoutHandover. */

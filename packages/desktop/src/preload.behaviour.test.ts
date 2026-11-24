@@ -45,6 +45,7 @@ async function loadPreload(): Promise<void> {
 vi.mock("electron", () => ({
   contextBridge: { exposeInMainWorld: vi.fn() },
   ipcRenderer: { invoke: vi.fn(), on: vi.fn(), removeListener: vi.fn() },
+  webUtils: { getPathForFile: vi.fn((file: { name: string }) => `/real/${file.name}`) },
 }));
 
 const ORIGINAL_ARGV = [...process.argv];
@@ -111,10 +112,26 @@ describe("preload.cts (the real file, run in Node)", () => {
         "platform",
         "firstRun",
         "popoutTabId",
+        "pathForFile",
         ...Object.keys(INVOKE_CHANNELS),
         ...Object.keys(PUSH_CHANNELS),
       ]),
     );
+  });
+
+  it("(a1) turns a dropped or picked File into its real path, and an empty string when it has none", async () => {
+    process.argv.push(...preloadChannelArgs());
+    await loadPreload();
+    const api = await exposedApi();
+    expect(api["pathForFile"]?.({ name: "a.txt" })).toBe("/real/a.txt");
+    const electron = (await import("electron")) as unknown as {
+      webUtils: { getPathForFile: ReturnType<typeof vi.fn> };
+    };
+    electron.webUtils.getPathForFile.mockImplementationOnce(() => {
+      throw new Error("not a File");
+    });
+    expect(api["pathForFile"]?.({ name: "b" })).toBe("");
+    expect(api["pathForFile"]?.("not a file")).toBe("");
   });
 
   it("(a2) knows the tab it is the pop-out of from its launch arguments, and only a plausible one", async () => {
