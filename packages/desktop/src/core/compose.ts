@@ -2615,6 +2615,25 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
         return undefined;
       }
     },
+    // A session whose process cwd could not be read: the cwd the transcript's
+    // own records name, then the pane's project path.
+    fallbackCwd: async (session) => {
+      if (session.transcriptPath !== undefined) {
+        try {
+          const head = (await readRange(session.transcriptPath, 0, 128 * 1024)).toString("utf8");
+          const found = /"cwd":("(?:[^"\\]|\\.)*")/.exec(head)?.[1];
+          if (found !== undefined) {
+            const value: unknown = JSON.parse(found);
+            if (typeof value === "string" && /^(\/|[A-Za-z]:[\\/])/.test(value)) return value;
+          }
+        } catch {
+          // No cwd in the transcript.
+        }
+      }
+      const tabId = session.paneKey.split(":")[0];
+      const tab = workspace.state().tabs.find((candidate) => candidate.id === tabId);
+      return tab === undefined ? undefined : config.projects[tab.project];
+    },
     now: () => Date.now(),
     log: (token) => console.warn(token),
   });

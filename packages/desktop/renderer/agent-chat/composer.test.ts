@@ -318,6 +318,23 @@ describe("suggestions", () => {
     expect(input(s).value).toBe("look at @src/cart/total.test.js ");
   });
 
+  it("says No files found for an empty list, and the Enter that meets it does not send @REA", async () => {
+    const s = await open();
+    s.api.terminalAgentFiles.mockResolvedValueOnce({ files: [] });
+    typeInto(s, "@REA");
+    s.timers.advance(120);
+    await settle();
+    expect(s.q(".ac-menu--suggest .ac-menu__empty").textContent).toBe("No files found");
+    const enter = press(input(s), "Enter");
+    expect(enter.defaultPrevented).toBe(true);
+    await settle();
+    expect(send(s)).not.toHaveBeenCalled();
+    expect(input(s).value).toBe("@REA");
+    press(input(s), "Enter");
+    await settle();
+    expect(send(s)).toHaveBeenCalledWith("t1", "@REA");
+  });
+
   it("ignores an answer for a query that has moved on", async () => {
     const s = await open();
     let release: (value: { files: { path: string; name: string }[] }) => void = () => {};

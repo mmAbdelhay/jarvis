@@ -491,6 +491,7 @@ export function createComposer(options: ComposerOptions): Composer {
       (command) =>
         !command.name.toLowerCase().startsWith(lower) && command.name.toLowerCase().includes(lower),
     );
+    suggest.setEmpty(t("agentChatNoSuggestions"));
     const items = [...starts, ...rest].slice(0, 30).map<MenuItem>((command) => ({
       id: command.name,
       label: `/${command.name}`,
@@ -522,10 +523,8 @@ export function createComposer(options: ComposerOptions): Composer {
           note: dirname(file.path),
           mono: true,
         }));
-        if (items.length === 0) {
-          closeSuggest();
-          return;
-        }
+        // An empty list says so and holds the Enter, instead of sending "@REA".
+        suggest.setEmpty(t("agentChatNoFiles"));
         showSuggest(items, replace, (item) => `@${quotePath(item.id)} `);
       })();
     }, FILES_DEBOUNCE_MS);

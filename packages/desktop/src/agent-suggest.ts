@@ -29,6 +29,9 @@ export type AgentSuggestDeps = {
   };
   /** Runs git in `cwd`; its stdout, or undefined when it is not a repository or fails. */
   git(cwd: string, args: string[]): Promise<string | undefined>;
+  /** Where the agent works when its process's cwd could not be read: the cwd
+   *  recorded in its transcript, then the pane's project path. */
+  fallbackCwd?(session: PaneAgentSession): Promise<string | undefined>;
   now(): number;
   log(token: string): void;
 };
@@ -181,13 +184,24 @@ export function createAgentSuggest(deps: AgentSuggestDeps): {
     return out;
   }
 
+  /** The session's working directory: its process's, else the fallback's. */
+  async function rootOf(session: PaneAgentSession): Promise<string | undefined> {
+    if (session.cwd !== null) return session.cwd;
+    try {
+      return await deps.fallbackCwd?.(session);
+    } catch {
+      return undefined;
+    }
+  }
+
   async function custom(session: PaneAgentSession): Promise<AgentCommandInfo[]> {
     if (session.vendor !== "anthropic") return [];
-    const key = `${session.cwd ?? ""}\0${session.transcriptPath ?? ""}`;
+    const cwd = await rootOf(session);
+    const key = `${cwd ?? ""}\0${session.transcriptPath ?? ""}`;
     const cached = customCache.get(key);
     if (cached !== undefined && deps.now() - cached.at < FILE_TTL_MS) return cached.commands;
     const roots: { dir: string; source: "project" | "account" }[] = [];
-    if (session.cwd !== null) roots.push({ dir: join(session.cwd, ".claude"), source: "project" });
+    if (cwd !== undefined) roots.push({ dir: join(cwd, ".claude"), source: "project" });
     const config = configDirOf(session);
     if (config !== undefined) roots.push({ dir: config, source: "account" });
     const found: AgentCommandInfo[] = [];
@@ -284,10 +298,11 @@ export function createAgentSuggest(deps: AgentSuggestDeps): {
       try {
         if (typeof query !== "string") return { files: [] };
         const session = await sessionOf(paneKey);
-        if (session?.cwd == null) return { files: [] };
+        const cwd = session === undefined ? undefined : await rootOf(session);
+        if (cwd === undefined) return { files: [] };
         const needle = query.slice(0, 100).toLowerCase();
         const ranked: { path: string; tier: number }[] = [];
-        for (const path of await listing(session.cwd)) {
+        for (const path of await listing(cwd)) {
           const lower = path.toLowerCase();
           const base = lower.slice(lower.lastIndexOf("/") + 1);
           const tier = base.startsWith(needle)
@@ -317,8 +332,9 @@ export function createAgentSuggest(deps: AgentSuggestDeps): {
       }
       try {
         const session = await sessionOf(paneKey);
-        if (session?.cwd == null) return { ok: false, reason: "gone" };
-        const root = resolve(session.cwd);
+        const cwd = session === undefined ? undefined : await rootOf(session);
+        if (cwd === undefined) return { ok: false, reason: "gone" };
+        const root = resolve(cwd);
         const candidate = resolve(root, path);
         // Lexical first: a path that leaves the root never reaches the disk.
         if (!isWithin(candidate, root)) return { ok: false, reason: "outside" };

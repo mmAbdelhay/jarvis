@@ -22,6 +22,9 @@ function setup(
     git?: string[] | undefined;
     vendor?: PaneAgentSession["vendor"];
     now?: () => number;
+    /** A session whose cwd could not be read (lsof missing or denied). */
+    noCwd?: boolean;
+    fallbackCwd?: AgentSuggestDeps["fallbackCwd"];
   } = {},
 ) {
   const entries = (dir: string): string[] =>
@@ -35,7 +38,9 @@ function setup(
   const deps: AgentSuggestDeps = {
     sessions: {
       session: vi.fn(async (paneKey: string) =>
-        paneKey === "t1" ? SESSION(options.vendor) : undefined,
+        paneKey === "t1"
+          ? { ...SESSION(options.vendor), ...(options.noCwd === true ? { cwd: null } : {}) }
+          : undefined,
       ),
       live: vi.fn((paneKey: unknown) => paneKey === "t1"),
     },
@@ -67,6 +72,7 @@ function setup(
       isFile: vi.fn(async (path: string) => tree[path]?.kind === "file"),
     },
     git,
+    ...(options.fallbackCwd === undefined ? {} : { fallbackCwd: options.fallbackCwd }),
     now: options.now ?? (() => 0),
     log: vi.fn(),
   };
@@ -234,5 +240,33 @@ describe("agentOpenFile", () => {
     expect(await t.suggest.resolve("t1", "a\0b")).toEqual({ ok: false, reason: "invalid" });
     expect(await t.suggest.resolve("t1", 5)).toEqual({ ok: false, reason: "invalid" });
     expect(await t.suggest.resolve("nope", "src/a.ts")).toEqual({ ok: false, reason: "gone" });
+  });
+});
+
+describe("a session whose cwd is unknown", () => {
+  const tree: Record<string, Node> = {
+    [ROOT]: { kind: "dir" },
+    [join(ROOT, "README.md")]: { kind: "file", text: "x" },
+  };
+
+  it("lists files and resolves a path from the fallback root, keeping the realpath guards", async () => {
+    const t = setup(tree, { noCwd: true, git: ["README.md"], fallbackCwd: async () => ROOT });
+    expect((await t.suggest.files("t1", "REA")).files).toEqual([
+      { path: "README.md", name: "README.md" },
+    ]);
+    expect(await t.suggest.resolve("t1", "README.md")).toEqual({
+      ok: true,
+      path: join(ROOT, "README.md"),
+    });
+    expect(await t.suggest.resolve("t1", "../../etc/passwd")).toEqual({
+      ok: false,
+      reason: "outside",
+    });
+  });
+
+  it("finds nothing, quietly, when there is no fallback either", async () => {
+    const t = setup(tree, { noCwd: true, git: ["README.md"] });
+    expect((await t.suggest.files("t1", "REA")).files).toEqual([]);
+    expect(await t.suggest.resolve("t1", "README.md")).toEqual({ ok: false, reason: "gone" });
   });
 });

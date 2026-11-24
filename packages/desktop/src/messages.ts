@@ -448,6 +448,8 @@ export const MESSAGES = {
       : "Message the agent, / for commands, @ for files",
   agentChatModelMore: (language: "ar" | "en"): string =>
     language === "ar" ? "نماذج أخرى…" : "More models\u2026",
+  agentChatNoFiles: (language: "ar" | "en"): string =>
+    language === "ar" ? "لا ملفات مطابقة." : "No files found",
   agentChatQuestionWait: (language: "ar" | "en"): string =>
     language === "ar"
       ? "ظهر السؤال للتو. انتظر لحظة ثم اختر."

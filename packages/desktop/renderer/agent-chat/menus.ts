@@ -25,6 +25,8 @@ export type Menu = {
   isOpen(): boolean;
   /** For an owner that keeps the focus: true when the key was the menu's. */
   handleKey(event: KeyboardEvent): boolean;
+  /** What an open menu with no rows says (a list that came back empty). */
+  setEmpty(text: string | undefined): void;
   /** The id of the highlighted row, for aria-activedescendant. */
   activeId(): string | undefined;
 };
@@ -44,6 +46,7 @@ export function createMenu(options: {
   element.setAttribute("aria-label", options.label);
   element.hidden = true;
   if (options.focusable === true) element.tabIndex = -1;
+  let emptyText = options.empty;
   let items: readonly MenuItem[] = [];
   let active = 0;
   let pick: ((item: MenuItem) => void) | undefined;
@@ -51,8 +54,8 @@ export function createMenu(options: {
 
   function paint(): void {
     element.replaceChildren();
-    if (items.length === 0 && options.empty !== undefined) {
-      element.append(el("div", "ac-menu__empty", options.empty));
+    if (items.length === 0 && emptyText !== undefined) {
+      element.append(el("div", "ac-menu__empty", emptyText));
     }
     items.forEach((item, index) => {
       const row = el("div", "ac-menu__row");
@@ -128,11 +131,10 @@ export function createMenu(options: {
         break;
       case "Enter":
       case "Tab":
-        if (items.length === 0) {
-          close();
-          return false;
-        }
-        choose(active);
+        // An empty list takes the key too: a typed "@REA" is not sent by the
+        // Enter that meant to pick from it.
+        if (items.length === 0) close();
+        else choose(active);
         break;
       case "Escape":
         close();
@@ -175,6 +177,9 @@ export function createMenu(options: {
     },
     close,
     isOpen: () => !element.hidden,
+    setEmpty(text) {
+      emptyText = text;
+    },
     handleKey,
     activeId: () => (element.hidden || items.length === 0 ? undefined : `${uid}-${active}`),
   };
