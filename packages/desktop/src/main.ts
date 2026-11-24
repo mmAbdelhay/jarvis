@@ -343,6 +343,7 @@ function createDesktopHost(client: CoreClient) {
       await client.invoke("workspace:activate", [id]);
     },
     mainSend: (channel, payload) => toWindow(channel, payload),
+    mainAlive: () => !window.isDestroyed(),
     schedule: (fn, ms) => {
       const timer = setTimeout(fn, ms);
       return () => clearTimeout(timer);
@@ -351,15 +352,21 @@ function createDesktopHost(client: CoreClient) {
     onFocusChanged: () => refocus(),
   });
   views.onPopoutCloseRequested((id) => void popouts.returnTab(id));
-  /** The windows whose viewing keys are held, to forget a closed one's. */
-  const viewingWindows = new Set<number>();
+  /** A pop-out shows exactly its own tab; the host says so itself (the page
+   *  has no renderer that reports, and a closed window is forgotten here). */
+  function syncPopoutViewing(): void {
+    viewing.setPopouts(
+      new Map(
+        popouts.contentsIds().flatMap((id) => {
+          const tabId = popouts.tabOf(id);
+          return tabId === undefined ? [] : [[id, [tabId]] as [number, string[]]];
+        }),
+      ),
+    );
+  }
   function refocus(): void {
-    const live = new Set(popouts.contentsIds());
-    for (const id of [...viewingWindows]) {
-      if (live.has(id)) continue;
-      viewingWindows.delete(id);
-      viewing.forget(id);
-    }
+    syncPopoutViewing();
+    if (window.isDestroyed()) return;
     viewing.setFocused(window.isFocused() ? mainContentsId : popouts.focusedContentsId());
   }
   window.on("focus", refocus);
@@ -433,7 +440,8 @@ function createDesktopHost(client: CoreClient) {
   /** `office:viewing` from any window: kept per window, and only the focused
    *  window's tabs are forwarded to the core. */
   function reportViewing(senderId: number, keys: unknown): void {
-    viewingWindows.add(senderId);
+    // Only the main window reports; a pop-out's tab is the host's own answer.
+    if (senderId !== mainContentsId) return;
     viewing.report(
       senderId,
       Array.isArray(keys) ? keys.filter((key): key is string => typeof key === "string") : [],
@@ -516,7 +524,7 @@ app.whenReady().then(async () => {
           }),
       });
     let appWindow: BrowserWindow | undefined;
-    let appPopouts: { closeAll(): void } | undefined;
+    let appPopouts: { closeAll(): void; returnAll(): Promise<void> } | undefined;
     const language = PRIMARY_LANGUAGE;
     const appImage = platform === "linux" ? appImageOf(process.env, process.execPath) : undefined;
     const nodeDeps = nodeDaemonModeDeps({
@@ -589,7 +597,10 @@ app.whenReady().then(async () => {
         inProcessCore = undefined;
         await core?.shutdown();
       },
-      useDaemon(link) {
+      async useDaemon(link) {
+        // Ask each pop-out's renderer for its layout and drafts and bring the
+        // tab back, before the core they belong to is switched away.
+        await appPopouts?.returnAll().catch(() => undefined);
         attached = link;
         client.switchTo(link);
         // Everything the renderer drew came from the old core: it starts
@@ -599,6 +610,7 @@ app.whenReady().then(async () => {
         appWindow?.webContents.reload();
       },
       async useInProcess() {
+        await appPopouts?.returnAll().catch(() => undefined);
         attached = undefined;
         inProcessCore = await startCore();
         client.switchTo(inProcessCoreClient(inProcessCore));

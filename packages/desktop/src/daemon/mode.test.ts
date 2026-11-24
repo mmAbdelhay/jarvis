@@ -132,7 +132,7 @@ function harness(options: Options = {}) {
       return options.fallback ?? "in-app";
     },
     stopInProcess: record("stopInProcess"),
-    useDaemon: (link) => events.push(`useDaemon ${link.name}`),
+    useDaemon: (link) => void events.push(`useDaemon ${link.name}`),
     useInProcess: async () => {
       events.push("useInProcess");
       if (options.useInProcessFails) throw new Error("createCore failed");

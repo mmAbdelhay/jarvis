@@ -149,7 +149,7 @@ async function setup(
     stopInProcess: async () => {
       events.push("stopInProcess");
     },
-    useDaemon: () => events.push("useDaemon"),
+    useDaemon: () => void events.push("useDaemon"),
     useInProcess: async () => {
       events.push("useInProcess");
     },

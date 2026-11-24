@@ -109,7 +109,7 @@ export type DaemonModeDeps<L extends DaemonLink> = {
   /** Stops the in-process core, awaited — its bridge's ports included. */
   stopInProcess(): Promise<void>;
   /** Switches the app's CoreClient to the daemon. */
-  useDaemon(link: L): void;
+  useDaemon(link: L): void | Promise<void>;
   /** Starts a core in the app and switches the CoreClient to it — for a
    *  window whose daemon is gone (a turn-off that failed half way). */
   useInProcess(): Promise<void>;
@@ -306,7 +306,7 @@ export function createDaemonMode<L extends DaemonLink>(deps: DaemonModeDeps<L>):
     // those at its boot, so the daemon applies its remote settings again
     // once they are free.
     link = connected;
-    deps.useDaemon(connected);
+    await deps.useDaemon(connected);
     await deps.stopInProcess().catch((error: unknown) => {
       deps.log(`stopping the in-process core failed: ${describe(error)}`);
     });

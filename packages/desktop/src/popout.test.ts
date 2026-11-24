@@ -83,8 +83,10 @@ function setup(tabs: WorkspaceTab[], activeTabId?: string) {
   const resumed: string[] = [];
   const timers: { at: number; fn: () => void }[] = [];
   let now = 0;
+  const flags = { mainAlive: true, createThrows: false, popOutThrows: false };
   const viewsFake = {
     popOut: vi.fn((id: string, _target: ViewTarget, bounds: Rect) => {
+      if (flags.popOutThrows) throw new Error("boom");
       if (!state.tabs.some((candidate) => candidate.id === id)) return false;
       popped.set(id, bounds);
       order.push(`popOut ${id}`);
@@ -106,7 +108,9 @@ function setup(tabs: WorkspaceTab[], activeTabId?: string) {
       },
     },
     views: viewsFake,
+    mainAlive: () => flags.mainAlive,
     createWindow: (spec, handlers) => {
+      if (flags.createThrows) throw new Error("boom");
       const window = new FakeWindow(100 + windows.length, spec, handlers, order);
       windows.push(window);
       order.push(`create ${spec.tabId}`);
@@ -149,6 +153,7 @@ function setup(tabs: WorkspaceTab[], activeTabId?: string) {
     setState,
     advance,
     viewsFake,
+    flags,
   };
 }
 
@@ -253,14 +258,95 @@ describe("popping out a page tab", () => {
     expect(h.announced.at(-1)).toEqual([]);
   });
 
-  it("closes every window on quit without touching a page, and forgets them", async () => {
+  it("closes every window on quit, each page back in the main window first, announced once", async () => {
     await h.popouts.open("a");
     await h.popouts.open("b");
     h.order.length = 0;
+    h.announced.length = 0;
     h.popouts.closeAll();
     expect(h.windows.every((window) => window.destroyed)).toBe(true);
-    expect(h.order).toEqual(["destroy a", "destroy b"]);
+    expect(h.order).toEqual(["popIn a", "destroy a", "popIn b", "destroy b"]);
     expect(h.popouts.list()).toEqual([]);
+    expect(h.announced).toEqual([[]]);
+  });
+
+  it("closeAll with the main window gone touches no view and sends nothing, and does not throw", async () => {
+    await h.popouts.open("a");
+    h.order.length = 0;
+    h.mainSent.length = 0;
+    h.flags.mainAlive = false;
+    expect(() => h.popouts.closeAll()).not.toThrow();
+    expect(h.order).toEqual(["destroy a"]);
+    expect(h.mainSent).toEqual([]);
+  });
+
+  it("closeAll keeps a terminal's last state as returned, once", async () => {
+    const t = setup([tab("t1", { kind: "terminal" })], "t1");
+    const open = t.popouts.open("t1");
+    t.popouts.provideState("main", "t1", plainTerminalState("t1"));
+    await open;
+    const split: PopoutTerminalState = {
+      shape: { direction: "row", first: { key: "t1" }, second: { key: "t1:p1" } },
+      drafts: { "t1:p1": "ls" },
+    };
+    t.popouts.reportState(100, split);
+    t.popouts.closeAll();
+    expect(t.popouts.takeReturned("t1")).toEqual(split);
+    expect(t.popouts.takeReturned("t1")).toBeUndefined();
+  });
+
+  it("closeAll during an open that is awaiting the handover opens no window afterwards", async () => {
+    const t = setup([tab("t1", { kind: "terminal" })], "t1");
+    const open = t.popouts.open("t1");
+    t.popouts.closeAll();
+    expect(await open).toEqual({ ok: false, reason: "failed" });
+    expect(t.windows).toEqual([]);
+  });
+
+  it("closeAll during a wake does not open a window afterwards", async () => {
+    const t = setup([tab("a", { suspended: true })], "b");
+    const open = t.popouts.open("a");
+    t.popouts.closeAll();
+    t.setState({ tabs: [tab("a")], activeTabId: "a" });
+    expect(await open).toEqual({ ok: false, reason: "failed" });
+    expect(t.windows).toEqual([]);
+  });
+
+  it("a window creation that throws is a failed result, never a rejection", async () => {
+    h.flags.createThrows = true;
+    await expect(h.popouts.open("a")).resolves.toEqual({ ok: false, reason: "failed" });
+    expect(h.popouts.list()).toEqual([]);
+    h.flags.createThrows = false;
+    expect(await h.popouts.open("a")).toEqual({ ok: true, already: false });
+  });
+
+  it("a view move that throws destroys the window and fails, never rejects", async () => {
+    h.flags.popOutThrows = true;
+    await expect(h.popouts.open("a")).resolves.toEqual({ ok: false, reason: "failed" });
+    expect(h.windows[0]?.destroyed).toBe(true);
+    expect(h.popouts.list()).toEqual([]);
+  });
+
+  it("a late close event of an old window does not drop the tab's new window", async () => {
+    await h.popouts.open("a");
+    const first = h.windows[0];
+    await h.popouts.returnTab("a");
+    await h.popouts.open("a");
+    first?.handlers.onClosed();
+    expect(h.popouts.list()).toEqual(["a"]);
+  });
+
+  it("returnAll asks every terminal renderer and returns every page before a reload", async () => {
+    const t = setup([tab("t1", { kind: "terminal" }), tab("a")], "a");
+    const open = t.popouts.open("t1");
+    t.popouts.provideState("main", "t1", plainTerminalState("t1"));
+    await open;
+    await t.popouts.open("a");
+    const done = t.popouts.returnAll();
+    t.popouts.provideState(100, "t1", plainTerminalState("t1"));
+    await done;
+    expect(t.popouts.list()).toEqual([]);
+    expect(t.order).toContain("popIn a");
   });
 
   it("forgets a window that was destroyed from outside, handing the page back first", async () => {
@@ -486,6 +572,28 @@ describe("viewing across windows", () => {
     viewing.report(1, ["t1"]);
     viewing.report(1, ["t1"]);
     viewing.report(5, ["t9"]);
+    expect(forwarded).toEqual([["t1"]]);
+  });
+});
+
+describe("viewing of pop-out windows", () => {
+  it("counts each pop-out's tab while its window is focused, from the host, and forgets it on close", () => {
+    const forwarded: string[][] = [];
+    const viewing = createViewingAggregate({ mainId: 1, forward: (keys) => forwarded.push(keys) });
+    viewing.report(1, ["t1"]);
+    viewing.setFocused(1);
+    viewing.setPopouts(new Map([[7, ["t2"]]]));
+    viewing.setFocused(7);
+    viewing.setPopouts(new Map());
+    expect(forwarded).toEqual([["t1"], ["t2"], []]);
+  });
+
+  it("only the main window's own reports are taken", () => {
+    const forwarded: string[][] = [];
+    const viewing = createViewingAggregate({ mainId: 1, forward: (keys) => forwarded.push(keys) });
+    viewing.setFocused(1);
+    viewing.report(9, ["x"]);
+    viewing.report(1, ["t1"]);
     expect(forwarded).toEqual([["t1"]]);
   });
 });

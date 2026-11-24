@@ -116,6 +116,9 @@ export type PopoutDeps = {
   log(token: string): void;
   /** The focus or the set of windows changed. */
   onFocusChanged?(): void;
+  /** False once the main window is destroyed: nothing is moved into it or
+   *  pushed to it then. Absent means alive. */
+  mainAlive?(): boolean;
 };
 
 export type OpenResult =
@@ -151,7 +154,13 @@ export type Popouts = {
   provideState(from: "main" | number, tabId: unknown, state: unknown): void;
   /** What a returned terminal tab carried back; handed over once. */
   takeReturned(tabId: string): PopoutTerminalState | undefined;
+  /** Quit, a mode switch, the main window going: every page back in the main
+   *  window, every terminal's last state kept, the windows destroyed, one
+   *  announcement. Synchronous; asks no renderer. */
   closeAll(): void;
+  /** Returns every pop-out, asking each terminal's renderer for its state
+   *  first (a mode switch, before the main renderer reloads). */
+  returnAll(): Promise<void>;
   anyFocused(): boolean;
   anyAwake(): boolean;
   focusedContentsId(): number | undefined;
@@ -172,6 +181,8 @@ export function createPopouts(deps: PopoutDeps): Popouts {
     { from: "main" | number; resolve(state: PopoutTerminalState | undefined): void; cancel(): void }
   >();
   let lastSize: { width: number; height: number } | undefined;
+  /** Bumped by closeAll: an open that began before it must not finish. */
+  let generation = 0;
 
   const log = (token: string): void => {
     try {
@@ -180,10 +191,15 @@ export function createPopouts(deps: PopoutDeps): Popouts {
       // A failing logger changes nothing.
     }
   };
+  const mainAlive = (): boolean => deps.mainAlive?.() ?? true;
   const ids = (): string[] => [...records.keys()];
   const announce = (): void => {
     const list = ids();
-    deps.mainSend("popout:changed", list);
+    try {
+      if (mainAlive()) deps.mainSend("popout:changed", list);
+    } catch {
+      // The main window is going; nothing there to tell.
+    }
     for (const listener of [...listeners]) listener(list);
     deps.onFocusChanged?.();
   };
@@ -233,6 +249,14 @@ export function createPopouts(deps: PopoutDeps): Popouts {
     });
   }
 
+  function safely(fn: () => void): void {
+    try {
+      fn();
+    } catch {
+      // A window or view already gone.
+    }
+  }
+
   function dropRecord(record: PopoutRecord): void {
     records.delete(record.tabId);
     const waiting = pending.get(record.tabId);
@@ -251,6 +275,9 @@ export function createPopouts(deps: PopoutDeps): Popouts {
     }
     if (opening.has(tabId)) return { ok: false, reason: "busy" };
     opening.add(tabId);
+    const started = generation;
+    const cancelled = (): boolean => started !== generation;
+    let created: PopoutWindow | undefined;
     try {
       const isTerminal = tab.kind === "terminal";
       let state: PopoutTerminalState | undefined;
@@ -269,6 +296,8 @@ export function createPopouts(deps: PopoutDeps): Popouts {
           return { ok: false, reason: "failed" };
         }
       }
+      // Everything was closed while the answer was awaited.
+      if (cancelled()) return { ok: false, reason: "failed" };
       // The tab may have closed while the answer was awaited.
       const current = tabOfId(tabId);
       if (current === undefined) return { ok: false, reason: "failed" };
@@ -281,8 +310,9 @@ export function createPopouts(deps: PopoutDeps): Popouts {
         onCloseRequested: () => void returnTab(tabId),
         onClosed: () => {
           const record = records.get(tabId);
-          if (record === undefined) return;
-          if (!isTerminal) deps.views.popIn(tabId);
+          // A late event of a window that is no longer this tab's.
+          if (record === undefined || record.window !== created) return;
+          if (!isTerminal) safely(() => deps.views.popIn(tabId));
           else if (record.state !== undefined) returned.set(tabId, record.state);
           dropRecord(record);
           announce();
@@ -297,9 +327,10 @@ export function createPopouts(deps: PopoutDeps): Popouts {
         { tabId, kind: current.kind, title: tabLabel(current), size: lastSize },
         handlers,
       );
+      created = window;
       const record: PopoutRecord = { tabId, kind: current.kind, window, state, returning: false };
       if (!isTerminal && !deps.views.popOut(tabId, window.target, bounds(window.contentSize()))) {
-        window.destroy();
+        safely(() => window.destroy());
         log("move-failed");
         return { ok: false, reason: "failed" };
       }
@@ -307,6 +338,14 @@ export function createPopouts(deps: PopoutDeps): Popouts {
       returned.delete(tabId);
       announce();
       return { ok: true, already: false };
+    } catch {
+      // createWindow or the view move threw: nothing is left half open.
+      if (created !== undefined) {
+        const window = created;
+        safely(() => window.destroy());
+      }
+      log("open-threw");
+      return { ok: false, reason: "failed" };
     } finally {
       opening.delete(tabId);
     }
@@ -324,7 +363,7 @@ export function createPopouts(deps: PopoutDeps): Popouts {
       if (records.get(tabId) !== record) return false;
       if (state !== undefined) returned.set(tabId, state);
     } else {
-      deps.views.popIn(tabId);
+      safely(() => deps.views.popIn(tabId));
     }
     dropRecord(record);
     // The page is back in the main window by now; only then does the window go.
@@ -402,11 +441,29 @@ export function createPopouts(deps: PopoutDeps): Popouts {
       return state;
     },
     closeAll() {
-      for (const record of [...records.values()]) {
+      generation += 1;
+      const alive = mainAlive();
+      const closing = [...records.values()];
+      for (const record of closing) {
+        // The page goes back before its window goes; a terminal keeps what it
+        // last reported for the tab's next pane. With the main window gone
+        // its views are gone too, and nothing is staged for a renderer
+        // that no longer exists.
+        if (alive) {
+          if (record.kind === "terminal") {
+            if (record.state !== undefined) returned.set(record.tabId, record.state);
+          } else {
+            safely(() => deps.views.popIn(record.tabId));
+          }
+        }
         records.delete(record.tabId);
-        record.window.destroy();
+        safely(() => record.window.destroy());
       }
       for (const waiting of [...pending.values()]) waiting.resolve(undefined);
+      if (closing.length > 0) announce();
+    },
+    async returnAll() {
+      await Promise.all(ids().map((id) => returnTab(id)));
     },
     anyFocused: () => [...records.values()].some((record) => record.window.isFocused()),
     anyAwake: () => [...records.values()].some((record) => record.window.isAwake()),
@@ -458,6 +515,9 @@ export function createViewingAggregate(deps: { mainId: number; forward(keys: str
   report(windowId: number, keys: string[]): void;
   setFocused(windowId: number | undefined): void;
   forget(windowId: number): void;
+  /** The host's own knowledge of the pop-out windows and what each shows:
+   *  replaces every window but the main one. */
+  setPopouts(windows: ReadonlyMap<number, string[]>): void;
 } {
   const reported = new Map<number, string[]>();
   let focusedId: number | undefined;
@@ -481,6 +541,13 @@ export function createViewingAggregate(deps: { mainId: number; forward(keys: str
     },
     forget(windowId) {
       reported.delete(windowId);
+      flush();
+    },
+    setPopouts(windows) {
+      for (const id of [...reported.keys()]) {
+        if (id !== deps.mainId && !windows.has(id)) reported.delete(id);
+      }
+      for (const [id, keys] of windows) if (id !== deps.mainId) reported.set(id, keys);
       flush();
     },
   };
