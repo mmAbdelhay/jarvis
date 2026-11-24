@@ -165,6 +165,20 @@ describe("readAgentMenu: unreadable goes to the drawer", () => {
     expect(readAgentMenu(screen, "github")).toEqual({ kind: "unreadable" });
     expect(readAgentMenu("some output\n$ ls", "github")).toBeUndefined();
   });
+
+  it("shows Copilot's boxed folder-trust menu in the terminal, never as keys it cannot prove", () => {
+    const box = (text: string): string => `│ ${text.padEnd(58)} │`;
+    const screen = [
+      `╭${"─".repeat(60)}╮`,
+      box("Confirm folder trust"),
+      box("Do you trust the files in this folder?"),
+      box("❯ 1. Yes"),
+      box("  2. Yes, and remember this folder for future sessions"),
+      box("  3. No, exit (Esc)"),
+      `╰${"─".repeat(60)}╯`,
+    ].join("\n");
+    expect(readAgentMenu(screen, "github")).toEqual({ kind: "unreadable" });
+  });
 });
 
 describe("readAgentMenu: plain screens are never a menu", () => {

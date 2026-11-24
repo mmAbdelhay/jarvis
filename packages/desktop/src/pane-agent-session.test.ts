@@ -7,7 +7,9 @@ import {
   listCodexRollouts,
   parseChildPids,
   parseLsofFileNames,
+  sameAgentSession,
   type PaneAgentLookupDeps,
+  type PaneAgentSession,
 } from "./pane-agent-session.js";
 
 const AGENTS: AgentConfig[] = [
@@ -180,6 +182,7 @@ describe("createPaneAgentLookup", () => {
         vendor: "openai",
         sessionId: "aaaa",
         transcriptPath: ROLLOUT,
+        startedAt: 1000,
         cwd: "/w",
         configDir: join("/h", ".codex"),
       });
@@ -190,7 +193,7 @@ describe("createPaneAgentLookup", () => {
       const { deps } = world({ openFiles: async () => ["/elsewhere/rollout-x.jsonl"] });
       await expect(
         createPaneAgentLookup(deps).forProcess(processOf("codex")),
-      ).resolves.toBeUndefined();
+      ).resolves.toMatchObject({ pending: true });
     });
 
     it("does not take a rollout under a sibling directory that shares the prefix", async () => {
@@ -201,7 +204,7 @@ describe("createPaneAgentLookup", () => {
       });
       await expect(
         createPaneAgentLookup(deps).forProcess(processOf("codex")),
-      ).resolves.toBeUndefined();
+      ).resolves.toMatchObject({ pending: true });
     });
 
     it("is undefined when lsof shows two open rollouts", async () => {
@@ -215,7 +218,7 @@ describe("createPaneAgentLookup", () => {
       const { deps } = world({
         listRollouts: async () => [
           { path: ROLLOUT, mtimeMs: 2000 },
-          { path: OTHER, mtimeMs: 500 }, // older than the process
+          { path: OTHER, mtimeMs: -5000 }, // older than the process
         ],
       });
       await expect(
@@ -238,13 +241,121 @@ describe("createPaneAgentLookup", () => {
       ).resolves.toBeUndefined();
     });
 
-    it("gives none when the cwd differs or is unknown", async () => {
+    it("gives none when the cwd is unknown, and a pending session when no rollout is in the cwd", async () => {
       const { deps } = world({ listRollouts: async () => [{ path: ROLLOUT, mtimeMs: 2000 }] });
       const lookup = createPaneAgentLookup(deps);
-      await expect(
-        lookup.forProcess(processOf("codex", { cwd: "/else" })),
-      ).resolves.toBeUndefined();
       await expect(lookup.forProcess(processOf("codex", { cwd: null }))).resolves.toBeUndefined();
+      await expect(lookup.forProcess(processOf("codex", { cwd: "/else" }))).resolves.toMatchObject({
+        pending: true,
+        sessionId: "pending-500-1000",
+        startedAt: 1000,
+      });
+    });
+
+    it("is pending before any rollout exists, and the real session after", async () => {
+      let rollouts: { path: string; mtimeMs: number }[] = [];
+      const { deps } = world({ listRollouts: async () => rollouts });
+      const lookup = createPaneAgentLookup(deps);
+      const before = await lookup.forProcess(processOf("codex"));
+      expect(before).toMatchObject({ pending: true });
+      expect(before?.transcriptPath).toBeUndefined();
+      rollouts = [{ path: ROLLOUT, mtimeMs: 2000 }];
+      const after = await lookup.forProcess(processOf("codex"));
+      expect(after).toMatchObject({ sessionId: "aaaa", transcriptPath: ROLLOUT });
+      expect(after?.pending).toBeUndefined();
+      expect(sameAgentSession(before as PaneAgentSession, after as PaneAgentSession)).toBe(true);
+      expect(
+        sameAgentSession(before as PaneAgentSession, {
+          ...(after as PaneAgentSession),
+          pid: 501,
+        }),
+      ).toBe(false);
+    });
+
+    it("skips an older session of the same cwd that something touched later", async () => {
+      const old = `${JSON.stringify({ type: "session_meta", payload: { id: "bbbb", cwd: "/w", timestamp: new Date(1000 - 60_000).toISOString() } })}\n`;
+      const fresh = `${JSON.stringify({ type: "session_meta", payload: { id: "aaaa", cwd: "/w", timestamp: new Date(1500).toISOString() } })}\n`;
+      const { deps } = world({
+        listRollouts: async () => [
+          { path: ROLLOUT, mtimeMs: 2000 },
+          { path: OTHER, mtimeMs: 9000 },
+        ],
+        readHead: async (path) => (path === ROLLOUT ? fresh : old),
+      });
+      await expect(
+        createPaneAgentLookup(deps).forProcess(processOf("codex")),
+      ).resolves.toMatchObject({ sessionId: "aaaa" });
+    });
+
+    it("takes the newest of several rollouts only when no other codex shares the cwd", async () => {
+      const stamp = (id: string, at: number): string =>
+        `${JSON.stringify({ type: "session_meta", payload: { id, cwd: "/w", timestamp: new Date(at).toISOString() } })}\n`;
+      const { deps } = world({
+        listRollouts: async () => [
+          { path: ROLLOUT, mtimeMs: 2000 },
+          { path: OTHER, mtimeMs: 3000 },
+        ],
+        readHead: async (path) => (path === ROLLOUT ? stamp("aaaa", 1500) : stamp("bbbb", 2500)),
+      });
+      const lookup = createPaneAgentLookup(deps);
+      const mine = processOf("codex");
+      await expect(lookup.forProcess(mine, [mine])).resolves.toMatchObject({ sessionId: "bbbb" });
+      const second = processOf("codex", { pid: 501 });
+      const other = processOf("codex", { pid: 600, terminalPaneKey: "t2" });
+      await expect(lookup.forProcess(second, [second, other])).resolves.toBeUndefined();
+      const elsewhere = processOf("codex", { pid: 600, cwd: "/x" });
+      await expect(lookup.forProcess(second, [second, elsewhere])).resolves.toMatchObject({
+        sessionId: "bbbb",
+      });
+      // Not told about peers: never a guess.
+      await expect(lookup.forProcess(processOf("codex", { pid: 502 }))).resolves.toBeUndefined();
+      // A process that was bound keeps its session when it later turns ambiguous.
+      await expect(lookup.forProcess(mine, [mine, other])).resolves.toMatchObject({
+        sessionId: "bbbb",
+      });
+    });
+
+    it("prefers the main thread over a sub-agent rollout", async () => {
+      const line = (id: string, extra: object): string =>
+        `${JSON.stringify({ type: "session_meta", payload: { id, cwd: "/w", timestamp: new Date(1500).toISOString(), ...extra } })}\n`;
+      const { deps } = world({
+        listRollouts: async () => [
+          { path: ROLLOUT, mtimeMs: 2000 },
+          { path: OTHER, mtimeMs: 3000 },
+        ],
+        readHead: async (path) =>
+          path === ROLLOUT
+            ? line("aaaa", { source: "cli" })
+            : line("bbbb", { source: { subagent: { thread_spawn: {} } } }),
+      });
+      await expect(
+        createPaneAgentLookup(deps).forProcess(processOf("codex")),
+      ).resolves.toMatchObject({ sessionId: "aaaa" });
+    });
+
+    it("compares real paths for a symlinked sessions dir and cwd", async () => {
+      const real = join("/real", "codex", "sessions", "2026", "11", "23", "rollout-x-aaaa.jsonl");
+      const { deps } = world({
+        openFiles: async () => [real],
+        realPath: async (path) =>
+          path === join("/h", ".codex", "sessions")
+            ? join("/real", "codex", "sessions")
+            : path.startsWith("/tmp")
+              ? `/private${path}`
+              : path,
+        readHead: async () => meta("aaaa", "/private/tmp/w"),
+      });
+      await expect(
+        createPaneAgentLookup(deps).forProcess(processOf("codex", { cwd: "/tmp/w" })),
+      ).resolves.toMatchObject({ sessionId: "aaaa", transcriptPath: real });
+      const viaCwd = world({
+        listRollouts: async () => [{ path: ROLLOUT, mtimeMs: 2000 }],
+        realPath: async (path) => (path.startsWith("/tmp") ? `/private${path}` : path),
+        readHead: async () => meta("aaaa", "/private/tmp/w"),
+      });
+      await expect(
+        createPaneAgentLookup(viaCwd.deps).forProcess(processOf("codex", { cwd: "/tmp/w" })),
+      ).resolves.toMatchObject({ sessionId: "aaaa" });
     });
 
     it("uses the account's own config directory", async () => {

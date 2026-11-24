@@ -2587,6 +2587,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
           mtimeMs: async (path) => (await stat(path)).mtimeMs,
         }),
       readHead: (path) => importFs.readHead(path),
+      realPath: (path) => realpath(path),
     }),
     readTail: (path) => readFileTail(path, CHAT_TAIL_BYTES),
     statFile: async (path) => {

@@ -185,6 +185,24 @@ describe("agentView", () => {
     expect(deps.readTail).toHaveBeenCalledTimes(1);
   });
 
+  it("is an empty session while the transcript does not exist yet, then loads it", async () => {
+    let there = false;
+    const missing = Object.assign(new Error("ENOENT: no such file"), { code: "ENOENT" });
+    const deps = fakeDeps("github", "", {
+      statFile: vi.fn(async () => {
+        if (!there) throw missing;
+        return { size: COPILOT_TRANSCRIPT.length, mtimeMs: 1 };
+      }),
+    });
+    const handlers = createAgentViewHandlers(deps);
+    const empty = await handlers.view("t1");
+    expect(empty).toMatchObject({ kind: "agent", vendor: "github", turns: [] });
+    await expect(handlers.peek("t1")).resolves.toMatchObject({ kind: "agent", turns: [] });
+    there = true;
+    const loaded = await handlers.view("t1");
+    expect(loaded.kind === "agent" && loaded.turns.length).toBeGreaterThan(0);
+  });
+
   it("is none, logging only a token, when a dependency fails", async () => {
     const deps = fakeDeps("github", "", {
       readTail: vi.fn(async () => {

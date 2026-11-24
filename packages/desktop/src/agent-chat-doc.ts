@@ -32,8 +32,8 @@ import {
 import type { ClaudeMode } from "@jarvis/wire";
 import { StringDecoder } from "node:string_decoder";
 import { basename, dirname } from "node:path";
-import { type AgentVendor, readAgentScreen } from "./agent-view.js";
-import type { PaneAgentSession } from "./pane-agent-session.js";
+import { type AgentVendor, isMissingFile, readAgentScreen } from "./agent-view.js";
+import { sameAgentSession, type PaneAgentSession } from "./pane-agent-session.js";
 
 const MB = 1024 * 1024;
 const PAGE_ITEMS = 200;
@@ -239,6 +239,8 @@ export function createAgentChatHandlers(deps: AgentChatDeps): {
   type AgentView = Extract<AgentChatView, { kind: "agent" }>;
   /** The last good reply per pane, shown again when a read fails. */
   const lastGood = new Map<string, AgentView>();
+  /** The session behind each lastGood, to tell a pending id from its real one. */
+  const lastSession = new Map<string, PaneAgentSession>();
   let tick = 0;
 
   function log(token: string): void {
@@ -497,6 +499,7 @@ export function createAgentChatHandlers(deps: AgentChatDeps): {
     forgetPane(paneKey) {
       for (const [id, entry] of entries) if (entry.paneKey === paneKey) entries.delete(id);
       lastGood.delete(paneKey);
+      lastSession.delete(paneKey);
     },
 
     async chat(paneKey, request) {
@@ -533,13 +536,24 @@ export function createAgentChatHandlers(deps: AgentChatDeps): {
         let pageOut: { items: ChatItem[]; older?: string; reset?: true } = { items: [] };
         let deriving = false;
         if (transcriptPath !== undefined) {
-          const got = await documentFor(session, transcriptPath);
-          doc = got.doc;
-          deriving = got.deriving;
-          const asked =
-            request !== null && typeof request === "object" ? (request as AgentChatRequest) : {};
-          pageOut = await page(got.entry, doc, asked);
-          got.entry.restarted = false;
+          try {
+            const got = await documentFor(session, transcriptPath);
+            doc = got.doc;
+            deriving = got.deriving;
+            const asked =
+              request !== null && typeof request === "object" ? (request as AgentChatRequest) : {};
+            pageOut = await page(got.entry, doc, asked);
+            got.entry.restarted = false;
+          } catch (error) {
+            // Not written yet (Copilot before the first message): an empty
+            // session, and the file loads once it exists. Anything else keeps
+            // the read-failed note.
+            if (!isMissingFile(error)) throw error;
+            drop(session.sessionId);
+            doc = { items: [], agents: [], files: [] };
+            pageOut = { items: [] };
+            deriving = false;
+          }
         }
 
         const left = leftPercent(session.vendor, screen);
@@ -599,6 +613,7 @@ export function createAgentChatHandlers(deps: AgentChatDeps): {
           caps: CAPS[session.vendor],
         };
         lastGood.set(paneKey, view);
+        lastSession.set(paneKey, session);
         return view;
       } catch {
         log("read");
@@ -607,7 +622,9 @@ export function createAgentChatHandlers(deps: AgentChatDeps): {
         const previous = typeof paneKey === "string" ? lastGood.get(paneKey) : undefined;
         if (
           previous !== undefined &&
-          (known === undefined || known.sessionId === previous.sessionId)
+          (known === undefined ||
+            known.sessionId === previous.sessionId ||
+            sameAgentSession(known, lastSession.get(paneKey as string) ?? known))
         ) {
           return { ...previous, readFailed: true };
         }

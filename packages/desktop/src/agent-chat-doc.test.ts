@@ -413,6 +413,20 @@ describe("agentChat", () => {
     expect(agent(await t.handlers.chat("t1")).readFailed).toBeUndefined();
   });
 
+  it("answers an empty session, not readFailed, while the transcript is missing, then loads it", async () => {
+    const t = setup(userLine(1));
+    const real = vi.mocked(t.deps.statFile).getMockImplementation();
+    vi.mocked(t.deps.statFile).mockRejectedValue(
+      Object.assign(new Error("ENOENT: no such file"), { code: "ENOENT" }),
+    );
+    const empty = agent(await t.handlers.chat("t1"));
+    expect(empty.readFailed).toBeUndefined();
+    expect(empty.page.items).toEqual([]);
+    expect(t.deps.log).not.toHaveBeenCalledWith("agent-chat: read");
+    if (real !== undefined) vi.mocked(t.deps.statFile).mockImplementation(real);
+    expect(ids(agent(await t.handlers.chat("t1"))).length).toBeGreaterThan(0);
+  });
+
   it("answers an empty agent view with readFailed when the very first read fails", async () => {
     const t = setup(userLine(1));
     vi.mocked(t.deps.statFile).mockRejectedValue(new Error("x"));

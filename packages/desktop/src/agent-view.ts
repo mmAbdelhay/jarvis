@@ -121,6 +121,13 @@ export function readAgentScreen(
   };
 }
 
+/** A read of a file that is not there (yet). */
+export function isMissingFile(error: unknown): boolean {
+  return (
+    typeof error === "object" && error !== null && (error as { code?: unknown }).code === "ENOENT"
+  );
+}
+
 export function createAgentViewHandlers(deps: AgentViewDeps): {
   view(paneKey: unknown): Promise<AgentView>;
   /** The same read as view(), with no outward effect: nothing noticed,
@@ -215,8 +222,10 @@ export function createAgentViewHandlers(deps: AgentViewDeps): {
     if (transcriptPath !== undefined) {
       try {
         chat = await chats.get(session.sessionId, transcriptPath, parserFor(session.vendor));
-      } catch {
-        return fail("transcript");
+      } catch (error) {
+        // A live agent that has not written its transcript yet (Copilot before
+        // the first message) is an empty session; the file loads once it exists.
+        if (!isMissingFile(error)) return fail("transcript");
       }
     }
     try {

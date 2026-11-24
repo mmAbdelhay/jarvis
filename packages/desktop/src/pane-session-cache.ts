@@ -12,7 +12,10 @@ export type PaneSessionCacheDeps<S> = {
   /** A fresh process scan. */
   scanAgents(): Promise<readonly ExternalAgentProcess[]>;
   lookup: {
-    forProcess(process: ExternalAgentProcess): Promise<S | undefined>;
+    forProcess(
+      process: ExternalAgentProcess,
+      peers?: readonly ExternalAgentProcess[],
+    ): Promise<S | undefined>;
     retain(sessionIds: ReadonlySet<string>): void;
   };
   now(): number;
@@ -79,7 +82,7 @@ export function createPaneSessionCache<S extends { sessionId: string; transcript
       let session: S | undefined;
       try {
         for (const process of candidates) {
-          session = await deps.lookup.forProcess(process);
+          session = await deps.lookup.forProcess(process, processes);
           if (session !== undefined) break;
         }
       } catch {
