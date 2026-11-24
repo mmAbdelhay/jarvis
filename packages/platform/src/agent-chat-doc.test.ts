@@ -511,6 +511,50 @@ describe("reader buffering", () => {
   });
 });
 
+describe("parseClaudeDoc: a pending question or plan", () => {
+  const ask = assistant("a", [
+    toolUse("q1", "AskUserQuestion", {
+      questions: [
+        {
+          question: "Which one?",
+          header: "Pick",
+          multiSelect: true,
+          options: [{ label: "A", description: "first" }, { label: "B" }],
+        },
+      ],
+    }),
+  ]);
+
+  it("surfaces AskUserQuestion input while no result exists", () => {
+    expect(parseClaudeDoc(ask).asking).toEqual({
+      id: "q1",
+      tool: "AskUserQuestion",
+      questions: [
+        {
+          question: "Which one?",
+          header: "Pick",
+          multiSelect: true,
+          options: [{ label: "A", description: "first" }, { label: "B" }],
+        },
+      ],
+    });
+  });
+
+  it("surfaces an ExitPlanMode plan, and drops it once answered or moved on", () => {
+    const plan = assistant("p", [toolUse("e1", "ExitPlanMode", { plan: "1. do it\u001b[0m" })]);
+    expect(parseClaudeDoc(plan).asking).toEqual({
+      id: "e1",
+      tool: "ExitPlanMode",
+      plan: "1. do it",
+    });
+    expect(
+      parseClaudeDoc([plan, user("r", [toolResult("e1", "approved")])].join("\n")).asking,
+    ).toBeUndefined();
+    expect(parseClaudeDoc([ask, user("n", "never mind")].join("\n")).asking).toBeUndefined();
+    expect(parseClaudeDoc(user("n", "hi")).asking).toBeUndefined();
+  });
+});
+
 describe("createClaudeDocReader", () => {
   const text = [
     user("u1", "one"),

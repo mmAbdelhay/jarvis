@@ -83,7 +83,21 @@ export type ChatAgent = {
 /** Lines changed are present only where the transcript lets them be counted. */
 export type ChatFile = { path: string; added?: number; removed?: number };
 
+/** A question or plan the agent is waiting on, as the transcript records it. */
+export type ChatAsking = {
+  id: string;
+  tool: "AskUserQuestion" | "ExitPlanMode";
+  questions?: {
+    question: string;
+    header?: string;
+    multiSelect: boolean;
+    options: { label: string; description?: string }[];
+  }[];
+  plan?: string;
+};
+
 export type ChatDoc = {
+  asking?: ChatAsking;
   items: ChatItem[];
   model?: string;
   contextTokens?: number;
@@ -502,6 +516,45 @@ function patchDiff(patch: unknown): ChatDiffLine[] | undefined {
   return diff.length === 0 ? undefined : diff.slice(0, MAX_DIFF_LINES);
 }
 
+function askingOf(
+  id: string,
+  tool: ChatAsking["tool"],
+  input: Record<string, unknown> | undefined,
+): ChatAsking | undefined {
+  if (tool === "ExitPlanMode") {
+    const plan = str(input?.["plan"]);
+    return plan === undefined ? undefined : { id, tool, plan: clean(plan) };
+  }
+  const list = input?.["questions"];
+  if (!Array.isArray(list)) return undefined;
+  const questions: NonNullable<ChatAsking["questions"]> = [];
+  for (const entry of list.slice(0, 10)) {
+    const fields = asRecord(entry);
+    const question = str(fields?.["question"]);
+    if (fields === undefined || question === undefined) continue;
+    const options: { label: string; description?: string }[] = [];
+    const raw = fields["options"];
+    for (const option of Array.isArray(raw) ? raw.slice(0, 10) : []) {
+      const optionFields = asRecord(option);
+      const label = str(optionFields?.["label"]);
+      if (label === undefined) continue;
+      const description = str(optionFields?.["description"]);
+      options.push({
+        label: clean(label, 200),
+        ...(description !== undefined ? { description: clean(description, 500) } : {}),
+      });
+    }
+    const header = str(fields["header"]);
+    questions.push({
+      question: clean(question, 1000),
+      ...(header !== undefined ? { header: clean(header, 100) } : {}),
+      multiSelect: fields["multiSelect"] === true,
+      options,
+    });
+  }
+  return questions.length === 0 ? undefined : { id, tool, questions };
+}
+
 const REMINDER = /<system-reminder>[\s\S]*?<\/system-reminder>/g;
 const NOTIFICATION = /<task-notification>[\s\S]*?<\/task-notification>/g;
 
@@ -533,6 +586,7 @@ export function createClaudeDocReader(options: ChatDocOptions = {}): ChatDocRead
   // Tasks in creation order; `num` is the id the CLI printed in the result.
   const tasks: { todo: ChatTodo | null; callId: string; num?: number }[] = [];
   const background = new Set<string>();
+  let asking: ChatAsking | undefined;
   let todoSource: "write" | "tasks" | undefined;
 
   const call = (block: Record<string, unknown>, fallbackId: string, at: number | undefined) => {
@@ -554,6 +608,7 @@ export function createClaudeDocReader(options: ChatDocOptions = {}): ChatDocRead
     }
     store.add(newTool(id, name, at, parts));
 
+    if (name === "AskUserQuestion" || name === "ExitPlanMode") asking = askingOf(id, name, input);
     if (name === "TodoWrite") {
       const todos = claudeTodos(input);
       if (todos !== undefined) {
@@ -610,6 +665,7 @@ export function createClaudeDocReader(options: ChatDocOptions = {}): ChatDocRead
     meta: Record<string, unknown> | undefined,
   ): void => {
     const patch = meta?.["structuredPatch"];
+    if (asking?.id === str(block["tool_use_id"])) asking = undefined;
     const id = str(block["tool_use_id"]);
     if (id === undefined) return;
     const failed = block["is_error"] === true;
@@ -671,6 +727,7 @@ export function createClaudeDocReader(options: ChatDocOptions = {}): ChatDocRead
     let images =
       role === "user" ? content.filter((b) => asRecord(b)?.["type"] === "image").length : 0;
     const message = (index: number, text: string): void => {
+      asking = undefined;
       addMessage(store, `${uuid}:${index}`, kind, clean(text), at, images);
       images = 0;
     };
@@ -715,6 +772,7 @@ export function createClaudeDocReader(options: ChatDocOptions = {}): ChatDocRead
         ? tasks.flatMap((task) => (task.todo === null ? [] : [task.todo]))
         : written;
     const doc = store.doc({ agents: agents.map((a) => ({ ...a })), files: files.list() });
+    if (asking !== undefined) doc.asking = structuredClone(asking);
     return withOptional(
       doc,
       model,
