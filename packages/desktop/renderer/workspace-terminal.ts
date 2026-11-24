@@ -1423,6 +1423,7 @@ function makePane(
     // A command began: the moment an agent typed at the prompt may have
     // started, so the Chat switch looks for one (agent-chat.ts).
     onCommandStart: () => agentChats.get(paneKey)?.commandStarted(),
+    onCommandEnd: () => agentChats.get(paneKey)?.commandEnded(),
     // Every keystroke verbatim, control bytes included — that is what makes
     // Ctrl-C, arrows and Escape work rather than only plain text.
     sendInput: (data) => void window.jarvis.sendTerminalInput(paneKey, data),

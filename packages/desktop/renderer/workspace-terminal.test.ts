@@ -2666,8 +2666,9 @@ describe("the agent chat switch", () => {
     expect(asked).toEqual(["tab-1"]);
     expect(bar()?.hidden).toBe(false);
     expect(bar()?.parentElement?.className).toBe("terminal-pane");
+    // Detection stops; the shown agent's own 10 s check is the one more look.
     await vi.advanceTimersByTimeAsync(10000);
-    expect(asked).toEqual(["tab-1"]);
+    expect(asked).toEqual(["tab-1", "tab-1"]);
   });
 
   it("keeps asking at 3s and 8s for a plain command, and never shows a switch", async () => {

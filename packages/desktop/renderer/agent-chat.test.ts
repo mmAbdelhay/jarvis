@@ -52,9 +52,10 @@ describe("detecting an agent", () => {
     await settle();
     expect(switchShown(s.host)).toBe(true);
     expect(tab(s.host, "term").getAttribute("aria-selected")).toBe("true");
+    // Detection has stopped; only the shown agent's own 10 s check looks again.
     s.timers.advance(10000);
     await settle();
-    expect(s.api.terminalAgentChat).toHaveBeenCalledTimes(1);
+    expect(s.api.terminalAgentChat).toHaveBeenCalledTimes(2);
     expect(s.setChatView).not.toHaveBeenCalledWith(true, expect.anything());
   });
 
@@ -135,10 +136,11 @@ describe("detecting an agent", () => {
     await settle();
     expect(s.api.terminalAgentChat).toHaveBeenCalledTimes(5);
     expect(switchShown(s.host)).toBe(true);
+    // Detection is over: what is left is the shown agent's own 10 s check.
     s.timers.advance(60000);
     await settle();
-    expect(s.api.terminalAgentChat).toHaveBeenCalledTimes(5);
-    expect(s.timers.pending()).toBe(0);
+    expect(s.api.terminalAgentChat).toHaveBeenCalledTimes(6);
+    expect(s.timers.pending()).toBe(1);
     running = false;
   });
 
@@ -384,6 +386,55 @@ describe("the chat's frame", () => {
     const s = await open(agentView(), { toggleFiles });
     s.q<HTMLButtonElement>(".ac-files-toggle").click();
     expect(toggleFiles).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("an agent that left while the pane was rebuilt", () => {
+  async function inChat(overrides: Partial<AgentChatOptions> = {}) {
+    const s = setup(overrides, agentView());
+    s.chat.focused();
+    await settle();
+    tab(s.host, "chat").click();
+    return s;
+  }
+
+  it("leaves Chat when the command ends, with no push needed", async () => {
+    const s = await inChat({ isRunning: () => false });
+    s.current.view = NONE;
+    s.chat.commandEnded();
+    await settle();
+    expect(switchShown(s.host)).toBe(false);
+    expect(s.q<HTMLElement>(".agent-chat").hidden).toBe(true);
+  });
+
+  it("leaves Chat at once when a send answers gone, even if the shell still reads as running", async () => {
+    const s = await inChat({ isRunning: () => true });
+    s.current.view = NONE;
+    (s.api.terminalAgentSend as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: false,
+      reason: "gone",
+    });
+    const input = s.q<HTMLTextAreaElement>(".agent-chat__input");
+    input.value = "hello";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
+    );
+    await settle();
+    await settle();
+    expect(switchShown(s.host)).toBe(false);
+    expect(input.value).toBe("hello");
+  });
+
+  it("checks every 10 s while it shows an agent, so a lost push cannot strand it", async () => {
+    const s = await inChat({ isRunning: () => false });
+    const calls = s.api.terminalAgentChat.mock.calls.length;
+    s.current.view = NONE;
+    s.timers.advance(10_000);
+    await settle();
+    expect(s.api.terminalAgentChat.mock.calls.length).toBe(calls + 1);
+    expect(switchShown(s.host)).toBe(false);
+    expect(s.timers.pending()).toBe(0);
   });
 });
 

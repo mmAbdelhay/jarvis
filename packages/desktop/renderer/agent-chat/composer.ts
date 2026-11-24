@@ -140,6 +140,8 @@ export type ComposerOptions = {
   /** Earlier messages sent to this agent, oldest first. */
   history(): string[];
   note(message: string | undefined): void;
+  /** An action answered "gone": the agent has left. */
+  gone?(): void;
   /** Something was sent or changed: look at the agent again. */
   changed(): void;
   /** Files may also be dropped anywhere on this element. */
@@ -624,6 +626,7 @@ export function createComposer(options: ComposerOptions): Composer {
     } else if (!threw) {
       // What was typed stays; the reason is shown.
       options.note(t(SEND_REFUSALS[outcome.reason]));
+      if (outcome.reason === "gone") options.gone?.();
     }
     paintButtons();
     // Back to the box only if the keys were still here or nowhere.
@@ -678,7 +681,10 @@ export function createComposer(options: ComposerOptions): Composer {
       options.note(undefined);
       try {
         const result = await api.stop();
-        if (!result.ok) options.note(t(STOP_REFUSALS[result.reason]));
+        if (!result.ok) {
+          options.note(t(STOP_REFUSALS[result.reason]));
+          if (result.reason === "gone") options.gone?.();
+        }
       } catch {
         options.note(t("agentChatStopFailed"));
       }
@@ -702,7 +708,10 @@ export function createComposer(options: ComposerOptions): Composer {
           options.note(undefined);
           try {
             const result = await api.mode(item.id);
-            if (!result.ok) options.note(t(MODE_REFUSALS[result.reason]));
+            if (!result.ok) {
+              options.note(t(MODE_REFUSALS[result.reason]));
+              if (result.reason === "gone") options.gone?.();
+            }
           } catch {
             options.note(t("agentChatModeUnreadable"));
           }
@@ -716,7 +725,10 @@ export function createComposer(options: ComposerOptions): Composer {
     options.note(undefined);
     try {
       const result = await api.command(command);
-      if (!result.ok) options.note(t(COMMAND_REFUSALS[result.reason]));
+      if (!result.ok) {
+        options.note(t(COMMAND_REFUSALS[result.reason]));
+        if (result.reason === "gone") options.gone?.();
+      }
     } catch {
       options.note(t("agentChatCommandInvalid"));
     }

@@ -47,6 +47,7 @@ function pane(
     onCwd?: (path: string) => void;
     chips?: (path: string) => Promise<import("../src/ipc.js").TerminalChips | undefined>;
     onCommandStart?: () => void;
+    onCommandEnd?: () => void;
     resize?: (cols: number, rows: number) => void;
     splitKeys?: import("./terminal-addons.js").SplitKeys;
   } = {},
@@ -2402,6 +2403,15 @@ describe("a terminal pane's chat view", () => {
     expect(onCommandStart).not.toHaveBeenCalled();
     p.write(C("claude"));
     expect(onCommandStart).toHaveBeenCalledTimes(1);
+  });
+
+  it("tells the caller when a command ends, so a chat can look again", () => {
+    const onCommandEnd = vi.fn();
+    const p = pane(undefined, { onCommandEnd });
+    p.write(`${A}$ ${B}claude\r\n${C("claude")}bye\r\n`);
+    expect(onCommandEnd).not.toHaveBeenCalled();
+    p.write(D(0));
+    expect(onCommandEnd).toHaveBeenCalledTimes(1);
   });
 
   it("hides the terminal without detaching it or resizing the pty", () => {

@@ -78,6 +78,9 @@ export type PaneHooks = {
    *  agent typed at the prompt may have started. The Chat view uses it to
    *  look for one. Absent for a pane that never shows a chat. */
   onCommandStart?: (() => void) | undefined;
+  /** A command ended (the shell is back at its prompt): an agent that ran
+   *  in it is gone. The Chat view uses it to look again. */
+  onCommandEnd?: (() => void) | undefined;
   /** The most recent commands from Jarvis's own command log, newest first —
    *  what ↑/↓ in the command editor walk. Absent (or failing) means the
    *  arrows find nothing, which is a line that simply does not change. */
@@ -1226,6 +1229,7 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
       // is never gated on whether the laptop's own pane is being watched.
       attempt(() => reportCommandFinished(event.block));
       attempt(() => notifyIfUnwatched(event.block));
+      attempt(() => hooks.onCommandEnd?.());
       // The frozen block now holds what the live terminal was drawing — so
       // the live terminal is cleared. Ordered *behind* xterm's write buffer,
       // never called straight from here: Terminal.write() always defers its

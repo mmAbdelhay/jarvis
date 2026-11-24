@@ -70,6 +70,8 @@ export type AgentChatOptions = {
 export type AgentChat = {
   /** A command began in the pane: look for an agent at 1s, 3s and 8s. */
   commandStarted(): void;
+  /** The command in the pane ended: an agent that ran in it is gone. */
+  commandEnded(): void;
   /** The pane regained focus: look now. */
   focused(): void;
   /** main said the view changed (terminal:claudeViewChanged). */
@@ -82,6 +84,8 @@ export const DETECT_AT_MS: readonly number[] = [1000, 3000, 8000];
 /** After those, how often to keep looking while the command still runs: a
  *  Codex or Copilot session file may only exist after the first message. */
 export const KEEP_LOOKING_MS = 10000;
+/** How often a pane that shows an agent checks it is still there. */
+export const WATCH_MS = 10000;
 /** How long to wait before asking again after the agent seemed to vanish. */
 const RE_ASK_MS = 2000;
 /** How long after the pane is built to look for a command already running. */
@@ -266,6 +270,12 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
     },
     note: showNote,
     changed: () => void load(),
+    // An action that answers "gone" proves the agent left: look again and,
+    // if it is still not there, leave Chat at once.
+    gone: () => {
+      lostOnce = true;
+      void load();
+    },
     dropTarget: panel,
   });
 
@@ -420,6 +430,8 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
     cancelReAsk = undefined;
     cancelTick?.();
     cancelTick = undefined;
+    cancelWatch?.();
+    cancelWatch = undefined;
     if (agent === undefined) return;
     const hadFocus = host.contains(document.activeElement);
     agent = undefined;
@@ -441,6 +453,22 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
       stopDetecting();
       cancelDetect = [schedule(keepLooking, KEEP_LOOKING_MS)];
     }
+  }
+
+  // A pane that shows an agent still asks now and then: a push or a command end
+  // lost on the way (a pane rebuilt after a pop-out) must not leave a chat for
+  // an agent that has gone.
+  let cancelWatch: (() => void) | undefined;
+  function watchAgent(): void {
+    cancelWatch?.();
+    cancelWatch = undefined;
+    if (disposed || agent === undefined) return;
+    cancelWatch = schedule(() => {
+      cancelWatch = undefined;
+      if (disposed || agent === undefined) return;
+      if (isShown() && document.visibilityState === "visible") void load();
+      watchAgent();
+    }, WATCH_MS);
   }
 
   function apply(view: AgentChatView): void {
@@ -467,6 +495,7 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
       agent = view;
     }
     stopDetecting();
+    watchAgent();
     bar.hidden = false;
     if (first && remembered() === "chat") setMode("chat", false);
     else if (mode === "chat")
@@ -589,6 +618,9 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
 
   return {
     commandStarted,
+    commandEnded() {
+      if (!disposed && agent !== undefined) void load();
+    },
     focused() {
       if (!disposed && isShown()) void load();
     },
@@ -602,6 +634,7 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
       cancelReload();
       cancelReAsk?.();
       cancelTick?.();
+      cancelWatch?.();
       stopDetecting();
       sizeObserver?.disconnect();
       drawer.close();
