@@ -200,6 +200,7 @@ function stubJarvis(overrides: Partial<RendererApi>): RendererApi {
     officeScreen: vi.fn(async () => ({ kind: "none" as const })),
     officePageShot: vi.fn(async () => undefined),
     popoutTabId: undefined,
+    pathForFile: () => "",
     popoutOpen: vi.fn(async () => ({ ok: false as const, reason: "failed" as const })),
     popoutReturn: vi.fn(async () => false),
     popoutFocus: vi.fn(async () => false),
