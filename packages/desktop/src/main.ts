@@ -524,7 +524,9 @@ app.whenReady().then(async () => {
           }),
       });
     let appWindow: BrowserWindow | undefined;
-    let appPopouts: { closeAll(): void; returnAll(): Promise<void> } | undefined;
+    let appPopouts:
+      | { closeAll(): void; forgetReturned(): void; returnAll(): Promise<void> }
+      | undefined;
     const language = PRIMARY_LANGUAGE;
     const appImage = platform === "linux" ? appImageOf(process.env, process.execPath) : undefined;
     const nodeDeps = nodeDaemonModeDeps({
@@ -607,6 +609,7 @@ app.whenReady().then(async () => {
         // over against the new one, in the same window. Its tabs and shells
         // are not the new core's, so no pop-out of them can stay.
         appPopouts?.closeAll();
+        appPopouts?.forgetReturned();
         appWindow?.webContents.reload();
       },
       async useInProcess() {
@@ -616,6 +619,7 @@ app.whenReady().then(async () => {
         client.switchTo(inProcessCoreClient(inProcessCore));
         inProcessCore.startRemote();
         appPopouts?.closeAll();
+        appPopouts?.forgetReturned();
         appWindow?.webContents.reload();
       },
       async showError(title, body) {

@@ -158,6 +158,9 @@ export type Popouts = {
    *  window, every terminal's last state kept, the windows destroyed, one
    *  announcement. Synchronous; asks no renderer. */
   closeAll(): void;
+  /** Drops every staged return: after a core switch the new core's tabs can
+   *  reuse the old ids, and must not take an old tab's layout or text. */
+  forgetReturned(): void;
   /** Returns every pop-out, asking each terminal's renderer for its state
    *  first (a mode switch, before the main renderer reloads). */
   returnAll(): Promise<void>;
@@ -462,6 +465,7 @@ export function createPopouts(deps: PopoutDeps): Popouts {
       for (const waiting of [...pending.values()]) waiting.resolve(undefined);
       if (closing.length > 0) announce();
     },
+    forgetReturned: () => returned.clear(),
     async returnAll() {
       await Promise.all(ids().map((id) => returnTab(id)));
     },

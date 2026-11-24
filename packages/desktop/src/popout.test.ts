@@ -295,6 +295,16 @@ describe("popping out a page tab", () => {
     expect(t.popouts.takeReturned("t1")).toBeUndefined();
   });
 
+  it("forgetReturned drops staged layouts: another core's tabs may reuse the ids", async () => {
+    const t = setup([tab("t1", { kind: "terminal" })], "t1");
+    const open = t.popouts.open("t1");
+    t.popouts.provideState("main", "t1", plainTerminalState("t1"));
+    await open;
+    t.popouts.closeAll();
+    t.popouts.forgetReturned();
+    expect(t.popouts.takeReturned("t1")).toBeUndefined();
+  });
+
   it("closeAll during an open that is awaiting the handover opens no window afterwards", async () => {
     const t = setup([tab("t1", { kind: "terminal" })], "t1");
     const open = t.popouts.open("t1");
