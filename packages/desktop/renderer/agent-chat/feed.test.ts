@@ -286,6 +286,42 @@ describe("tool rows", () => {
     expect(order.indexOf("ac-card__target")).toBeLessThan(order.indexOf("agent-chat__add"));
   });
 
+  it("shows a question row with its question and answer, never a bare tool name", async () => {
+    const s = await open(
+      agentView({
+        page: {
+          items: [
+            tool("q1", "AskUserQuestion", {
+              target: "Which tests?",
+              output: "User has answered: A",
+            }),
+            tool("q2", "ExitPlanMode", { target: "Move the discount", state: "running" }),
+          ],
+        },
+      }),
+    );
+    const [ask, plan] = rows(s.host);
+    expect(ask?.querySelector(".ac-card__target")?.textContent).toBe("Which tests?");
+    expect(ask?.querySelector<HTMLElement>(".ac-card__body")?.hidden).toBe(false);
+    expect(ask?.textContent).toContain("User has answered: A");
+    expect(plan?.querySelector(".ac-card__target")?.textContent).toBe("Move the discount");
+  });
+
+  it("shows how long a turn took only from 10 s", async () => {
+    const quick = await open(
+      agentView({
+        page: { items: [user("u1", "go", 0), reply("a1", "ok", 4000), user("u2", "n", 9000)] },
+      }),
+    );
+    expect(quick.host.querySelector(".ac-turn")).toBeNull();
+    const slow = await open(
+      agentView({
+        page: { items: [user("u1", "go", 0), reply("a1", "ok", 10000), user("u2", "n", 19000)] },
+      }),
+    );
+    expect(slow.q(".ac-turn").textContent).toBe("Worked for 10s");
+  });
+
   it("copies a command and a code block", async () => {
     const s = await open(
       agentView({

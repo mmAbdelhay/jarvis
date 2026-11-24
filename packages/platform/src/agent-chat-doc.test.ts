@@ -555,6 +555,30 @@ describe("parseClaudeDoc: a pending question or plan", () => {
   });
 });
 
+describe("parseClaudeDoc: question and plan tool rows", () => {
+  it("names the question as the row's target and keeps the answer as its output", () => {
+    const text = [
+      assistant("a", [
+        toolUse("q1", "AskUserQuestion", {
+          questions: [{ question: "Which tests?", multiSelect: false, options: [{ label: "A" }] }],
+        }),
+      ]),
+      user("r", [toolResult("q1", "User has answered: Which tests? = A")]),
+    ].join("\n");
+    const row = parseClaudeDoc(text).items.find((item) => item.kind === "tool");
+    expect(row?.kind === "tool" && row.target).toBe("Which tests?");
+    expect(row?.kind === "tool" && row.output).toContain("= A");
+  });
+
+  it("names the plan's first line (without heading marks) as the target", () => {
+    const text = assistant("p", [
+      toolUse("e1", "ExitPlanMode", { plan: "## Move the discount\n\n1. do it" }),
+    ]);
+    const row = parseClaudeDoc(text).items.find((item) => item.kind === "tool");
+    expect(row?.kind === "tool" && row.target).toBe("Move the discount");
+  });
+});
+
 describe("createClaudeDocReader", () => {
   const text = [
     user("u1", "one"),

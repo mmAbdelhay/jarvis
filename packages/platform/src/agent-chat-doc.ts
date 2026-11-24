@@ -600,6 +600,18 @@ export function createClaudeDocReader(options: ChatDocOptions = {}): ChatDocRead
     if (command !== undefined) parts.command = clean(command, MAX_COMMAND_CHARS);
     const path = str(input?.["file_path"]) ?? str(input?.["path"]);
     if (path !== undefined) parts.path = path;
+    // A question or plan row names what it asks, never a bare tool name.
+    if (name === "AskUserQuestion" || name === "ExitPlanMode") {
+      const asked = askingOf(id, name, input);
+      const title =
+        name === "ExitPlanMode"
+          ? asked?.plan
+              ?.split("\n")
+              .map((row) => row.replace(/^[#>*\s-]+/, "").trim())
+              .find((row) => row !== "")
+          : asked?.questions?.[0]?.question;
+      if (title !== undefined) parts.target = clean(title, 400);
+    }
     const pairs = inputPairs(input);
     if (pairs.length > 0) parts.input = pairs;
     if (input !== undefined) {

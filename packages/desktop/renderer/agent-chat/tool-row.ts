@@ -282,7 +282,15 @@ function otherCard(item: ChatToolItem, ctx: ToolContext): HTMLElement {
     }
     if (hasOutput) body.append(outputBody(item, ctx, item.id));
     const label = ctx.t("agentChatDetails");
-    bar.prepend(toggle(ctx, `${item.id}:body`, false, body, label));
+    bar.prepend(
+      toggle(
+        ctx,
+        `${item.id}:body`,
+        /^(AskUserQuestion|ExitPlanMode)$/.test(item.tool),
+        body,
+        label,
+      ),
+    );
     card.append(body);
   }
   return card;

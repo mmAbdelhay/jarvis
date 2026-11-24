@@ -18,6 +18,8 @@ import {
 
 /** How close to the bottom still counts as "at the bottom", in px. */
 const BOTTOM_SLACK_PX = 24;
+/** A turn shorter than this has no "Worked for" line. */
+const MIN_TURN_MS = 10_000;
 /** How close to the top asks for the page before. */
 const TOP_SLACK_PX = 160;
 
@@ -193,7 +195,8 @@ export function createFeed(options: FeedOptions): Feed {
     let turnLast: number | undefined;
     const closeTurn = (finished: boolean): void => {
       if (turnStart === undefined || turnStart.at === undefined || turnLast === undefined) return;
-      if (!finished || turnLast <= turnStart.at) return;
+      // Only a turn that took a while is worth saying so about.
+      if (!finished || turnLast - turnStart.at < MIN_TURN_MS) return;
       const id = `turn:${turnStart.id}`;
       const text = fmt(t("agentChatWorkedFor"), { time: duration(turnLast - turnStart.at) });
       entries.push({ key: id, sig: text, build: () => turnRow(id, text) });
