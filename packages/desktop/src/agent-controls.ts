@@ -13,6 +13,7 @@ import {
   stripAnsi,
 } from "@jarvis/core";
 import type { ClaudeMode } from "@jarvis/wire";
+import { builtInNames } from "./agent-command-tables.js";
 import { bracketedSubmit } from "./bracketed.js";
 import type { PaneAgentSession } from "./pane-agent-session.js";
 
@@ -53,48 +54,7 @@ const MODES: readonly ClaudeMode[] = ["default", "acceptEdits", "plan", "auto"];
 const SETTLE_MS = 1_500;
 const POLL_MS = 100;
 
-/** The slash commands each vendor documents; custom ones come from files. */
-const BUILT_IN: Record<PaneAgentSession["vendor"], readonly string[]> = {
-  anthropic: [
-    "help",
-    "clear",
-    "compact",
-    "model",
-    "cost",
-    "status",
-    "resume",
-    "config",
-    "memory",
-    "init",
-    "agents",
-    "mcp",
-    "permissions",
-    "doctor",
-    "review",
-    "add-dir",
-    "hooks",
-  ],
-  openai: [
-    "model",
-    "approvals",
-    "new",
-    "init",
-    "compact",
-    "diff",
-    "mention",
-    "status",
-    "review",
-    "mcp",
-    "resume",
-  ],
-  github: ["help", "clear", "model", "usage", "resume", "mcp", "add-dir", "init"],
-};
-
-export function builtInCommands(vendor: PaneAgentSession["vendor"]): readonly string[] {
-  return BUILT_IN[vendor];
-}
-
-const COMMAND = /^\/([A-Za-z][A-Za-z0-9:_-]{0,60})(?: ([A-Za-z0-9._:@[\]/-]{1,64}))?$/;
+const COMMAND = /^\/([A-Za-z][A-Za-z0-9:._-]{0,60})(?: ([A-Za-z0-9._:@[\]/-]{1,64}))?$/;
 
 type Reading = "menu" | "idle" | "busy" | "draft" | "other";
 
@@ -205,7 +165,7 @@ export function createAgentControls(deps: AgentControlDeps): {
           return { ok: false, reason: "gone" };
         const name = match[1] ?? "";
         const known =
-          BUILT_IN[session.vendor].includes(name) ||
+          builtInNames(session.vendor).has(name) ||
           (deps.commandNames !== undefined && (await deps.commandNames(session)).has(name));
         if (!known) return { ok: false, reason: "unknown" };
         const seen = reading(screenOf(paneKey), session.vendor);

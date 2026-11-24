@@ -233,5 +233,16 @@ describe("agentCommand", () => {
     const codex = setup({}, { vendor: "openai", screen: () => "› Ask Codex to do anything" });
     expect(await codex.controls.command("t1", "/clear")).toEqual({ ok: false, reason: "unknown" });
     expect(await codex.controls.command("t1", "/new")).toEqual({ ok: true });
+    expect(await codex.controls.command("t1", "/approvals")).toEqual({
+      ok: false,
+      reason: "unknown",
+    });
+  });
+
+  it("knows a built-in by its alias too, and the table's newer names", async () => {
+    const claude = setup();
+    expect(await claude.controls.command("t1", "/cost")).toEqual({ ok: true });
+    const codexNow = setup({}, { vendor: "openai", screen: () => "› Ask Codex to do anything" });
+    expect(await codexNow.controls.command("t1", "/mention src")).toEqual({ ok: true });
   });
 });
