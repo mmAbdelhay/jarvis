@@ -427,6 +427,35 @@ describe("agentChat", () => {
     expect(ids(agent(await t.handlers.chat("t1"))).length).toBeGreaterThan(0);
   });
 
+  it("keeps the pending session's view when the real session for the same process then fails to read", async () => {
+    const pending = {
+      ...SESSION(),
+      sessionId: "pending-1-9",
+      startedAt: 9,
+      pending: true as const,
+    };
+    delete (pending as { transcriptPath?: string }).transcriptPath;
+    const t = setup(userLine(1), { sessions: [pending] });
+    const first = agent(await t.handlers.chat("t1"));
+    expect(first.sessionId).toBe("pending-1-9");
+    vi.mocked(t.deps.sessions.session).mockResolvedValue({
+      ...SESSION(),
+      startedAt: 9,
+      sessionId: "real-1",
+    });
+    vi.mocked(t.deps.statFile).mockRejectedValue(new Error("disk"));
+    const failed = agent(await t.handlers.chat("t1"));
+    expect(failed).toMatchObject({ readFailed: true, sessionId: "pending-1-9" });
+    // Another process's session does not inherit the pending view.
+    vi.mocked(t.deps.sessions.session).mockResolvedValue({
+      ...SESSION(),
+      pid: 2,
+      startedAt: 9,
+      sessionId: "real-2",
+    });
+    expect(agent(await t.handlers.chat("t1")).sessionId).toBe("real-2");
+  });
+
   it("answers an empty agent view with readFailed when the very first read fails", async () => {
     const t = setup(userLine(1));
     vi.mocked(t.deps.statFile).mockRejectedValue(new Error("x"));

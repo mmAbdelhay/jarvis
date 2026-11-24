@@ -1591,8 +1591,6 @@ function makePane(
       toggleFiles: toggleExplorer,
     });
     agentChats.set(paneKey, chat);
-    // A new pane without an agent header brings the tab's strip back.
-    queueMicrotask(() => syncChatOnly(view.element.closest<HTMLElement>(".terminal-split")));
     const disposePane = view.dispose;
     view.dispose = () => {
       agentChats.delete(paneKey);

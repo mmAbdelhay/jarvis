@@ -354,8 +354,13 @@ describe("createPaneAgentLookup", () => {
         const x = processOf("codex", { pid: 500, startedAt: 1000 });
         const y = processOf("codex", { pid: 501, startedAt: 1100, cwd: "/elsewhere" });
         await expect(lookup.forProcess(x, [x, y])).resolves.toMatchObject({ sessionId: "aaaa" });
+        // X moved on to another directory, so it no longer contests the rollout,
+        // but the rollout stays bound to it while it lives.
+        const xMoved = processOf("codex", { pid: 500, startedAt: 1000, cwd: "/elsewhere" });
         const y2 = processOf("codex", { pid: 501, startedAt: 1100 });
-        await expect(lookup.forProcess(y2, [x, y2])).resolves.toMatchObject({ pending: true });
+        await expect(lookup.forProcess(y2, [xMoved, y2])).resolves.toMatchObject({
+          pending: true,
+        });
         // X is gone: nothing binds the rollout away from Y any more.
         const peerGone = createPaneAgentLookup(one(1500, 2000));
         await peerGone.forProcess(x, [x]);

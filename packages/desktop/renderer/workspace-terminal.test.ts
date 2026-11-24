@@ -2727,7 +2727,9 @@ describe("the agent chat switch", () => {
     // Clear is in the header row in Term, and clears the pane.
     const clear = document.querySelector<HTMLButtonElement>(".ac-bar__clear");
     expect(clear?.hidden).toBe(false);
-    expect(() => clear?.click()).not.toThrow();
+    const clearedBefore = FakeTerminal.instances[0]?.cleared ?? 0;
+    clear?.click();
+    expect(FakeTerminal.instances[0]?.cleared).toBe(clearedBefore + 1);
   });
 
   it("looks for an agent in a pane that holds the alternate screen, with no command mark seen", async () => {
