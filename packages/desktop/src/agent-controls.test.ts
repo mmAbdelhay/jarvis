@@ -91,7 +91,7 @@ describe("agentStop", () => {
   it.each([
     ["idle", { busy: false }, "idle"],
     ["a menu", { busy: true, menu: true }, "prompt"],
-    ["a draft", { busy: false, draft: "typing" }, "idle"],
+    ["a draft hiding the busy reading", { busy: false, draft: "typing" }, "draft"],
   ])("refuses %s, writing nothing", async (_n, pane, reason) => {
     const t = setup(pane);
     expect(await t.controls.stop("t1")).toEqual({ ok: false, reason });

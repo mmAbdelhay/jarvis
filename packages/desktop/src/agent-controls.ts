@@ -31,7 +31,7 @@ export type AgentControlDeps = {
 
 export type AgentStopResult =
   | { ok: true }
-  | { ok: false; reason: "gone" | "prompt" | "idle" | "unsupported" };
+  | { ok: false; reason: "gone" | "prompt" | "idle" | "draft" | "unsupported" };
 
 export type AgentModeResult =
   | { ok: true; mode: ClaudeMode }
@@ -151,6 +151,8 @@ export function createAgentControls(deps: AgentControlDeps): {
         // running right now is interrupted, once.
         const seen = reading(screenOf(paneKey), session.vendor);
         if (seen === "menu") return { ok: false, reason: "prompt" };
+        // A draft in the box hides whether a turn runs: say so, not "idle".
+        if (seen === "draft") return { ok: false, reason: "draft" };
         if (seen !== "busy") return { ok: false, reason: "idle" };
         deps.write(paneKey, ESC);
         return { ok: true };
