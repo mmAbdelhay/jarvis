@@ -19,7 +19,13 @@ export type QuestionOptions = {
   focusComposer(): void;
   /** For a pane with no live terminal to show: the Term view. */
   toTerm(): void;
+  /** Milliseconds clock and one-shot timer (the card ignores answers just after it appears). */
+  now(): number;
+  schedule(fn: () => void, ms: number): () => void;
 };
+
+/** How long after a question appears or changes its buttons ignore a click. */
+export const ANSWER_GUARD_MS = 400;
 
 export type QuestionCard = {
   element: HTMLElement;
@@ -28,7 +34,7 @@ export type QuestionCard = {
   shown(): boolean;
 };
 
-function details(asking: ChatAsking, t: Translate): HTMLElement | undefined {
+function details(asking: ChatAsking, t: Translate, title: string): HTMLElement | undefined {
   if (asking.questions === undefined || asking.questions.length === 0) return undefined;
   const box = el("details", "ac-question__details");
   box.open = true;
@@ -38,9 +44,11 @@ function details(asking: ChatAsking, t: Translate): HTMLElement | undefined {
     if (question.header !== undefined && question.header !== "") {
       block.append(el("span", "ac-badge", question.header));
     }
-    const text = el("strong", undefined, question.question);
-    text.dir = "auto";
-    block.append(text);
+    if (question.question !== title) {
+      const text = el("strong", undefined, question.question);
+      text.dir = "auto";
+      block.append(text);
+    }
     if (question.multiSelect) block.append(el("span", "ac-badge", t("agentChatQuestionMulti")));
     const list = el("ul", "ac-question__options");
     for (const option of question.options) {
@@ -65,6 +73,13 @@ export function createQuestion(options: QuestionOptions): QuestionCard {
   element.hidden = true;
   element.setAttribute("role", "group");
   element.setAttribute("aria-label", t("agentChatQuestionLabel"));
+  // Where the keys land when the composer locks under the typist: a card that
+  // acts on nothing, never an option.
+  element.tabIndex = -1;
+  const announce = el("span", "ac-sr-only");
+  announce.setAttribute("role", "status");
+  let shownAt = 0;
+  let cancelAnnounce: (() => void) | undefined;
   let sig = "";
   let dismissed = false;
   let manual = false;
@@ -81,11 +96,9 @@ export function createQuestion(options: QuestionOptions): QuestionCard {
     element.replaceChildren();
     const prompt = view.prompt;
     const head = el("div", "ac-question__head");
-    const title = el(
-      "strong",
-      "agent-chat__question ac-question__title",
-      prompt?.question ?? view.asking?.questions?.[0]?.question ?? t("agentChatNeedsTerm"),
-    );
+    const titleText =
+      prompt?.question ?? view.asking?.questions?.[0]?.question ?? t("agentChatNeedsTerm");
+    const title = el("strong", "agent-chat__question ac-question__title", titleText);
     title.dir = "auto";
     head.append(title, el("span", "ac-question__flag", t("agentChatNeedsAnswer")));
     element.append(head);
@@ -95,10 +108,12 @@ export function createQuestion(options: QuestionOptions): QuestionCard {
       for (const block of renderMarkdown(view.asking.plan, options.code)) plan.append(block);
       element.append(plan);
     } else if (prompt?.body !== undefined && prompt.body !== "") {
-      element.append(renderCode(prompt.body));
+      const command = renderCode(prompt.body);
+      command.classList.add("ac-question__command");
+      element.append(command);
     }
     if (view.asking !== undefined) {
-      const more = details(view.asking, t);
+      const more = details(view.asking, t, titleText);
       if (more !== undefined) element.append(more);
     }
 
@@ -111,7 +126,18 @@ export function createQuestion(options: QuestionOptions): QuestionCard {
         button.dataset["index"] = String(index);
         if (option.highlighted) button.classList.add("ac-primary");
         button.disabled = answering;
-        button.addEventListener("click", () => void options.answer(index, option.label));
+        button.addEventListener("click", () => {
+          // An Enter or Space meant for something else a moment ago: not an answer.
+          if (options.now() - shownAt < ANSWER_GUARD_MS) {
+            announce.textContent = t("agentChatQuestionWait");
+            cancelAnnounce?.();
+            cancelAnnounce = options.schedule(() => {
+              announce.textContent = "";
+            }, 2000);
+            return;
+          }
+          void options.answer(index, option.label);
+        });
         choices.append(button);
       });
     }
@@ -121,7 +147,7 @@ export function createQuestion(options: QuestionOptions): QuestionCard {
         : undefined;
     if (hint !== undefined) element.append(el("p", "ac-question__hint", hint));
 
-    const terminalButton = el("button", "agent-chat__option ac-terminal-button");
+    const terminalButton = el("button", "ac-link-button ac-terminal-button");
     terminalButton.type = "button";
     terminalButton.addEventListener("click", () => {
       const open = drawer.isOpen();
@@ -135,12 +161,21 @@ export function createQuestion(options: QuestionOptions): QuestionCard {
       if (last !== undefined) sync(last);
     });
     choices.append(terminalButton);
+    const answerTerm = el(
+      "button",
+      "ac-link-button ac-answer-term",
+      t("agentChatAnswerInTerminal"),
+    );
+    answerTerm.type = "button";
+    answerTerm.hidden = true;
+    answerTerm.addEventListener("click", () => drawer.focusTerm());
+    choices.append(answerTerm);
     const toTerm = el("button", "agent-chat__option ac-to-term", t("agentChatNeedsTermButton"));
     toTerm.type = "button";
     toTerm.hidden = true;
     toTerm.addEventListener("click", () => options.toTerm());
     choices.append(toTerm);
-    element.append(choices);
+    element.append(choices, announce);
     const slot = el("div", "ac-drawer-slot");
     slot.hidden = true;
     element.append(slot);
@@ -150,13 +185,14 @@ export function createQuestion(options: QuestionOptions): QuestionCard {
     const slot = element.querySelector<HTMLElement>(".ac-drawer-slot");
     const button = element.querySelector<HTMLButtonElement>(".ac-terminal-button");
     const toTerm = element.querySelector<HTMLButtonElement>(".ac-to-term");
-    if (slot === null || button === null || toTerm === null) return;
+    const answerTerm = element.querySelector<HTMLButtonElement>(".ac-answer-term");
+    if (slot === null || button === null || toTerm === null || answerTerm === null) return;
     const want = wantsDrawer(view);
     if (want) {
       slot.hidden = false;
       if (!drawer.isOpen()) {
-        if (drawer.open(slot)) drawer.focusTerm();
-        else slot.hidden = true;
+        // Never takes the keys by itself: someone typing would answer the menu.
+        if (!drawer.open(slot)) slot.hidden = true;
       } else drawer.place();
       wasOpen = drawer.isOpen();
     } else {
@@ -170,6 +206,7 @@ export function createQuestion(options: QuestionOptions): QuestionCard {
     }
     // No live terminal to show here: the only way to answer is the Term view.
     toTerm.hidden = !(want && !drawer.isOpen());
+    answerTerm.hidden = !drawer.isOpen();
     button.hidden = !drawer.available();
     button.textContent =
       want && drawer.isOpen() ? t("agentChatHideTerminal") : t("agentChatShowTerminal");
@@ -197,6 +234,7 @@ export function createQuestion(options: QuestionOptions): QuestionCard {
         manual = false;
         return;
       }
+      if (element.hidden) shownAt = options.now();
       element.hidden = false;
       const next = JSON.stringify([
         prompt?.kind,
@@ -208,6 +246,7 @@ export function createQuestion(options: QuestionOptions): QuestionCard {
       if (next !== sig || lastAnswering !== answering) {
         const changed = next !== sig;
         if (changed) {
+          shownAt = options.now();
           dismissed = false;
           manual = false;
         }

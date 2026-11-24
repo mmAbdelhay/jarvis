@@ -41,6 +41,7 @@ describe("a pending question", () => {
   it("answers by index and label from the screen's own prompt, then looks again", async () => {
     const s = await open(single());
     const calls = s.api.terminalAgentChat.mock.calls.length;
+    s.timers.advance(400);
     s.host.querySelectorAll<HTMLButtonElement>("button[data-index]")[2]?.click();
     await settle();
     expect(s.api.terminalAgentAnswer).toHaveBeenCalledWith("t1", 2, "No");
@@ -49,6 +50,7 @@ describe("a pending question", () => {
 
   it("says so when the question changed or is gone", async () => {
     const s = await open(single());
+    s.timers.advance(400);
     s.api.terminalAgentAnswer.mockResolvedValueOnce({ ok: false, reason: "changed" } as never);
     s.host.querySelector<HTMLButtonElement>("button[data-index]")?.click();
     await settle();
@@ -141,7 +143,7 @@ describe("the terminal drawer", () => {
     expect(live.style.getPropertyValue("--drawer-w")).not.toBe("");
     expect(live.parentElement).toBe(parent);
     expect(s.q<HTMLElement>(".ac-drawer-slot").hidden).toBe(false);
-    expect(document.activeElement).toBe(s.xterm);
+    expect(document.activeElement).not.toBe(s.xterm);
     expect(s.q<HTMLTextAreaElement>(".agent-chat__input").disabled).toBe(true);
     expect(s.host.querySelector<HTMLElement>(".ac-terminal-button")?.textContent).toBe(
       t("agentChatHideTerminal"),
@@ -183,6 +185,8 @@ describe("the terminal drawer", () => {
 
   it("closes by itself when the menu is gone, and the keys return to the composer", async () => {
     const s = await open(agentView({ needsTerm: true }));
+    expect(document.activeElement).not.toBe(s.xterm);
+    s.q<HTMLButtonElement>(".ac-answer-term").click();
     expect(document.activeElement).toBe(s.xterm);
     s.current.view = agentView();
     s.chat.refresh();
@@ -219,5 +223,65 @@ describe("the terminal drawer", () => {
     toTerm.click();
     expect(tab(s.host, "term").getAttribute("aria-selected")).toBe("true");
     expect(s.focusTerm).toHaveBeenCalled();
+  });
+
+  it("never takes the keys from the composer when it opens, and the locked composer hands them to the card, not an option", async () => {
+    const s = await open();
+    const input = s.q<HTMLTextAreaElement>(".agent-chat__input");
+    input.focus();
+    s.current.view = single();
+    s.chat.refresh();
+    await settle();
+    expect(document.activeElement).toBe(s.q(".agent-chat__prompt"));
+    expect(document.activeElement?.tagName).not.toBe("BUTTON");
+    s.current.view = agentView({ needsTerm: true, sessionId: "s1" });
+    s.chat.refresh();
+    await settle();
+    expect(document.activeElement).not.toBe(s.xterm);
+  });
+
+  it("ignores an answer in the first 400 ms after a question appears or changes, and says so", async () => {
+    const s = await open(single());
+    const button = s.q<HTMLButtonElement>("button[data-index]");
+    button.click();
+    await settle();
+    expect(s.api.terminalAgentAnswer).not.toHaveBeenCalled();
+    expect(button.disabled).toBe(false);
+    expect(s.q(".ac-sr-only").textContent).toBe(t("agentChatQuestionWait"));
+    s.timers.advance(400);
+    button.click();
+    await settle();
+    expect(s.api.terminalAgentAnswer).toHaveBeenCalledTimes(1);
+    // A changed question starts the guard again.
+    const next = single();
+    next.prompt = {
+      kind: "single",
+      question: "Another?",
+      options: [{ label: "Ok", highlighted: true }],
+    };
+    s.current.view = next;
+    s.chat.refresh();
+    await settle();
+    s.q<HTMLButtonElement>("button[data-index]").click();
+    await settle();
+    expect(s.api.terminalAgentAnswer).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not repeat the question text inside its details", async () => {
+    const s = await open(
+      agentView({
+        ...single(),
+        asking: {
+          id: "q",
+          tool: "AskUserQuestion",
+          questions: [
+            { question: "Run this command?", multiSelect: false, options: [{ label: "Yes" }] },
+          ],
+        },
+      }),
+    );
+    expect(
+      (s.q(".agent-chat__prompt").textContent?.match(/Run this command\?/g) ?? []).length,
+    ).toBe(1);
   });
 });

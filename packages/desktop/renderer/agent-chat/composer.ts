@@ -124,6 +124,8 @@ export type Composer = {
   update(view: AgentOf, locked: boolean): void;
   focus(): void;
   value(): string;
+  /** Whether the keys are in the box. */
+  hasFocus(): boolean;
   addFiles(files: readonly File[]): Promise<void>;
 };
 
@@ -738,6 +740,7 @@ export function createComposer(options: ComposerOptions): Composer {
       if (!input.disabled) input.focus();
     },
     value: () => input.value,
+    hasFocus: () => document.activeElement === input,
     addFiles,
     update(next, isLocked) {
       view = next;

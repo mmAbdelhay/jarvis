@@ -442,6 +442,12 @@ export const MESSAGES = {
     language === "ar" ? "انتظر حتى ينتهي رفع الملفات." : "Wait for the files to finish uploading.",
   agentChatWorkedFor: (language: "ar" | "en"): string =>
     language === "ar" ? "عمل لمدة {time}" : "Worked for {time}",
+  agentChatQuestionWait: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "ظهر السؤال للتو. انتظر لحظة ثم اختر."
+      : "The question just appeared. Wait a moment, then choose.",
+  agentChatAnswerInTerminal: (language: "ar" | "en"): string =>
+    language === "ar" ? "الإجابة في الطرفية" : "Answer in terminal",
   planPanelToggle: (language: "ar" | "en"): string =>
     language === "ar" ? "تبديل لوحة الخطة" : "Toggle plan panel",
   // ---- Reviews (Task 12): the Terminal tab's dock, its PR link chip and

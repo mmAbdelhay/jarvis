@@ -2660,6 +2660,9 @@
   .agent-chat__option:hover:not(:disabled) { border-color: var(--accent); }
   .agent-chat__option:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .agent-chat__option:disabled { opacity: 0.5; cursor: default; }
+  .ac-sr-only { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .ac-question:focus { outline: none; }
+  .ac-question__command { border-radius: var(--r-control); background: var(--terminal-ground); }
   .ac-drawer-slot { height: 260px; border-radius: var(--r-control); background: var(--terminal-ground); }
 
   .agent-chat__composer { position: relative; display: flex; flex-direction: column; align-items: stretch;

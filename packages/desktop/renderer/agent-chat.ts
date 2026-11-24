@@ -221,6 +221,8 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
     answer,
     focusComposer: () => composer.focus(),
     toTerm: () => setMode("term", true),
+    now,
+    schedule,
   });
   const side = createPanel({
     t,
@@ -370,8 +372,12 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
     shell.setIdentity(VENDOR_NAMES[view.vendor], view.title);
     renderFeed(view);
     // The composer first: closing the drawer hands the keys to it.
+    const typing = composer.hasFocus();
     composer.update(view, view.prompt !== undefined || view.needsTerm === true);
     question.update(view, answering);
+    // A composer that locked under the typist must not leave the keys where an
+    // Enter would reach anything: they land on the card, which acts on nothing.
+    if (typing && question.shown()) question.element.focus();
     layout(view);
     if (view.readFailed === true) {
       showNote(t("agentChatReadFailed"));
