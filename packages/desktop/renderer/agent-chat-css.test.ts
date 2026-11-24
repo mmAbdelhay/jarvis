@@ -65,4 +65,47 @@ describe("the agent chat's layout", () => {
     expect(ruleBodyFor(".agent-chat__input:disabled")).toMatch(/opacity/);
     expect(ruleBodyFor(".agent-chat__send:disabled")).toMatch(/opacity/);
   });
+
+  it("centres a 820px column and gives the side panel 320px", () => {
+    expect(ruleBodyFor(".ac-column")).toMatch(/width\s*:\s*min\(820px,\s*100%\)/);
+    expect(ruleBodyFor(".ac-lower")).toMatch(/width\s*:\s*min\(820px,\s*100%\)/);
+    expect(ruleBodyFor(".ac-side")).toMatch(/width\s*:\s*320px/);
+  });
+
+  it("lets rows skip their layout while off screen, so thousands scroll smoothly", () => {
+    expect(ruleBodyFor(".ac-row")).toMatch(/content-visibility\s*:\s*auto/);
+  });
+
+  it("lays the live terminal over the card's slot for the drawer, anchored to its bottom rows", () => {
+    const drawer = ruleBodyFor(
+      '.terminal-pane[data-view="chat"][data-drawer="on"] > .terminal-live',
+    );
+    expect(drawer).toMatch(/display\s*:\s*block/);
+    expect(drawer).toMatch(/position\s*:\s*absolute/);
+    expect(
+      ruleBodyFor('.terminal-pane[data-view="chat"][data-drawer="on"] > .terminal-live .xterm'),
+    ).toMatch(/inset-block-end\s*:\s*0/);
+  });
+
+  it("stops its animations for people who ask for reduced motion", () => {
+    expect(css).toMatch(
+      /prefers-reduced-motion: reduce\)\s*\{[^}]*ac-working svg[^}]*animation\s*:\s*none/,
+    );
+  });
+
+  it("uses logical properties for what sits at the start or end, so Arabic mirrors", () => {
+    expect(ruleBodyFor(".ac-side")).toMatch(/border-inline-start/);
+    expect(ruleBodyFor(".agent-chat__bubble")).toMatch(/margin-inline-start\s*:\s*auto/);
+    expect(ruleBodyFor(".ac-msg__actions")).toMatch(/inset-inline-end/);
+  });
+
+  it("gives the new controls a visible keyboard focus", () => {
+    for (const selector of [
+      ".ac-jump:focus-visible",
+      ".ac-file:focus-visible",
+      ".ac-menu:focus-visible",
+    ]) {
+      expect(css).toContain(selector);
+    }
+  });
 });
