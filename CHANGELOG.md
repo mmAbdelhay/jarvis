@@ -8,6 +8,20 @@ version and the downloads. This file is the index.
 
 ## Unreleased
 
+- Terminal: the Chat view of a pane running Claude Code, Copilot or Codex is redesigned so a
+  session never needs Term. A single header row (files toggle, title, search, Chat | Term), a
+  centred conversation with edit and command cards (diffs, output, Copy), grouped read and
+  search tools, time per tool and per turn, older history on scroll, search in the chat, and a
+  side panel with the to-do list, sub-agents, changed files and context left (chips above the
+  box in a narrow pane). The box takes attachments (picker, paste, drop), `/` commands, `@`
+  files, history on Up and Down and a draft per pane; it queues a message while Claude Code
+  works, and has Stop plus Claude Code's mode and model. A question or plan shows as a card,
+  and a menu only the terminal can answer opens the terminal inside the card. Desktop only; the
+  phone is unchanged.
+- Terminal: the chat no longer sends text into an agent whose own input line already has typed
+  text, and says why; a failed read keeps the last view instead of closing the chat.
+- Background service: files attached in the chat reach the service as binary, not JSON.
+
 ## [0.1.15] — 2026-11-24
 
 - File sidebar: right-clicking a folder (or the empty area) in the Terminal tab now
