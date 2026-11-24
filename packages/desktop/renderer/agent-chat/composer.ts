@@ -759,15 +759,6 @@ export function createComposer(options: ComposerOptions): Composer {
     return fmtNode(t("agentChatContextUsed"), { n: tokens(used.used) });
   }
 
-  function contextText(next: AgentOf): string {
-    const used = next.context;
-    if (used === undefined) return "";
-    if (used.leftPercent !== undefined)
-      return fmt(t("agentChatContextLeft"), { n: `${used.leftPercent}%` });
-    const n = tokens(used.used);
-    return fmt(t("agentChatContextUsed"), { n });
-  }
-
   grow();
   paintChips();
   paintButtons();
