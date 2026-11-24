@@ -11,6 +11,7 @@ import type { LinkResult, PullRequest, QueuedComment, ReviewComment } from "@jar
 import { REVIEW_MARKER } from "@jarvis/core";
 import type { ReviewListItem, ReviewStatus, ReviewThread } from "../src/review-service.js";
 import { MESSAGES } from "../src/messages.js";
+import { fileIconFor } from "./file-icons.js";
 import {
   initReviews,
   JARVIS_MARKER,
@@ -256,6 +257,24 @@ describe("Reviews page — thread", () => {
 
     expect(document.querySelector("img")).toBeNull();
     expect(text("reviews-thread")).toContain(evil);
+  });
+
+  it("shows the file icon beside an inline comment's path", async () => {
+    const api = fakeApi({
+      thread: {
+        pr: PR,
+        link: LINKED,
+        waitReason: null,
+        comments: [queued("queued", { kind: "review-inline", path: "src/app.ts", line: 3 })],
+      },
+    });
+    const { view } = await start(api);
+    await view.open(KEY);
+    await flush();
+    const icon = document.querySelector(".reviews-comment-head .file-icon");
+    expect(icon?.getAttribute("src")).toBe(
+      `vendor/material-icons/icons/${fileIconFor("app.ts", { parent: "src" })}`,
+    );
   });
 
   it("marks each comment with its state's border class", async () => {

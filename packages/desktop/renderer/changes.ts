@@ -1,6 +1,7 @@
 import type { GitDiffHunk, GitDiffLine, GitFileChange, GitFileDiff } from "@jarvis/core";
 import type { ChangesView, GitViewResult } from "../src/ipc.js";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
+import { fileIcon } from "./file-icons.js";
 import { detectLanguage, formatAgo } from "./format.js";
 import { toSideBySide } from "./sidebyside.js";
 import { showView } from "./views.js";
@@ -446,7 +447,12 @@ function fileRow(view: ChangesView, file: GitFileChange): HTMLElement {
   name.className = "file-name";
   setText(name, file.path);
 
-  row.append(stage, status, name);
+  const folder = file.path.split("/").slice(0, -1).pop();
+  const icon = fileIcon(
+    file.path.slice(file.path.lastIndexOf("/") + 1),
+    folder === undefined || folder === "" ? {} : { parent: folder },
+  );
+  row.append(stage, status, icon, name);
   if (file.insertions > 0) row.append(countEl("diff-add", `+${file.insertions}`));
   if (file.deletions > 0) row.append(countEl("diff-del", `−${file.deletions}`));
 

@@ -3,6 +3,7 @@
 // Enter or Tab picks, Escape closes. Keys typed while an IME is composing are
 // never taken. A suggestion list keeps the focus in the textarea (the owner
 // forwards its keys to handleKey); a picker takes the focus itself.
+import { fileIcon } from "../file-icons.js";
 import { el } from "./dom.js";
 
 export type MenuItem = {
@@ -13,6 +14,10 @@ export type MenuItem = {
   current?: boolean;
   /** Label in the code font (commands, file names). */
   mono?: boolean;
+  /** A file name to draw the theme's icon of before the label. */
+  icon?: string;
+  /** The folder that holds it, for the names the theme keys by path. */
+  iconParent?: string;
   /** Quiet argument hint after the label. */
   hint?: string;
   /** Full text of a shortened note, for the hover title. */
@@ -112,6 +117,11 @@ export function createMenu(options: {
       row.setAttribute("role", "option");
       row.setAttribute("aria-selected", String(index === active));
       row.dataset["active"] = String(index === active);
+      if (item.icon !== undefined) {
+        row.append(
+          fileIcon(item.icon, item.iconParent === undefined ? {} : { parent: item.iconParent }),
+        );
+      }
       row.append(labelNode(item));
       if (item.hint !== undefined && item.hint !== "") {
         const hint = el("span", "ac-menu__hint", item.hint);

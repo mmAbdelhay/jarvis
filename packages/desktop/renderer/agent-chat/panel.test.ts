@@ -2,6 +2,7 @@
 //
 // The side panel and, in a narrow pane, the chips above the composer.
 import { beforeEach, describe, expect, it } from "vitest";
+import { fileIconFor } from "../file-icons.js";
 import { agentView, open, press, settle, t } from "./fixture.js";
 
 beforeEach(() => {
@@ -38,6 +39,10 @@ describe("the side panel", () => {
     expect(side.querySelector(".ac-agent__state")?.textContent).toBe("Running 0s");
     const files = [...side.querySelectorAll<HTMLButtonElement>(".ac-file")];
     expect(files.map((f) => f.textContent)).toEqual(["total.js+2−1", "total.test.js+18"]);
+    expect(files.map((f) => f.querySelector(".file-icon")?.getAttribute("src"))).toEqual([
+      `vendor/material-icons/icons/${fileIconFor("total.js")}`,
+      `vendor/material-icons/icons/${fileIconFor("total.test.js")}`,
+    ]);
     expect(side.querySelector("[role='progressbar']")?.getAttribute("aria-valuenow")).toBe("38");
     expect(side.querySelectorAll(".ac-todo--done")).toHaveLength(2);
   });

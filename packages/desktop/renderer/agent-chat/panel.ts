@@ -3,9 +3,11 @@
 // a popover. A section with no data is not drawn; the panel can be hidden and
 // that is remembered.
 import type { ChatAgent, ChatFile, ChatTodo } from "@jarvis/platform";
+import { fileIcon } from "../file-icons.js";
 import { count } from "./tool-row.js";
 import {
   basename,
+  dirname,
   duration,
   el,
   fmt,
@@ -154,7 +156,15 @@ export function buildSection(
       button.setAttribute("aria-label", `${t("agentChatOpenFile")} ${file.path}`);
       const name = el("span", "ac-file__name", basename(file.path));
       name.dir = "ltr";
-      button.append(name, el("span", "ac-spacer"));
+      const folder = dirname(file.path);
+      button.append(
+        fileIcon(
+          basename(file.path),
+          folder === "" || folder === "/" ? {} : { parent: basename(folder) },
+        ),
+        name,
+        el("span", "ac-spacer"),
+      );
       if (file.added !== undefined && file.added > 0)
         button.append(count("agent-chat__add", `+${file.added}`));
       if (file.removed !== undefined && file.removed > 0) {

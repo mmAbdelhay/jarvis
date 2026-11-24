@@ -14,6 +14,7 @@ import {
   typeInto,
   type Setup,
 } from "./fixture.js";
+import { fileIconFor } from "../file-icons.js";
 import { forgetAgentDraft, prettyModel } from "./composer.js";
 
 beforeEach(() => {
@@ -335,6 +336,19 @@ describe("suggestions", () => {
     expect(input(s).value).toBe("look at @src/cart/total.test.js ");
   });
 
+  it("shows each file's icon in the @ list", async () => {
+    const s = await open();
+    typeInto(s, "look at @tot");
+    s.timers.advance(120);
+    await settle();
+    const icons = [...s.host.querySelectorAll(".ac-menu--suggest [role='option'] .file-icon")];
+    expect(icons.map((icon) => icon.getAttribute("src"))).toEqual([
+      `vendor/material-icons/icons/${fileIconFor("total.js")}`,
+      `vendor/material-icons/icons/${fileIconFor("total.test.js")}`,
+    ]);
+    expect(icons[0]?.getAttribute("aria-hidden")).toBe("true");
+  });
+
   it("says No files found for an empty list, and the Enter that meets it does not send @REA", async () => {
     const s = await open();
     s.api.terminalAgentFiles.mockResolvedValueOnce({ files: [] });
@@ -468,6 +482,9 @@ describe("attachments", () => {
     expect(s.api.terminalAgentAttach).not.toHaveBeenCalled();
     const chip = s.q(".ac-attachment");
     expect(chip.textContent).toContain("a b.txt");
+    expect(chip.querySelector(".file-icon")?.getAttribute("src")).toBe(
+      `vendor/material-icons/icons/${fileIconFor("a b.txt")}`,
+    );
     typeInto(s, "read this");
     press(input(s), "Enter");
     await settle();

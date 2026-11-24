@@ -113,7 +113,9 @@ describe("the file tree", () => {
     };
     const { tree: t } = tree({ list: async (p: string) => nasty[p] ?? [] });
     await t.setRoot("/proj");
-    expect(t.element.querySelector("img")).toBeNull();
+    // Only the theme's own icon is an image; the name made none.
+    expect(t.element.querySelectorAll("img")).toHaveLength(1);
+    expect(t.element.querySelector("img")?.className).toBe("file-icon");
     expect(t.element.textContent).toContain("<img src=x onerror=alert(1)>");
   });
 
@@ -421,5 +423,88 @@ describe("the file tree's context menu hook", () => {
       [{ path: "/proj/src", directory: true }, 3, 4],
       [undefined, 5, 6],
     ]);
+  });
+});
+
+describe("file icons in the tree", () => {
+  const src = (img: Element | null | undefined) => img?.getAttribute("src") ?? "";
+  const rowOf = (t: ReturnType<typeof tree>["tree"], path: string) =>
+    t.element.querySelector<HTMLElement>(`[data-path="${path}"]`);
+
+  it("puts a quiet icon between the chevron column and the name, keeping the column", async () => {
+    const { tree: t } = tree();
+    await t.setRoot("/proj");
+    for (const path of ["/proj/src", "/proj/read me.md"]) {
+      const row = rowOf(t, path);
+      const kids = [...(row?.children ?? [])];
+      expect(kids.map((n) => n.className.split(" ")[0])).toEqual([
+        path === "/proj/src" ? "file-tree-chevron" : "file-tree-spacer",
+        "file-icon",
+        "file-tree-name",
+      ]);
+      const icon = kids[1] as HTMLImageElement;
+      expect(icon.alt).toBe("");
+      expect(icon.getAttribute("aria-hidden")).toBe("true");
+      expect(icon.draggable).toBe(false);
+    }
+  });
+
+  it("gives a file its own icon and a named folder its own", async () => {
+    const { tree: t } = tree();
+    await t.setRoot("/proj");
+    expect(src(rowOf(t, "/proj/read me.md")?.querySelector(".file-icon"))).toContain("markdown");
+    expect(src(rowOf(t, "/proj/src")?.querySelector(".file-icon"))).toContain("folder-src");
+  });
+
+  it("opens and closes the folder's picture with the folder", async () => {
+    const { tree: t } = tree();
+    await t.setRoot("/proj");
+    const icon = () => src(rowOf(t, "/proj/src")?.querySelector(".file-icon"));
+    const closed = icon();
+    rowOf(t, "/proj/src")?.click();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(icon()).not.toBe(closed);
+    expect(icon()).toContain("-open");
+    rowOf(t, "/proj/src")?.click();
+    expect(icon()).toBe(closed);
+  });
+
+  it("knows a nested file by the folder it is in", async () => {
+    const { tree: t } = tree({
+      list: vi.fn(async (path: string) =>
+        path === "/proj"
+          ? [{ name: ".github", directory: true }]
+          : path === "/proj/.github"
+            ? [{ name: "workflows", directory: true }]
+            : [],
+      ),
+    });
+    await t.setRoot("/proj");
+    rowOf(t, "/proj/.github")?.click();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(src(rowOf(t, "/proj/.github/workflows")?.querySelector(".file-icon"))).toContain(
+      "folder-gh-workflows",
+    );
+  });
+
+  it("keeps the icon while a name is being edited", async () => {
+    const { tree: t } = tree();
+    await t.setRoot("/proj");
+    void t.edit({ kind: "rename", path: "/proj/read me.md" });
+    expect(rowOf(t, "/proj/read me.md")?.querySelector(".file-icon")).not.toBeNull();
+    expect(rowOf(t, "/proj/read me.md")?.querySelector(".file-tree-input")).not.toBeNull();
+  });
+
+  it("shows the new name's icon after a reload that finds it renamed", async () => {
+    let name = "notes.txt";
+    const { tree: t } = tree({
+      list: vi.fn(async () => [{ name, directory: false }]),
+    });
+    await t.setRoot("/proj");
+    const before = src(rowOf(t, "/proj/notes.txt")?.querySelector(".file-icon"));
+    name = "notes.ts";
+    await t.reload();
+    const after = src(rowOf(t, "/proj/notes.ts")?.querySelector(".file-icon"));
+    expect(after).not.toBe(before);
   });
 });

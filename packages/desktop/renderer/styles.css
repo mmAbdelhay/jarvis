@@ -2013,6 +2013,11 @@
     color: var(--text-muted);
   }
 
+  /* The Material file icons: a fixed 16px slot, so a row never changes height
+     and the chevron column and the names stay where they were. */
+  .file-icon { flex: 0 0 16px; width: 16px; height: 16px; object-fit: contain; pointer-events: none; }
+  .file-icon[hidden] { display: none; }
+
   .file-tree-name {
     flex: 1 1 auto;
     min-width: 0;

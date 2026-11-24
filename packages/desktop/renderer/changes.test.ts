@@ -10,6 +10,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { GitFileChange, GitFileDiff, GitPushResult } from "@jarvis/core";
 import type { GitViewResult, RendererApi } from "../src/ipc.js";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
+import { fileIconFor } from "./file-icons.js";
 import { detectLanguage, formatAgo } from "./format.js";
 
 const AWAKE_STATUS = {
@@ -946,6 +947,9 @@ describe("the changed-files panel", () => {
     expect(rows).toHaveLength(4);
     expect(rows[0]?.querySelector(".file-status")?.textContent).toBe("M");
     expect(rows[0]?.querySelector(".file-name")?.textContent).toBe("CheckoutService.php");
+    expect(rows[0]?.querySelector(".file-icon")?.getAttribute("src")).toBe(
+      `vendor/material-icons/icons/${fileIconFor("CheckoutService.php")}`,
+    );
     expect(rows[0]?.querySelector(".diff-add")?.textContent).toBe("+42");
     expect(rows[0]?.querySelector(".diff-del")?.textContent).toBe("−9");
   });

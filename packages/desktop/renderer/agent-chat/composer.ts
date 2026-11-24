@@ -30,6 +30,7 @@ import {
 } from "./dom.js";
 import { hostPlatform } from "../keys.js";
 import { clockText, createDictationControl, type DictationApi } from "./dictation.js";
+import { fileIcon } from "../file-icons.js";
 import { createMenu, type MenuItem } from "./menus.js";
 
 /** The most one send carries, as agentSend counts it. */
@@ -218,6 +219,12 @@ function kindOf(name: string, mime: string): "image" | "file" {
 }
 
 let suggestCounter = 0;
+
+/** The name of the folder a path is in (`src` for `a/src/b.ts`), when there is one. */
+function parentName(path: string): string | undefined {
+  const folder = dirname(path);
+  return folder === "" || folder === "/" ? undefined : basename(folder);
+}
 
 export function createComposer(options: ComposerOptions): Composer {
   const { t, api } = options;
@@ -574,7 +581,7 @@ export function createComposer(options: ComposerOptions): Composer {
       chip.dataset["state"] = item.state;
       const name = el("span", "ac-attachment__name", item.name);
       name.dir = "auto";
-      chip.append(name);
+      chip.append(fileIcon(item.name), name);
       if (item.state === "uploading")
         chip.append(el("span", "ac-attachment__state", t("agentChatUploading")));
       if (item.state === "failed")
@@ -861,6 +868,10 @@ export function createComposer(options: ComposerOptions): Composer {
           label: file.name === "" ? basename(file.path) : file.name,
           note: dirname(file.path),
           mono: true,
+          icon: file.name === "" ? basename(file.path) : file.name,
+          ...(parentName(file.path) === undefined
+            ? {}
+            : { iconParent: parentName(file.path) as string }),
         }));
         // An empty list says so and holds the Enter, instead of sending "@REA".
         suggest.setEmpty(t("agentChatNoFiles"));
