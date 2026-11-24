@@ -154,6 +154,20 @@ describe("buildOffice", () => {
     expect(employeesOf(out)).toHaveLength(0);
   });
 
+  it("never takes the loading flag of a tab Jarvis draws itself as work: nothing clears it", () => {
+    for (const kind of ["terminal", "api", "docker"] as const) {
+      const model = buildOffice(
+        input({
+          workspace: {
+            tabs: [tab("t1", "alpha", { kind, loading: true })],
+            activeTabId: undefined,
+          },
+        }),
+      );
+      expect(model.rooms[0]?.employees[0]?.pose).toBe("idle");
+    }
+  });
+
   it("orders poses: question, error or dead, starting, busy or loading, suspended, done, idle", () => {
     const poseOf = (overrides: Partial<WorkspaceTab>, entry?: OfficeActivity["panes"][string]) =>
       employeesOf(

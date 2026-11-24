@@ -1066,6 +1066,8 @@ export function createOfficeView(options: OfficeViewOptions): OfficeView {
     seat?.element.removeAttribute("aria-describedby");
     hover?.element.removeAttribute("aria-describedby");
     hover = undefined;
+    // A card hidden under the pointer gets no mouseleave.
+    pointerOnCard = false;
     card.hidden = true;
   }
 
@@ -1094,6 +1096,8 @@ export function createOfficeView(options: OfficeViewOptions): OfficeView {
     hideTimer = timer;
   }
 
+  // The card sits inside the stage: selecting in it must not drag the office.
+  card.addEventListener("pointerdown", (event) => event.stopPropagation());
   card.addEventListener("mouseenter", () => {
     pointerOnCard = true;
     cancelHide();
@@ -1184,6 +1188,10 @@ export function createOfficeView(options: OfficeViewOptions): OfficeView {
       if (image === undefined) {
         image = document.createElement("img");
         image.className = "office-card__shot";
+        // Its height is only known now, and the card must stay inside the stage.
+        image.addEventListener("load", () => {
+          if (preview === current && hover !== undefined) placeCard(hover);
+        });
         current.image = image;
       }
       image.alt = employee.label;
@@ -1251,6 +1259,10 @@ export function createOfficeView(options: OfficeViewOptions): OfficeView {
     const signature = JSON.stringify(found);
     if (signature === current.drawn) return;
     current.drawn = signature;
+    // Follow the output, unless the reader scrolled up in that pane.
+    const kept = [...current.area.querySelectorAll("pre")].map((pre) =>
+      pre.scrollHeight - pre.clientHeight - pre.scrollTop > 4 ? pre.scrollTop : undefined,
+    );
     const blocks: HTMLElement[] = [];
     for (const section of found) {
       if (section.label !== undefined) blocks.push(html("div", "office-card__pane", section.label));
@@ -1260,7 +1272,9 @@ export function createOfficeView(options: OfficeViewOptions): OfficeView {
       blocks.push(pre);
     }
     current.area.replaceChildren(...blocks);
-    for (const pre of current.area.querySelectorAll("pre")) pre.scrollTop = pre.scrollHeight;
+    current.area.querySelectorAll("pre").forEach((pre, index) => {
+      pre.scrollTop = kept[index] ?? pre.scrollHeight;
+    });
     if (hover !== undefined) placeCard(hover);
   }
 
@@ -1475,6 +1489,8 @@ export function createOfficeView(options: OfficeViewOptions): OfficeView {
   stage.addEventListener(
     "wheel",
     (event) => {
+      // Over the card the wheel scrolls its preview.
+      if (event.target instanceof Node && card.contains(event.target)) return;
       event.preventDefault();
       const point = localPoint(event);
       const sensitivity = event.ctrlKey ? 0.01 : 0.002;

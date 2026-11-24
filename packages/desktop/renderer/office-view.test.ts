@@ -782,6 +782,69 @@ describe("the hover card's live preview", () => {
   const advance = (ms: number) => vi.advanceTimersByTimeAsync(ms);
   const screenBlock = () => root.querySelector<HTMLElement>(".office-card__screen");
 
+  it("keeps wheel and drag on the card from moving the office", async () => {
+    const { view } = previewSetup(async () => terminal("x"));
+    view.update(modelOf([tab("t1", "alpha", { kind: "terminal" })]));
+    hover();
+    await advance(120);
+    const before = view.view();
+    const wheel = new WheelEvent("wheel", { deltaY: 100, bubbles: true, cancelable: true });
+    screenBlock()?.dispatchEvent(wheel);
+    expect(wheel.defaultPrevented).toBe(false);
+    screenBlock()?.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0 }));
+    screenBlock()?.dispatchEvent(
+      new MouseEvent("pointermove", { bubbles: true, buttons: 1, clientX: 90, clientY: 90 }),
+    );
+    expect(view.view()).toEqual(before);
+    expect($("#office-card").hidden).toBe(false);
+  });
+
+  it("closes a later card normally after one closed under the pointer", async () => {
+    const { view } = previewSetup(async () => terminal("x"));
+    view.update(modelOf([tab("t1", "alpha", { kind: "terminal" })]));
+    hover();
+    $("#office-card").dispatchEvent(new MouseEvent("mouseenter"));
+    view.update(modelOf([tab("t2", "alpha", { kind: "terminal" })]));
+    await advance(1000);
+    expect($("#office-card").hidden).toBe(true);
+    hover();
+    leave();
+    await advance(200);
+    expect($("#office-card").hidden).toBe(true);
+  });
+
+  it("keeps the reader's place when the screen changes after they scrolled up", async () => {
+    let n = 0;
+    const { view } = previewSetup(async () => {
+      n += 1;
+      return terminal(`line ${n}`);
+    });
+    view.update(modelOf([tab("t1", "alpha", { kind: "terminal" })]));
+    hover();
+    await advance(120);
+    const pre = screenBlock() as HTMLElement;
+    Object.defineProperty(pre, "scrollHeight", { value: 500 });
+    Object.defineProperty(pre, "clientHeight", { value: 100 });
+    pre.scrollTop = 50;
+    await advance(1000);
+    expect(screenBlock()?.textContent).toBe("line 2");
+    expect(screenBlock()?.scrollTop).toBe(50);
+  });
+
+  it("places the card again once the page's picture has its size", async () => {
+    const { view } = previewSetup(
+      async () => undefined,
+      async () => JPEG,
+    );
+    view.update(modelOf([tab("t1", "alpha")]));
+    hover();
+    await advance(120);
+    const card = $("#office-card");
+    Object.defineProperty(card, "offsetHeight", { value: 800 });
+    root.querySelector(".office-card__shot")?.dispatchEvent(new Event("load"));
+    expect(card.style.top).toBe("40px");
+  });
+
   it("asks nothing until 120 ms of hover intent, then shows the screen as text, scrolled to the bottom", async () => {
     const { view, screenCalls } = previewSetup(async () => terminal("$ npm test", "ok"));
     view.update(modelOf([tab("t1", "alpha", { kind: "terminal" })]));

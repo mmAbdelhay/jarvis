@@ -207,7 +207,9 @@ function tabEmployee(
   let pose: OfficePose;
   if (entry?.state === "question") pose = "hand";
   else if (tab.error !== undefined) pose = "dead";
-  else if (tab.loading || entry?.state === "busy") pose = "typing";
+  // Only a hosted page ever clears its loading flag; a tab the renderer draws
+  // (terminal, API, Docker) keeps the one it was opened with.
+  else if ((tab.loading && PAGE_KINDS.has(tab.kind)) || entry?.state === "busy") pose = "typing";
   else if (
     tab.kind === "terminal" &&
     entry === undefined &&
