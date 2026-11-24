@@ -2679,8 +2679,7 @@
     padding: 0; border: 0; background: transparent; color: var(--text); font: 15px/1.5 var(--font-ui); }
   /* One focus ring: the box around the field, not the field inside it. */
   .agent-chat__input:focus-visible { outline: none; }
-  .agent-chat__composer:focus-within { border-color: var(--accent); outline: 2px solid var(--accent);
-    outline-offset: 1px; }
+  .agent-chat__composer:focus-within { outline: 2px solid var(--accent); outline-offset: 0; }
   .agent-chat__input:disabled { opacity: 0.5; }
   .ac-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
   .ac-context { color: var(--text-muted); font-size: 13px; white-space: nowrap; }
