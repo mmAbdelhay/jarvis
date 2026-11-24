@@ -21,6 +21,15 @@ version and the downloads. This file is the index.
 - Terminal: dictate into the chat. A microphone button in the box (or ⌘⇧M, Ctrl+Shift+M) records,
   transcribes on the laptop with the same whisper as the voice turn and puts the text at the
   caret for you to edit; it never sends. Needs ffmpeg and whisper. Desktop only.
+- Terminal: typing `/` in the chat lists every command the agent offers (Claude Code, Copilot and
+  Codex, read from the installed CLI versions) with its description, your own commands and
+  skills and the commands of enabled plugins, ranked as you type with the matched letters
+  marked, with documented argument choices after the name; Codex skills also after `$`. A
+  recording that is left running is finished when you leave the chat, and a stuck recorder no
+  longer keeps the microphone.
+- Files and folders now wear Material icons (the set VS Code uses) in the Terminal tab's file
+  sidebar, the chat's `@` list, changed files and attachments, and the Changes and Reviews pages.
+  Always on, bundled with the app (about 1.3 MB).
 - Terminal: the chat no longer sends text into an agent whose own input line already has typed
   text, and says why; a failed read keeps the last view instead of closing the chat.
 - Background service: files attached in the chat reach the service as binary, not JSON.

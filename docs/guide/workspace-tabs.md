@@ -540,12 +540,18 @@ the phone's chat view is unchanged.
   line. Attach files with the **+** button, paste an image, or drop files on
   the chat: a file with a path on disk is sent as that path, anything else
   (a pasted image) is stored privately (25 MB at most, kept 7 days) and sent as
-  a path. Type `/` for the agent's commands (including your own commands and
-  skills) and `@` for project files. Up and Down in an empty box walk through
+  a path. Type `/` for every command the agent offers, with its description
+  (built-ins, your own commands and skills, and plugins; Codex skills also
+  after `$`), narrowing as you type; Enter or Tab on a part of a name fills it in,
+  Enter on a whole name sends it. A `/` after a space inside a message suggests
+  too. Type `@` for project files. Up and Down in an empty box walk through
   earlier messages, and an unsent draft is kept for the pane. While the agent
   works the button says **Queue** for an agent that queues messages (Claude
   Code). If the agent's own input line already holds typed text, nothing is sent
   and the chat says so.
+- **File icons.** Files and folders in the Terminal tab's file sidebar, the
+  chat's `@` list, changed files and attachments, and the Changes and Reviews
+  pages wear the Material icon of their name (the set VS Code uses), always on.
 - **Dictation.** The microphone button after the **+** (or **⌘⇧M**, Ctrl+Shift+M)
   records what you say, shows the time with **Done** and **Cancel**, and puts the
   words in the box at the caret, replacing a selection, for you to edit before
@@ -554,6 +560,8 @@ the phone's chat view is unchanged.
   model (Settings → Tools), records on the laptop only, keeps the recording just
   long enough to transcribe it, and stops by itself after 5 minutes. The voice
   hotkey and dictation share the one microphone, so one waits for the other.
+  A recording ends, and its words go to the box, when the chat is switched to
+  Term or the tab is left.
 - **Control.** **Stop** interrupts a working agent. Claude Code's **mode**
   (Ask first, Accept edits, Plan, Auto) and **model** can be switched from the
   box; Copilot and Codex open their own model menu. Controls a vendor does not
