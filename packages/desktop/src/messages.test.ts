@@ -59,6 +59,9 @@ describe("MESSAGES", () => {
       MESSAGES.agentChatNeedsTermButton,
       MESSAGES.officeLounge,
       MESSAGES.officeAnAgent,
+      MESSAGES.officePreviewUnavailable,
+      MESSAGES.officePreviewAsleep,
+      MESSAGES.officePreviewScreen,
       MESSAGES.unknownAgent,
       MESSAGES.cannotEditLiveSessionState,
     ];

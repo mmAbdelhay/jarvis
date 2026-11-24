@@ -22,6 +22,11 @@ version and the downloads. This file is the index.
   room per project, one cubicle and employee per tab or agent, with a card on hover and
   a raised hand, a notification and a badge when an agent asks a question. Pan and zoom,
   minimap, sidebar of projects. Desktop only; the phone is unchanged.
+- Office: the hover card now shows what is happening inside the tab, live: the last rows of a
+  Terminal tab's screen (each pane of a split tab) or an agent session's output, and a small
+  picture of a web, editor, database, cluster or chat page. A sleeping page is not woken. The
+  card is wider and stays open while the pointer is on it. Desktop only; nothing is logged or
+  sent to a phone.
 - Tabs: right-click a tab (or an employee in the Office, with a right click, the Menu key
   or Shift+F10) and choose "Open in new window" to move it into a window of its own;
   "Return to main window", or closing the window, puts it back. A web page, editor,

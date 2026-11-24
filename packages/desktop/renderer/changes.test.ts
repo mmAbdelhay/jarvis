@@ -189,6 +189,8 @@ function stubJarvis(overrides: Partial<RendererApi>): RendererApi {
     onTerminalClaudeViewChanged: vi.fn(),
     officeActivity: vi.fn(async () => ({ panes: {}, sessions: {} })),
     officeViewing: vi.fn(async () => undefined),
+    officeScreen: vi.fn(async () => ({ kind: "none" as const })),
+    officePageShot: vi.fn(async () => undefined),
     popoutTabId: undefined,
     popoutOpen: vi.fn(async () => ({ ok: false as const, reason: "failed" as const })),
     popoutReturn: vi.fn(async () => false),

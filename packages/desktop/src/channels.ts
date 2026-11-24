@@ -209,6 +209,9 @@ export const INVOKE_CHANNELS = {
   terminalAgentSend: "terminal:agentSend",
   officeActivity: "office:activity",
   officeViewing: "office:viewing",
+  officeScreen: "office:screen",
+  // Electron-bound (the page's view): a still of a hosted page.
+  officePageShot: "office:pageShot",
   terminalAttachUpload: "terminal:attachUpload",
   sendTerminalInput: "terminal:input",
   resizeTerminal: "terminal:resize",

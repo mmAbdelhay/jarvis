@@ -49,6 +49,9 @@ export type OfficeEmployee = {
   branch?: string;
   diff?: { added: number; removed: number; files?: number };
   lastActivityAt?: number;
+  /** A hosted page's address and whether its page is asleep, for the card's
+   *  preview. Only for a tab that has a page (not a terminal, API or Docker). */
+  page?: { url: string; suspended: boolean };
   target: OfficeTarget;
 };
 
@@ -182,6 +185,8 @@ function strongest(entries: readonly [string, OfficeEntry][]): [string, OfficeEn
   return best;
 }
 
+const PAGE_KINDS: ReadonlySet<string> = new Set(["web", "editor", "database", "cluster", "chat"]);
+
 function tabEmployee(
   tab: WorkspaceTab,
   input: OfficeInput,
@@ -233,6 +238,7 @@ function tabEmployee(
     branch: merged?.branch,
     diff: diffOf(merged),
     lastActivityAt: merged?.lastActivityAt,
+    page: PAGE_KINDS.has(tab.kind) ? { url: tab.url, suspended: tab.suspended } : undefined,
     target,
   });
 }

@@ -8,7 +8,12 @@ import type { Session, WorkspaceTab } from "@jarvis/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MESSAGES } from "../src/messages.js";
 import { buildOffice, type OfficeInput, type OfficeTarget } from "./office-model.js";
-import { createOfficeView, initOffice, type OfficeView } from "./office-view.js";
+import {
+  createOfficeView,
+  initOffice,
+  type OfficeView,
+  type OfficeViewOptions,
+} from "./office-view.js";
 
 const html = readFileSync("packages/desktop/renderer/index.html", "utf8");
 const css = readFileSync("packages/desktop/renderer/styles.css", "utf8");
@@ -56,7 +61,14 @@ let openedTab: number;
 
 let menus: { tabId: string; x: number; y: number }[];
 
-function setup(options: { language?: "ar" | "en"; visible?: () => boolean } = {}) {
+function setup(
+  options: {
+    language?: "ar" | "en";
+    visible?: () => boolean;
+    preview?: OfficeViewOptions["preview"];
+    measure?: () => { width: number; height: number };
+  } = {},
+) {
   document.body.innerHTML = skeleton();
   root = document.getElementById("view-office") as HTMLElement;
   opened = [];
@@ -486,10 +498,12 @@ describe("the hover card", () => {
       expect(text).toContain(part);
     }
     seats()[0]?.dispatchEvent(new MouseEvent("mouseleave"));
+    vi.advanceTimersByTime(150);
     expect(card.hidden).toBe(true);
     seats()[0]?.dispatchEvent(new FocusEvent("focus"));
     expect(card.hidden).toBe(false);
     seats()[0]?.dispatchEvent(new FocusEvent("blur"));
+    vi.advanceTimersByTime(150);
     expect(card.hidden).toBe(true);
   });
 });
@@ -729,6 +743,396 @@ describe("reading the view", () => {
     view.show();
     expect(view.view().k).toBeGreaterThan(0);
     expect(view.view().fit).toBe(true);
+  });
+});
+
+describe("the hover card's live preview", () => {
+  const JPEG = "data:image/jpeg;base64,/9j/AAAA";
+  type Screen = { kind: string; sections?: unknown[]; lines?: string[] };
+  const terminal = (...lines: string[]): Screen => ({
+    kind: "terminal",
+    sections: [{ paneKey: "t1", lines }],
+  });
+
+  function previewSetup(
+    screen: (target: { type: string; id: string }) => Promise<unknown>,
+    pageShot: (tabId: string) => Promise<string | undefined> = async () => undefined,
+    extra: Parameters<typeof setup>[0] = {},
+  ) {
+    const screenCalls: { type: string; id: string }[] = [];
+    const shotCalls: string[] = [];
+    const view = setup({
+      ...extra,
+      preview: {
+        screen: (target) => {
+          screenCalls.push(target);
+          return screen(target);
+        },
+        pageShot: (tabId) => {
+          shotCalls.push(tabId);
+          return pageShot(tabId);
+        },
+      },
+    });
+    return { view, screenCalls, shotCalls };
+  }
+
+  const hover = (index = 0) => seats()[index]?.dispatchEvent(new MouseEvent("mouseenter"));
+  const leave = (index = 0) => seats()[index]?.dispatchEvent(new MouseEvent("mouseleave"));
+  const advance = (ms: number) => vi.advanceTimersByTimeAsync(ms);
+  const screenBlock = () => root.querySelector<HTMLElement>(".office-card__screen");
+
+  it("asks nothing until 120 ms of hover intent, then shows the screen as text, scrolled to the bottom", async () => {
+    const { view, screenCalls } = previewSetup(async () => terminal("$ npm test", "ok"));
+    view.update(modelOf([tab("t1", "alpha", { kind: "terminal" })]));
+    hover();
+    await advance(119);
+    expect(screenCalls).toEqual([]);
+    await advance(1);
+    expect(screenCalls).toEqual([{ type: "tab", id: "t1" }]);
+    const pre = screenBlock();
+    expect(pre?.tagName).toBe("PRE");
+    expect(pre?.dir).toBe("ltr");
+    expect(pre?.textContent).toBe("$ npm test\nok");
+  });
+
+  it("asks for the pane when the employee stands for a pane", async () => {
+    const { view, screenCalls } = previewSetup(async () => terminal("x"));
+    view.update(
+      modelOf([tab("t1", "alpha", { kind: "terminal" })], {
+        activity: {
+          panes: { "t1:p2": { agent: "Codex", state: "question", question: "Go?" } },
+          sessions: {},
+        },
+      }),
+    );
+    hover();
+    await advance(120);
+    expect(screenCalls).toEqual([{ type: "pane", id: "t1:p2" }]);
+  });
+
+  it("asks for the session when the employee is a session", async () => {
+    const { view, screenCalls } = previewSetup(async () => ({
+      kind: "session",
+      lines: ["a", "b"],
+    }));
+    view.update(
+      modelOf([], {
+        sessions: [
+          {
+            id: "s9",
+            project: "alpha",
+            projectPath: "/p",
+            agentId: "claude",
+            state: "running",
+            summary: "x",
+            startedAt: NOW,
+            lastActivityAt: NOW,
+            origin: "jarvis",
+            pid: 4,
+          } as Session,
+        ],
+      }),
+    );
+    hover();
+    await advance(120);
+    expect(screenCalls).toEqual([{ type: "session", id: "s9" }]);
+    expect(screenBlock()?.textContent).toBe("a\nb");
+  });
+
+  it("polls every second, with one request in flight at a time", async () => {
+    let release: (value: unknown) => void = () => undefined;
+    let calls = 0;
+    const { view } = previewSetup(() => {
+      calls += 1;
+      return calls === 1
+        ? new Promise((resolve) => (release = resolve))
+        : Promise.resolve(terminal("n"));
+    });
+    view.update(modelOf([tab("t1", "alpha", { kind: "terminal" })]));
+    hover();
+    await advance(5000);
+    expect(calls).toBe(1);
+    release(terminal("first"));
+    await advance(0);
+    await advance(1000);
+    expect(calls).toBe(2);
+    await advance(1000);
+    expect(calls).toBe(3);
+  });
+
+  it("leaves the text node alone when the screen has not changed, and rewrites it when it has", async () => {
+    let text = "one";
+    const { view } = previewSetup(async () => terminal(text));
+    view.update(modelOf([tab("t1", "alpha", { kind: "terminal" })]));
+    hover();
+    await advance(120);
+    const first = screenBlock()?.firstChild;
+    await advance(1000);
+    expect(screenBlock()?.firstChild).toBe(first);
+    text = "two";
+    await advance(1000);
+    expect(screenBlock()?.textContent).toBe("two");
+  });
+
+  it("labels each pane of a split tab, and only then", async () => {
+    const { view } = previewSetup(async () => ({
+      kind: "terminal",
+      sections: [
+        { paneKey: "t1", lines: ["a"] },
+        { paneKey: "t1:p2", lines: ["b"] },
+      ],
+    }));
+    view.update(modelOf([tab("t1", "alpha", { kind: "terminal" })]));
+    hover();
+    await advance(120);
+    const labels = [...root.querySelectorAll(".office-card__pane")].map((n) => n.textContent);
+    expect(labels).toEqual(["Pane 1", "Pane 2"]);
+    expect(root.querySelectorAll(".office-card__screen")).toHaveLength(2);
+  });
+
+  it("shows hostile screen text as text, never markup", async () => {
+    const hostile = '<img src=x onerror="alert(1)"><script>alert(2)</script>';
+    const { view } = previewSetup(async () => terminal(hostile));
+    view.update(modelOf([tab("t1", "alpha", { kind: "terminal" })]));
+    hover();
+    await advance(120);
+    expect(screenBlock()?.textContent).toBe(hostile);
+    expect($("#office-card").querySelector("img, script")).toBeNull();
+  });
+
+  it("stops asking when the pointer leaves, and starts over for the next employee", async () => {
+    const { view, screenCalls } = previewSetup(async () => terminal("x"));
+    view.update(
+      modelOf([tab("t1", "alpha", { kind: "terminal" }), tab("t2", "alpha", { kind: "terminal" })]),
+    );
+    hover(0);
+    await advance(120);
+    leave(0);
+    await advance(150);
+    const after = screenCalls.length;
+    await advance(5000);
+    expect(screenCalls).toHaveLength(after);
+    hover(1);
+    await advance(120);
+    expect(screenCalls.at(-1)).toEqual({ type: "tab", id: "t2" });
+  });
+
+  it("drops the answer of an employee hovered earlier", async () => {
+    const resolvers: ((value: unknown) => void)[] = [];
+    const { view } = previewSetup(() => new Promise((resolve) => resolvers.push(resolve)));
+    view.update(
+      modelOf([tab("t1", "alpha", { kind: "terminal" }), tab("t2", "alpha", { kind: "terminal" })]),
+    );
+    hover(0);
+    await advance(120);
+    leave(0);
+    hover(1);
+    resolvers[0]?.(terminal("STALE"));
+    await advance(0);
+    await advance(120);
+    resolvers[1]?.(terminal("fresh"));
+    await advance(0);
+    expect(root.textContent).not.toContain("STALE");
+    expect(screenBlock()?.textContent).toBe("fresh");
+  });
+
+  it("asks nothing while the route is hidden, however long the card stays open", async () => {
+    let visible = true;
+    const { view, screenCalls, shotCalls } = previewSetup(
+      async () => terminal("x"),
+      async () => JPEG,
+      {
+        visible: () => visible,
+      },
+    );
+    view.update(modelOf([tab("t1", "alpha", { kind: "terminal" })]));
+    hover();
+    await advance(120);
+    visible = false;
+    const before = screenCalls.length;
+    await advance(10_000);
+    expect(screenCalls).toHaveLength(before);
+    expect(shotCalls).toEqual([]);
+  });
+
+  it("asks nothing while the document is hidden, and carries on when it shows again", async () => {
+    const { view, screenCalls } = previewSetup(async () => terminal("x"));
+    view.update(modelOf([tab("t1", "alpha", { kind: "terminal" })]));
+    hover();
+    await advance(120);
+    Object.defineProperty(document, "visibilityState", { value: "hidden", configurable: true });
+    document.dispatchEvent(new Event("visibilitychange"));
+    const before = screenCalls.length;
+    await advance(5000);
+    expect(screenCalls).toHaveLength(before);
+    Object.defineProperty(document, "visibilityState", { value: "visible", configurable: true });
+    document.dispatchEvent(new Event("visibilitychange"));
+    await advance(1000);
+    expect(screenCalls.length).toBeGreaterThan(before);
+  });
+
+  it("stops for good when the view is disposed", async () => {
+    const { view, screenCalls } = previewSetup(async () => terminal("x"));
+    view.update(modelOf([tab("t1", "alpha", { kind: "terminal" })]));
+    hover();
+    await advance(120);
+    view.dispose();
+    const before = screenCalls.length;
+    await advance(5000);
+    expect(screenCalls).toHaveLength(before);
+  });
+
+  it("says Preview unavailable when the read fails or answers nonsense, and never throws", async () => {
+    let mode = 0;
+    const { view } = previewSetup(async () => {
+      mode += 1;
+      if (mode === 1) throw new Error("boom");
+      return { kind: "terminal", sections: "nope" };
+    });
+    view.update(modelOf([tab("t1", "alpha", { kind: "terminal" })]));
+    hover();
+    await advance(120);
+    expect($("#office-card").textContent).toContain(MESSAGES.officePreviewUnavailable("en"));
+    await advance(1000);
+    expect($("#office-card").textContent).toContain(MESSAGES.officePreviewUnavailable("en"));
+  });
+
+  it("shows a page's still as an image, its title as the alt text and its host, every 2 s", async () => {
+    const { view, shotCalls, screenCalls } = previewSetup(
+      async () => terminal("x"),
+      async () => JPEG,
+    );
+    view.update(
+      modelOf([tab("w1", "alpha", { url: "https://docs.example.com/a/b?q=1", title: "The docs" })]),
+    );
+    hover();
+    await advance(120);
+    const img = root.querySelector<HTMLImageElement>(".office-card__shot");
+    expect(img?.getAttribute("src")).toBe(JPEG);
+    expect(img?.alt).toBe("The docs");
+    expect($("#office-card").textContent).toContain("docs.example.com");
+    expect($("#office-card").textContent).not.toContain("/a/b");
+    expect(shotCalls).toEqual(["w1"]);
+    expect(screenCalls).toEqual([]);
+    await advance(1999);
+    expect(shotCalls).toHaveLength(1);
+    await advance(1);
+    expect(shotCalls).toHaveLength(2);
+  });
+
+  it("puts only a JPEG data URL into an image's src", async () => {
+    for (const bad of [
+      "https://evil.example/x.jpg",
+      "data:image/svg+xml;base64,AAAA",
+      "javascript:alert(1)",
+      "data:image/png;base64,AA",
+    ]) {
+      const { view } = previewSetup(
+        async () => terminal("x"),
+        async () => bad,
+      );
+      view.update(modelOf([tab("w1", "alpha", { title: "Page" })]));
+      hover();
+      await advance(120);
+      expect(root.querySelector(".office-card__shot")).toBeNull();
+      leave();
+      await advance(200);
+      view.dispose();
+    }
+  });
+
+  it("says what it knows when there is no still, and asks nothing for a page that is asleep", async () => {
+    const live = previewSetup(
+      async () => terminal("x"),
+      async () => undefined,
+    );
+    live.view.update(modelOf([tab("w1", "alpha", { url: "https://a.example/", title: "A page" })]));
+    hover();
+    await advance(120);
+    expect(root.querySelector(".office-card__shot")).toBeNull();
+    expect($("#office-card").textContent).toContain("a.example");
+    live.view.dispose();
+
+    const asleep = previewSetup(
+      async () => terminal("x"),
+      async () => JPEG,
+    );
+    asleep.view.update(
+      modelOf([
+        tab("w1", "alpha", { url: "https://a.example/", title: "A page", suspended: true }),
+      ]),
+    );
+    hover();
+    await advance(5000);
+    expect(asleep.shotCalls).toEqual([]);
+    expect($("#office-card").textContent).toContain(MESSAGES.officePreviewAsleep("en"));
+    expect($("#office-card").textContent).toContain("a.example");
+  });
+
+  it("shows only label and state for an API or Docker tab, asking nothing", async () => {
+    const { view, screenCalls, shotCalls } = previewSetup(
+      async () => terminal("x"),
+      async () => JPEG,
+    );
+    view.update(modelOf([tab("a1", "alpha", { kind: "api", url: "", title: "Requests" })]));
+    hover();
+    await advance(5000);
+    expect(screenCalls).toEqual([]);
+    expect(shotCalls).toEqual([]);
+    expect($("#office-card").textContent).toContain("Requests");
+  });
+
+  it("lets the pointer move onto the card, and closes 150 ms after it leaves both", async () => {
+    const { view } = previewSetup(async () => terminal("x"));
+    view.update(modelOf([tab("t1", "alpha", { kind: "terminal" })]));
+    const card = $("#office-card");
+    hover();
+    leave();
+    await advance(100);
+    card.dispatchEvent(new MouseEvent("mouseenter"));
+    await advance(1000);
+    expect(card.hidden).toBe(false);
+    card.dispatchEvent(new MouseEvent("mouseleave"));
+    await advance(149);
+    expect(card.hidden).toBe(false);
+    await advance(1);
+    expect(card.hidden).toBe(true);
+    expect(/\.office-card\s*\{[^}]*pointer-events:\s*auto/.test(css)).toBe(true);
+  });
+
+  it("is 420 px wide and always inside the stage, flipped or clamped", async () => {
+    const width = 700;
+    const { view } = previewSetup(async () => terminal("x"), undefined, {
+      measure: () => ({ width, height: 600 }),
+    });
+    view.update(
+      modelOf([tab("t1", "alpha", { kind: "terminal" }), tab("t2", "alpha", { kind: "terminal" })]),
+    );
+    for (const index of [0, 1]) {
+      hover(index);
+      const left = Number.parseFloat($("#office-card").style.left);
+      expect(left).toBeGreaterThanOrEqual(8);
+      expect(left + 420).toBeLessThanOrEqual(width - 8 + 0.5);
+      leave(index);
+      await advance(200);
+    }
+    expect(/\.office-card\s*\{[^}]*width:\s*420px/.test(css)).toBe(true);
+  });
+
+  it("styles the preview with tokens only, and draws no motion for it", () => {
+    for (const name of [
+      "office-card__preview",
+      "office-card__screen",
+      "office-card__shot",
+      "office-card__pane",
+      "office-card__note",
+    ]) {
+      const rule = new RegExp(`\\.${name}[^{]*\\{([^}]*)\\}`).exec(css)?.[1] ?? "";
+      expect(rule, name).not.toBe("");
+      expect(rule).not.toMatch(/#[0-9a-fA-F]{3,8}\b|rgba?\(/);
+      expect(rule).not.toMatch(/animation|transition/);
+    }
   });
 });
 

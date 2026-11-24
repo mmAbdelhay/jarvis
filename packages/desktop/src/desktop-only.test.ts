@@ -431,6 +431,7 @@ function fakeDesktopDeps(): DesktopOnlyDeps {
       setVisible: vi.fn(),
       hideAll: vi.fn(),
       requestPictureInPicture: vi.fn(),
+      capture: vi.fn(async () => "data:image/jpeg;base64,AAAA"),
     },
     chooseDock: vi.fn(),
     reloadTab: vi.fn(),
@@ -610,5 +611,49 @@ describe("pop-out channels", () => {
     listener("workspace:tabMenu")(MAIN, "api1", 1, 2);
     expect(template.map((item) => item.label)).not.toContain("Open in new window");
     (template.at(-1)?.click as (() => void) | undefined)?.();
+  });
+});
+
+describe("office:pageShot", () => {
+  const MAIN = { sender: { id: 1 } };
+  const POPOUT = { sender: { id: 7 } };
+  const handler = (deps: DesktopOnlyDeps) => {
+    const handle = vi.fn();
+    registerDesktopOnly({ ...deps, handle });
+    return handle.mock.calls.find(([c]) => c === "office:pageShot")![1] as (
+      event: unknown,
+      ...args: unknown[]
+    ) => Promise<unknown>;
+  };
+
+  it("is Electron-bound and desktop-only", () => {
+    expect(ELECTRON_BOUND_CHANNELS).toContain("office:pageShot");
+    expect(CHANNEL_POLICY["office:pageShot"]).toBe("desktop-only");
+  });
+
+  it("answers the main window with the view's capture", async () => {
+    const deps = fakeDesktopDeps();
+    expect(await handler(deps)(MAIN, "w1")).toBe("data:image/jpeg;base64,AAAA");
+    expect(deps.views.capture).toHaveBeenCalledWith("w1");
+  });
+
+  it("answers undefined to a pop-out, a stranger, a bad sender or a bad tab id, capturing nothing", async () => {
+    const deps = fakeDesktopDeps();
+    const listener = handler(deps);
+    for (const event of [POPOUT, { sender: { id: 99 } }, {}, null]) {
+      expect(await listener(event, "w1")).toBeUndefined();
+    }
+    for (const id of [undefined, 4, "", "x".repeat(300), {}]) {
+      expect(await listener(MAIN, id)).toBeUndefined();
+    }
+    expect(deps.views.capture).not.toHaveBeenCalled();
+  });
+
+  it("answers only a JPEG data URL, and undefined when the capture throws", async () => {
+    const deps = fakeDesktopDeps();
+    vi.mocked(deps.views.capture).mockResolvedValueOnce("data:image/svg+xml;base64,AAAA");
+    expect(await handler(deps)(MAIN, "w1")).toBeUndefined();
+    vi.mocked(deps.views.capture).mockRejectedValueOnce(new Error("gone"));
+    expect(await handler(deps)(MAIN, "w1")).toBeUndefined();
   });
 });

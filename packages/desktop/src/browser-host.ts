@@ -83,6 +83,10 @@ export type HostedView = {
    *  window: a small always-on-top window outside the app entirely, which
    *  is what makes the video survive switching tabs, routes and apps. */
   requestPictureInPicture(): void;
+  /** A still of the page as it is, for the Office's hover card: a JPEG data
+   *  URL at most 560px wide, or undefined for an empty image or a page that
+   *  cannot be read. It never shows the view, focuses it or moves it. */
+  capture(): Promise<string | undefined>;
 };
 
 export type ViewFactory = (partition: string, kind: TabKind) => HostedView;

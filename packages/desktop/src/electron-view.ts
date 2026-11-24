@@ -54,6 +54,9 @@ const FIND_PLAYING_VIDEO =
   "Array.from(document.querySelectorAll('video')).find(" +
   "(v) => !v.paused && !v.ended && v.readyState >= 2 && v.videoWidth > 0)";
 
+/** The widest still the Office's hover card asks for. */
+const CAPTURE_MAX_WIDTH = 560;
+
 export type ElectronViewOptions = {
   /** Asked on every popup, so the setting is read where it is used. */
   allowPopups(): boolean;
@@ -408,6 +411,16 @@ export function createElectronViewFactory(
           // rejection.
           .then((result: unknown) => result === true)
           .catch(() => false),
+      capture: async () => {
+        if (contents.isDestroyed()) return undefined;
+        // stayHidden: the page is not shown, woken or focused to be read.
+        const image = await contents.capturePage(undefined, { stayHidden: true });
+        if (image.isEmpty()) return undefined;
+        const { width } = image.getSize();
+        const small =
+          width > CAPTURE_MAX_WIDTH ? image.resize({ width: CAPTURE_MAX_WIDTH }) : image;
+        return `data:image/jpeg;base64,${small.toJPEG(70).toString("base64")}`;
+      },
       requestPictureInPicture: () => {
         // The page's own API, not a window of ours: Chromium's PiP window
         // is a real always-on-top OS window that outlives switching tabs,

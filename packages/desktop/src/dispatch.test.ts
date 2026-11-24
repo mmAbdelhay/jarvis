@@ -316,6 +316,7 @@ export function fakeDeps(overrides: Partial<DispatchDeps> = {}): DispatchDeps {
     office: {
       read: vi.fn(async () => ({ panes: {}, sessions: {} })),
       setViewing: vi.fn(),
+      screen: vi.fn(() => ({ kind: "none" as const })),
     },
     attachUpload: {
       attach: vi.fn(async () => ({ ok: true as const, path: ".jarvis/uploads/x.png" })),
@@ -1330,6 +1331,14 @@ describe("dispatch table: api, dialog, voices", () => {
     expect(await call(table, "office:activity")).toEqual({ panes: {}, sessions: {} });
     await call(table, "office:viewing", ["t1"]);
     expect(deps.office.setViewing).toHaveBeenCalledWith(["t1"]);
+  });
+
+  it("office:screen hands its target to the reader, for the desktop only", async () => {
+    const deps = fakeDeps();
+    const table = createDispatchTable(deps);
+    expect(await call(table, "office:screen", { type: "tab", id: "t1" })).toEqual({ kind: "none" });
+    expect(deps.office.screen).toHaveBeenCalledWith({ type: "tab", id: "t1" });
+    expect("office:pageShot" in table).toBe(false);
   });
 
   it("terminal:agentView, agentAnswer and agentSend pass their arguments through", async () => {

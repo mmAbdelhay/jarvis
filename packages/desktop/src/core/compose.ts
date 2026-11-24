@@ -259,6 +259,7 @@ import {
 import { createPaneAttach, createPaneAttachCwd } from "../pane-attach.js";
 import { createAgentViewHandlers } from "../agent-view.js";
 import { createOfficeActivity, createOfficeViewing } from "../office-activity.js";
+import { createOfficeScreen } from "../office-screen.js";
 import { createClaudeViewHandlers, createClaudeViewNotifier } from "../claude-view.js";
 import { createRecorderDeps, Recorder } from "../recorder.js";
 import { capacityReport, startupReport } from "../startup.js";
@@ -2576,6 +2577,17 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     language: PRIMARY_LANGUAGE,
     log: (token) => console.warn(token),
   });
+  // office:screen: what a tab, pane or session shows now. Reads only.
+  const officeScreen = createOfficeScreen({
+    tabs: () => workspace.state().tabs,
+    panes: () => shells.panes(),
+    screenText: (paneKey) => paneScreens.screenText(paneKey),
+    paneLog: (paneKey) => shells.log(paneKey),
+    sessions: () => sessions.list(),
+    sessionLog: (id) => sessions.log(id),
+    agentOf: (paneKey) => officeWatcher.agentOf(paneKey),
+    log: (token) => console.warn(token),
+  });
   const stopOfficeFeeds = [
     shells.onOutput(({ paneKey }) => officeWatcher.markDirty(paneKey)),
     shells.onShellExit(() => officeWatcher.markDirty()),
@@ -2698,6 +2710,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     office: {
       read: () => officeWatcher.read(),
       setViewing: (keys) => officeViewing.set(keys),
+      screen: (target) => officeScreen.read(target),
     },
     attachUpload: paneAttach,
     terminalLayout: { announce: (change) => broadcast.send("terminal:layout", change) },

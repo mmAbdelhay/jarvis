@@ -32,6 +32,7 @@ import {
 } from "@jarvis/core";
 import type { AgentAnswerResult, AgentSendResult, AgentView } from "./agent-view.js";
 import type { OfficeActivity } from "./office-activity.js";
+import type { OfficeScreen } from "./office-screen.js";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { Brain, ReviewComment, WorkspaceState, WorkspaceTab } from "@jarvis/core";
 import type { BindChoice, OwnerStatus, RemoteStatus, SetOwnerPasswordResult } from "@jarvis/remote";
@@ -1036,6 +1037,11 @@ export type RendererApi = {
   /** Tells main which tabs and session this window shows, so a hand raised
    *  for one of them is not announced. Desktop only. */
   officeViewing(keys: string[]): Promise<void>;
+  /** What a terminal tab, pane or session shows right now (its last rows),
+   *  for the hover card. Read-only; desktop only. */
+  officeScreen(target: { type: "tab" | "pane" | "session"; id: string }): Promise<OfficeScreen>;
+  /** A JPEG data URL still of a hosted page, or undefined. Main window only. */
+  officePageShot(tabId: string): Promise<string | undefined>;
   onOfficeChanged(cb: () => void): void;
   /** Starts a second shell in the same tab and the same directory, for a
    *  pane the renderer has just split off. */

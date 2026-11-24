@@ -72,6 +72,13 @@ class FakeView implements HostedView {
   requestPictureInPicture(): void {
     this.pipRequests += 1;
   }
+  /** What a capture answers; a function runs per call. */
+  shot: string | undefined | (() => Promise<string | undefined>) = "data:image/jpeg;base64,AAAA";
+  captures = 0;
+  capture(): Promise<string | undefined> {
+    this.captures += 1;
+    return typeof this.shot === "function" ? this.shot() : Promise.resolve(this.shot);
+  }
   onEvent(listener: (event: HostedViewEvent) => void): void {
     this.#listeners.push(listener);
   }
@@ -1618,5 +1625,97 @@ describe("ViewReconciler pop-outs", () => {
     reconciler.setDevToolsBounds({ x: 1, y: 2, width: 3, height: 4 });
     expect(created[0]?.devToolsBounds).toBeUndefined();
     expect(created[1]?.devToolsBounds).toEqual({ x: 1, y: 2, width: 3, height: 4 });
+  });
+});
+
+describe("ViewReconciler capture (office:pageShot)", () => {
+  const SHOT = "data:image/jpeg;base64,AAAA";
+  let created: Map<string, FakeView>;
+  let reconciler: ViewReconciler;
+  let visibility: string[];
+
+  function build(tabs: WorkspaceTab[], active = "a") {
+    created = new Map();
+    visibility = [];
+    reconciler = new ViewReconciler(() => {
+      const view = new FakeView();
+      const setVisible = view.setVisible.bind(view);
+      view.setVisible = (visible: boolean) => {
+        visibility.push(String(visible));
+        setVisible(visible);
+      };
+      created.set(String(created.size), view);
+      return view;
+    }, recordingReports().reports);
+    reconciler.setVisible(true);
+    reconciler.apply(snapshot(tabs, active));
+  }
+  const viewA = () => created.get("0") as FakeView;
+
+  it("answers the JPEG data URL of a hosted page, without touching visibility or bounds", async () => {
+    build([tab("a"), tab("b")], "b");
+    reconciler.setBounds({ x: 1, y: 2, width: 3, height: 4 });
+    const before = { visible: viewA().visible, bounds: viewA().bounds, calls: visibility.length };
+    expect(await reconciler.capture("a")).toBe(SHOT);
+    expect(viewA().captures).toBe(1);
+    expect({ visible: viewA().visible, bounds: viewA().bounds, calls: visibility.length }).toEqual(
+      before,
+    );
+    expect(viewA().moves).toEqual([]);
+  });
+
+  it("works for a popped tab", async () => {
+    build([tab("a")]);
+    reconciler.popOut("a", {}, { x: 0, y: 0, width: 640, height: 480 });
+    expect(await reconciler.capture("a")).toBe(SHOT);
+  });
+
+  it("answers undefined for an unknown tab, a suspended tab (and wakes nothing), and a terminal", async () => {
+    build([tab("a", { suspended: true }), tab("t", { kind: "terminal" })]);
+    expect(created.size).toBe(0);
+    expect(await reconciler.capture("a")).toBeUndefined();
+    expect(await reconciler.capture("t")).toBeUndefined();
+    expect(await reconciler.capture("nope")).toBeUndefined();
+    expect(created.size).toBe(0);
+  });
+
+  it("answers undefined for a failed tab, an Authorize tab waiting for its result and a blank tab", async () => {
+    build([
+      tab("a", { error: "boom" }),
+      tab("b", { title: "acme — Authorize" }),
+      tab("c", { url: "" }),
+    ]);
+    for (const id of ["a", "b", "c"]) expect(await reconciler.capture(id)).toBeUndefined();
+    for (const view of created.values()) expect(view.captures).toBe(0);
+  });
+
+  it("answers undefined for an empty image, an error, or anything but a JPEG data URL", async () => {
+    build([tab("a")]);
+    for (const shot of [undefined, "data:image/png;base64,AA", "javascript:1", "x".repeat(10)]) {
+      viewA().shot = shot;
+      expect(await reconciler.capture("a")).toBeUndefined();
+    }
+    viewA().shot = () => Promise.reject(new Error("destroyed"));
+    expect(await reconciler.capture("a")).toBeUndefined();
+  });
+
+  it("gives up after 1.5 s", async () => {
+    vi.useFakeTimers();
+    try {
+      build([tab("a")]);
+      viewA().shot = () => new Promise(() => undefined);
+      const pending = reconciler.capture("a");
+      await vi.advanceTimersByTimeAsync(1499);
+      let settled = false;
+      void pending.then(() => {
+        settled = true;
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(2);
+      expect(await pending).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

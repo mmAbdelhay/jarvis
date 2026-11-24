@@ -33,6 +33,7 @@ import { isWithin } from "@jarvis/platform";
 import { randomInt } from "node:crypto";
 import type { AgentAnswerResult, AgentSendResult, AgentView } from "./agent-view.js";
 import type { OfficeActivity } from "./office-activity.js";
+import type { OfficeScreen } from "./office-screen.js";
 import { bracketedSubmit } from "./bracketed.js";
 import {
   type AttachUploadResult,
@@ -253,7 +254,9 @@ export type ElectronBoundChannel =
   | "popout:ready"
   | "popout:state"
   | "popout:handedOver"
-  | "popout:take";
+  | "popout:take"
+  // The Office's still of a hosted page (view-reconciler.ts's capture).
+  | "office:pageShot";
 
 export type TableChannel = Exclude<InvokeChannel, ElectronBoundChannel>;
 
@@ -490,6 +493,8 @@ export type DispatchDeps = {
   office: {
     read(): Promise<OfficeActivity>;
     setViewing(keys: unknown): void;
+    /** office:screen: what a terminal or session shows now (office-screen.ts). */
+    screen(target: unknown): OfficeScreen;
   };
   // pane-attach.ts's createPaneAttach, built in compose.ts over the same
   // upload store remote:uploadFile stages into. `deviceId` is always the
@@ -1235,6 +1240,7 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
       deps.agentView.answer(paneKey, index, label),
     "terminal:agentSend": ([paneKey, text]) => deps.agentView.send(paneKey, text),
     "office:activity": () => deps.office.read(),
+    "office:screen": ([target]) => deps.office.screen(target),
     "office:viewing": ([keys]) => {
       deps.office.setViewing(keys);
     },

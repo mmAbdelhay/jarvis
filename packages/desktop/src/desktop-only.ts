@@ -61,6 +61,7 @@ export const ELECTRON_BOUND_CHANNELS: readonly (ElectronBoundChannel & DesktopOn
   "popout:state",
   "popout:handedOver",
   "popout:take",
+  "office:pageShot",
 ];
 
 /** plans:openLink's own gate (Task 8, controller ruling). main's own
@@ -111,6 +112,7 @@ export type DesktopOnlyDeps = {
     | "setVisible"
     | "hideAll"
     | "requestPictureInPicture"
+    | "capture"
   >;
   chooseDock: (dock: DevToolsDock) => void; // broadcast.local("workspace:devtoolsDockChosen", dock)
   // Bug 2 / Task 8: the tab menu's own four items. Reload is
@@ -370,6 +372,21 @@ export function registerDesktopOnly(deps: DesktopOnlyDeps): void {
     deps
       .buildMenu([{ label: item.label, click: item.onClick }])
       .popup({ window: deps.window, x: Math.round(x), y: Math.round(y) });
+  });
+  // The Office's still of a hosted page: the main window only, a tab id only.
+  // Anything else, and every failure, answers undefined — the card then says
+  // what it knows without a picture.
+  deps.handle("office:pageShot", async (event, tabId) => {
+    if (!fromMain(event)) return undefined;
+    if (typeof tabId !== "string" || tabId === "" || tabId.length > 200) return undefined;
+    try {
+      const shot = await deps.views.capture(tabId);
+      return typeof shot === "string" && shot.startsWith("data:image/jpeg;base64,")
+        ? shot
+        : undefined;
+    } catch {
+      return undefined;
+    }
   });
   deps.handle("popout:ready", (event) => {
     const id = senderId(event);

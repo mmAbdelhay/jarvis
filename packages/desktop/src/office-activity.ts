@@ -87,6 +87,8 @@ export type OfficeActivityDeps = {
 export type OfficeWatcher = {
   /** The latest answer; scans first if there is none or output waits. */
   read(): Promise<OfficeActivity>;
+  /** The agent's name for a pane from the latest scan, with no scan. */
+  agentOf(paneKey: string): string | undefined;
   /** `key` (a pane key or session id) printed; no key: something came or
    *  went, so every pane and session is read. */
   markDirty(key?: string): void;
@@ -346,6 +348,7 @@ export function createOfficeActivity(deps: OfficeActivityDeps): OfficeWatcher {
       else if (isDirty() && deps.now() - lastScanAt >= OFFICE_SCAN_MS) await scan();
       return latest ?? EMPTY_OFFICE_ACTIVITY;
     },
+    agentOf: (paneKey) => latest?.panes[paneKey]?.agent,
     markDirty(key) {
       if (key === undefined) allDirty = true;
       else if (dirtyKeys.size < DIRTY_MAX) dirtyKeys.add(key);

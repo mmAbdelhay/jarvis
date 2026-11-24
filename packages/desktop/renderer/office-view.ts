@@ -42,7 +42,15 @@ const SEAT_H = 150;
 const MINIMAP_W = 216;
 const MINIMAP_H = 156;
 const MINIMAP_PAD = 8;
-const CARD_W = 290;
+const CARD_W = 420;
+/** The pointer may cross the gap between a seat and its card in this long. */
+const CARD_GRACE_MS = 150;
+/** How long a hover must last before the first preview request. */
+const PREVIEW_INTENT_MS = 120;
+const PREVIEW_TEXT_MS = 1000;
+const PREVIEW_IMAGE_MS = 2000;
+const PREVIEW_IMAGE_MAX_CHARS = 1_000_000;
+const JPEG_DATA_URL = "data:image/jpeg;base64,";
 
 export type OfficeViewOptions = {
   /** #view-office, with the skeleton from index.html in it. */
@@ -59,6 +67,12 @@ export type OfficeViewOptions = {
   /** The stage's size in px. Default: its own box. */
   measure?(): { width: number; height: number };
   now?(): number;
+  /** The hover card's live preview: what a terminal shows now (office:screen)
+   *  and a still of a hosted page (office:pageShot). Absent: no preview. */
+  preview?: {
+    screen(target: { type: "tab" | "pane" | "session"; id: string }): Promise<unknown>;
+    pageShot(tabId: string): Promise<string | undefined>;
+  };
 };
 
 export type OfficeViewState = { k: number; tx: number; ty: number; fit: boolean };
@@ -642,7 +656,7 @@ export function createOfficeView(options: OfficeViewOptions): OfficeView {
       );
     });
     const show = (): void => showCard(node);
-    const hide = (): void => hideCard(node);
+    const hide = (): void => scheduleHide(node);
     element.addEventListener("mouseenter", show);
     element.addEventListener("mouseleave", hide);
     element.addEventListener("focus", () => {
@@ -959,6 +973,8 @@ export function createOfficeView(options: OfficeViewOptions): OfficeView {
   }
 
   function showCard(seat: SeatNode): void {
+    cancelHide();
+    stopPreview();
     hover = seat;
     const employee = seat.employee;
     const project = employee.project === null ? MESSAGES.officeLounge(L) : employee.project;
@@ -975,6 +991,7 @@ export function createOfficeView(options: OfficeViewOptions): OfficeView {
     const label = html("div", "office-card__title", employee.label);
     label.dir = "auto";
     card.append(label);
+    buildPreview(seat);
     if (employee.doing !== undefined && employee.doing !== "") {
       // The line is the agent's current work only while it is busy; once it
       // is idle (or asking) it is just the last thing it did.
@@ -1023,6 +1040,7 @@ export function createOfficeView(options: OfficeViewOptions): OfficeView {
     card.id = "office-card";
     seat.element.setAttribute("aria-describedby", "office-card");
     placeCard(seat);
+    startPreview(seat);
   }
 
   function placeCard(seat: SeatNode): void {
@@ -1030,18 +1048,301 @@ export function createOfficeView(options: OfficeViewOptions): OfficeView {
     const sx = tx + seat.world.x * k;
     const sy = ty + seat.world.y * k;
     const off = (SEAT_W / 2) * k * 0.9 + 10;
-    const flip = sx + off + CARD_W > size.width - 8;
-    const left = flip ? sx - off - CARD_W : sx + off;
-    const top = Math.max(8, Math.min(sy - 70, Math.max(8, size.height - 200)));
-    card.style.left = `${Math.max(8, left)}px`;
-    card.style.top = `${top}px`;
+    // Never wider than the stage, and always inside it, flipped or clamped.
+    const width = Math.max(0, Math.min(CARD_W, size.width - 16));
+    card.style.maxWidth = `${width}px`;
+    const flip = sx + off + width > size.width - 8;
+    const left = flip ? sx - off - width : sx + off;
+    const high = Math.max(8, size.width - 8 - width);
+    const room = Math.max(8, size.height - 8 - (card.offsetHeight || 200));
+    card.style.left = `${Math.max(8, Math.min(left, high))}px`;
+    card.style.top = `${Math.max(8, Math.min(sy - 70, room))}px`;
   }
 
   function hideCard(seat: SeatNode | undefined): void {
     if (seat !== undefined && hover !== undefined && hover !== seat) return;
+    cancelHide();
+    stopPreview();
     seat?.element.removeAttribute("aria-describedby");
+    hover?.element.removeAttribute("aria-describedby");
     hover = undefined;
     card.hidden = true;
+  }
+
+  // The card closes a moment after the pointer (or focus) leaves, so the
+  // pointer can cross onto the card — to read it, to select its text — and
+  // the card then stays until the pointer leaves it too.
+  let hideTimer: ReturnType<typeof setTimeout> | undefined;
+  let pointerOnCard = false;
+
+  function cancelHide(): void {
+    if (hideTimer === undefined) return;
+    clearTimeout(hideTimer);
+    timers.delete(hideTimer);
+    hideTimer = undefined;
+  }
+
+  function scheduleHide(seat: SeatNode | undefined): void {
+    cancelHide();
+    const timer = setTimeout(() => {
+      timers.delete(timer);
+      hideTimer = undefined;
+      if (pointerOnCard) return;
+      hideCard(seat);
+    }, CARD_GRACE_MS);
+    timers.add(timer);
+    hideTimer = timer;
+  }
+
+  card.addEventListener("mouseenter", () => {
+    pointerOnCard = true;
+    cancelHide();
+  });
+  card.addEventListener("mouseleave", () => {
+    pointerOnCard = false;
+    scheduleHide(hover);
+  });
+
+  // ---- the card's live preview --------------------------------------------
+
+  type PreviewKind = "screen" | "page" | "none";
+  type Preview = {
+    kind: PreviewKind;
+    generation: number;
+    area: HTMLElement;
+    /** What is drawn now, so an unchanged answer rebuilds nothing. */
+    drawn: string;
+    image: HTMLImageElement | undefined;
+  };
+  let preview: Preview | undefined;
+  let generation = 0;
+  let previewTimer: ReturnType<typeof setTimeout> | undefined;
+  let inFlight = false;
+
+  function previewKindOf(employee: OfficeEmployee): PreviewKind {
+    if (options.preview === undefined) return "none";
+    if (employee.target.type === "session") return "screen";
+    if (employee.page !== undefined) return "page";
+    switch (employee.kind) {
+      case "terminal":
+      case "claude":
+      case "codex":
+      case "copilot":
+      case "agent":
+        return "screen";
+      default:
+        return "none";
+    }
+  }
+
+  const hostOf = (url: string): string => {
+    try {
+      return new URL(url).host;
+    } catch {
+      return "";
+    }
+  };
+
+  function buildPreview(seat: SeatNode): void {
+    preview = undefined;
+    const kind = previewKindOf(seat.employee);
+    if (kind === "none") return;
+    const area = html("div", "office-card__preview");
+    area.setAttribute("aria-live", "off");
+    card.append(area);
+    preview = { kind, generation, area, drawn: "", image: undefined };
+    if (kind === "page") drawPage(preview, seat.employee, undefined, false);
+  }
+
+  function setNote(area: HTMLElement, text: string): void {
+    area.replaceChildren(html("span", "office-card__note", text));
+  }
+
+  /** The page's still (when there is one), its address and, with no still,
+   *  what state it is in. Text only; the image's source is checked. */
+  function drawPage(
+    current: Preview,
+    employee: OfficeEmployee,
+    shot: string | undefined,
+    unavailable: boolean,
+  ): void {
+    const page = employee.page;
+    const host = page === undefined ? "" : hostOf(page.url);
+    const good = shot?.startsWith(JPEG_DATA_URL) === true && shot.length <= PREVIEW_IMAGE_MAX_CHARS;
+    const signature = JSON.stringify([
+      good ? shot : "",
+      host,
+      employee.pose,
+      page?.suspended,
+      unavailable,
+    ]);
+    if (signature === current.drawn) return;
+    current.drawn = signature;
+    const parts: HTMLElement[] = [];
+    if (good) {
+      let image = current.image;
+      if (image === undefined) {
+        image = document.createElement("img");
+        image.className = "office-card__shot";
+        current.image = image;
+      }
+      image.alt = employee.label;
+      image.setAttribute("src", shot);
+      parts.push(image);
+    } else {
+      current.image = undefined;
+    }
+    const caption = html("div", "office-card__note mono");
+    caption.dir = "ltr";
+    caption.textContent = good
+      ? host
+      : [host, MESSAGES.officePose(employee.pose, L)].filter((part) => part !== "").join(" · ");
+    parts.push(caption);
+    if (!good && page?.suspended === true) {
+      parts.push(html("span", "office-card__note", MESSAGES.officePreviewAsleep(L)));
+    } else if (unavailable) {
+      parts.push(html("span", "office-card__note", MESSAGES.officePreviewUnavailable(L)));
+    }
+    current.area.replaceChildren(...parts);
+  }
+
+  type Section = { label: string | undefined; text: string };
+
+  /** Reads an office:screen answer; undefined for anything else. */
+  function sectionsOf(answer: unknown): Section[] | undefined {
+    if (typeof answer !== "object" || answer === null) return undefined;
+    const { kind, sections, lines } = answer as {
+      kind?: unknown;
+      sections?: unknown;
+      lines?: unknown;
+    };
+    const textOf = (value: unknown): string | undefined =>
+      Array.isArray(value) && value.every((line) => typeof line === "string")
+        ? (value as string[]).join("\n")
+        : undefined;
+    if (kind === "session") {
+      const text = textOf(lines);
+      return text === undefined ? undefined : [{ label: undefined, text }];
+    }
+    if (kind !== "terminal" || !Array.isArray(sections)) return undefined;
+    const found: Section[] = [];
+    for (const section of sections as { lines?: unknown }[]) {
+      const text = textOf(section?.lines);
+      if (text === undefined) return undefined;
+      found.push({ label: undefined, text });
+    }
+    if (found.length > 1) {
+      found.forEach((section, index) => {
+        section.label = MESSAGES.officePreviewPane(index + 1, L);
+      });
+    }
+    return found;
+  }
+
+  function drawScreen(current: Preview, answer: unknown): void {
+    const found = sectionsOf(answer);
+    if (found === undefined) {
+      if (current.drawn !== "unavailable") {
+        current.drawn = "unavailable";
+        setNote(current.area, MESSAGES.officePreviewUnavailable(L));
+      }
+      return;
+    }
+    const signature = JSON.stringify(found);
+    if (signature === current.drawn) return;
+    current.drawn = signature;
+    const blocks: HTMLElement[] = [];
+    for (const section of found) {
+      if (section.label !== undefined) blocks.push(html("div", "office-card__pane", section.label));
+      const pre = html("pre", "office-card__screen mono", section.text);
+      pre.dir = "ltr";
+      pre.setAttribute("aria-label", MESSAGES.officePreviewScreen(L));
+      blocks.push(pre);
+    }
+    current.area.replaceChildren(...blocks);
+    for (const pre of current.area.querySelectorAll("pre")) pre.scrollTop = pre.scrollHeight;
+    if (hover !== undefined) placeCard(hover);
+  }
+
+  /** Whether a request may go out now: the card is open, the Office route is
+   *  on screen and so is the document. */
+  const previewAllowed = (): boolean =>
+    hover !== undefined &&
+    !card.hidden &&
+    !disposed &&
+    isVisible() &&
+    document.visibilityState !== "hidden";
+
+  function armPreview(ms: number, expected: number): void {
+    if (previewTimer !== undefined) {
+      clearTimeout(previewTimer);
+      timers.delete(previewTimer);
+    }
+    const timer = setTimeout(() => {
+      timers.delete(timer);
+      if (previewTimer === timer) previewTimer = undefined;
+      void tickPreview(expected);
+    }, ms);
+    timers.add(timer);
+    previewTimer = timer;
+  }
+
+  function stopPreview(): void {
+    generation += 1;
+    if (previewTimer !== undefined) {
+      clearTimeout(previewTimer);
+      timers.delete(previewTimer);
+      previewTimer = undefined;
+    }
+    preview = undefined;
+  }
+
+  function startPreview(seat: SeatNode): void {
+    if (preview === undefined || options.preview === undefined) return;
+    // A page that is asleep is never woken to be looked at.
+    if (preview.kind === "page" && seat.employee.page?.suspended === true) return;
+    armPreview(PREVIEW_INTENT_MS, generation);
+  }
+
+  async function tickPreview(expected: number): Promise<void> {
+    if (expected !== generation || preview === undefined || hover === undefined) return;
+    if (!previewAllowed()) return;
+    // One request at a time: an earlier hover's answer is still on its way.
+    if (inFlight) {
+      armPreview(100, expected);
+      return;
+    }
+    const current = preview;
+    const seat = hover;
+    const employee = seat.employee;
+    const source = options.preview;
+    if (source === undefined) return;
+    inFlight = true;
+    try {
+      if (current.kind === "screen") {
+        const target = employee.target;
+        const answer = await source.screen(
+          target.type === "session"
+            ? { type: "session", id: target.sessionId }
+            : target.type === "pane"
+              ? { type: "pane", id: target.paneKey }
+              : { type: "tab", id: target.tabId },
+        );
+        if (expected === generation) drawScreen(current, answer);
+      } else if (employee.target.type !== "session") {
+        const shot = await source.pageShot(employee.target.tabId);
+        if (expected === generation) drawPage(current, employee, shot, false);
+      }
+    } catch {
+      if (expected === generation) {
+        if (current.kind === "screen") drawScreen(current, undefined);
+        else drawPage(current, employee, undefined, true);
+      }
+    } finally {
+      inFlight = false;
+    }
+    if (expected !== generation) return;
+    armPreview(current.kind === "screen" ? PREVIEW_TEXT_MS : PREVIEW_IMAGE_MS, expected);
   }
 
   // ---- drawing ------------------------------------------------------------
@@ -1224,6 +1525,16 @@ export function createOfficeView(options: OfficeViewOptions): OfficeView {
 
   const onVisibility = (): void => {
     root.classList.toggle("office--paused", document.visibilityState === "hidden");
+    // The card's preview paused with the document; it picks up again, at once.
+    if (
+      document.visibilityState === "visible" &&
+      hover !== undefined &&
+      preview !== undefined &&
+      previewTimer === undefined &&
+      !inFlight
+    ) {
+      armPreview(0, generation);
+    }
   };
   document.addEventListener("visibilitychange", onVisibility);
   onVisibility();
@@ -1237,6 +1548,7 @@ export function createOfficeView(options: OfficeViewOptions): OfficeView {
     view: () => ({ k, tx, ty, fit }),
     dispose() {
       disposed = true;
+      generation += 1;
       for (const timer of timers) clearTimeout(timer);
       timers.clear();
       document.removeEventListener("visibilitychange", onVisibility);
@@ -1247,7 +1559,8 @@ export function createOfficeView(options: OfficeViewOptions): OfficeView {
 // ---- the feed ---------------------------------------------------------------
 
 export type OfficeFeedOptions = OfficeViewOptions & {
-  api: Pick<RendererApi, "officeActivity" | "onOfficeChanged">;
+  api: Pick<RendererApi, "officeActivity" | "onOfficeChanged"> &
+    Partial<Pick<RendererApi, "officeScreen" | "officePageShot">>;
   /** Terminal tabs whose shell this window knows runs a command. */
   running(): ReadonlySet<string>;
   /** The raised-hands count, for the nav badge — also while the route is hidden. */
@@ -1272,7 +1585,18 @@ export type Office = {
  * badge needs the hands count — but the view does no DOM work then.
  */
 export function initOffice(options: OfficeFeedOptions): Office {
-  const view = createOfficeView(options);
+  const { api } = options;
+  const view = createOfficeView({
+    ...options,
+    ...(api.officeScreen !== undefined && api.officePageShot !== undefined
+      ? {
+          preview: {
+            screen: (target) => api.officeScreen?.(target) ?? Promise.reject(new Error("none")),
+            pageShot: (tabId) => api.officePageShot?.(tabId) ?? Promise.resolve(undefined),
+          },
+        }
+      : {}),
+  });
   const now = options.now ?? (() => Date.now());
   let projects: readonly string[] = [];
   let workspace: WorkspaceState = { tabs: [], activeTabId: undefined };

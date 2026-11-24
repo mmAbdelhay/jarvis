@@ -704,7 +704,15 @@ not drawn; they are listed last in the sidebar.
 
 Hover or focus an employee for a card: what it is, its project, the agent and
 model, what it is doing, its branch and changes, and when it was last active.
-Click it to open that tab, pane or session. An agent that stops to ask a question
+The card also shows what is happening inside the tab, live while it is open: a
+Terminal tab shows the last rows of its screen (one block per pane for a split tab,
+at most four), an agent session shows the tail of its output, and a web page,
+editor, database, cluster or chat tab shows a small picture of the page with its
+address. A page that is asleep is not woken for this and says so; an API or Docker
+tab shows only its name and state. Text refreshes every second and pictures every
+two, only while the card is open and the Office is on screen. The card stays open
+while the pointer is on it. What the card reads is never logged and never sent to
+another device. Click it to open that tab, pane or session. An agent that stops to ask a question
 raises its hand, and Jarvis shows a desktop notification naming the project and
 the agent — never the question itself. The badge on the Office item counts the
 raised hands. Drag to pan, scroll or pinch to zoom, **Show whole office** to see

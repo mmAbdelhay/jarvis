@@ -143,6 +143,9 @@ export const CHANNEL_POLICY = {
   // this window shows. Never run for a phone.
   "office:activity": "desktop-only",
   "office:viewing": "desktop-only",
+  // What a tab shows right now, for the hover card: never leaves the laptop.
+  "office:screen": "desktop-only",
+  "office:pageShot": "desktop-only",
   // The file sidebar's writes. Owner decision 2026-10-03: rename and trash
   // are remote — the phone's file list drives them. Both stay inside a
   // configured project root (ipc.ts's resolveWithin/entryWithin, the same

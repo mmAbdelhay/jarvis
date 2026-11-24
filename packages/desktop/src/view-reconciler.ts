@@ -8,9 +8,18 @@ import type {
   ViewFactory,
   ViewTarget,
 } from "./browser-host.js";
-import { hasView, type TabReports, type TabSource, type ViewRequest } from "./core/tab-host.js";
+import {
+  hasView,
+  isAuthorizeTab,
+  type TabReports,
+  type TabSource,
+  type ViewRequest,
+} from "./core/tab-host.js";
 
 export type { TabReports, TabSource };
+
+const CAPTURE_TIMEOUT_MS = 1500;
+const JPEG_DATA_URL = "data:image/jpeg;base64,";
 
 type Held = { view: HostedView; project: string };
 
@@ -149,6 +158,38 @@ export class ViewReconciler {
    */
   requestPictureInPicture(id: TabId): void {
     this.#views.get(id)?.view.requestPictureInPicture();
+  }
+
+  /**
+   * A still of this tab's page for the Office's hover card, or undefined: a
+   * tab with no page (suspended, a terminal, unknown), a failed or blank one,
+   * a sign-in page waiting for its result, an empty image, an error, or no
+   * answer within a second and a half. Asks the view to capture without
+   * showing it, so it never changes visibility, focus or bounds and never
+   * builds a page a suspended tab does not have. A popped page is captured
+   * where it is.
+   */
+  async capture(id: TabId): Promise<string | undefined> {
+    if (this.#destroyed) return undefined;
+    const held = this.#views.get(id);
+    const tab = this.#state.tabs.find((candidate) => candidate.id === id);
+    if (held === undefined || tab === undefined || !hasView(tab)) return undefined;
+    if (tab.error !== undefined || isAuthorizeTab(tab)) return undefined;
+    if (tab.url === "" || tab.url === "about:blank") return undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const shot = await Promise.race([
+        held.view.capture(),
+        new Promise<undefined>((resolve) => {
+          timer = setTimeout(() => resolve(undefined), CAPTURE_TIMEOUT_MS);
+        }),
+      ]);
+      return typeof shot === "string" && shot.startsWith(JPEG_DATA_URL) ? shot : undefined;
+    } catch {
+      return undefined;
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
   }
 
   setBounds(bounds: Rect): void {

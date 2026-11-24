@@ -199,6 +199,14 @@ export const MESSAGES = {
     language === "ar" ? "انقر لفتح هذه اللوحة" : "Click to open this pane",
   officeCardOpenSession: (language: "ar" | "en"): string =>
     language === "ar" ? "انقر لفتح هذه الجلسة" : "Click to open this session",
+  officePreviewUnavailable: (language: "ar" | "en"): string =>
+    language === "ar" ? "المعاينة غير متاحة" : "Preview unavailable",
+  officePreviewAsleep: (language: "ar" | "en"): string =>
+    language === "ar" ? "لا معاينة أثناء النوم" : "No preview while asleep",
+  officePreviewPane: (index: number, language: "ar" | "en"): string =>
+    language === "ar" ? `اللوحة ${index}` : `Pane ${index}`,
+  officePreviewScreen: (language: "ar" | "en"): string =>
+    language === "ar" ? "الشاشة الآن" : "Screen right now",
   officeLounge: (language: "ar" | "en"): string => (language === "ar" ? "الاستراحة" : "Lounge"),
   officeHandTitle: (project: string, language: "ar" | "en"): string =>
     language === "ar" ? `رُفعت يد في ${project}` : `Hand raised in ${project}`,
