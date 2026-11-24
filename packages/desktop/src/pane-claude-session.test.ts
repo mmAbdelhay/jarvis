@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { AgentConfig } from "@jarvis/core";
 import type { ExternalAgentProcess } from "@jarvis/platform";
@@ -59,6 +59,7 @@ describe("createPaneClaudeLookup", () => {
       transcriptPath: TRANSCRIPT,
       cwd: "/w",
       transcriptsDir: PROJECTS,
+      configDir: dirname(PROJECTS),
     });
   });
 

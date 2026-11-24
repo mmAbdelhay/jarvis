@@ -3,7 +3,7 @@
 // transcripts directory holds its `<sessionId>.jsonl`. Shared by the tab
 // namer (session-tab-name.ts) and the phone's chat view of a pane.
 
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import type { AgentConfig } from "@jarvis/core";
 import {
   claudeSessionPaths,
@@ -23,6 +23,8 @@ export type PaneClaudeSession = {
   transcriptPath?: string;
   cwd: string | null;
   transcriptsDir: string;
+  /** The matched agent account's config directory. */
+  configDir: string;
 };
 
 export type PaneClaudeLookupDeps = Pick<
@@ -106,6 +108,7 @@ export function createPaneClaudeLookup(deps: PaneClaudeLookupDeps): PaneClaudeLo
         ...(transcriptPath === undefined ? {} : { transcriptPath }),
         cwd: process.cwd,
         transcriptsDir: paths.transcriptsDir,
+        configDir: dirname(paths.sessionsDir),
       };
     },
     forget: (sessionIds) => transcriptPaths.forget(sessionIds),

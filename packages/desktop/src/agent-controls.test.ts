@@ -231,7 +231,10 @@ describe("agentCommand", () => {
 
   it("lists no command a vendor does not have", async () => {
     const codex = setup({}, { vendor: "openai", screen: () => "› Ask Codex to do anything" });
-    expect(await codex.controls.command("t1", "/clear")).toEqual({ ok: false, reason: "unknown" });
+    expect(await codex.controls.command("t1", "/rollout")).toEqual({
+      ok: false,
+      reason: "unknown",
+    });
     expect(await codex.controls.command("t1", "/new")).toEqual({ ok: true });
     expect(await codex.controls.command("t1", "/approvals")).toEqual({
       ok: false,

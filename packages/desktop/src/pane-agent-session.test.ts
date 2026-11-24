@@ -118,7 +118,21 @@ describe("createPaneAgentLookup", () => {
       name: "n",
       transcriptPath: join("/h/.claude-main", "projects", "-w", "c1.jsonl"),
       cwd: "/w",
+      configDir: "/h/.claude-main",
     });
+  });
+
+  it("names the account's config directory even before a transcript exists", async () => {
+    const { deps } = world({
+      readFile: async (path) => {
+        if (path === join("/h/.claude-main", "sessions", "500.json"))
+          return JSON.stringify({ pid: 500, sessionId: "c1" });
+        throw new Error("ENOENT");
+      },
+    });
+    const found = await createPaneAgentLookup(deps).forProcess(processOf("claude"));
+    expect(found?.transcriptPath).toBeUndefined();
+    expect(found?.configDir).toBe("/h/.claude-main");
   });
 
   describe("github", () => {
@@ -131,6 +145,7 @@ describe("createPaneAgentLookup", () => {
         sessionId: "s-two",
         transcriptPath: join(COPILOT_STATE, "s-two", "events.jsonl"),
         cwd: "/w",
+        configDir: join("/h", ".copilot"),
       });
     });
 
@@ -166,6 +181,7 @@ describe("createPaneAgentLookup", () => {
         sessionId: "aaaa",
         transcriptPath: ROLLOUT,
         cwd: "/w",
+        configDir: join("/h", ".codex"),
       });
       expect(openFiles).toHaveBeenCalledWith([500, 501]);
     });
@@ -236,6 +252,20 @@ describe("createPaneAgentLookup", () => {
       const { deps } = world({ listRollouts });
       await createPaneAgentLookup(deps).forProcess(processOf("codex-work"));
       expect(listRollouts).toHaveBeenCalledWith(join("/h/.codex-work", "sessions"));
+    });
+
+    it("names the account's own directory for a codex account with a config directory", async () => {
+      const { deps } = world({
+        listRollouts: async () => [
+          {
+            path: join("/h/.codex-work", "sessions", "2026", "11", "23", "rollout-x-cccc.jsonl"),
+            mtimeMs: 2000,
+          },
+        ],
+        readHead: async () => meta("cccc", "/w"),
+      });
+      const found = await createPaneAgentLookup(deps).forProcess(processOf("codex-work"));
+      expect(found?.configDir).toBe("/h/.codex-work");
     });
 
     it("on Windows never runs lsof and resolves by the fallback only", async () => {

@@ -29,6 +29,7 @@ function setup(
     home?: string;
     env?: Record<string, string | undefined>;
     noTranscript?: boolean;
+    configDir?: string;
   } = {},
 ) {
   const entries = (dir: string): string[] =>
@@ -48,6 +49,7 @@ function setup(
               ...(options.noCwd === true ? { cwd: null } : {}),
               ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
               ...(options.noTranscript === true ? { transcriptPath: undefined } : {}),
+              ...(options.configDir === undefined ? {} : { configDir: options.configDir }),
             }
           : undefined,
       ),
@@ -303,7 +305,7 @@ describe("built-in rows", () => {
     const out = await setup({}).suggest.commands("t1");
     expect(out.commands.find((c) => c.name === "model")).toEqual({
       name: "model",
-      description: "Set the AI model for Claude Code",
+      description: "Switch model",
       hint: "<model>",
       choices: ["opus", "sonnet", "haiku"],
       source: "built-in",
@@ -645,5 +647,87 @@ describe("limits and cache", () => {
       );
       expect(bytes).toBeLessThanOrEqual(262_144);
     }
+  });
+});
+
+describe("which account's folders are read", () => {
+  const CWD = join("/", "work", "app");
+  const MINE = join(HOME, ".claude-mine");
+  const OTHER = join(HOME, ".claude");
+  const tree: Record<string, Node> = {
+    ...dir(CWD),
+    ...dir(MINE, "commands"),
+    ...file(join(MINE, "commands", "mine.md"), "Mine"),
+    ...dir(OTHER, "commands"),
+    ...file(join(OTHER, "commands", "theirs.md"), "Theirs"),
+  };
+
+  it("uses the matched account before any transcript exists, never ~/.claude", async () => {
+    const t = setup(tree, { cwd: CWD, home: HOME, noTranscript: true, configDir: MINE });
+    expect(names(await t.suggest.commands("t1"), "account")).toEqual(["mine"]);
+  });
+
+  it("prefers the matched account over the transcript's directory", async () => {
+    const t = setup(tree, { cwd: CWD, home: HOME, configDir: MINE });
+    expect(names(await t.suggest.commands("t1"), "account")).toEqual(["mine"]);
+  });
+
+  it("uses the Codex account's directory for prompts and skills", async () => {
+    const codex = join(HOME, ".codex-work");
+    const t = setup(
+      {
+        ...dir(CWD),
+        ...dir(codex, "prompts"),
+        ...file(join(codex, "prompts", "p.md"), "Work prompt"),
+        ...dir(codex, "skills", "s"),
+        ...file(join(codex, "skills", "s", "SKILL.md"), "Work skill"),
+        ...dir(HOME, ".codex", "prompts"),
+        ...file(join(HOME, ".codex", "prompts", "other.md"), "Other"),
+      },
+      { vendor: "openai", cwd: CWD, home: HOME, env: {}, noTranscript: true, configDir: codex },
+    );
+    expect(names(await t.suggest.commands("t1")).sort()).toEqual(["prompts:p", "s"]);
+  });
+
+  it("uses the Copilot account's skills", async () => {
+    const copilot = join(HOME, ".copilot-work");
+    const t = setup(
+      {
+        ...dir(CWD),
+        ...dir(copilot, "skills", "w"),
+        ...file(join(copilot, "skills", "w", "SKILL.md"), "Work"),
+        ...dir(HOME, ".copilot", "skills", "d"),
+        ...file(join(HOME, ".copilot", "skills", "d", "SKILL.md"), "Default"),
+      },
+      { vendor: "github", cwd: CWD, home: HOME, configDir: copilot },
+    );
+    expect(names(await t.suggest.commands("t1"), "skill")).toEqual(["w"]);
+  });
+});
+
+describe("skills synced from claude.ai", () => {
+  const CWD = join("/", "work", "app");
+  it("appear as /name from <config>/skills/synced/<id>/<name>", async () => {
+    const t = setup(
+      {
+        ...dir(CWD),
+        ...dir(CONFIG, "skills", "synced", "abc123"),
+        ...dir(CONFIG, "skills", "synced", "def456"),
+        ...dir(CONFIG, "skills", "synced", "abc123", "pitch"),
+        ...file(
+          join(CONFIG, "skills", "synced", "abc123", "pitch", "SKILL.md"),
+          "---\ndescription: Pitch deck\n---\n",
+        ),
+        ...dir(CONFIG, "skills", "synced", "def456", "notes"),
+        ...file(join(CONFIG, "skills", "synced", "def456", "notes", "SKILL.md"), "Notes"),
+        [join(CONFIG, "skills", "synced", "link")]: { kind: "link", to: join("/", "elsewhere") },
+      },
+      { cwd: CWD },
+    );
+    const out = await t.suggest.commands("t1");
+    expect(out.commands.filter((c) => c.source === "skill")).toEqual([
+      { name: "pitch", description: "Pitch deck", source: "skill" },
+      { name: "notes", description: "Notes", source: "skill" },
+    ]);
   });
 });

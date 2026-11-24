@@ -57,6 +57,7 @@ const SESSION: PaneClaudeSession = {
   // What claudeSessionPaths() really returns: the projects root, one level
   // above the project folder that holds the transcript.
   transcriptsDir: "/home/.claude/projects",
+  configDir: "/home/.claude",
 };
 
 function fakeDeps(overrides: Partial<ClaudeViewDeps> = {}): ClaudeViewDeps {

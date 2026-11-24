@@ -237,6 +237,24 @@ export function createAgentSuggest(deps: AgentSuggestDeps): {
     return out;
   }
 
+  /** Skills synced from claude.ai: `<dir>/<id>/<name>/SKILL.md`, one level of ids, no symlinks. */
+  async function syncedSkills(dir: string, realBase: string): Promise<AgentCommandInfo[]> {
+    const out: AgentCommandInfo[] = [];
+    let ids: Entry[];
+    try {
+      if (!isWithin(await deps.fs.realpath(dir), realBase)) return out;
+      ids = (await deps.fs.readdir(dir)).slice(0, MAX_ENTRIES);
+    } catch {
+      return out;
+    }
+    for (const id of ids) {
+      if (out.length >= MAX_COMMANDS) break;
+      if (id.isSymlink || !id.isDirectory) continue;
+      out.push(...(await skillDirs(join(dir, id.name), realBase)));
+    }
+    return out;
+  }
+
   /** The session's working directory: its process's, else the fallback's. */
   async function rootOf(session: PaneAgentSession): Promise<string | undefined> {
     if (session.cwd !== null) return session.cwd;
@@ -355,17 +373,21 @@ export function createAgentSuggest(deps: AgentSuggestDeps): {
         found.push(...(await skillDirs(join(base, "skills"), realBase)));
       }
       const config =
-        configDirOf(session) ?? (deps.home === undefined ? undefined : join(deps.home, ".claude"));
+        session.configDir ??
+        configDirOf(session) ??
+        (deps.home === undefined ? undefined : join(deps.home, ".claude"));
       if (config !== undefined) {
         const realBase = await realOrUndefined(config);
         if (realBase !== undefined) {
           found.push(...(await commandFiles(join(config, "commands"), realBase, "account")));
           found.push(...(await skillDirs(join(config, "skills"), realBase, { follow: true })));
+          found.push(...(await syncedSkills(join(config, "skills", "synced"), realBase)));
           found.push(...(await claudePlugins(config, cwd, chain)));
         }
       }
     } else if (session.vendor === "openai") {
       const codexHome =
+        session.configDir ??
         codexHomeOf(session) ??
         deps.env?.["CODEX_HOME"] ??
         (deps.home === undefined ? undefined : join(deps.home, ".codex"));
@@ -394,10 +416,11 @@ export function createAgentSuggest(deps: AgentSuggestDeps): {
         for (const sub of [".github", ".agents", ".claude"])
           roots.push({ dir: join(dir, sub, "skills"), follow: false });
       }
-      if (deps.home !== undefined) {
-        roots.push({ dir: join(deps.home, ".copilot", "skills"), follow: true });
+      const copilotHome =
+        session.configDir ?? (deps.home === undefined ? undefined : join(deps.home, ".copilot"));
+      if (copilotHome !== undefined) roots.push({ dir: join(copilotHome, "skills"), follow: true });
+      if (deps.home !== undefined)
         roots.push({ dir: join(deps.home, ".agents", "skills"), follow: true });
-      }
       for (const { dir, follow } of roots) {
         const realDir = await realOrUndefined(dir);
         if (realDir !== undefined) found.push(...(await skillDirs(dir, realDir, { follow })));

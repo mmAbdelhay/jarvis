@@ -5,7 +5,7 @@
 // undefined — two candidates are never guessed between — and nothing here
 // throws. All file and process access is injected.
 
-import { join, sep } from "node:path";
+import { dirname, join, sep } from "node:path";
 import type { AgentConfig } from "@jarvis/core";
 import { transcriptDirs, type ExternalAgentProcess } from "@jarvis/platform";
 import {
@@ -26,6 +26,10 @@ export type PaneAgentSession = {
   /** Absent until the agent has written the transcript. */
   transcriptPath?: string;
   cwd: string | null;
+  /** The config directory of the agent account that matched this process
+   *  (Claude's config dir, CODEX_HOME, Copilot's home): known before any
+   *  transcript exists, never guessed between accounts. */
+  configDir?: string;
 };
 
 export type PaneAgentLookupDeps = PaneClaudeLookupDeps & {
@@ -141,6 +145,7 @@ export function createPaneAgentLookup(deps: PaneAgentLookupDeps): PaneAgentLooku
       sessionId,
       transcriptPath: join(dir, sessionId, "events.jsonl"),
       cwd: process.cwd,
+      configDir: dirname(dir),
     };
   }
 
@@ -157,6 +162,7 @@ export function createPaneAgentLookup(deps: PaneAgentLookupDeps): PaneAgentLooku
       sessionId: id,
       transcriptPath,
       cwd: process.cwd,
+      configDir: dirname(sessionsDir),
     });
     // A path separator closes the prefix: "sessions-old" is not under "sessions".
     const under = (path: string): boolean => path.startsWith(sessionsDir + sep);
