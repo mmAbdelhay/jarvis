@@ -13,7 +13,7 @@ export type ChatInline =
 export type ChatBlock =
   | { kind: "para"; inlines: ChatInline[] }
   | { kind: "list"; ordered: boolean; items: { marker: string; inlines: ChatInline[] }[] }
-  | { kind: "codeBlock"; text: string };
+  | { kind: "codeBlock"; text: string; lang?: string };
 
 function parseInlines(text: string): ChatInline[] {
   const inlines: ChatInline[] = [];
@@ -58,13 +58,18 @@ export function parseChatText(text: string): ChatBlock[] {
     const line = lines[index] ?? "";
     if (/^```[^`]*$/.test(line)) {
       flushParagraph();
+      const lang = /^```\s*([A-Za-z0-9_+#.-]{1,20})\s*$/.exec(line)?.[1];
       const inner: string[] = [];
       index++;
       while (index < lines.length && !/^```\s*$/.test(lines[index] ?? "")) {
         inner.push(lines[index] ?? "");
         index++;
       }
-      blocks.push({ kind: "codeBlock", text: inner.join("\n") });
+      blocks.push({
+        kind: "codeBlock",
+        text: inner.join("\n"),
+        ...(lang === undefined ? {} : { lang }),
+      });
     } else if (/^\s*$/.test(line)) {
       flushParagraph();
     } else {

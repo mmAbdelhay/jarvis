@@ -213,6 +213,7 @@ describe("queue, stop, mode and model", () => {
       "Opus",
       "Sonnet",
       "Haiku",
+      "More models\u2026",
     ]);
     expect(menu.querySelector("[aria-selected='true']")?.textContent).toContain("Opus");
     press(menu, "ArrowDown");
@@ -224,6 +225,7 @@ describe("queue, stop, mode and model", () => {
     press(s.q(".ac-menu:not([hidden])"), "End");
     press(s.q(".ac-menu:not([hidden])"), "Enter");
     await settle();
+    expect(s.api.terminalAgentCommand).toHaveBeenLastCalledWith("t1", "/model");
     expect(s.q(".agent-chat__note").textContent).toBe(t("agentChatCommandBusy"));
 
     const codex = await open(
@@ -233,6 +235,20 @@ describe("queue, stop, mode and model", () => {
     codex.q<HTMLButtonElement>(".ac-modelbutton").click();
     await settle();
     expect(codex.api.terminalAgentCommand).toHaveBeenCalledWith("t1", "/model");
+  });
+
+  it("has the design's placeholder, shorter in a narrow pane", async () => {
+    const s = await open();
+    expect(input(s).placeholder).toBe("Message the agent, / for commands, @ for files");
+    Object.defineProperty(s.host, "clientWidth", { configurable: true, get: () => 600 });
+    s.chat.refresh();
+    await settle();
+    expect(input(s).placeholder).toBe(t("agentChatComposer"));
+  });
+
+  it("isolates the percent in a bdi so right-to-left words cannot turn 62% into %62", async () => {
+    const s = await open(agentView({ context: { used: 38000, leftPercent: 62 } }));
+    expect(s.q(".ac-context bdi").textContent).toBe("62%");
   });
 
   it("names the model and the context left, or used", async () => {

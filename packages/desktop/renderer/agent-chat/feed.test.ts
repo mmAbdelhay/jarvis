@@ -241,6 +241,51 @@ describe("tool rows", () => {
     expect(card?.querySelector("dt")?.textContent).toBe("todos");
   });
 
+  it("names the language in the code header, and with none has no header and Copy overlays", async () => {
+    const s = await open(
+      agentView({
+        page: {
+          items: [reply("a1", "```js\nconst a = 1; // x\n```"), reply("a2", "```\nplain\n```")],
+        },
+      }),
+    );
+    const [withLang, without] = [...s.host.querySelectorAll<HTMLElement>(".ac-codebox")];
+    expect(withLang?.querySelector(".ac-codebox__lang")?.textContent).toBe("js");
+    expect(withLang?.querySelector(".ac-tok--keyword")?.textContent).toBe("const");
+    expect(withLang?.querySelector(".ac-tok--comment")?.textContent).toBe("// x");
+    expect(without?.querySelector(".ac-codebox__bar")).toBeNull();
+    expect(without?.querySelector(".ac-copy--overlay")).not.toBeNull();
+  });
+
+  it("reads code, commands, output and diffs left to right, and isolates +/- counts", async () => {
+    const s = await open(
+      agentView({
+        page: {
+          items: [
+            reply("a1", "```js\nx\n```"),
+            tool("b1", "Bash", { command: "a\nb", output: "o" }),
+            tool("e1", "Edit", { path: "/r/a.ts", diff: [{ sign: "+", text: "x" }] }),
+          ],
+        },
+      }),
+    );
+    for (const sel of [".ac-codebox", ".ac-code", ".ac-cmd", ".ac-output__text", ".ac-diff"]) {
+      expect(s.q(sel).getAttribute("dir"), sel).toBe("ltr");
+    }
+    const count = s.q(".ac-card--edit bdi.agent-chat__add");
+    expect(count.getAttribute("dir")).toBe("ltr");
+  });
+
+  it("puts the toggle's words in its label only, and orders a header name, target, counts, status", async () => {
+    const s = await open();
+    const head = s.q<HTMLElement>(".ac-card--edit .ac-card__head");
+    expect(head.querySelector(".ac-toggle")?.getAttribute("aria-label")).toBe("Changes, 3 lines");
+    expect(head.querySelector(".ac-toggle")?.textContent).toBe("");
+    const order = [...head.children].map((n) => n.className.split(" ")[0]);
+    expect(order.indexOf("ac-card__name")).toBeLessThan(order.indexOf("ac-card__target"));
+    expect(order.indexOf("ac-card__target")).toBeLessThan(order.indexOf("agent-chat__add"));
+  });
+
   it("copies a command and a code block", async () => {
     const s = await open(
       agentView({
@@ -423,5 +468,34 @@ describe("the reader's scroll", () => {
     jump.click();
     expect(feed.scrollTop).toBe(state.scrollHeight);
     expect(jump.hidden).toBe(true);
+  });
+
+  it("stays pinned to the bottom when the feed's own height changes (a question card appears), and not when scrolled up", async () => {
+    const callbacks: (() => void)[] = [];
+    class FakeObserver {
+      constructor(cb: () => void) {
+        callbacks.push(cb);
+      }
+      observe() {}
+      disconnect() {}
+    }
+    (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = FakeObserver;
+    try {
+      const s = await open();
+      const feed = s.q<HTMLElement>(".agent-chat__feed");
+      const state = geometry(feed, { scrollHeight: 1000, clientHeight: 200, scrollTop: 800 });
+      feed.dispatchEvent(new Event("scroll"));
+      state.clientHeight = 100; // the card took space below
+      for (const cb of callbacks) cb();
+      expect(state.scrollTop).toBe(1000);
+      expect(s.q<HTMLElement>(".ac-jump").hidden).toBe(true);
+      state.scrollTop = 100;
+      feed.dispatchEvent(new Event("scroll"));
+      state.clientHeight = 50;
+      for (const cb of callbacks) cb();
+      expect(state.scrollTop).toBe(100);
+    } finally {
+      delete (globalThis as unknown as { ResizeObserver?: unknown }).ResizeObserver;
+    }
   });
 });

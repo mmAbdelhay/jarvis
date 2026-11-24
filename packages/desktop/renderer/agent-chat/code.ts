@@ -127,6 +127,7 @@ export function copyButton(
 /** `<pre><code>` with token spans. */
 export function renderCode(text: string, hint?: string): HTMLPreElement {
   const pre = el("pre", "ac-code");
+  pre.dir = "ltr";
   const code = el("code");
   for (const token of tokenize(text, familyOf(hint))) {
     if (token.kind === "plain") code.append(document.createTextNode(token.text));
@@ -136,12 +137,23 @@ export function renderCode(text: string, hint?: string): HTMLPreElement {
   return pre;
 }
 
-/** A code block with a Copy button above it. */
+/** A code block. With a language the header names it beside Copy; with none
+ *  there is no header and Copy sits over the code. Code reads left to right in
+ *  any language of the interface. */
 export function codeBlock(ctx: CodeContext, text: string, hint?: string): HTMLElement {
   const box = el("div", "ac-codebox");
-  const bar = el("div", "ac-codebox__bar");
-  bar.append(copyButton(ctx, () => text));
-  box.append(bar, renderCode(text, hint));
+  box.dir = "ltr";
+  const copy = copyButton(ctx, () => text);
+  const code = renderCode(text, hint);
+  code.dir = "ltr";
+  if (hint !== undefined && hint !== "") {
+    const bar = el("div", "ac-codebox__bar");
+    bar.append(el("span", "ac-codebox__lang", hint), copy);
+    box.append(bar, code);
+  } else {
+    copy.classList.add("ac-copy--overlay");
+    box.append(copy, code);
+  }
   return box;
 }
 
@@ -170,7 +182,7 @@ function renderInlines(inlines: readonly ChatInline[], ctx: CodeContext): Docume
 }
 
 function renderBlock(block: ChatBlock, ctx: CodeContext): HTMLElement {
-  if (block.kind === "codeBlock") return codeBlock(ctx, block.text);
+  if (block.kind === "codeBlock") return codeBlock(ctx, block.text, block.lang);
   if (block.kind === "list") {
     const list = el("div", "agent-chat__list");
     list.setAttribute("role", "list");

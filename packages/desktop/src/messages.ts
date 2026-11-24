@@ -281,7 +281,7 @@ export const MESSAGES = {
       ? "الوكيل يسأل سؤالاً. أجب عنه أعلاه."
       : "The agent is asking a question. Answer it above.",
   agentChatContextLeft: (language: "ar" | "en"): string =>
-    language === "ar" ? "السياق: متبقٍ {n}%" : "Context {n}% left",
+    language === "ar" ? "السياق: متبقٍ {n}" : "Context {n} left",
   agentChatContextUsed: (language: "ar" | "en"): string =>
     language === "ar" ? "السياق: استُخدم {n} رمزاً" : "Context {n} tokens used",
   agentChatCopied: (language: "ar" | "en"): string => (language === "ar" ? "تم النسخ" : "Copied"),
@@ -358,7 +358,7 @@ export const MESSAGES = {
   agentChatPanelAgents: (language: "ar" | "en"): string =>
     language === "ar" ? "الوكلاء الفرعيون" : "Sub-agents",
   agentChatPanelContextLeft: (language: "ar" | "en"): string =>
-    language === "ar" ? "السياق، متبقٍ {n}%" : "Context, {n}% left",
+    language === "ar" ? "السياق، متبقٍ {n}" : "Context, {n} left",
   agentChatPanelContextUsed: (language: "ar" | "en"): string =>
     language === "ar" ? "السياق، استُخدم {n} رمزاً" : "Context, {n} tokens used",
   agentChatPanelFiles: (language: "ar" | "en"): string =>
@@ -442,6 +442,12 @@ export const MESSAGES = {
     language === "ar" ? "انتظر حتى ينتهي رفع الملفات." : "Wait for the files to finish uploading.",
   agentChatWorkedFor: (language: "ar" | "en"): string =>
     language === "ar" ? "عمل لمدة {time}" : "Worked for {time}",
+  agentChatComposerHint: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "اكتب رسالة للوكيل، / للأوامر، @ للملفات"
+      : "Message the agent, / for commands, @ for files",
+  agentChatModelMore: (language: "ar" | "en"): string =>
+    language === "ar" ? "نماذج أخرى…" : "More models\u2026",
   agentChatQuestionWait: (language: "ar" | "en"): string =>
     language === "ar"
       ? "ظهر السؤال للتو. انتظر لحظة ثم اختر."

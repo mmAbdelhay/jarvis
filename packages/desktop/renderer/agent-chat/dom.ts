@@ -91,3 +91,23 @@ export function tokens(used: number): string {
   const value = used >= 100_000 ? String(Math.round(used / 1000)) : (used / 1000).toFixed(1);
   return `${value.replace(/\.0$/, "")}k`;
 }
+
+/** Like fmt, as nodes: each value sits in a <bdi>, so a number or a percent
+ *  keeps its own direction inside right-to-left words ("62%", not "%62"). */
+export function fmtNode(
+  template: string,
+  values: Record<string, string | number>,
+): DocumentFragment {
+  const out = document.createDocumentFragment();
+  let cursor = 0;
+  for (const match of template.matchAll(/\{(\w+)\}/g)) {
+    const at = match.index ?? 0;
+    if (at > cursor) out.append(document.createTextNode(template.slice(cursor, at)));
+    const name = match[1] ?? "";
+    if (name in values) out.append(el("bdi", undefined, String(values[name])));
+    else out.append(document.createTextNode(match[0]));
+    cursor = at + match[0].length;
+  }
+  if (cursor < template.length) out.append(document.createTextNode(template.slice(cursor)));
+  return out;
+}

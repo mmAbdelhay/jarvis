@@ -371,14 +371,18 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
   function render(view: AgentOf): void {
     shell.setIdentity(VENDOR_NAMES[view.vendor], view.title);
     renderFeed(view);
+    layout(view);
     // The composer first: closing the drawer hands the keys to it.
     const typing = composer.hasFocus();
-    composer.update(view, view.prompt !== undefined || view.needsTerm === true);
+    composer.update(
+      view,
+      view.prompt !== undefined || view.needsTerm === true,
+      panel.dataset["narrow"] === "true",
+    );
     question.update(view, answering);
     // A composer that locked under the typist must not leave the keys where an
     // Enter would reach anything: they land on the card, which acts on nothing.
     if (typing && question.shown()) question.element.focus();
-    layout(view);
     if (view.readFailed === true) {
       showNote(t("agentChatReadFailed"));
       readFailedNote = true;

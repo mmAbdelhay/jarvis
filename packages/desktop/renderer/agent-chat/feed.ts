@@ -118,6 +118,15 @@ export function createFeed(options: FeedOptions): Feed {
     jump.hidden = stuck;
     if (scroller.scrollTop <= TOP_SLACK_PX && lastState?.older === "more") options.loadOlder();
   });
+  // The feed's box or its content changing size (a card or the drawer appearing
+  // below) must not strand a reader who was at the bottom.
+  if (typeof ResizeObserver !== "undefined") {
+    const observer = new ResizeObserver(() => {
+      if (stuck) scrollToBottom();
+    });
+    observer.observe(scroller);
+    observer.observe(column);
+  }
   jump.addEventListener("click", () => {
     scrollToBottom();
     scroller.focus({ preventScroll: true });

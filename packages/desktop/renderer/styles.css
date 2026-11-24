@@ -2536,7 +2536,13 @@
   .agent-chat .ac-inline { background: var(--surface-sunken); border-radius: 4px; padding: 0 4px; }
   .ac-codebox { margin: 0 0 var(--s2); border: 1px solid var(--border); border-radius: var(--r-control);
     overflow: hidden; background: var(--terminal-ground); }
-  .ac-codebox__bar { display: flex; justify-content: flex-end; padding: 2px var(--s2);
+  .ac-codebox { position: relative; text-align: left; }
+  .ac-codebox__lang { margin-inline-end: auto; color: var(--text-muted); font: 12px/1.4 var(--font-mono); }
+  .ac-copy--overlay { position: absolute; inset-block-start: 6px; inset-inline-end: 6px; z-index: 1;
+    opacity: 0; }
+  .ac-codebox:hover .ac-copy--overlay, .ac-copy--overlay:focus-visible { opacity: 1; }
+  .ac-code, .ac-cmd, .ac-diff, .ac-output__text { text-align: left; }
+  .ac-codebox__bar { display: flex; justify-content: flex-end; align-items: center; padding: 2px var(--s2);
     border-bottom: 1px solid var(--border); background: var(--surface); }
   .ac-code { margin: 0; padding: var(--s2) var(--s3); overflow-x: auto; color: var(--text);
     tab-size: 2; }
@@ -2671,8 +2677,10 @@
   .ac-composer[data-dropping], .agent-chat[data-dropping] .ac-composer { border-color: var(--accent); }
   .agent-chat__input { width: 100%; box-sizing: border-box; min-height: 1.5em; max-height: 220px; resize: none;
     padding: 0; border: 0; background: transparent; color: var(--text); font: 15px/1.5 var(--font-ui); }
-  .agent-chat__input:focus-visible { outline: 2px solid var(--accent); outline-offset: 6px;
-    border-radius: 4px; }
+  /* One focus ring: the box around the field, not the field inside it. */
+  .agent-chat__input:focus-visible { outline: none; }
+  .agent-chat__composer:focus-within { border-color: var(--accent); outline: 2px solid var(--accent);
+    outline-offset: 1px; }
   .agent-chat__input:disabled { opacity: 0.5; }
   .ac-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
   .ac-context { color: var(--text-muted); font-size: 13px; white-space: nowrap; }

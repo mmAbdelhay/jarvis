@@ -3,7 +3,18 @@
 // a popover. A section with no data is not drawn; the panel can be hidden and
 // that is remembered.
 import type { ChatAgent, ChatFile, ChatTodo } from "@jarvis/platform";
-import { basename, duration, el, fmt, ICONS, icon, tokens, type Translate } from "./dom.js";
+import { count } from "./tool-row.js";
+import {
+  basename,
+  duration,
+  el,
+  fmt,
+  fmtNode,
+  ICONS,
+  icon,
+  tokens,
+  type Translate,
+} from "./dom.js";
 
 export type SectionKind = "todo" | "agents" | "files" | "context";
 
@@ -37,7 +48,7 @@ export function headingOf(kind: SectionKind, data: PanelData, t: Translate): str
   if (kind === "files") return t("agentChatPanelFiles");
   const context = data.context;
   return context?.leftPercent !== undefined
-    ? fmt(t("agentChatPanelContextLeft"), { n: context.leftPercent })
+    ? fmt(t("agentChatPanelContextLeft"), { n: `${context.leftPercent}%` })
     : fmt(t("agentChatPanelContextUsed"), { n: tokens(context?.used ?? 0) });
 }
 
@@ -94,7 +105,11 @@ export function buildSection(
   const { t } = ctx;
   const section = el("section", "ac-section");
   section.dataset["section"] = kind;
-  section.append(el("h2", "ac-section__title", headingOf(kind, data, t)));
+  const title = el("h2", "ac-section__title");
+  if (kind === "context" && data.context?.leftPercent !== undefined) {
+    title.append(fmtNode(t("agentChatPanelContextLeft"), { n: `${data.context.leftPercent}%` }));
+  } else title.textContent = headingOf(kind, data, t);
+  section.append(title);
   if (kind === "todo") {
     for (const todo of data.todos ?? []) {
       const row = el("div", `ac-todo ac-todo--${todo.state}`);
@@ -141,9 +156,9 @@ export function buildSection(
       name.dir = "ltr";
       button.append(name, el("span", "ac-spacer"));
       if (file.added !== undefined && file.added > 0)
-        button.append(el("span", "agent-chat__add", `+${file.added}`));
+        button.append(count("agent-chat__add", `+${file.added}`));
       if (file.removed !== undefined && file.removed > 0) {
-        button.append(el("span", "agent-chat__del", `−${file.removed}`));
+        button.append(count("agent-chat__del", `\u2212${file.removed}`));
       }
       button.addEventListener("click", () => ctx.openFile(file.path));
       section.append(button);

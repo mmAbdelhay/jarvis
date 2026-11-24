@@ -89,11 +89,14 @@ function toggle(
   key: string,
   fallback: boolean,
   body: HTMLElement,
-  label: HTMLElement,
+  label: HTMLElement | string,
 ): HTMLButtonElement {
   const button = el("button", "ac-toggle");
   button.type = "button";
-  button.append(icon(ICONS.chevron, 12), label);
+  button.append(icon(ICONS.chevron, 12));
+  // A card's toggle is a chevron: its words name it for a screen reader only.
+  if (typeof label === "string") button.setAttribute("aria-label", label);
+  else button.append(label);
   const apply = (open: boolean): void => {
     button.setAttribute("aria-expanded", String(open));
     body.hidden = !open;
@@ -131,6 +134,7 @@ function outputBody(item: ChatToolItem, ctx: ToolContext, key: string): HTMLElem
   if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
   const pre = el("pre", "ac-output__text");
   pre.dir = "ltr";
+  box.dir = "ltr";
   const hiddenCount = Math.max(0, lines.length - OUTPUT_TAIL_LINES);
   if (hiddenCount > 0) {
     const head = el("span", "ac-output__head", `${lines.slice(0, hiddenCount).join("\n")}\n`);
@@ -161,6 +165,19 @@ function outputBody(item: ChatToolItem, ctx: ToolContext, key: string): HTMLElem
   return box;
 }
 
+/** A +N or −N count, isolated so a right-to-left row cannot reverse its sign. */
+export function count(className: string, text: string): HTMLElement {
+  const node = el("bdi", className, text);
+  node.dir = "ltr";
+  return node;
+}
+
+function ltrPre(text: string): HTMLElement {
+  const pre = el("pre", "ac-cmd", text);
+  pre.dir = "ltr";
+  return pre;
+}
+
 function diffCounts(item: ChatToolItem): { added: number; removed: number } {
   let added = 0;
   let removed = 0;
@@ -176,7 +193,7 @@ function head(item: ChatToolItem, ctx: ToolContext, target: string | undefined):
   bar.append(el("strong", "ac-card__name", item.tool));
   if (target !== undefined && target !== "") {
     const node = el("span", "ac-card__target", target);
-    node.dir = "auto";
+    node.dir = "ltr";
     node.title = target;
     bar.append(node);
   }
@@ -189,8 +206,8 @@ function editCard(item: ChatToolItem, ctx: ToolContext): HTMLElement {
   const path = item.path ?? item.target;
   const bar = head(item, ctx, path === undefined ? undefined : basename(path));
   const { added, removed } = diffCounts(item);
-  if (added > 0) bar.append(el("span", "agent-chat__add", `+${added}`));
-  if (removed > 0) bar.append(el("span", "agent-chat__del", `−${removed}`));
+  if (added > 0) bar.append(count("agent-chat__add", `+${added}`));
+  if (removed > 0) bar.append(count("agent-chat__del", `\u2212${removed}`));
   bar.append(el("span", "ac-spacer"));
   const state = mark(item, ctx);
   if (state !== undefined) bar.append(state);
@@ -208,7 +225,7 @@ function editCard(item: ChatToolItem, ctx: ToolContext): HTMLElement {
   const lines = item.diff?.length ?? 0;
   if (lines > 0) {
     const body = diffBody(item);
-    const label = el("span", "ac-toggle__label", fmt(ctx.t("agentChatDiffLines"), { n: lines }));
+    const label = fmt(ctx.t("agentChatDiffLines"), { n: lines });
     bar.prepend(toggle(ctx, `${item.id}:diff`, lines <= DIFF_OPEN_MAX_LINES, body, label));
     card.append(body);
   }
@@ -234,9 +251,9 @@ function bashCard(item: ChatToolItem, ctx: ToolContext): HTMLElement {
   const hasOutput = item.output !== undefined && item.output !== "";
   if (command.includes("\n") || hasOutput) {
     const body = el("div", "ac-card__body");
-    if (command.includes("\n")) body.append(el("pre", "ac-cmd", command));
+    if (command.includes("\n")) body.append(ltrPre(command));
     if (hasOutput) body.append(outputBody(item, ctx, item.id));
-    const label = el("span", "ac-toggle__label", ctx.t("agentChatOutput"));
+    const label = ctx.t("agentChatOutput");
     bar.prepend(toggle(ctx, `${item.id}:body`, true, body, label));
     card.append(body);
   }
@@ -264,7 +281,7 @@ function otherCard(item: ChatToolItem, ctx: ToolContext): HTMLElement {
       body.append(list);
     }
     if (hasOutput) body.append(outputBody(item, ctx, item.id));
-    const label = el("span", "ac-toggle__label", ctx.t("agentChatDetails"));
+    const label = ctx.t("agentChatDetails");
     bar.prepend(toggle(ctx, `${item.id}:body`, false, body, label));
     card.append(body);
   }

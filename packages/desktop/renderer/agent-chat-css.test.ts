@@ -108,4 +108,15 @@ describe("the agent chat's layout", () => {
       expect(css).toContain(selector);
     }
   });
+
+  it("draws one focus ring, on the composer's box, not on the field inside it", () => {
+    expect(ruleBodyFor(".agent-chat__input:focus-visible")).toMatch(/outline\s*:\s*none/);
+    expect(ruleBodyFor(".agent-chat__composer:focus-within")).toMatch(/outline\s*:\s*2px solid/);
+  });
+
+  it("keeps code, commands and diffs left aligned whatever the interface language", () => {
+    expect(ruleBodyFor(".ac-code, .ac-cmd, .ac-diff, .ac-output__text")).toMatch(
+      /text-align\s*:\s*left/,
+    );
+  });
 });

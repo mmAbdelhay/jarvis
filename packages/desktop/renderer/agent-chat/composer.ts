@@ -20,6 +20,7 @@ import {
   dirname,
   el,
   fmt,
+  fmtNode,
   ICONS,
   icon,
   quotePath,
@@ -147,7 +148,7 @@ export type ComposerOptions = {
 
 export type Composer = {
   element: HTMLElement;
-  update(view: AgentOf, locked: boolean): void;
+  update(view: AgentOf, locked: boolean, narrow?: boolean): void;
   focus(): void;
   value(): string;
   /** Whether the keys are in the box. */
@@ -200,7 +201,7 @@ export function createComposer(options: ComposerOptions): Composer {
   input.rows = 1;
   input.dir = "auto";
   input.spellcheck = false;
-  input.placeholder = t("agentChatComposer");
+  input.placeholder = t("agentChatComposerHint");
   input.setAttribute("aria-label", t("agentChatComposerLabel"));
   input.setAttribute("role", "combobox");
   input.setAttribute("aria-autocomplete", "list");
@@ -733,22 +734,36 @@ export function createComposer(options: ComposerOptions): Composer {
     if (modelMenu.isOpen()) return modelMenu.close();
     const now = (view.model ?? "").toLowerCase();
     modelMenu.open(
-      CLAUDE_MODELS.map<MenuItem>((model) => ({
-        id: model.id,
-        label: model.label,
-        ...(now.includes(model.id) ? { current: true, note: t("agentChatCurrent") } : {}),
-      })),
+      [
+        ...CLAUDE_MODELS.map<MenuItem>((model) => ({
+          id: model.id,
+          label: model.label,
+          ...(now.includes(model.id) ? { current: true, note: t("agentChatCurrent") } : {}),
+        })),
+        // Claude's own picker, which opens in the terminal drawer.
+        { id: "more", label: t("agentChatModelMore") },
+      ],
       (item) => {
-        if (!now.includes(item.id)) void runCommand(`/model ${item.id}`);
+        if (item.id === "more") void runCommand("/model");
+        else if (!now.includes(item.id)) void runCommand(`/model ${item.id}`);
       },
     );
   });
+
+  function contextNode(next: AgentOf): DocumentFragment | undefined {
+    const used = next.context;
+    if (used === undefined) return undefined;
+    if (used.leftPercent !== undefined) {
+      return fmtNode(t("agentChatContextLeft"), { n: `${used.leftPercent}%` });
+    }
+    return fmtNode(t("agentChatContextUsed"), { n: tokens(used.used) });
+  }
 
   function contextText(next: AgentOf): string {
     const used = next.context;
     if (used === undefined) return "";
     if (used.leftPercent !== undefined)
-      return fmt(t("agentChatContextLeft"), { n: used.leftPercent });
+      return fmt(t("agentChatContextLeft"), { n: `${used.leftPercent}%` });
     const n = tokens(used.used);
     return fmt(t("agentChatContextUsed"), { n });
   }
@@ -765,7 +780,7 @@ export function createComposer(options: ComposerOptions): Composer {
     value: () => input.value,
     hasFocus: () => document.activeElement === input,
     addFiles,
-    update(next, isLocked) {
+    update(next, isLocked, narrow = false) {
       view = next;
       locked = isLocked;
       const modeShown = next.caps.mode && next.mode !== undefined;
@@ -775,9 +790,15 @@ export function createComposer(options: ComposerOptions): Composer {
       modelButton.hidden = model === undefined && next.caps.model !== "menu";
       modelButton.textContent = model ?? t("agentChatModel");
       modelButton.setAttribute("aria-label", `${t("agentChatModelMenu")}: ${model ?? ""}`.trim());
-      context.textContent = contextText(next);
-      context.hidden = context.textContent === "";
-      input.placeholder = locked ? t("agentChatComposerLocked") : t("agentChatComposer");
+      const node = contextNode(next);
+      if (node === undefined) context.replaceChildren();
+      else context.replaceChildren(node);
+      context.hidden = node === undefined;
+      input.placeholder = locked
+        ? t("agentChatComposerLocked")
+        : narrow
+          ? t("agentChatComposer")
+          : t("agentChatComposerHint");
       paintButtons();
     },
   };
