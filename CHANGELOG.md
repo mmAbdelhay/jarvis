@@ -8,6 +8,8 @@ version and the downloads. This file is the index.
 
 ## Unreleased
 
+## [0.1.15] — 2026-11-24
+
 - File sidebar: right-clicking a folder (or the empty area) in the Terminal tab now
   offers "Open in editor", which opens that folder in the project's editor.
 - Terminal: "Clear terminal" (palette, the clear-screen chord and a new button beside the
@@ -42,6 +44,7 @@ version and the downloads. This file is the index.
   Copilot session may only appear after the first message), no longer drops out of Chat
   on one failed read, and shows a card when an agent asks something only the terminal
   can answer.
+- Terminal agents: a Claude turn whose spinner shows several words is read as working.
 
 ## [0.1.14] — 2026-11-22
 
