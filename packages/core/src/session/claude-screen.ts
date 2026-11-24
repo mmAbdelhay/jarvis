@@ -14,6 +14,25 @@ const MODE_ROWS: readonly [RegExp, ClaudeMode][] = [
   [/^\s*⏵⏵\s*accept edits on\b/i, "acceptEdits"],
 ];
 
+/** The words Claude's status row shows in its default mode. */
+const DEFAULT_HINT = /^\s*\?\s*for shortcuts\b/i;
+
+/**
+ * The mode the status row shows, or undefined when it shows none: the
+ * default mode has no row of its own, so only its "? for shortcuts" hint
+ * proves a readable default. Unlike readClaudeScreen's `mode`, which is
+ * "default" for anything unrecognised, this never guesses.
+ */
+export function readClaudeMode(screen: string): ClaudeMode | undefined {
+  const rows = stripAnsi(screen).split("\n").slice(-40);
+  let mode: ClaudeMode | undefined;
+  for (const row of rows) {
+    for (const [marker, value] of MODE_ROWS) if (marker.test(row)) mode = value;
+    if (mode === undefined && DEFAULT_HINT.test(row)) mode = "default";
+  }
+  return mode;
+}
+
 /** A spinner's elapsed time: "6s", "5m 43s", "1h 2m". */
 const ELAPSED = /^\d+[hms](?:\s+\d+[hms])*$/;
 
