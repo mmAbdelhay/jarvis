@@ -45,6 +45,7 @@ export const ICONS = {
   search: ["M7 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8z", "M10 10l4 4"],
   files: ["M2.5 3.5h11v9h-11z", "M6 3.5v9"],
   panel: ["M2.5 3.5h11v9h-11z", "M10 3.5v9"],
+  menu: ["M2.5 4.5h11M2.5 8h11M2.5 11.5h11"],
   up: ["M8 13V3M4 7l4-4 4 4"],
   down: ["M8 3v10M4 9l4 4 4-4"],
   spinner: ["M8 2a6 6 0 1 1-6 6"],

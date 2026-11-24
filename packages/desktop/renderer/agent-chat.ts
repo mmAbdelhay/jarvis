@@ -63,6 +63,9 @@ export type AgentChatOptions = {
   isShown?(): boolean;
   /** The tab's file sidebar toggle, shown in the header. */
   toggleFiles?: () => void;
+  /** The tab's other toolbar actions, which the header carries while the chat
+   *  shows (the tab's own strip is hidden then): Reviews and the menu. */
+  toolbar?: { reviews(): void; menu(): void };
   now?: () => number;
   copy?: (text: string) => void;
 };
@@ -169,6 +172,7 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
   const shell = createShell({
     t,
     toggleFiles: options.toggleFiles,
+    toolbar: options.toolbar,
     onTab: (next, byUser) => setMode(next, byUser),
     currentMode: () => mode,
   });

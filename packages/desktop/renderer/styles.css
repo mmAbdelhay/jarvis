@@ -2256,6 +2256,11 @@
      Floated over the panes' top corner they sat on the first block's
      collapse/copy/re-run buttons and took their clicks. */
   .terminal-split:has(> .plan-toggle, > .reviews-toggle, > .explorer-toggle) { padding-block-start: 30px; }
+  /* While every pane of the tab shows its Chat, the chat header is the one row
+     (workspace-terminal.ts syncChatOnly): the tab's own strip goes. */
+  .terminal-split[data-chat-only] { padding-block-start: 0; }
+  .terminal-split[data-chat-only] > :is(.explorer-toggle, .clear-toggle, .plan-toggle, .reviews-toggle) {
+    display: none; }
   /* The plan panel's own switch, in that band (the split is its positioned
      box). Quiet until hovered, accent while the panel is open, and a dot
      when the tab's session has a plan to show. */
@@ -2478,6 +2483,10 @@
   .ac-bar__title { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text);
     font-weight: 700; }
   .ac-bar__vendor { color: var(--text-muted); }
+  .ac-bar__text { height: 32px; padding: 0 12px; border: 1px solid var(--border); border-radius: var(--r-control);
+    background: transparent; color: var(--text-muted); font: 13px/1 var(--font-ui); cursor: pointer; }
+  .ac-bar__text:hover { color: var(--text); }
+  .ac-bar__text:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .ac-bar__actions { display: flex; align-items: center; gap: var(--s2); }
   .ac-spacer { flex: 1 1 auto; }
   .agent-switch { display: inline-flex; padding: 3px; border-radius: var(--r-control);

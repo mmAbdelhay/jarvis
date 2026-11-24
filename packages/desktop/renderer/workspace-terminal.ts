@@ -209,6 +209,25 @@ function clearIcon(): SVGSVGElement {
   return svg;
 }
 
+// ------------------------------------------------------------- Chat header
+
+/** The tab's toolbar strip (files, clear, plan, Reviews) is hidden while every
+ *  pane of the tab shows its Chat: the chat's own header row carries the useful
+ *  ones, so there is one row, not two. In Term, or with a mix, it stays. */
+function syncChatOnly(split: HTMLElement | null): void {
+  if (split === null) return;
+  const panes = [...split.querySelectorAll<HTMLElement>(".terminal-pane")];
+  split.toggleAttribute(
+    "data-chat-only",
+    panes.length > 0 && panes.every((pane) => pane.dataset["view"] === "chat"),
+  );
+}
+
+/** Presses one of the tab toolbar's own buttons: the handler stays where it is. */
+function tabToggle(from: HTMLElement, selector: string): void {
+  from.closest(".terminal-split")?.querySelector<HTMLElement>(`:scope > ${selector}`)?.click();
+}
+
 // ------------------------------------------------------------- Plan panel
 
 /** Adapts plan-panel.ts's `t: (key: MessageKey) => string` to this app's
@@ -1548,7 +1567,14 @@ function makePane(
       host: view.element,
       api: window.jarvis,
       t: planPanelT,
-      setChatView: (active, focusChat) => view.setChatView(active, focusChat),
+      setChatView: (active, focusChat) => {
+        view.setChatView(active, focusChat);
+        syncChatOnly(view.element.closest<HTMLElement>(".terminal-split"));
+      },
+      toolbar: {
+        reviews: () => tabToggle(view.element, ".reviews-toggle"),
+        menu: () => tabToggle(view.element, ".plan-toggle"),
+      },
       focusTerm: () => view.focus(),
       chatKey: (event) => view.chatKey(event),
       isRunning: () => view.element.dataset["state"] === "running",
@@ -1558,8 +1584,10 @@ function makePane(
     const disposePane = view.dispose;
     view.dispose = () => {
       agentChats.delete(paneKey);
+      const split = view.element.closest<HTMLElement>(".terminal-split");
       chat.dispose();
       disposePane();
+      syncChatOnly(split);
     };
   } catch {
     // No chat switch. The terminal is untouched.

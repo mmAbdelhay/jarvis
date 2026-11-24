@@ -30,6 +30,7 @@ export type Shell = {
 export function createShell(options: {
   t: Translate;
   toggleFiles?: (() => void) | undefined;
+  toolbar?: { reviews(): void; menu(): void } | undefined;
   onTab(mode: Mode, byUser: boolean): void;
   currentMode(): Mode;
 }): Shell {
@@ -80,6 +81,20 @@ export function createShell(options: {
     options.onTab(next, true);
     tabs[next].focus();
   });
+  const toolbar = options.toolbar;
+  if (toolbar !== undefined) {
+    const reviews = el("button", "ac-bar__text ac-bar__reviews", t("reviewsDockToggleText"));
+    reviews.type = "button";
+    reviews.title = t("reviewsDockToggle");
+    reviews.addEventListener("click", () => toolbar.reviews());
+    const menu = el("button", "ac-iconbutton ac-bar__menu");
+    menu.type = "button";
+    menu.append(icon(ICONS.menu));
+    menu.setAttribute("aria-label", t("planPanelToggle"));
+    menu.title = t("planPanelToggle");
+    menu.addEventListener("click", () => toolbar.menu());
+    actions.append(reviews, menu);
+  }
   bar.append(title, vendor, el("span", "ac-spacer"), actions, tablist);
 
   const panel = el("section", "agent-chat");

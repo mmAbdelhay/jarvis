@@ -2706,6 +2706,25 @@ describe("the agent chat switch", () => {
     expect(asked).toEqual(["tab-1"]);
   });
 
+  it("hides the tab's own toolbar strip while its only pane shows Chat, and brings it back in Term", async () => {
+    await started();
+    views["tab-1"] = agent;
+    dataListener?.("tab-1", COMMAND);
+    await vi.advanceTimersByTimeAsync(1000);
+    const split = document.querySelector<HTMLElement>(".terminal-split");
+    expect(split?.hasAttribute("data-chat-only")).toBe(false);
+    document.querySelector<HTMLButtonElement>('.agent-switch__tab[data-mode="chat"]')?.click();
+    expect(split?.hasAttribute("data-chat-only")).toBe(true);
+    // The header carries Reviews and the menu, wired to the tab's own buttons.
+    const reviews = split?.querySelector<HTMLButtonElement>(":scope > .reviews-toggle");
+    const pressed = vi.fn();
+    reviews?.addEventListener("click", pressed);
+    document.querySelector<HTMLButtonElement>(".ac-bar__reviews")?.click();
+    expect(pressed).toHaveBeenCalledTimes(1);
+    document.querySelector<HTMLButtonElement>('.agent-switch__tab[data-mode="term"]')?.click();
+    expect(split?.hasAttribute("data-chat-only")).toBe(false);
+  });
+
   it("goes with its pane", async () => {
     const render = await started();
     vi.useRealTimers();

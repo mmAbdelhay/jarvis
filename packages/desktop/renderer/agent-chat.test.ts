@@ -381,6 +381,18 @@ describe("the chat's frame", () => {
     expect(s.q<HTMLElement>(".agent-chat__note").hidden).toBe(true);
   });
 
+  it("carries the tab toolbar's Reviews and menu in its header row when the tab gives them", async () => {
+    const reviews = vi.fn();
+    const menu = vi.fn();
+    const s = await open(agentView(), { toolbar: { reviews, menu } });
+    s.q<HTMLButtonElement>(".ac-bar__reviews").click();
+    s.q<HTMLButtonElement>(".ac-bar__menu").click();
+    expect(reviews).toHaveBeenCalledTimes(1);
+    expect(menu).toHaveBeenCalledTimes(1);
+    const none = await open(agentView());
+    expect(none.host.querySelector(".ac-bar__reviews")).toBeNull();
+  });
+
   it("shows the file toggle when the tab gives one, and calls it", async () => {
     const toggleFiles = vi.fn();
     const s = await open(agentView(), { toggleFiles });
