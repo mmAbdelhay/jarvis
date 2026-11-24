@@ -2629,6 +2629,8 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
   });
   const agentSuggest = createAgentSuggest({
     sessions: agentSessions,
+    home: homedir(),
+    env: { CODEX_HOME: process.env["CODEX_HOME"] },
     fs: {
       readdir: async (path) =>
         (await readdir(path, { withFileTypes: true })).map((entry) => ({

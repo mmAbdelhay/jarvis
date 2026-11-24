@@ -25,6 +25,10 @@ function setup(
     /** A session whose cwd could not be read (lsof missing or denied). */
     noCwd?: boolean;
     fallbackCwd?: AgentSuggestDeps["fallbackCwd"];
+    cwd?: string;
+    home?: string;
+    env?: Record<string, string | undefined>;
+    noTranscript?: boolean;
   } = {},
 ) {
   const entries = (dir: string): string[] =>
@@ -39,7 +43,12 @@ function setup(
     sessions: {
       session: vi.fn(async (paneKey: string) =>
         paneKey === "t1"
-          ? { ...SESSION(options.vendor), ...(options.noCwd === true ? { cwd: null } : {}) }
+          ? {
+              ...SESSION(options.vendor),
+              ...(options.noCwd === true ? { cwd: null } : {}),
+              ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
+              ...(options.noTranscript === true ? { transcriptPath: undefined } : {}),
+            }
           : undefined,
       ),
       live: vi.fn((paneKey: unknown) => paneKey === "t1"),
@@ -66,13 +75,21 @@ function setup(
       realpath: vi.fn(async (path: string) => {
         const node = tree[path];
         if (node?.kind === "link") return node.to;
-        if (node === undefined) throw new Error("ENOENT");
+        // A parent folder exists when anything below it does.
+        if (
+          node === undefined &&
+          !Object.keys(tree).some((key) => key.startsWith(`${path}${sep}`))
+        ) {
+          throw new Error("ENOENT");
+        }
         return path;
       }),
       isFile: vi.fn(async (path: string) => tree[path]?.kind === "file"),
     },
     git,
     ...(options.fallbackCwd === undefined ? {} : { fallbackCwd: options.fallbackCwd }),
+    ...(options.home === undefined ? {} : { home: options.home }),
+    ...(options.env === undefined ? {} : { env: options.env }),
     now: options.now ?? (() => 0),
     log: vi.fn(),
   };
@@ -124,7 +141,7 @@ describe("agentCommands", () => {
     await t.suggest.commands("t1");
     for (const call of vi.mocked(t.deps.fs.readHead).mock.calls) {
       expect(call[0]).not.toBe(join(CONFIG, "commands", "evil.md"));
-      expect(call[1]).toBeLessThanOrEqual(4096);
+      expect(call[1]).toBeLessThanOrEqual(call[0].endsWith(".json") ? 262_144 : 4096);
     }
   });
 
@@ -268,5 +285,365 @@ describe("a session whose cwd is unknown", () => {
     const t = setup(tree, { noCwd: true, git: ["README.md"] });
     expect((await t.suggest.files("t1", "REA")).files).toEqual([]);
     expect(await t.suggest.resolve("t1", "README.md")).toEqual({ ok: false, reason: "gone" });
+  });
+});
+
+const HOME = join("/", "home", "me");
+const dir = (...parts: string[]): Record<string, Node> => ({ [join(...parts)]: { kind: "dir" } });
+const file = (path: string, text: string): Record<string, Node> => ({
+  [path]: { kind: "file", text },
+});
+const names = (out: { commands: { name: string; source: string }[] }, source?: string): string[] =>
+  out.commands
+    .filter((c) => c.source !== "built-in" && (source === undefined || c.source === source))
+    .map((c) => c.name);
+
+describe("built-in rows", () => {
+  it("carry description, hint, aliases and documented choices", async () => {
+    const out = await setup({}).suggest.commands("t1");
+    expect(out.commands.find((c) => c.name === "model")).toEqual({
+      name: "model",
+      description: "Set the AI model for Claude Code",
+      hint: "<model>",
+      choices: ["opus", "sonnet", "haiku"],
+      source: "built-in",
+    });
+    expect(out.commands.find((c) => c.name === "usage")?.aliases).toEqual(["cost", "stats"]);
+    const copilot = await setup({}, { vendor: "github" }).suggest.commands("t1");
+    expect(copilot.commands.filter((c) => c.source === "built-in")).toHaveLength(77);
+    const codex = await setup({}, { vendor: "openai" }).suggest.commands("t1");
+    expect(codex.commands.some((c) => c.name === "approvals")).toBe(false);
+  });
+});
+
+describe("Claude discovery", () => {
+  const GIT_ROOT = join("/", "work", "mono");
+  const CWD = join(GIT_ROOT, "pkg", "web");
+  const base: Record<string, Node> = {
+    ...dir(GIT_ROOT),
+    ...dir(GIT_ROOT, ".git"),
+    ...dir(GIT_ROOT, "pkg"),
+    ...dir(CWD),
+    ...dir(CONFIG),
+  };
+
+  it("walks from the cwd up to the git root, nearest first, and stops there", async () => {
+    const t = setup(
+      {
+        ...base,
+        ...dir(GIT_ROOT, ".claude", "commands"),
+        ...file(join(GIT_ROOT, ".claude", "commands", "root-cmd.md"), "Root command"),
+        ...dir(CWD, ".claude", "commands"),
+        ...file(join(CWD, ".claude", "commands", "near.md"), "Near command"),
+        ...dir("/work", ".claude", "commands"),
+        ...file(join("/work", ".claude", "commands", "above.md"), "Above the repo"),
+      },
+      { cwd: CWD },
+    );
+    expect(names(await t.suggest.commands("t1"), "project")).toEqual(["near", "root-cmd"]);
+  });
+
+  it("leaves out user-invocable false, lets name: win, reads block descriptions and hints", async () => {
+    const t = setup(
+      {
+        ...base,
+        ...dir(CWD, ".claude", "skills", "a"),
+        ...file(
+          join(CWD, ".claude", "skills", "a", "SKILL.md"),
+          "---\nname: renamed\ndescription: >\n  Folded\n  text\nargument-hint: [x]\n---\nSECRET BODY",
+        ),
+        ...dir(CWD, ".claude", "skills", "b"),
+        ...file(
+          join(CWD, ".claude", "skills", "b", "SKILL.md"),
+          "---\nuser-invocable: false\n---\nhidden",
+        ),
+      },
+      { cwd: CWD },
+    );
+    const out = await t.suggest.commands("t1");
+    expect(out.commands.filter((c) => c.source === "skill")).toEqual([
+      { name: "renamed", description: "Folded text", hint: "[x]", source: "skill" },
+    ]);
+    expect(JSON.stringify(out)).not.toContain("SECRET");
+  });
+
+  it("follows a symlinked skill directory in the account only", async () => {
+    const outside = join("/", "elsewhere", "shared-skill");
+    const t = setup(
+      {
+        ...base,
+        ...dir(CONFIG, "skills"),
+        [join(CONFIG, "skills", "linked")]: { kind: "link", to: outside },
+        ...dir(outside),
+        ...file(join(outside, "SKILL.md"), "---\ndescription: Shared\n---\n"),
+        ...dir(CWD, ".claude", "skills"),
+        [join(CWD, ".claude", "skills", "pl")]: { kind: "link", to: outside },
+      },
+      { cwd: CWD },
+    );
+    const out = await t.suggest.commands("t1");
+    expect(names(out, "skill")).toEqual(["linked"]);
+  });
+
+  it("uses ~/.claude for the account when there is no transcript yet", async () => {
+    const t = setup(
+      {
+        ...base,
+        ...dir(HOME, ".claude", "commands"),
+        ...file(join(HOME, ".claude", "commands", "mine.md"), "Mine"),
+      },
+      { cwd: CWD, home: HOME, noTranscript: true },
+    );
+    expect(names(await t.suggest.commands("t1"), "account")).toEqual(["mine"]);
+  });
+
+  describe("plugins", () => {
+    const P2 = join(CONFIG, "plugins", "cache", "acme", "tools", "1.0.0");
+    const P1 = join(CONFIG, "plugins", "cache", "old");
+    const plugins = (extra: Record<string, Node> = {}): Record<string, Node> => ({
+      ...base,
+      ...dir(CONFIG, "plugins"),
+      ...file(
+        join(CONFIG, "plugins", "installed_plugins.json"),
+        JSON.stringify({
+          version: 2,
+          plugins: {
+            "tools@acme": [{ scope: "user", installPath: P2, version: "1.0.0" }],
+            "proj@acme": [
+              {
+                scope: "project",
+                installPath: join(P2, "..", "proj"),
+                projectPath: join("/", "other"),
+              },
+            ],
+            "old@acme": { installPath: P1, version: "0.1" },
+          },
+        }),
+      ),
+      ...file(
+        join(CONFIG, "settings.json"),
+        JSON.stringify({
+          model: "x",
+          env: { TOKEN: "s3cret" },
+          enabledPlugins: { "tools@acme": true, "old@acme": true, "proj@acme": true },
+        }),
+      ),
+      ...dir(P2, "commands"),
+      ...file(join(P2, "commands", "deploy.md"), "Deploy it"),
+      ...dir(P2, "skills", "audit"),
+      ...file(join(P2, "skills", "audit", "SKILL.md"), "---\ndescription: Audit\n---\n"),
+      ...dir(P1, "commands"),
+      ...file(join(P1, "commands", "legacy.md"), "Legacy"),
+      ...extra,
+    });
+
+    it("lists enabled plugins' commands and skills as plugin:name, in both file shapes", async () => {
+      const out = await setup(plugins(), { cwd: CWD }).suggest.commands("t1");
+      expect(names(out, "plugin").sort()).toEqual(["old:legacy", "tools:audit", "tools:deploy"]);
+    });
+
+    it("skips a plugin the settings do not enable, and a project-scoped one for another project", async () => {
+      const off = plugins({
+        ...file(
+          join(CONFIG, "settings.json"),
+          JSON.stringify({ enabledPlugins: { "tools@acme": false } }),
+        ),
+      });
+      expect(names(await setup(off, { cwd: CWD }).suggest.commands("t1"), "plugin")).toEqual([]);
+      const proj = join(P2, "..", "proj");
+      const onlyProj = plugins({
+        ...dir(proj, "commands"),
+        ...file(join(proj, "commands", "pc.md"), "Project plugin"),
+      });
+      expect(
+        names(await setup(onlyProj, { cwd: CWD }).suggest.commands("t1"), "plugin"),
+      ).not.toContain("proj:pc");
+    });
+
+    it("lets project settings enable a plugin and a project-scoped entry match its projectPath", async () => {
+      const proj = join(P2, "..", "proj");
+      const tree = plugins({
+        ...file(join(CONFIG, "settings.json"), JSON.stringify({})),
+        ...file(
+          join(CWD, ".claude", "settings.json"),
+          JSON.stringify({ enabledPlugins: { "proj@acme": true } }),
+        ),
+        ...file(
+          join(CONFIG, "plugins", "installed_plugins.json"),
+          JSON.stringify({
+            version: 2,
+            plugins: {
+              "proj@acme": [{ scope: "project", installPath: proj, projectPath: GIT_ROOT }],
+            },
+          }),
+        ),
+        ...dir(proj, "commands"),
+        ...file(join(proj, "commands", "pc.md"), "Project plugin"),
+      });
+      expect(names(await setup(tree, { cwd: CWD }).suggest.commands("t1"), "plugin")).toEqual([
+        "proj:pc",
+      ]);
+    });
+
+    it("follows plugin.json paths only inside the install path", async () => {
+      const tree = plugins({
+        ...file(
+          join(P2, ".claude-plugin", "plugin.json"),
+          JSON.stringify({ commands: ["./extra", "../../escape"], skills: "./more" }),
+        ),
+        ...dir(P2, ".claude-plugin"),
+        ...dir(P2, "extra"),
+        ...file(join(P2, "extra", "x.md"), "Extra"),
+        ...dir(P2, "more", "s"),
+        ...file(join(P2, "more", "s", "SKILL.md"), "Skill s"),
+        ...dir(CONFIG, "plugins", "cache", "acme", "escape"),
+        ...file(join(CONFIG, "plugins", "cache", "acme", "escape", "e.md"), "Escaped"),
+      });
+      const out = names(await setup(tree, { cwd: CWD }).suggest.commands("t1"), "plugin");
+      expect(out).toContain("tools:x");
+      expect(out).toContain("tools:s");
+      expect(out).not.toContain("tools:e");
+    });
+
+    it("reads only enabledPlugins from settings and never lets its other keys out", async () => {
+      const out = await setup(plugins(), { cwd: CWD }).suggest.commands("t1");
+      expect(JSON.stringify(out)).not.toContain("s3cret");
+    });
+  });
+});
+
+describe("Codex discovery", () => {
+  const CODEX_HOME = join(HOME, ".codex");
+  const CWD = join("/", "work", "mono", "pkg");
+  const tree: Record<string, Node> = {
+    ...dir(join("/", "work", "mono")),
+    ...dir(join("/", "work", "mono", ".git")),
+    ...dir(CWD),
+    ...dir(CODEX_HOME, "prompts"),
+    ...file(
+      join(CODEX_HOME, "prompts", "draft.md"),
+      "---\ndescription: Draft a PR\nargument-hint: FILES=<paths>\n---\nbody",
+    ),
+    ...dir(CODEX_HOME, "skills", "pdf"),
+    ...file(join(CODEX_HOME, "skills", "pdf", "SKILL.md"), "---\ndescription: Read PDFs\n---\n"),
+    ...dir(HOME, ".agents", "skills", "shared"),
+    ...file(join(HOME, ".agents", "skills", "shared", "SKILL.md"), "Shared skill"),
+    ...dir("/work/mono", ".agents", "skills", "local"),
+    ...file(join("/work/mono", ".agents", "skills", "local", "SKILL.md"), "Local skill"),
+  };
+
+  it("offers prompts as prompts:name and skills as $name", async () => {
+    const t = setup(tree, { vendor: "openai", cwd: CWD, home: HOME, env: {} });
+    const out = await t.suggest.commands("t1");
+    const custom = out.commands.filter((c) => c.source !== "built-in");
+    expect(custom.find((c) => c.name === "prompts:draft")).toEqual({
+      name: "prompts:draft",
+      description: "Draft a PR",
+      hint: "FILES=<paths>",
+      source: "account",
+    });
+    expect(
+      custom
+        .filter((c) => c.trigger === "$")
+        .map((c) => c.name)
+        .sort(),
+    ).toEqual(["local", "pdf", "shared"]);
+    expect(custom.find((c) => c.name === "pdf")).toMatchObject({
+      trigger: "$",
+      source: "skill",
+      description: "Read PDFs",
+    });
+  });
+
+  it("takes CODEX_HOME from the environment", async () => {
+    const other = join("/", "srv", "codex");
+    const t = setup(
+      { ...dir(other, "prompts"), ...file(join(other, "prompts", "p.md"), "P"), ...dir(CWD) },
+      { vendor: "openai", cwd: CWD, home: HOME, env: { CODEX_HOME: other } },
+    );
+    expect(names(await t.suggest.commands("t1"))).toEqual(["prompts:p"]);
+  });
+
+  it("keeps $ skills out of the typed-command allow-list", async () => {
+    const t = setup(tree, { vendor: "openai", cwd: CWD, home: HOME, env: {} });
+    expect([...(await t.suggest.names({ ...SESSION("openai"), cwd: CWD }))]).toEqual([
+      "prompts:draft",
+    ]);
+  });
+});
+
+describe("Copilot discovery", () => {
+  it("lists skills from the project folders and the home folders as /name", async () => {
+    const CWD = join("/", "work", "app");
+    const t = setup(
+      {
+        ...dir(CWD),
+        ...dir(CWD, ".github", "skills", "gh"),
+        ...file(
+          join(CWD, ".github", "skills", "gh", "SKILL.md"),
+          "---\ndescription: GH skill\n---\n",
+        ),
+        ...dir(CWD, ".claude", "skills", "cl"),
+        ...file(join(CWD, ".claude", "skills", "cl", "SKILL.md"), "Claude folder skill"),
+        ...dir(HOME, ".copilot", "skills", "mine"),
+        ...file(join(HOME, ".copilot", "skills", "mine", "SKILL.md"), "Mine"),
+        ...dir(HOME, ".agents", "skills", "ag"),
+        ...file(join(HOME, ".agents", "skills", "ag", "SKILL.md"), "Agents"),
+      },
+      { vendor: "github", cwd: CWD, home: HOME },
+    );
+    const out = await t.suggest.commands("t1");
+    expect(names(out, "skill").sort()).toEqual(["ag", "cl", "gh", "mine"]);
+    expect(out.commands.find((c) => c.name === "gh")?.trigger).toBeUndefined();
+  });
+});
+
+describe("limits and cache", () => {
+  it("returns up to 1000 custom commands per pane and no more", async () => {
+    const tree: Record<string, Node> = {
+      ...dir(ROOT),
+      ...dir(CONFIG),
+      ...dir(ROOT, ".claude", "commands"),
+    };
+    for (let i = 0; i < 1200; i++)
+      tree[join(ROOT, ".claude", "commands", `c${i}.md`)] = { kind: "file", text: "x" };
+    const t = setup(tree);
+    expect(names(await t.suggest.commands("t1"))).toHaveLength(1000);
+  });
+
+  it("serves the discovery from a 10 s cache and refreshes after", async () => {
+    let now = 0;
+    const tree: Record<string, Node> = {
+      ...dir(ROOT),
+      ...dir(CONFIG),
+      ...dir(ROOT, ".claude", "commands"),
+      ...file(join(ROOT, ".claude", "commands", "a.md"), "A"),
+    };
+    const t = setup(tree, { now: () => now });
+    await t.suggest.commands("t1");
+    const reads = vi.mocked(t.deps.fs.readHead).mock.calls.length;
+    now = 9_000;
+    await t.suggest.commands("t1");
+    expect(vi.mocked(t.deps.fs.readHead).mock.calls.length).toBe(reads);
+    now = 11_000;
+    await t.suggest.commands("t1");
+    expect(vi.mocked(t.deps.fs.readHead).mock.calls.length).toBeGreaterThan(reads);
+  });
+
+  it("reads only markdown files, SKILL.md and the two plugin JSON files, each bounded", async () => {
+    const t = setup({
+      ...dir(ROOT),
+      ...dir(CONFIG),
+      ...dir(ROOT, ".claude", "commands"),
+      ...file(join(ROOT, ".claude", "commands", "a.md"), "A"),
+      ...file(join(ROOT, ".claude", "commands", "secrets.env"), "KEY=1"),
+    });
+    await t.suggest.commands("t1");
+    for (const [path, bytes] of vi.mocked(t.deps.fs.readHead).mock.calls) {
+      expect(path).toMatch(
+        /\.md$|installed_plugins\.json$|settings(\.local)?\.json$|plugin\.json$/,
+      );
+      expect(bytes).toBeLessThanOrEqual(262_144);
+    }
   });
 });
