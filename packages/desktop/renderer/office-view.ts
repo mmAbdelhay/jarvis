@@ -12,7 +12,7 @@
 
 import type { Session, WorkspaceState } from "@jarvis/core";
 import type { RendererApi } from "../src/ipc.js";
-import { EMPTY_OFFICE_ACTIVITY, type OfficeActivity } from "../src/office-activity.js";
+import type { OfficeActivity } from "../src/office-activity.js";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 import { formatAgo } from "./format.js";
 import {
@@ -1277,7 +1277,7 @@ export function initOffice(options: OfficeFeedOptions): Office {
   let projects: readonly string[] = [];
   let workspace: WorkspaceState = { tabs: [], activeTabId: undefined };
   let sessions: readonly Session[] = [];
-  let activity: OfficeActivity = EMPTY_OFFICE_ACTIVITY;
+  let activity: OfficeActivity = { panes: {}, sessions: {} };
   let hands = -1;
   let queued = false;
   let pulling = false;
