@@ -56,6 +56,10 @@ export type Feed = {
   column: HTMLElement;
   setItems(items: readonly ChatItem[], state: FeedState): void;
   scrollToBottom(): void;
+  /** Releases the bottom pin (a deliberate move elsewhere in the feed). */
+  unpin(): void;
+  /** Removes the listeners this feed put on the document and window. */
+  dispose(): void;
   atBottom(): boolean;
   /** Opens whatever hides the node (a closed group or output) so it can be seen. */
   reveal(node: Node): void;
@@ -117,28 +121,61 @@ export function createFeed(options: FeedOptions): Feed {
     jump.hidden = true;
   }
 
-  // Only the reader moves the feed off the bottom: a wheel, a touch, a key, or a
-  // drag of the scrollbar. A scroll the layout causes (rows measured under
-  // content-visibility, a card appearing) is not one, and must not unpin.
+  // Only the reader moves the feed off the bottom: a wheel, a touch, a key, a
+  // press-and-drag (scrollbar or text selection), middle-click autoscroll, or
+  // keyboard focus moving to a row. A scroll the layout causes (rows measured
+  // under content-visibility, a card appearing) is not one, and must not unpin.
   let userAt = Number.NEGATIVE_INFINITY;
+  let pointerAt = Number.NEGATIVE_INFINITY;
   let dragging = false;
-  const byUser = (): boolean => dragging || Date.now() - userAt < USER_SCROLL_MS;
+  let autoscrolling = false;
+  const byUser = (): boolean => dragging || autoscrolling || Date.now() - userAt < USER_SCROLL_MS;
   const mark = (): void => {
     userAt = Date.now();
   };
+  /** A deliberate move away from the bottom: stay where it lands until the
+   *  reader gets back to the bottom, jumps, or sends. */
+  function unpin(): void {
+    stuck = false;
+    jump.hidden = false;
+  }
   scroller.addEventListener("wheel", mark, { passive: true });
   scroller.addEventListener("touchmove", mark, { passive: true });
   scroller.addEventListener("keydown", (event) => {
+    if (autoscrolling) autoscrolling = false;
     if (["PageUp", "PageDown", "Home", "End", "ArrowUp", "ArrowDown", " "].includes(event.key))
       mark();
   });
   scroller.addEventListener("pointerdown", (event) => {
-    // A press on the scroller itself (its scrollbar), not on a row's button.
-    if (event.target === scroller) dragging = true;
+    pointerAt = Date.now();
+    // Any press in the feed may become a drag (scrollbar, selection) that
+    // autoscrolls; a middle press starts autoscroll, which a later press ends.
+    autoscrolling = event.button === 1 && !autoscrolling;
+    dragging = event.button !== 1;
   });
-  document.addEventListener("pointerup", () => {
+  scroller.addEventListener("focusin", (event) => {
+    const target = event.target;
+    // Focus moved by the keyboard scrolls its target into view: the reader's move.
+    if (target instanceof Node && target !== scroller && Date.now() - pointerAt > USER_SCROLL_MS)
+      mark();
+  });
+  scroller.addEventListener("click", (event) => {
+    // Opening or closing a row at the bottom must not carry it out of view.
+    const target = event.target;
+    if (target instanceof Element && target.closest("button[aria-expanded]") !== null) unpin();
+  });
+  const release = (): void => {
     dragging = false;
-  });
+  };
+  // A release outside the window never reaches pointerup: a move with no
+  // button down, a cancel, or losing the window all end the drag.
+  const onMove = (event: Event): void => {
+    if ((event as MouseEvent).buttons === 0) release();
+  };
+  document.addEventListener("pointerup", release);
+  document.addEventListener("pointercancel", release);
+  document.addEventListener("pointermove", onMove);
+  window.addEventListener("blur", release);
   scroller.addEventListener("scroll", () => {
     if (atBottom()) stuck = true;
     else if (byUser()) stuck = false;
@@ -148,8 +185,9 @@ export function createFeed(options: FeedOptions): Feed {
   });
   // The feed's box or its content changing size (a card or the drawer appearing
   // below) must not strand a reader who was at the bottom.
+  let observer: ResizeObserver | undefined;
   if (typeof ResizeObserver !== "undefined") {
-    const observer = new ResizeObserver(() => {
+    observer = new ResizeObserver(() => {
       if (stuck) scrollToBottom();
     });
     observer.observe(scroller);
@@ -168,8 +206,11 @@ export function createFeed(options: FeedOptions): Feed {
     );
     row.dataset["itemId"] = item.id;
     if (user) {
-      const bubble = el("div", "agent-chat__bubble", item.text);
-      bubble.dir = "auto";
+      // The bubble sits on the app's side; only the words inside pick their own direction.
+      const words = el("div", "ac-bubble__text", item.text);
+      words.dir = "auto";
+      const bubble = el("div", "agent-chat__bubble");
+      bubble.append(words);
       row.append(bubble);
       if (item.images !== undefined && item.images > 0) {
         row.append(el("span", "ac-images", fmt(t("agentChatImages"), { n: item.images })));
@@ -361,8 +402,17 @@ export function createFeed(options: FeedOptions): Feed {
     column,
     setItems,
     scrollToBottom,
+    unpin,
+    dispose() {
+      document.removeEventListener("pointerup", release);
+      document.removeEventListener("pointercancel", release);
+      document.removeEventListener("pointermove", onMove);
+      window.removeEventListener("blur", release);
+      observer?.disconnect();
+    },
     atBottom,
     reveal(node) {
+      unpin();
       for (let at: Node | null = node; at !== null && at !== column; at = at.parentNode) {
         if (at instanceof HTMLElement && at.hidden) {
           const toggleButton = at.parentElement?.querySelector<HTMLElement>(

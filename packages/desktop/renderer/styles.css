@@ -2720,6 +2720,10 @@
   .ac-menu__note { color: var(--text-muted); font-size: 13px; }
   .ac-menu__empty { padding: var(--s3); color: var(--text-muted); }
   .ac-mono { font-family: var(--font-mono); }
+  /* Classic (always-visible) scrollbars paint a light track unless told otherwise. */
+  .agent-chat__feed, .ac-side, .ac-code, .ac-diff, .ac-output__text, .ac-menu, .ac-popover,
+  .ac-question__plan, .terminal-pane[data-view="chat"] > .terminal-live {
+    scrollbar-color: var(--text-faint) transparent; scrollbar-width: thin; }
 
   .ac-sidewrap { flex: 0 0 auto; display: flex; }
   .ac-side { width: 320px; box-sizing: border-box; padding: var(--s5) 20px; display: flex;

@@ -162,6 +162,32 @@ describe("parseClaudeDoc", () => {
     ).toBeUndefined();
   });
 
+  it("names an Agent or Task row by its description, and counts a TodoWrite's done items", () => {
+    const doc = parseClaudeDoc(
+      [
+        assistant("a", [
+          toolUse("t1", "Task", { description: "Check the totals", prompt: "long prompt" }),
+          toolUse("t2", "Agent", { description: "Find callers", subagent_type: "x" }),
+          toolUse("t3", "Task", { prompt: "no description" }),
+          toolUse("w", "TodoWrite", {
+            todos: [
+              { content: "one", status: "completed" },
+              { content: "two", status: "in_progress" },
+              { content: "three", status: "pending" },
+            ],
+          }),
+          toolUse("w2", "TodoWrite", { todos: "nope" }),
+        ]),
+      ].join("\n"),
+    );
+    const byId = (id: string) => doc.items.find((item) => item.id === id) as ChatToolItem;
+    expect(byId("t1").target).toBe("Check the totals");
+    expect(byId("t2").target).toBe("Find callers");
+    expect(byId("t3").target).toBeUndefined();
+    expect(byId("w").progress).toEqual({ done: 1, total: 3 });
+    expect(byId("w2").progress).toBeUndefined();
+  });
+
   it("keeps the last TodoWrite as the to-do list", () => {
     const write = (todos: unknown[]) => assistant("a", [toolUse("w", "TodoWrite", { todos })]);
     const doc = parseClaudeDoc(

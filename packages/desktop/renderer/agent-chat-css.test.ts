@@ -129,4 +129,23 @@ describe("the agent chat's layout", () => {
       /\.terminal-split\[data-chat-only\] > :is\([^)]*\.reviews-toggle[^)]*\) \{\s*display: none;/,
     );
   });
+
+  it("gives every chat scroller a themed thumb on a transparent track (classic scrollbars show a white track otherwise)", () => {
+    const selectors = [
+      ".agent-chat__feed",
+      ".ac-side",
+      ".ac-code",
+      ".ac-diff",
+      ".ac-output__text",
+      ".ac-menu",
+      ".ac-popover",
+      ".ac-question__plan",
+      '.terminal-pane[data-view="chat"] > .terminal-live',
+    ];
+    const rule =
+      /(?:^|\n)\s*([^{}\n]*scrollbar-color[^{}\n]*|[^{}]*)\{[^}]*scrollbar-color\s*:\s*var\(--text-faint\)\s+transparent[^}]*\}/g;
+    const heads = [...css.matchAll(rule)].map((m) => m[0]);
+    const block = heads.join("\n");
+    for (const selector of selectors) expect(block).toContain(selector);
+  });
 });

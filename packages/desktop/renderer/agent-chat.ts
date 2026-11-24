@@ -647,6 +647,7 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
       cancelWatch?.();
       stopDetecting();
       sizeObserver?.disconnect();
+      feed.dispose();
       drawer.close();
       bar.remove();
       panel.remove();

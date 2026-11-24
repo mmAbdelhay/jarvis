@@ -44,6 +44,8 @@ export function toolSig(item: ChatToolItem): string {
     item.at,
     item.endAt,
     item.target,
+    item.progress?.done,
+    item.progress?.total,
     item.command,
     item.diff?.length,
     item.output?.length,
@@ -262,7 +264,11 @@ function bashCard(item: ChatToolItem, ctx: ToolContext): HTMLElement {
 
 function otherCard(item: ChatToolItem, ctx: ToolContext): HTMLElement {
   const card = el("div", "ac-card ac-card--other");
-  const bar = head(item, ctx, item.target ?? item.command);
+  const counted =
+    item.progress === undefined
+      ? undefined
+      : `${fmt(ctx.t("agentChatChipOf"), { done: item.progress.done, total: item.progress.total })} ${ctx.t("agentChatTodoDone")}`;
+  const bar = head(item, ctx, item.target ?? counted ?? item.command);
   bar.append(el("span", "ac-spacer"));
   const state = mark(item, ctx);
   if (state !== undefined) bar.append(state);

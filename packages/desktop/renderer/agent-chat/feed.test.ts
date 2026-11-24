@@ -487,6 +487,37 @@ describe("paging", () => {
   });
 });
 
+describe("agent and to-do rows", () => {
+  it("shows the agent's description as the target and the to-do count when known", async () => {
+    const s = await open(
+      agentView({
+        page: {
+          items: [
+            tool("t1", "Task", { target: "Check the totals" }),
+            tool("w", "TodoWrite", { progress: { done: 1, total: 3 } }),
+            tool("w2", "TodoWrite", {}),
+          ],
+        },
+      }),
+    );
+    const targets = [...s.host.querySelectorAll(".ac-card--other .ac-card__target")].map(
+      (n) => n.textContent,
+    );
+    expect(targets).toEqual(["Check the totals", "1 of 3 done"]);
+  });
+});
+
+describe("a user message's side", () => {
+  it("follows the app's direction: dir=auto sits on the inner text, never on the bubble", async () => {
+    const s = await open(agentView({ page: { items: [user("u1", "مرحبا بك")] } }));
+    const bubble = s.q<HTMLElement>(".agent-chat__bubble");
+    expect(bubble.getAttribute("dir")).toBeNull();
+    const text = bubble.querySelector<HTMLElement>("[dir=auto]");
+    expect(text?.textContent).toBe("مرحبا بك");
+    expect(bubble.textContent).toBe("مرحبا بك");
+  });
+});
+
 describe("the reader's scroll", () => {
   it("follows new items only from the bottom, and offers Jump to latest when scrolled up", async () => {
     const s = await open();
@@ -579,5 +610,138 @@ describe("the reader's scroll", () => {
     await settle();
     expect(state.scrollTop).toBe(1000);
     expect(s.q<HTMLElement>(".ac-jump").hidden).toBe(true);
+  });
+
+  describe("deliberate moves away from the bottom", () => {
+    async function pinned(items = agentView().page.items) {
+      const s = await open(agentView({ page: { items } }));
+      const feed = s.q<HTMLElement>(".agent-chat__feed");
+      const state = geometry(feed, { scrollHeight: 1000, clientHeight: 200, scrollTop: 800 });
+      feed.dispatchEvent(new Event("scroll"));
+      return { s, feed, state };
+    }
+    const moved = (feed: HTMLElement, state: { scrollTop: number; scrollHeight: number }) => {
+      state.scrollTop = 300;
+      feed.dispatchEvent(new Event("scroll"));
+      state.scrollHeight = 1400; // later layout
+      feed.dispatchEvent(new Event("scroll"));
+    };
+
+    it("a search reveal, next and previous unpin and stay unpinned through layout", async () => {
+      const { s, feed, state } = await pinned([
+        user("u1", "coupon total"),
+        reply("a1", "coupon again"),
+      ]);
+      s.q<HTMLButtonElement>('button[aria-label="Search this chat"]').click();
+      const field = s.q<HTMLInputElement>(".ac-search__input");
+      field.value = "coupon";
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+      moved(feed, state);
+      expect(state.scrollTop).toBe(300);
+      expect(s.q<HTMLElement>(".ac-jump").hidden).toBe(false);
+      state.scrollTop = 800;
+      state.scrollHeight = 1000;
+      feed.dispatchEvent(new Event("scroll")); // back at the bottom: pinned again
+      s.q<HTMLButtonElement>('button[aria-label="Next match"]').click();
+      moved(feed, state);
+      expect(state.scrollTop).toBe(300);
+    });
+
+    it("keyboard focus moving into a row unpins; a mouse press focusing it does not mark a user scroll", async () => {
+      const { s, feed, state } = await pinned([
+        user("u1", "go"),
+        tool("t1", "Bash", { command: "ls", output: "a" }),
+      ]);
+      const button = s.q<HTMLElement>(".ac-column button");
+      button.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+      moved(feed, state);
+      expect(state.scrollTop).toBe(300);
+      expect(s.q<HTMLElement>(".ac-jump").hidden).toBe(false);
+    });
+
+    it("a selection drag (pointerdown on a row) may scroll away; a cancelled or off-window release ends it", async () => {
+      const { s, feed, state } = await pinned();
+      const row = s.q<HTMLElement>(".ac-column > *");
+      row.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0 }));
+      state.scrollTop = 500;
+      feed.dispatchEvent(new Event("scroll"));
+      expect(s.q<HTMLElement>(".ac-jump").hidden).toBe(false);
+      state.scrollTop = 800;
+      feed.dispatchEvent(new Event("scroll"));
+      row.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0 }));
+      document.dispatchEvent(new MouseEvent("pointercancel", { bubbles: true }));
+      state.scrollHeight = 1400;
+      feed.dispatchEvent(new Event("scroll"));
+      expect(state.scrollTop).toBe(1400);
+      row.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0 }));
+      document.dispatchEvent(new MouseEvent("pointermove", { buttons: 0 })); // released off-window
+      state.scrollHeight = 1800;
+      feed.dispatchEvent(new Event("scroll"));
+      expect(state.scrollTop).toBe(1800);
+    });
+
+    it("middle-click autoscroll (pointerdown on a row) counts as the reader's until the next press", async () => {
+      const { s, feed, state } = await pinned();
+      const row = s.q<HTMLElement>(".ac-column > *");
+      row.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 1 }));
+      document.dispatchEvent(new MouseEvent("pointerup", { bubbles: true, button: 1 }));
+      state.scrollTop = 500;
+      feed.dispatchEvent(new Event("scroll"));
+      expect(s.q<HTMLElement>(".ac-jump").hidden).toBe(false);
+      state.scrollTop = 450;
+      feed.dispatchEvent(new Event("scroll"));
+      expect(state.scrollTop).toBe(450);
+    });
+
+    it("removes its document listeners when the chat is disposed", async () => {
+      const added: string[] = [];
+      const removed: string[] = [];
+      const add = document.addEventListener.bind(document);
+      const rem = document.removeEventListener.bind(document);
+      document.addEventListener = ((type: string, ...rest: unknown[]) => {
+        added.push(type);
+        return (add as (...a: unknown[]) => void)(type, ...rest);
+      }) as typeof document.addEventListener;
+      document.removeEventListener = ((type: string, ...rest: unknown[]) => {
+        removed.push(type);
+        return (rem as (...a: unknown[]) => void)(type, ...rest);
+      }) as typeof document.removeEventListener;
+      try {
+        const s = await open();
+        s.chat.dispose();
+        for (const type of new Set(added.filter((x) => x.startsWith("pointer"))))
+          expect(removed).toContain(type);
+        expect(added.some((x) => x.startsWith("pointer"))).toBe(true);
+      } finally {
+        document.addEventListener = add;
+        document.removeEventListener = rem;
+      }
+    });
+
+    it("expanding Show all at the bottom does not yank the clicked row away", async () => {
+      const callbacks: (() => void)[] = [];
+      class FakeObserver {
+        constructor(cb: () => void) {
+          callbacks.push(cb);
+        }
+        observe() {}
+        disconnect() {}
+      }
+      (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = FakeObserver;
+      try {
+        const output = Array.from({ length: 20 }, (_, n) => `line ${n}`).join("\n");
+        const { s, state } = await pinned([
+          user("u1", "go"),
+          tool("t1", "Bash", { command: "ls", output }),
+        ]);
+        s.q<HTMLButtonElement>(".ac-output .ac-link-button").click();
+        state.scrollHeight = 1400;
+        for (const cb of callbacks) cb();
+        expect(state.scrollTop).toBe(800);
+        expect(s.q<HTMLElement>(".ac-jump").hidden).toBe(false);
+      } finally {
+        delete (globalThis as unknown as { ResizeObserver?: unknown }).ResizeObserver;
+      }
+    });
   });
 });

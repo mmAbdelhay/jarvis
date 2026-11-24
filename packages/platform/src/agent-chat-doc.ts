@@ -65,6 +65,8 @@ export type ChatToolItem = {
   diff?: ChatDiffLine[];
   output?: string;
   outputCut?: boolean;
+  /** A TodoWrite row: how many of its items are done, when its input says so. */
+  progress?: { done: number; total: number };
   /** `ended`: no result was ever recorded, so how it finished is unknown. */
   state: "running" | "ok" | "error" | "ended";
   at?: number;
@@ -596,6 +598,20 @@ export function createClaudeDocReader(options: ChatDocOptions = {}): ChatDocRead
     const shaped = chatTool(name, input);
     const parts: Partial<ChatToolItem> = {};
     if (shaped.target !== undefined) parts.target = clean(shaped.target, 400);
+    // An agent row names its job, not just "Task"; a to-do row counts what is done.
+    if ((name === "Task" || name === "Agent") && parts.target === undefined) {
+      const description = str(input?.["description"]);
+      if (description !== undefined && description.trim() !== "")
+        parts.target = clean(description, 400);
+    }
+    if (name === "TodoWrite") {
+      const list = claudeTodos(input);
+      if (list !== undefined && list.length > 0)
+        parts.progress = {
+          done: list.filter((todo) => todo.state === "done").length,
+          total: list.length,
+        };
+    }
     const command = str(input?.["command"]);
     if (command !== undefined) parts.command = clean(command, MAX_COMMAND_CHARS);
     const path = str(input?.["file_path"]) ?? str(input?.["path"]);
