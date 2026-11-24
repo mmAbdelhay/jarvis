@@ -137,9 +137,7 @@ const api: Record<string, unknown> = {
 // with no path on disk answers "".
 api["pathForFile"] = (file: unknown): string => {
   try {
-    return typeof file === "object" && file !== null
-      ? webUtils.getPathForFile(file as File)
-      : "";
+    return typeof file === "object" && file !== null ? webUtils.getPathForFile(file as File) : "";
   } catch {
     return "";
   }

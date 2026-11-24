@@ -2620,7 +2620,7 @@ describe("the agent chat switch", () => {
     jarvis["onTerminalClaudeViewChanged"] = (cb: typeof viewListener) => {
       viewListener = cb;
     };
-    jarvis["terminalAgentView"] = (paneKey: string) => {
+    jarvis["terminalAgentChat"] = (paneKey: string) => {
       asked.push(paneKey);
       return Promise.resolve(views[paneKey] ?? { kind: "none" });
     };
@@ -2629,7 +2629,23 @@ describe("the agent chat switch", () => {
   });
   afterEach(() => vi.useRealTimers());
 
-  const agent = { kind: "agent", vendor: "openai", sessionId: "s", turns: [] };
+  const agent = {
+    kind: "agent",
+    vendor: "openai",
+    sessionId: "s",
+    page: { items: [] },
+    agents: [],
+    files: [],
+    caps: {
+      stop: true,
+      mode: false,
+      model: "menu",
+      commands: true,
+      files: true,
+      attach: true,
+      queue: false,
+    },
+  };
   const bar = (index = 0) => document.querySelectorAll<HTMLElement>(".agent-bar")[index];
 
   async function started() {
@@ -2701,7 +2717,7 @@ describe("the agent chat switch", () => {
   it("is harmless in a preload without the channels", async () => {
     const jarvis = (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
     jarvis["onTerminalClaudeViewChanged"] = undefined;
-    jarvis["terminalAgentView"] = undefined;
+    jarvis["terminalAgentChat"] = undefined;
     await started();
     dataListener?.("tab-1", COMMAND);
     await vi.advanceTimersByTimeAsync(9000);

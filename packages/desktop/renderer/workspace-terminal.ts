@@ -1550,6 +1550,7 @@ function makePane(
       focusTerm: () => view.focus(),
       chatKey: (event) => view.chatKey(event),
       isRunning: () => view.element.dataset["state"] === "running",
+      toggleFiles: toggleExplorer,
     });
     agentChats.set(paneKey, chat);
     const disposePane = view.dispose;
