@@ -1199,7 +1199,12 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
       return;
     }
     if (event.type === "alt-screen") {
-      attempt(() => applyState(event.active ? "alt" : "blocks"));
+      // Leaving the alternate screen mid-command (an agent TUI that
+      // draws inline between full-screen views) leaves the command running:
+      // "blocks" would tell the chat the shell is idle.
+      attempt(() =>
+        applyState(event.active ? "alt" : splitter.active() !== undefined ? "running" : "blocks"),
+      );
       return;
     }
     if (event.type === "command-start") {

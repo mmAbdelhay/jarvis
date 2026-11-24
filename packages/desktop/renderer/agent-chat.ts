@@ -633,6 +633,16 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
     cancelDetect = [schedule(keepLooking, KEEP_LOOKING_MS)];
   }
 
+  // Coming back to the window asks again where an agent may have started
+  // unseen (a late-found one, or the polling paused while hidden): once per
+  // event, only for a pane that still runs something.
+  const onWindowBack = (): void => {
+    if (disposed || agent !== undefined || options.isRunning?.() !== true) return;
+    if (isShown() && document.visibilityState === "visible") void load();
+  };
+  window.addEventListener("focus", onWindowBack);
+  document.addEventListener("visibilitychange", onWindowBack);
+
   // The pane's width decides the side panel; watch it where the browser can.
   let sizeObserver: ResizeObserver | undefined;
   if (typeof ResizeObserver !== "undefined") {
@@ -660,6 +670,8 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
     },
     dispose() {
       disposed = true;
+      window.removeEventListener("focus", onWindowBack);
+      document.removeEventListener("visibilitychange", onWindowBack);
       cancelReload();
       cancelReAsk?.();
       cancelTick?.();

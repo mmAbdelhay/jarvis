@@ -1578,7 +1578,9 @@ function makePane(
       liveScreen: () => view.liveScreen(),
       focusTerm: () => view.focus(),
       chatKey: (event) => view.chatKey(event),
-      isRunning: () => view.element.dataset["state"] === "running",
+      // A TUI holding the alternate screen is running too, whatever the
+      // shell's own marks said.
+      isRunning: () => ["running", "alt"].includes(view.element.dataset["state"] ?? ""),
       toggleFiles: toggleExplorer,
     });
     agentChats.set(paneKey, chat);

@@ -144,6 +144,18 @@ describe("detecting an agent", () => {
     running = false;
   });
 
+  it("looks again when the window gets focus back, only for a pane that runs something", async () => {
+    const s = setup({ isRunning: () => true });
+    s.current.view = agentView();
+    window.dispatchEvent(new Event("focus"));
+    await settle();
+    expect(switchShown(s.host)).toBe(true);
+    const idle = setup({ isRunning: () => false });
+    window.dispatchEvent(new Event("focus"));
+    await settle();
+    expect(idle.api.terminalAgentChat).not.toHaveBeenCalled();
+  });
+
   it("stops looking when the command ends or the pane is disposed", async () => {
     let running = true;
     const s = setup({ isRunning: () => running });
