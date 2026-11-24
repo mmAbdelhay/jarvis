@@ -31,6 +31,10 @@ import {
 import type { DockerConfig, PlanCommentStore, PlanFiles, SnippetLanguage } from "@jarvis/platform";
 import { isWithin } from "@jarvis/platform";
 import { randomInt } from "node:crypto";
+import type { AgentAttachResult } from "./agent-attach.js";
+import type { AgentChatView } from "./agent-chat-doc.js";
+import type { AgentCommandResult, AgentModeResult, AgentStopResult } from "./agent-controls.js";
+import type { AgentCommandInfo, AgentFileHit, AgentOpenFileResult } from "./agent-suggest.js";
 import type { AgentAnswerResult, AgentSendResult, AgentView } from "./agent-view.js";
 import type { OfficeActivity } from "./office-activity.js";
 import type { OfficeScreen } from "./office-screen.js";
@@ -487,6 +491,19 @@ export type DispatchDeps = {
     view(paneKey: unknown): Promise<AgentView>;
     answer(paneKey: unknown, index: unknown, label: unknown): AgentAnswerResult;
     send(paneKey: unknown, text: unknown): Promise<AgentSendResult>;
+  };
+  // The chat redesign's document and controls (agent-chat-doc.ts,
+  // agent-controls.ts, agent-suggest.ts, agent-attach.ts; built in
+  // compose.ts). Desktop-only channels; each validates its own arguments.
+  agentChat: {
+    chat(paneKey: unknown, request?: unknown): Promise<AgentChatView>;
+    stop(paneKey: unknown): Promise<AgentStopResult>;
+    mode(paneKey: unknown, mode: unknown): Promise<AgentModeResult>;
+    command(paneKey: unknown, command: unknown): Promise<AgentCommandResult>;
+    commands(paneKey: unknown): Promise<{ commands: AgentCommandInfo[] }>;
+    files(paneKey: unknown, query: unknown): Promise<{ files: AgentFileHit[] }>;
+    attach(paneKey: unknown, file: unknown): Promise<AgentAttachResult>;
+    openFile(paneKey: unknown, path: unknown): Promise<AgentOpenFileResult>;
   };
   // The Office's watcher and window-viewing keys (office-activity.ts, built
   // in compose.ts). Desktop-only channels.
@@ -1239,6 +1256,14 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
     "terminal:agentAnswer": ([paneKey, index, label]) =>
       deps.agentView.answer(paneKey, index, label),
     "terminal:agentSend": ([paneKey, text]) => deps.agentView.send(paneKey, text),
+    "terminal:agentChat": ([paneKey, request]) => deps.agentChat.chat(paneKey, request),
+    "terminal:agentStop": ([paneKey]) => deps.agentChat.stop(paneKey),
+    "terminal:agentMode": ([paneKey, mode]) => deps.agentChat.mode(paneKey, mode),
+    "terminal:agentCommand": ([paneKey, command]) => deps.agentChat.command(paneKey, command),
+    "terminal:agentCommands": ([paneKey]) => deps.agentChat.commands(paneKey),
+    "terminal:agentFiles": ([paneKey, query]) => deps.agentChat.files(paneKey, query),
+    "terminal:agentAttach": ([paneKey, file]) => deps.agentChat.attach(paneKey, file),
+    "terminal:agentOpenFile": ([paneKey, path]) => deps.agentChat.openFile(paneKey, path),
     "office:activity": () => deps.office.read(),
     "office:screen": ([target]) => deps.office.screen(target),
     "office:viewing": ([keys]) => {

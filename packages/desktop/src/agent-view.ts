@@ -10,7 +10,13 @@
 // here logs a path, a session name, or any transcript, screen or typed
 // text — only category tokens.
 
-import { readAgentInputState, readClaudeScreen, readPrompt, stripAnsi } from "@jarvis/core";
+import {
+  readAgentInputState,
+  readAgentMenu,
+  readClaudeScreen,
+  readPrompt,
+  stripAnsi,
+} from "@jarvis/core";
 import {
   type ChatTurn,
   parseChatTranscript,
@@ -77,6 +83,39 @@ function screenTail(screen: string): string {
   return stripAnsi(screen).split("\n").slice(-40).join("\n");
 }
 
+/** What a pane's screen shows of its agent: mode (Claude), the prompt
+ *  readPrompt reads, a spinner label, and a menu only the terminal can answer. */
+export function readAgentScreen(
+  vendor: AgentVendor,
+  screen: string,
+): {
+  mode?: ClaudeMode;
+  prompt?: NonNullable<ReturnType<typeof readPrompt>>;
+  working?: string;
+  needsTerm: boolean;
+} {
+  let mode: ClaudeMode | undefined;
+  let prompt: ReturnType<typeof readPrompt>;
+  let working: string | undefined;
+  if (vendor === "anthropic") {
+    const parsed = readClaudeScreen(screen);
+    ({ prompt, working } = parsed);
+    mode = parsed.mode;
+  } else {
+    const tail = screenTail(screen);
+    prompt = readPrompt(tail);
+    if (readAgentInputState(tail, vendor) === "busy") working = WORKING_LABEL;
+  }
+  const needsTerm =
+    prompt === undefined && readAgentInputState(screenTail(screen), vendor) === "approval-prompt";
+  return {
+    ...(mode === undefined ? {} : { mode }),
+    ...(prompt === undefined ? {} : { prompt }),
+    ...(working === undefined ? {} : { working }),
+    needsTerm,
+  };
+}
+
 export function createAgentViewHandlers(deps: AgentViewDeps): {
   view(paneKey: unknown): Promise<AgentView>;
   /** The same read as view(), with no outward effect: nothing noticed,
@@ -88,6 +127,11 @@ export function createAgentViewHandlers(deps: AgentViewDeps): {
   send(paneKey: unknown, text: unknown): Promise<AgentSendResult>;
   /** Drops a pane's cached session (its shell exited). */
   forgetPane(paneKey: string): void;
+  /** The pane's agent session for the chat handlers: the cached one, or a
+   *  fresh scan when `fresh`. Throws Error("scan" | "lookup"). */
+  session(paneKey: string, fresh?: boolean): Promise<PaneAgentSession | undefined>;
+  /** Whether `paneKey` is a pane whose shell still runs. */
+  live(paneKey: unknown): boolean;
 } {
   const cache = createPaneSessionCache<PaneAgentSession>({
     panes: () => deps.panes(),
@@ -171,23 +215,10 @@ export function createAgentViewHandlers(deps: AgentViewDeps): {
       }
     }
     try {
-      const screen = deps.screenText(paneKey) ?? "";
-      let mode: ClaudeMode | undefined;
-      let prompt: ReturnType<typeof readPrompt>;
-      let working: string | undefined;
-      let needsTerm = false;
-      if (session.vendor === "anthropic") {
-        const parsed = readClaudeScreen(screen);
-        ({ prompt, working } = parsed);
-        mode = parsed.mode;
-      } else {
-        const tail = screenTail(screen);
-        prompt = readPrompt(tail);
-        if (readAgentInputState(tail, session.vendor) === "busy") working = WORKING_LABEL;
-      }
-      if (prompt === undefined) {
-        needsTerm = readAgentInputState(screenTail(screen), session.vendor) === "approval-prompt";
-      }
+      const { mode, prompt, working, needsTerm } = readAgentScreen(
+        session.vendor,
+        deps.screenText(paneKey) ?? "",
+      );
       return {
         kind: "agent",
         vendor: session.vendor,
@@ -212,8 +243,34 @@ export function createAgentViewHandlers(deps: AgentViewDeps): {
     }
   }
 
+  /** The prompt the stricter reader finds; "unreadable" when it sees one it
+   *  cannot drive (never answered with a bare Enter). */
+  function numberedPrompt(
+    paneKey: string,
+    screen: string,
+  ): ReturnType<typeof readPrompt> | "unreadable" {
+    const known = cache.cached(paneKey)?.vendor;
+    let unreadable = false;
+    for (const vendor of known === undefined ? ["openai", "anthropic"] : [known]) {
+      const menu = readAgentMenu(screen, vendor);
+      if (menu?.kind === "single") {
+        return {
+          question: menu.question,
+          options: menu.options.map(({ label, keys }) => ({ label, keys })),
+        };
+      }
+      if (menu?.kind === "unreadable") unreadable = true;
+    }
+    return unreadable ? "unreadable" : undefined;
+  }
+
   return {
     forgetPane: (paneKey) => cache.forget(paneKey),
+    async session(paneKey, fresh = false) {
+      if (fresh) cache.forget(paneKey);
+      return cache.sessionFor(paneKey);
+    },
+    live: (paneKey) => cache.live(paneKey),
     view: (paneKey) => read(paneKey, true),
     peek: (paneKey) => read(paneKey, false),
 
@@ -224,7 +281,13 @@ export function createAgentViewHandlers(deps: AgentViewDeps): {
     answer(paneKey, index, label) {
       try {
         if (!cache.live(paneKey)) return { ok: false, reason: "gone" };
-        const prompt = readPrompt(screenTail(deps.screenText(paneKey) ?? ""));
+        const screen = deps.screenText(paneKey) ?? "";
+        // The stricter reader first: for a numbered menu it agrees with
+        // readPrompt, and for Codex's `›` rows readPrompt would offer a bare
+        // Enter. Anything it does not read falls back to readPrompt.
+        const found = numberedPrompt(paneKey, screen);
+        if (found === "unreadable") return { ok: false, reason: "changed" };
+        const prompt = found ?? readPrompt(screenTail(screen));
         if (prompt === undefined) return { ok: false, reason: "gone" };
         const option = Number.isInteger(index) ? prompt.options[index as number] : undefined;
         if (option === undefined || option.label !== label) {
@@ -257,6 +320,7 @@ export function createAgentViewHandlers(deps: AgentViewDeps): {
         // never answer a menu the agent drew meanwhile.
         const tail = screenTail(deps.screenText(paneKey) ?? "");
         if (
+          readAgentMenu(deps.screenText(paneKey) ?? "", session.vendor) !== undefined ||
           readPrompt(tail) !== undefined ||
           readAgentInputState(tail, session.vendor) === "approval-prompt"
         ) {

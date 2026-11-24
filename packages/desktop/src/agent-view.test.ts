@@ -305,6 +305,71 @@ describe("agentAnswer", () => {
   });
 });
 
+describe("agentAnswer for Codex's numbered menu", () => {
+  const MENU = [
+    "Would you like to run the following command?",
+    "$ rm -rf build",
+    "› 1. Yes, proceed (y)",
+    "  2. Yes, and don't ask again (a)",
+    "  3. No, and tell Codex what to do differently (esc)",
+    "",
+    "Press enter to confirm or esc to cancel",
+  ].join("\n");
+
+  it("re-reads the menu and types the keys for the exactly matching option", () => {
+    const deps = fakeDeps("openai", MENU);
+    const handlers = createAgentViewHandlers(deps);
+    expect(handlers.answer("t1", 2, "No, and tell Codex what to do differently (esc)")).toEqual({
+      ok: true,
+    });
+    expect(deps.write).toHaveBeenCalledWith("t1", "\x1b[B\x1b[B\r");
+  });
+
+  it("refuses a changed label or index, and an unreadable menu", () => {
+    const deps = fakeDeps("openai", MENU);
+    const handlers = createAgentViewHandlers(deps);
+    expect(handlers.answer("t1", 1, "Yes, proceed (y)")).toEqual({ ok: false, reason: "changed" });
+    expect(handlers.answer("t1", 7, "x")).toEqual({ ok: false, reason: "changed" });
+    const boxes = fakeDeps(
+      "openai",
+      ["Which?", "› 1. [ ] a", "  2. [x] b", "Esc to cancel"].join("\n"),
+    );
+    expect(createAgentViewHandlers(boxes).answer("t1", 0, "[ ] a")).toEqual({
+      ok: false,
+      reason: "changed",
+    });
+    const trust = fakeDeps(
+      "anthropic",
+      [
+        "Is this a project you trust?",
+        "❯ No, exit",
+        "  Yes, I trust this folder",
+        "Enter to confirm · Esc to cancel",
+      ].join("\n"),
+    );
+    expect(createAgentViewHandlers(trust).answer("t1", 0, "Enter")).toEqual({
+      ok: false,
+      reason: "changed",
+    });
+    expect(trust.write).not.toHaveBeenCalled();
+    expect(deps.write).not.toHaveBeenCalled();
+  });
+});
+
+describe("agentSession", () => {
+  it("serves the cached session, and a fresh one on request", async () => {
+    const deps = fakeDeps("anthropic", CLAUDE_IDLE);
+    const handlers = createAgentViewHandlers(deps);
+    expect((await handlers.session("t1"))?.sessionId).toBe("anthropic-1");
+    await handlers.session("t1");
+    expect(deps.scanAgents).toHaveBeenCalledTimes(1);
+    await handlers.session("t1", true);
+    expect(deps.scanAgents).toHaveBeenCalledTimes(2);
+    expect(handlers.live("t1")).toBe(true);
+    expect(handlers.live("nope")).toBe(false);
+  });
+});
+
 describe("agentSend", () => {
   const PASTE = (text: string) => `\u001b[200~${text}\u001b[201~\r`;
 

@@ -139,6 +139,16 @@ export const CHANNEL_POLICY = {
   "terminal:agentView": "desktop-only",
   "terminal:agentAnswer": "desktop-only",
   "terminal:agentSend": "desktop-only",
+  // The chat redesign's controls: the document, stop, mode, commands, files,
+  // attachments and the file opener are all the laptop's own.
+  "terminal:agentChat": "desktop-only",
+  "terminal:agentStop": "desktop-only",
+  "terminal:agentMode": "desktop-only",
+  "terminal:agentCommand": "desktop-only",
+  "terminal:agentCommands": "desktop-only",
+  "terminal:agentFiles": "desktop-only",
+  "terminal:agentAttach": "desktop-only",
+  "terminal:agentOpenFile": "desktop-only",
   // The Office (office-activity.ts): what each agent is doing and which tabs
   // this window shows. Never run for a phone.
   "office:activity": "desktop-only",

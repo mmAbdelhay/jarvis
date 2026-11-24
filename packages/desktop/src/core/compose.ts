@@ -32,6 +32,7 @@ import {
   mkdir,
   mkdtemp,
   lstat,
+  open,
   readdir,
   readFile,
   realpath,
@@ -258,6 +259,10 @@ import {
   parseLsofFileNames,
 } from "../pane-agent-session.js";
 import { createPaneAttach, createPaneAttachCwd } from "../pane-attach.js";
+import { createAgentAttach } from "../agent-attach.js";
+import { createAgentChatHandlers } from "../agent-chat-doc.js";
+import { createAgentControls } from "../agent-controls.js";
+import { createAgentSuggest } from "../agent-suggest.js";
 import { createAgentViewHandlers } from "../agent-view.js";
 import { createOfficeActivity, createOfficeViewing } from "../office-activity.js";
 import { createOfficeScreen } from "../office-screen.js";
@@ -2469,6 +2474,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
       shells.onShellExit(({ paneKey }) => {
         claudeView.forgetPane(paneKey);
         agentView.forgetPane(paneKey);
+        agentChatDoc.forgetPane(paneKey);
         cb(paneKey);
       }),
     watch: (dir, cb, onError) => {
@@ -2551,6 +2557,125 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     follow: (paneKey, transcript) => claudeViewNotifier.follow(paneKey, transcript),
     forget: (paneKey) => claudeViewNotifier.forget(paneKey),
   });
+  // The chat redesign (agent-chat-doc.ts and its controls): the incremental
+  // document, stop/mode/command, the `/` and `@` lists, attachments and the
+  // file opener. They share agentView's scan cache and never touch the phone.
+  const agentSessions = {
+    session: (paneKey: string, fresh?: boolean) => agentView.session(paneKey, fresh),
+    live: (paneKey: unknown) => agentView.live(paneKey),
+  };
+  const readRange = async (path: string, start: number, length: number): Promise<Buffer> => {
+    const handle = await open(path, "r");
+    try {
+      const buffer = Buffer.alloc(length);
+      const { bytesRead } = await handle.read(buffer, 0, length, start);
+      return buffer.subarray(0, bytesRead);
+    } finally {
+      await handle.close();
+    }
+  };
+  const agentChatDoc = createAgentChatHandlers({
+    sessions: agentSessions,
+    statFile: async (path) => {
+      const { size, mtimeMs, ino } = await stat(path);
+      return { size, mtimeMs, ino };
+    },
+    readRange,
+    screenText: (paneKey) => paneScreens.screenText(paneKey),
+    notice: (paneKey) => claudeViewNotifier.notice(paneKey),
+    follow: (paneKey, transcript) => claudeViewNotifier.follow(paneKey, transcript),
+    forget: (paneKey) => claudeViewNotifier.forget(paneKey),
+    changed: (paneKey) => claudeViewNotifier.poke(paneKey),
+    log: (token) => console.warn(token),
+  });
+  const agentSuggest = createAgentSuggest({
+    sessions: agentSessions,
+    fs: {
+      readdir: async (path) =>
+        (await readdir(path, { withFileTypes: true })).map((entry) => ({
+          name: entry.name,
+          isDirectory: entry.isDirectory(),
+          isFile: entry.isFile(),
+          isSymlink: entry.isSymbolicLink(),
+        })),
+      readHead: async (path, bytes) => (await readRange(path, 0, bytes)).toString("utf8"),
+      realpath: (path) => realpath(path),
+      isFile: async (path) => (await stat(path)).isFile(),
+    },
+    git: async (cwd, args) => {
+      try {
+        const out = await runCommandWithLimits(
+          "git",
+          ["-C", cwd, ...args],
+          { timeoutMs: 5_000, maxOutputBytes: 16 * 1024 * 1024 },
+          agentEnv,
+        );
+        return out.code === 0 && !out.truncated && !out.timedOut ? out.stdout : undefined;
+      } catch {
+        return undefined;
+      }
+    },
+    now: () => Date.now(),
+    log: (token) => console.warn(token),
+  });
+  const agentControls = createAgentControls({
+    sessions: agentSessions,
+    screenText: (paneKey) => paneScreens.screenText(paneKey),
+    write: (paneKey, data) => shells.write(paneKey, data),
+    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    log: (token) => console.warn(token),
+    commandNames: (session) => agentSuggest.names(session),
+  });
+  const agentAttachRoot = join(homedir(), ".config/jarvis/agent-attach");
+  const agentAttach = createAgentAttach({
+    baseDir: agentAttachRoot,
+    sessions: agentSessions,
+    fs: {
+      mkdir: async (path, mode) => {
+        await mkdir(path, { recursive: true, mode });
+        await chmod(path, mode);
+      },
+      writeFile: (path, bytes, mode) => writeFile(path, bytes, { mode, flag: "wx" }),
+      list: async (path) => {
+        const names = await readdir(path, { withFileTypes: true });
+        const out: { name: string; isDirectory: boolean; mtimeMs: number }[] = [];
+        for (const entry of names) {
+          if (entry.isSymbolicLink()) continue;
+          try {
+            out.push({
+              name: entry.name,
+              isDirectory: entry.isDirectory(),
+              mtimeMs: (await stat(join(path, entry.name))).mtimeMs,
+            });
+          } catch {
+            // Gone while listing.
+          }
+        }
+        return out;
+      },
+      remove: (path) => rm(path, { force: true }),
+    },
+    now: () => Date.now(),
+    random: () => randomBytes(3).toString("hex"),
+    log: (token) => console.warn(token),
+  });
+  const agentChatApi = {
+    chat: (paneKey: unknown, request?: unknown) => agentChatDoc.chat(paneKey, request),
+    stop: (paneKey: unknown) => agentControls.stop(paneKey),
+    mode: (paneKey: unknown, mode: unknown) => agentControls.mode(paneKey, mode),
+    command: (paneKey: unknown, command: unknown) => agentControls.command(paneKey, command),
+    commands: (paneKey: unknown) => agentSuggest.commands(paneKey),
+    files: (paneKey: unknown, query: unknown) => agentSuggest.files(paneKey, query),
+    attach: (paneKey: unknown, file: unknown) => agentAttach.attach(paneKey, file),
+    // Resolved inside the pane's project here, then handed to the terminal's
+    // own openFile, which applies its project-root guard once more.
+    openFile: async (paneKey: unknown, path: unknown) => {
+      const resolved = await agentSuggest.resolve(paneKey, path);
+      if (!resolved.ok) return resolved;
+      const opened = await terminal.openFile(paneKey as string, resolved.path);
+      return opened.ok ? ({ ok: true } as const) : ({ ok: false, reason: "failed" } as const);
+    },
+  };
   // The Office (office-activity.ts): one shared watcher over every agent
   // pane and Jarvis session. Quiet until something prints; its changes go to
   // this window only (never a phone), and a raised hand is a desktop
@@ -2709,6 +2834,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     tailnetPeers,
     claudeView,
     agentView,
+    agentChat: agentChatApi,
     office: {
       read: () => officeWatcher.read(),
       setViewing: (keys) => officeViewing.set(keys),

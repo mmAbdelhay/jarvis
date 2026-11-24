@@ -257,6 +257,8 @@ export type ClaudeViewNotifierDeps = {
 export function createClaudeViewNotifier(deps: ClaudeViewNotifierDeps): {
   notice(paneKey: string): void;
   follow(paneKey: string, transcript: TranscriptLocation): void;
+  /** Asks for one more push for a pane already noticed or followed. */
+  poke(paneKey: string): void;
   forget(paneKey: string): void;
   stop(): void;
 } {
@@ -322,6 +324,9 @@ export function createClaudeViewNotifier(deps: ClaudeViewNotifierDeps): {
   return {
     notice(paneKey) {
       if (!stopped) noticed.add(paneKey);
+    },
+    poke(paneKey) {
+      if (noticed.has(paneKey) || followed.has(paneKey)) bump(paneKey, CLAUDE_VIEW_DEBOUNCE_MS);
     },
     follow(paneKey, transcript) {
       if (stopped) return;

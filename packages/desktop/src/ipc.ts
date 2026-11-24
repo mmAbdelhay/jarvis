@@ -30,6 +30,10 @@ import {
   type SystemMetrics,
   type Turn,
 } from "@jarvis/core";
+import type { AgentAttachResult } from "./agent-attach.js";
+import type { AgentChatView } from "./agent-chat-doc.js";
+import type { AgentCommandResult, AgentModeResult, AgentStopResult } from "./agent-controls.js";
+import type { AgentCommandInfo, AgentFileHit, AgentOpenFileResult } from "./agent-suggest.js";
 import type { AgentAnswerResult, AgentSendResult, AgentView } from "./agent-view.js";
 import type { OfficeActivity } from "./office-activity.js";
 import type { OfficeScreen } from "./office-screen.js";
@@ -1030,6 +1034,27 @@ export type RendererApi = {
    *  Enter. Refused with `gone` when no agent runs there (never a plain
    *  shell), `prompt` at a menu, `invalid` for empty or over-long text. */
   terminalAgentSend(paneKey: string, text: string): Promise<AgentSendResult>;
+  /** The Chat view's document: the latest page of items (or the page before
+   *  `request.before`, an opaque cursor), the side panel's data, the prompt
+   *  labels (never keys) and which controls this vendor has. */
+  terminalAgentChat(paneKey: string, request?: { before?: string }): Promise<AgentChatView>;
+  /** One Esc, only when the agent is busy and no menu is up. */
+  terminalAgentStop(paneKey: string): Promise<AgentStopResult>;
+  /** Claude only: Shift+Tab until the screen shows `mode`, at most 5 presses. */
+  terminalAgentMode(paneKey: string, mode: string): Promise<AgentModeResult>;
+  /** An allow-listed slash command (`/model sonnet`), refused while busy. */
+  terminalAgentCommand(paneKey: string, command: string): Promise<AgentCommandResult>;
+  /** The `/` list: built-ins plus custom command and skill names. */
+  terminalAgentCommands(paneKey: string): Promise<{ commands: AgentCommandInfo[] }>;
+  /** The `@` list: at most 30 project files matching `query`. */
+  terminalAgentFiles(paneKey: string, query: string): Promise<{ files: AgentFileHit[] }>;
+  /** Stores pasted or dropped bytes privately and answers the path to send. */
+  terminalAgentAttach(
+    paneKey: string,
+    file: { name: string; bytes: Uint8Array },
+  ): Promise<AgentAttachResult>;
+  /** Opens an edited file in the editor, inside the pane's project only. */
+  terminalAgentOpenFile(paneKey: string, path: string): Promise<AgentOpenFileResult>;
   onTerminalClaudeViewChanged(cb: (payload: { paneKey: string }) => void): void;
   /** What each agent pane and Jarvis session is doing, for the Office:
    *  state, question, what it is doing. Desktop only. */

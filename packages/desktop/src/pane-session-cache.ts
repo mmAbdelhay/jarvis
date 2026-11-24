@@ -37,6 +37,11 @@ export function createPaneSessionCache<S extends { sessionId: string; transcript
       );
     },
 
+    /** The session last found for a pane, whatever its age; no scan. */
+    cached(paneKey: string): S | undefined {
+      return sessions.get(paneKey)?.session;
+    },
+
     /** Drops a pane's cached session. */
     forget(paneKey: string): void {
       sessions.delete(paneKey);
