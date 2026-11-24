@@ -202,6 +202,29 @@ describe("agentChat", () => {
     expect(agent(await shrunk.handlers.chat("t1")).reset).toBe(true);
   });
 
+  it("for a 3500-turn session: first reply from the tail, deriving; the background read then announces itself, and the next reply is whole", async () => {
+    const body = Array.from({ length: 3500 }, (_, i) =>
+      i % 2 === 0
+        ? userLine(i)
+        : asstLine(i, [
+            {
+              type: "tool_use",
+              id: `e${i}`,
+              name: "Edit",
+              input: { file_path: `/repo/f${i}.ts`, old_string: "a", new_string: "b" },
+            },
+          ]),
+    ).join("");
+    const t = setup(body, { syncBytes: 64 * 1024, stepBytes: 64 * 1024, chunkBytes: 256 * 1024 });
+    const first = agent(await t.handlers.chat("t1"));
+    expect(first.deriving).toBe(true);
+    expect(first.files).toEqual([]);
+    await vi.waitFor(() => expect(t.deps.changed).toHaveBeenCalledWith("t1"));
+    const second = agent(await t.handlers.chat("t1"));
+    expect(second.deriving).toBeUndefined();
+    expect(second.files.length).toBeGreaterThan(100);
+  });
+
   it("never mixes two files into one reader when the file is replaced during a read", async () => {
     const t = setup(userLine(1) + userLine(2));
     let release: () => void = () => undefined;

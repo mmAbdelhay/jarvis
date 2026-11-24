@@ -476,6 +476,12 @@ describe("paging", () => {
   it("shows a small loading line in the panel while the whole session is still read", async () => {
     const s = await open(agentView({ deriving: true }));
     expect(s.q(".ac-side .ac-deriving").textContent).toBe(t("agentChatDeriving"));
+    // main's push after the background read: the next look has the lists.
+    s.current.view = agentView({ files: [{ path: "/r/a.ts", added: 1 }] });
+    s.chat.refresh();
+    await settle();
+    expect(s.host.querySelector(".ac-deriving")).toBeNull();
+    expect(s.host.querySelector(".ac-file")).not.toBeNull();
   });
 });
 
