@@ -549,6 +549,17 @@ the phone's chat view is unchanged.
   works the button says **Queue** for an agent that queues messages (Claude
   Code). If the agent's own input line already holds typed text, nothing is sent
   and the chat says so.
+- **Limits and status line.** Under the box, small chips show the agent's usage
+  limits (Claude Code's session and weekly windows, Codex's 5-hour and weekly
+  windows, Copilot's plan) with a meter, the percent used and when it resets;
+  from 80% used they turn amber and say *High*, from 95% red and say *Almost
+  out*. Below them are the agent's own status line rows (the custom status line
+  you set in Claude Code, Codex's model and folder row, Copilot's account and
+  model rows), two rows then **More**. They are read from what the pane shows
+  and from Codex's transcript, never guessed: a limit the agent does not show
+  is not shown, and while a menu hides the screen the last rows stay, dimmed.
+  The side panel's **Usage limits** section (a chip in a narrow pane) has the
+  same data in full. Desktop only.
 - **File icons.** Files and folders in the Terminal tab's file sidebar, the
   chat's `@` list, changed files and attachments, and the Changes and Reviews
   pages wear the Material icon of their name (the set VS Code uses), always on.

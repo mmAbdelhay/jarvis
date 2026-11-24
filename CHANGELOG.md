@@ -8,6 +8,10 @@ version and the downloads. This file is the index.
 
 ## Unreleased
 
+- Terminal: the Chat view shows the agent's usage limits and its own status line under the
+  composer, for Claude Code, Codex and Copilot: chips with a meter, percent used and reset time
+  (amber from 80%, red from 95%, with words), then the status rows, and a Usage limits section
+  in the side panel. Read from the pane's screen and Codex's transcript, never guessed.
 - Terminal: the Chat view finds more agents. A Codex session shows up even when a background
   Codex process holds its log, and appears empty before its first message (so does Copilot's);
   an agent found late still gets its Chat tab; the `/` list includes plugin skills named by

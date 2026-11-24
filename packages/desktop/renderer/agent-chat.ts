@@ -22,6 +22,7 @@ import { el } from "./agent-chat/dom.js";
 import { createFeed } from "./agent-chat/feed.js";
 import { mergeLive, prependOlder } from "./agent-chat/paging.js";
 import { createPanel } from "./agent-chat/panel.js";
+import { createStatusStrip } from "./agent-chat/status.js";
 import { createQuestion } from "./agent-chat/question.js";
 import { createSearch } from "./agent-chat/search.js";
 import { createShell, type Mode } from "./agent-chat/shell.js";
@@ -251,6 +252,7 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
       setPanelHidden(hidden);
     },
   });
+  const strip = createStatusStrip({ t });
   const composer = createComposer({
     t,
     paneKey,
@@ -309,7 +311,7 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
   shell.actions.append(search.toggle, side.toggle);
   shell.top.append(search.element);
   shell.main.insertBefore(feed.element, shell.lower);
-  shell.lower.append(question.element, side.chips, note, composer.element);
+  shell.lower.append(question.element, side.chips, note, composer.element, strip.element);
   shell.side.append(side.aside);
   host.prepend(bar);
   host.append(panel);
@@ -362,12 +364,14 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
     const width = paneWidth();
     const narrow = width > 0 && width < NARROW_PX;
     panel.dataset["narrow"] = String(narrow);
+    strip.update(view.status);
     side.update(
       {
         ...(view.todos === undefined ? {} : { todos: view.todos }),
         agents: view.agents,
         files: view.files,
         ...(view.context === undefined ? {} : { context: view.context }),
+        ...(view.status === undefined ? {} : { status: view.status }),
         ...(view.deriving === true ? { deriving: true } : {}),
         now: now(),
       },

@@ -790,6 +790,58 @@ describe("parseCodexDoc", () => {
     expect(JSON.stringify(doc)).not.toContain("secret");
   });
 
+  it("reads the last token_count's rate limits as limits, by window", () => {
+    const count = (rate: unknown): string =>
+      line({ type: "event_msg", payload: { type: "token_count", rate_limits: rate } });
+    const doc = parseCodexDoc(
+      [
+        count({ primary: { used_percent: 1, window_minutes: 300, resets_at: 1000 } }),
+        count({
+          plan_type: "pro",
+          credits: { balance: "9" },
+          primary: { used_percent: 12.5, window_minutes: 300, resets_at: 1_900_000_000 },
+          secondary: { used_percent: 40, window_minutes: 10080, resets_at: 1_900_100_000 },
+        }),
+      ].join("\n"),
+    );
+    expect(doc.limits).toEqual([
+      { label: "5h", usedPercent: 12.5, resetsAt: 1_900_000_000 },
+      { label: "week", usedPercent: 40, resetsAt: 1_900_100_000 },
+    ]);
+    expect(JSON.stringify(doc)).not.toContain("pro");
+  });
+
+  it("labels other windows, skips null or invalid ones and keeps the last count only", () => {
+    const count = (rate: unknown): string =>
+      line({ type: "event_msg", payload: { type: "token_count", rate_limits: rate } });
+    const doc = parseCodexDoc(
+      count({
+        primary: { used_percent: 5, window_minutes: 43200 },
+        secondary: { used_percent: 6, window_minutes: 120 },
+      }),
+    );
+    expect(doc.limits).toEqual([
+      { label: "30 days", usedPercent: 5 },
+      { label: "2 h", usedPercent: 6 },
+    ]);
+    expect(
+      parseCodexDoc(
+        count({ primary: null, secondary: { used_percent: 150, window_minutes: 4320 } }),
+      ).limits,
+    ).toBeUndefined();
+    expect(
+      parseCodexDoc(count({ primary: { used_percent: 3, window_minutes: 2880 } })).limits,
+    ).toEqual([{ label: "2 days", usedPercent: 3 }]);
+    // A later count without rate limits keeps the earlier ones.
+    const kept = parseCodexDoc(
+      [
+        count({ primary: { used_percent: 7, window_minutes: 300 } }),
+        line({ type: "event_msg", payload: { type: "token_count", info: null } }),
+      ].join("\n"),
+    );
+    expect(kept.limits).toEqual([{ label: "5h", usedPercent: 7 }]);
+  });
+
   it("reads update_plan as the to-do list", () => {
     const doc = parseCodexDoc(
       line({

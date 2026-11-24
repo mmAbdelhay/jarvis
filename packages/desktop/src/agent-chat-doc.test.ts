@@ -471,4 +471,79 @@ describe("agentChat", () => {
     for (const call of vi.mocked(t.deps.log).mock.calls)
       expect(String(call[0])).not.toContain("secret");
   });
+
+  describe("status line and limits", () => {
+    const RULE = "─".repeat(40);
+    const claudeScreen = (...rows: string[]): string =>
+      ["output", RULE, "❯ ", RULE, ...rows, "  ? for shortcuts"].join("\n");
+    const codexLimitsLine = (primary: unknown, secondary: unknown): string =>
+      line({
+        type: "event_msg",
+        payload: { type: "token_count", rate_limits: { primary, secondary } },
+      });
+
+    it("shows the screen's status rows and limits", async () => {
+      const t = setup(userLine(1), {
+        screen: claudeScreen("  Session █░░ 13% resets 04:20", "  work-account"),
+      });
+      const view = agent(await t.handlers.chat("t1"));
+      expect(view.status).toEqual({
+        lines: ["Session 13% resets 04:20", "work-account"],
+        limits: [{ label: "Session", usedPercent: 13, resets: "04:20" }],
+      });
+      expect(
+        agent(await setup(userLine(1), { screen: claudeScreen() }).handlers.chat("t1")).status,
+      ).toBeUndefined();
+    });
+
+    it("keeps the last status for the same session while the screen gives none, then drops it", async () => {
+      const t = setup(userLine(1), { screen: claudeScreen("  work-account") });
+      expect(agent(await t.handlers.chat("t1")).status).toEqual({
+        lines: ["work-account"],
+        limits: [],
+      });
+      t.state.screen = ["Do you want to proceed?", "❯ 1. Yes", "  2. No"].join("\n");
+      expect(agent(await t.handlers.chat("t1")).status).toEqual({
+        lines: ["work-account"],
+        limits: [],
+        stale: true,
+      });
+      t.state.screen = claudeScreen("  other-account");
+      expect(agent(await t.handlers.chat("t1")).status?.stale).toBeUndefined();
+      t.state.screen = "";
+      vi.mocked(t.deps.sessions.session).mockResolvedValue({ ...SESSION(), sessionId: "another" });
+      expect(agent(await t.handlers.chat("t1")).status).toBeUndefined();
+    });
+
+    it("merges Codex's transcript limits, dropping a window that has already reset", async () => {
+      const now = Date.parse("2026-11-24T10:00:00Z");
+      const t = setup(
+        codexLimitsLine(
+          { used_percent: 10, window_minutes: 300, resets_at: now / 1000 + 3600 },
+          { used_percent: 50, window_minutes: 10080, resets_at: now / 1000 - 5 },
+        ),
+        {
+          vendor: "openai",
+          screen: "› Ask\n  GPT-6-Luna default · /private/tmp/x\n  ? for shortcuts",
+        },
+      );
+      t.deps.now = () => now;
+      const view = agent(await t.handlers.chat("t1"));
+      expect(view.status?.lines).toEqual(["GPT-6-Luna default · /private/tmp/x"]);
+      expect(view.status?.limits).toHaveLength(1);
+      expect(view.status?.limits[0]).toMatchObject({ label: "5h", usedPercent: 10 });
+      expect(view.status?.limits[0]?.resets).toMatch(/\d\d:\d\d/);
+    });
+
+    it("shows transcript limits even with no screen rows", async () => {
+      const t = setup(codexLimitsLine({ used_percent: 3, window_minutes: 300 }, null), {
+        vendor: "openai",
+        screen: "",
+      });
+      expect(agent(await t.handlers.chat("t1")).status).toEqual({
+        lines: [],
+        limits: [{ label: "5h", usedPercent: 3 }],
+      });
+    });
+  });
 });

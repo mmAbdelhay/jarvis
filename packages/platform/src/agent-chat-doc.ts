@@ -98,8 +98,14 @@ export type ChatAsking = {
   plan?: string;
 };
 
+/** A usage window the agent reported (Codex's rate limits). `resetsAt` is epoch
+ *  seconds; whether it has passed is for the reader of the document to judge. */
+export type ChatLimit = { label: string; usedPercent: number; resetsAt?: number };
+
 export type ChatDoc = {
   asking?: ChatAsking;
+  /** Desktop only: the phone's output never carries it. */
+  limits?: ChatLimit[];
   items: ChatItem[];
   model?: string;
   contextTokens?: number;
@@ -354,6 +360,38 @@ function createReader(
       return build();
     },
   };
+}
+
+function windowLabel(minutes: number): string {
+  if (minutes === 300) return "5h";
+  if (minutes === 10080) return "week";
+  if (minutes === 43200) return "30 days";
+  if (minutes % 1440 === 0) return `${minutes / 1440} days`;
+  if (minutes % 60 === 0) return `${minutes / 60} h`;
+  return `${minutes} min`;
+}
+
+/** Codex's token_count rate_limits: primary and secondary, either may be null. */
+function codexLimits(rate: unknown): ChatLimit[] | undefined {
+  const record = asRecord(rate);
+  if (record === undefined) return undefined;
+  const out: ChatLimit[] = [];
+  for (const key of ["primary", "secondary"]) {
+    const window = asRecord(record[key]);
+    const used = window?.["used_percent"];
+    const minutes = window?.["window_minutes"];
+    if (typeof used !== "number" || !Number.isFinite(used) || used < 0 || used > 100) continue;
+    if (typeof minutes !== "number" || !Number.isInteger(minutes) || minutes <= 0) continue;
+    const resets = window?.["resets_at"];
+    out.push({
+      label: windowLabel(minutes),
+      usedPercent: used,
+      ...(typeof resets === "number" && Number.isFinite(resets) && resets > 0
+        ? { resetsAt: resets }
+        : {}),
+    });
+  }
+  return out;
 }
 
 function withOptional(
@@ -984,6 +1022,7 @@ export function createCodexDocReader(options: ChatDocOptions = {}): ChatDocReade
   let model: string | undefined;
   let tokens: number | undefined;
   let plan: ChatTodo[] | undefined;
+  let limits: ChatLimit[] | undefined;
 
   const handleItem = (item: Record<string, unknown>, id: string, at: number | undefined): void => {
     sawItem = true;
@@ -1065,6 +1104,8 @@ export function createCodexDocReader(options: ChatDocOptions = {}): ChatDocReade
     } else if (type === "event_msg" && payload["type"] === "token_count") {
       const total = asRecord(asRecord(payload["info"])?.["last_token_usage"])?.["total_tokens"];
       if (typeof total === "number" && total > 0) tokens = total;
+      const found = codexLimits(payload["rate_limits"]);
+      if (found !== undefined) limits = found.length > 0 ? found : undefined;
     } else if (type === "response_item" && payload["type"] === "message") {
       const role = payload["role"];
       if (role !== "user" && role !== "assistant") return; // developer
@@ -1156,12 +1197,14 @@ export function createCodexDocReader(options: ChatDocOptions = {}): ChatDocReade
   const build = (): ChatDoc => {
     const store = sawItem ? fromItems : fromResponses;
     const doc = store.doc({ agents: [], files: (sawItem ? files : responseFiles).list() });
-    return withOptional(
+    const out = withOptional(
       doc,
       model,
       tokens,
       plan?.map((t) => ({ ...t })),
     );
+    if (limits !== undefined) out.limits = limits.map((l) => ({ ...l }));
+    return out;
   };
   return createReader(handle, build);
 }

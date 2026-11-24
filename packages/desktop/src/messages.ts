@@ -454,6 +454,22 @@ export const MESSAGES = {
     language === "ar" ? "إظهار اللوحة" : "Show panel",
   agentChatShowTerminal: (language: "ar" | "en"): string =>
     language === "ar" ? "إظهار الطرفية" : "Show terminal",
+  agentChatChipLimits: (language: "ar" | "en"): string => (language === "ar" ? "الحدود" : "Limits"),
+  agentChatLimitAlmostOut: (language: "ar" | "en"): string =>
+    language === "ar" ? "أوشك على النفاد" : "Almost out",
+  agentChatLimitHigh: (language: "ar" | "en"): string => (language === "ar" ? "مرتفع" : "High"),
+  agentChatLimitResets: (language: "ar" | "en"): string =>
+    language === "ar" ? "يتجدد {when}" : "resets {when}",
+  agentChatLimitUsed: (language: "ar" | "en"): string =>
+    language === "ar" ? "استُخدم {n}%" : "{n}% used",
+  agentChatPanelLimits: (language: "ar" | "en"): string =>
+    language === "ar" ? "حدود الاستخدام" : "Usage limits",
+  agentChatStatusLabel: (language: "ar" | "en"): string =>
+    language === "ar" ? "حالة الوكيل" : "Agent status",
+  agentChatStatusLess: (language: "ar" | "en"): string => (language === "ar" ? "أقل" : "Less"),
+  agentChatStatusMore: (language: "ar" | "en"): string => (language === "ar" ? "المزيد" : "More"),
+  agentChatStatusStale: (language: "ar" | "en"): string =>
+    language === "ar" ? "آخر ما ظهر" : "last seen",
   agentChatStop: (language: "ar" | "en"): string => (language === "ar" ? "إيقاف" : "Stop"),
   agentChatStopDraft: (language: "ar" | "en"): string =>
     language === "ar"

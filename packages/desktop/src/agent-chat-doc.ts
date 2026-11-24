@@ -32,6 +32,7 @@ import {
 import type { ClaudeMode } from "@jarvis/wire";
 import { StringDecoder } from "node:string_decoder";
 import { basename, dirname } from "node:path";
+import { type AgentLimit, readAgentStatusLine } from "./agent-status-line.js";
 import { type AgentVendor, isMissingFile, readAgentScreen } from "./agent-view.js";
 import { sameAgentSession, type PaneAgentSession } from "./pane-agent-session.js";
 
@@ -67,6 +68,8 @@ export type AgentChatDeps = {
   changed?(paneKey: string): void;
   log(token: string): void;
   limits?: AgentChatLimits;
+  /** The clock, in ms (tests set it). */
+  now?: () => number;
 };
 
 /** Which controls work for a vendor; the renderer shows only these. */
@@ -140,6 +143,9 @@ export type AgentChatView =
       agents: ChatAgent[];
       files: ChatFile[];
       context?: { used: number; leftPercent?: number };
+      /** The agent's own status line and usage limits; `stale`: the screen
+       *  shows none right now and these are the last it showed. */
+      status?: { lines: string[]; limits: AgentLimit[]; stale?: true };
       /** The question or plan the agent is waiting on, read-only. */
       asking?: ChatAsking;
       /** The whole file is still being read: side data fills in later. */
@@ -209,6 +215,35 @@ function decode(raw: unknown): Cursor | undefined {
   }
 }
 
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+/** A reset time of the transcript as the screen words it: "04:20" today, "Wed 22:00" later. */
+function resetText(epochSeconds: number, nowMs: number): string {
+  const at = new Date(epochSeconds * 1000);
+  const hh = String(at.getHours()).padStart(2, "0");
+  const mm = String(at.getMinutes()).padStart(2, "0");
+  const today = new Date(nowMs);
+  const sameDay =
+    at.getFullYear() === today.getFullYear() &&
+    at.getMonth() === today.getMonth() &&
+    at.getDate() === today.getDate();
+  return sameDay ? `${hh}:${mm}` : `${WEEKDAYS[at.getDay()]} ${hh}:${mm}`;
+}
+
+/** The transcript's limits that have not reset yet, worded like the screen's. */
+function transcriptLimits(limits: ChatDoc["limits"], nowMs: number): AgentLimit[] {
+  const out: AgentLimit[] = [];
+  for (const limit of limits ?? []) {
+    if (limit.resetsAt !== undefined && limit.resetsAt * 1000 <= nowMs) continue;
+    out.push({
+      label: limit.label,
+      usedPercent: limit.usedPercent,
+      ...(limit.resetsAt === undefined ? {} : { resets: resetText(limit.resetsAt, nowMs) }),
+    });
+  }
+  return out;
+}
+
 /** "Context left until auto-compact: 12%" (Claude) or "87% context left" (Codex). */
 function leftPercent(vendor: AgentVendor, screen: string): number | undefined {
   const pattern =
@@ -241,6 +276,11 @@ export function createAgentChatHandlers(deps: AgentChatDeps): {
   const lastGood = new Map<string, AgentView>();
   /** The session behind each lastGood, to tell a pending id from its real one. */
   const lastSession = new Map<string, PaneAgentSession>();
+  /** The last status the screen showed, per pane, for the session that showed it. */
+  const lastStatus = new Map<
+    string,
+    { session: PaneAgentSession; lines: string[]; limits: AgentLimit[] }
+  >();
   let tick = 0;
 
   function log(token: string): void {
@@ -500,6 +540,7 @@ export function createAgentChatHandlers(deps: AgentChatDeps): {
       for (const [id, entry] of entries) if (entry.paneKey === paneKey) entries.delete(id);
       lastGood.delete(paneKey);
       lastSession.delete(paneKey);
+      lastStatus.delete(paneKey);
     },
 
     async chat(paneKey, request) {
@@ -581,6 +622,32 @@ export function createAgentChatHandlers(deps: AgentChatDeps): {
             }
           }
         }
+        const read = readAgentStatusLine(session.vendor, screen);
+        const fromTranscript = transcriptLimits(doc.limits, (deps.now ?? Date.now)());
+        let status: AgentView["status"];
+        if (read.lines.length > 0 || read.limits.length > 0) {
+          lastStatus.set(paneKey, { session, lines: read.lines, limits: read.limits });
+          status = { lines: read.lines, limits: read.limits };
+        } else {
+          const kept = lastStatus.get(paneKey);
+          if (kept !== undefined && sameAgentSession(kept.session, session)) {
+            status = { lines: kept.lines, limits: kept.limits, stale: true };
+          } else {
+            lastStatus.delete(paneKey);
+          }
+        }
+        if (fromTranscript.length > 0) {
+          const seen = new Set((status?.limits ?? []).map((limit) => limit.label.toLowerCase()));
+          const limits = [
+            ...(status?.limits ?? []),
+            ...fromTranscript.filter((limit) => !seen.has(limit.label.toLowerCase())),
+          ];
+          status = {
+            lines: status?.lines ?? [],
+            limits,
+            ...(status?.stale ? { stale: true as const } : {}),
+          };
+        }
         const needsTerm = menu?.kind === "unreadable" || (menu === undefined && state.needsTerm);
         const view: AgentView = {
           kind: "agent",
@@ -608,6 +675,7 @@ export function createAgentChatHandlers(deps: AgentChatDeps): {
                   ...(left === undefined ? {} : { leftPercent: left }),
                 },
               }),
+          ...(status === undefined ? {} : { status }),
           ...(doc.asking === undefined ? {} : { asking: doc.asking }),
           ...(deriving ? { deriving: true as const } : {}),
           caps: CAPS[session.vendor],

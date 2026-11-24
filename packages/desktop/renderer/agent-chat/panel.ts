@@ -4,6 +4,7 @@
 // that is remembered.
 import type { ChatAgent, ChatFile, ChatTodo } from "@jarvis/platform";
 import { fileIcon } from "../file-icons.js";
+import { buildLimitBlock, type StatusData } from "./status.js";
 import { count } from "./tool-row.js";
 import {
   basename,
@@ -18,13 +19,15 @@ import {
   type Translate,
 } from "./dom.js";
 
-export type SectionKind = "todo" | "agents" | "files" | "context";
+export type SectionKind = "limits" | "todo" | "agents" | "files" | "context";
 
 export type PanelData = {
   todos?: readonly ChatTodo[];
   agents: readonly ChatAgent[];
   files: readonly ChatFile[];
   context?: { used: number; leftPercent?: number };
+  /** The agent's usage limits and own status line. */
+  status?: StatusData;
   /** The whole session is still being read: the lists fill in later. */
   deriving?: boolean;
   now: number;
@@ -32,6 +35,12 @@ export type PanelData = {
 
 export function sectionsOf(data: PanelData): SectionKind[] {
   const kinds: SectionKind[] = [];
+  if (
+    data.status !== undefined &&
+    (data.status.limits.length > 0 || data.status.lines.length > 0)
+  ) {
+    kinds.push("limits");
+  }
   if (data.todos !== undefined && data.todos.length > 0) kinds.push("todo");
   if (data.agents.length > 0) kinds.push("agents");
   if (data.files.length > 0) kinds.push("files");
@@ -41,6 +50,7 @@ export function sectionsOf(data: PanelData): SectionKind[] {
 
 /** "To-do, 2 of 4", "Context, 62% left": the heading text of a section. */
 export function headingOf(kind: SectionKind, data: PanelData, t: Translate): string {
+  if (kind === "limits") return t("agentChatPanelLimits");
   if (kind === "todo") {
     const todos = data.todos ?? [];
     const done = todos.filter((todo) => todo.state === "done").length;
@@ -60,6 +70,18 @@ export function chipOf(
   data: PanelData,
   t: Translate,
 ): { name: string; value: string } {
+  if (kind === "limits") {
+    const percents = (data.status?.limits ?? []).flatMap((limit) =>
+      limit.usedPercent === undefined ? [] : [limit.usedPercent],
+    );
+    return {
+      name: t("agentChatChipLimits"),
+      value:
+        percents.length > 0
+          ? `${Math.round(Math.max(...percents))}%`
+          : String(data.status?.lines.length ?? 0),
+    };
+  }
   if (kind === "todo") {
     const todos = data.todos ?? [];
     const done = todos.filter((todo) => todo.state === "done").length;
@@ -112,7 +134,15 @@ export function buildSection(
     title.append(fmtNode(t("agentChatPanelContextLeft"), { n: `${data.context.leftPercent}%` }));
   } else title.textContent = headingOf(kind, data, t);
   section.append(title);
-  if (kind === "todo") {
+  if (kind === "limits") {
+    for (const limit of data.status?.limits ?? []) section.append(buildLimitBlock(limit, t));
+    for (const text of data.status?.lines ?? []) {
+      const line = el("div", "ac-limit-line", text);
+      line.dir = "auto";
+      line.title = text;
+      section.append(line);
+    }
+  } else if (kind === "todo") {
     for (const todo of data.todos ?? []) {
       const row = el("div", `ac-todo ac-todo--${todo.state}`);
       const mark = icon(
