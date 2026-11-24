@@ -241,6 +241,10 @@ export type TerminalPane = {
    * back with focus().
    */
   setChatView(active: boolean, focusChat?: () => void): void;
+  /** The live terminal's rows and the one to keep in view: the last with
+   *  content, or the cursor's if lower. Read from xterm's buffer; the pty is
+   *  never resized for it. Undefined when the buffer cannot be read. */
+  liveScreen(): { rows: number; anchor: number } | undefined;
   /** A keydown in the chat's composer: ⌘P opens this pane's palette and the
    *  split chords act, as in the terminal. False when claimed. */
   chatKey(event: KeyboardEvent): boolean;
@@ -1421,6 +1425,22 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
       // are the caller's to hand back (focus()), so a chat that ends in a
       // background pane never takes them from where the user is.
       if (!active) attempt(() => refit());
+    },
+    liveScreen: () => {
+      try {
+        const buffer = terminal.buffer.active;
+        let last = -1;
+        for (let row = terminal.rows - 1; row >= 0; row--) {
+          const line = buffer.getLine(buffer.baseY + row);
+          if (line !== undefined && line.translateToString(true).trim() !== "") {
+            last = row;
+            break;
+          }
+        }
+        return { rows: terminal.rows, anchor: Math.max(last, buffer.cursorY) };
+      } catch {
+        return undefined;
+      }
     },
     chatKey: (event) => {
       if (event.type !== "keydown") return true;

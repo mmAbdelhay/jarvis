@@ -1575,6 +1575,7 @@ function makePane(
         reviews: () => tabToggle(view.element, ".reviews-toggle"),
         menu: () => tabToggle(view.element, ".plan-toggle"),
       },
+      liveScreen: () => view.liveScreen(),
       focusTerm: () => view.focus(),
       chatKey: (event) => view.chatKey(event),
       isRunning: () => view.element.dataset["state"] === "running",

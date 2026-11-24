@@ -2454,6 +2454,21 @@ describe("a terminal pane's chat view", () => {
     }
   });
 
+  it("reports the rows to keep in view: the last with content or the cursor's, whichever is lower", () => {
+    const p = pane();
+    const terminal = FakeTerminal.instances[FakeTerminal.instances.length - 1];
+    if (terminal === undefined) throw new Error("no terminal");
+    terminal.rows = 40;
+    terminal.lines = ["agent screen", "", "❯ 1. Yes", "  2. No"];
+    terminal.cursor = { x: 0, y: 0 };
+    expect(p.liveScreen()).toEqual({ rows: 40, anchor: 3 });
+    terminal.cursor = { x: 0, y: 12 };
+    expect(p.liveScreen()).toEqual({ rows: 40, anchor: 12 });
+    terminal.lines = [];
+    terminal.cursor = { x: 0, y: 0 };
+    expect(p.liveScreen()).toEqual({ rows: 40, anchor: 0 });
+  });
+
   it("sends focus to the chat while it shows, and back to the terminal after", () => {
     const p = pane();
     const terminal = FakeTerminal.instances[0];

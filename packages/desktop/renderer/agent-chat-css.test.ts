@@ -82,9 +82,12 @@ describe("the agent chat's layout", () => {
     );
     expect(drawer).toMatch(/display\s*:\s*block/);
     expect(drawer).toMatch(/position\s*:\s*absolute/);
-    expect(
-      ruleBodyFor('.terminal-pane[data-view="chat"][data-drawer="on"] > .terminal-live .xterm'),
-    ).toMatch(/inset-block-end\s*:\s*0/);
+    const xterm = ruleBodyFor(
+      '.terminal-pane[data-view="chat"][data-drawer="on"] > .terminal-live .xterm',
+    );
+    expect(xterm).toMatch(/transform\s*:\s*translateY\(var\(--drawer-shift/);
+    // Wide agent screens scroll sideways instead of being cut.
+    expect(drawer).toMatch(/overflow-x\s*:\s*auto/);
   });
 
   it("stops its animations for people who ask for reduced motion", () => {

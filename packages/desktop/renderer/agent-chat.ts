@@ -66,6 +66,8 @@ export type AgentChatOptions = {
   /** The tab's other toolbar actions, which the header carries while the chat
    *  shows (the tab's own strip is hidden then): Reviews and the menu. */
   toolbar?: { reviews(): void; menu(): void };
+  /** The pane's live terminal rows, for the drawer's window onto them. */
+  liveScreen?: () => { rows: number; anchor: number } | undefined;
   now?: () => number;
   copy?: (text: string) => void;
 };
@@ -221,7 +223,10 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
     loadOlder,
     onClose: () => composer.focus(),
   });
-  const drawer = createDrawer(host);
+  const drawer = createDrawer(
+    host,
+    options.liveScreen === undefined ? {} : { screen: options.liveScreen },
+  );
   const question = createQuestion({
     t,
     code,
