@@ -409,7 +409,7 @@ export function summaryOf(text: string): string | undefined {
  * the user while running local commands..." before this existed — so such a
  * turn is skipped and the search continues to the next one.
  */
-function isLocalCommandNoise(text: string): boolean {
+export function isLocalCommandNoise(text: string): boolean {
   return /^\s*<local-command-(?:caveat|stdout|stderr)>/.test(text);
 }
 
@@ -877,7 +877,7 @@ export function parseChatTranscript(
 /** The longest command line a chat tool shows before cutting it. */
 const TARGET_CHARS = 80;
 
-function chatTool(name: string, input: unknown): ChatTool {
+export function chatTool(name: string, input: unknown): ChatTool {
   const tool: ChatTool = { name };
   if (typeof input !== "object" || input === null) return tool;
   const fields = input as Record<string, unknown>;
@@ -935,6 +935,47 @@ function lineCount(value: unknown): number {
 const SYNTHETIC_MODEL = "<synthetic>";
 
 /**
+ * A parsed transcript record as a conversation turn: its role, whole fields
+ * and `message` body. Undefined for anything that is not a user or assistant
+ * turn, or that the CLI injected (`isMeta`). The one rule readTurns and the
+ * desktop chat document share, so they cannot disagree about which records
+ * are conversation.
+ */
+export function claudeConversationRecord(
+  record: unknown,
+):
+  | { role: "user" | "assistant"; fields: Record<string, unknown>; body: Record<string, unknown> }
+  | undefined {
+  if (typeof record !== "object" || record === null) return undefined;
+  const fields = record as Record<string, unknown>;
+  const role = fields["type"];
+  if (role !== "user" && role !== "assistant") return undefined;
+  // The CLI records its own injections as "user" turns — a skill's entire
+  // instruction file, a system reminder — and flags them isMeta. Nobody
+  // typed them, and rendered as the user's words a skill's manual dwarfs
+  // the conversation it was injected into.
+  if (fields["isMeta"] === true) return undefined;
+  const message = fields["message"];
+  if (typeof message !== "object" || message === null) return undefined;
+  return { role, fields, body: message as Record<string, unknown> };
+}
+
+/**
+ * The model an assistant record names. An API error is written as an
+ * assistant record whose model is "<synthetic>": not a model, so it must not
+ * replace the real one.
+ */
+export function claudeRecordModel(
+  role: "user" | "assistant",
+  body: Record<string, unknown>,
+): string | undefined {
+  const model = body["model"];
+  return role === "assistant" && typeof model === "string" && model !== SYNTHETIC_MODEL
+    ? model
+    : undefined;
+}
+
+/**
  * The conversation in a Claude transcript, with each tool call shaped by
  * `toTool` — the reading both parseTranscript and parseChatTranscript share,
  * so the two can never disagree about which turns exist.
@@ -954,27 +995,11 @@ function readTurns<T>(
       // One unreadable line is not a reason to lose the other thousand.
       continue;
     }
-    if (typeof record !== "object" || record === null) continue;
-    const fields = record as Record<string, unknown>;
-    const role = fields["type"];
-    if (role !== "user" && role !== "assistant") continue;
-    // The CLI records its own injections as "user" turns — a skill's entire
-    // instruction file, a system reminder — and flags them isMeta. Nobody
-    // typed them, and rendered as the user's words a skill's manual dwarfs
-    // the conversation it was injected into.
-    if (fields["isMeta"] === true) continue;
-    const message = fields["message"];
-    if (typeof message !== "object" || message === null) continue;
-    const body = message as Record<string, unknown>;
-    // An API error is written as an assistant record whose model is
-    // "<synthetic>": not a model, so it must not replace the real one.
-    if (
-      role === "assistant" &&
-      typeof body["model"] === "string" &&
-      body["model"] !== SYNTHETIC_MODEL
-    ) {
-      model = body["model"];
-    }
+    const found = claudeConversationRecord(record);
+    if (found === undefined) continue;
+    const { role, body } = found;
+    const next = claudeRecordModel(role, body);
+    if (next !== undefined) model = next;
     const turn = transcriptTurn(body["content"], toTool);
     if (turn === undefined) continue;
     if (turn.text === "" && turn.tools.length === 0) continue;
