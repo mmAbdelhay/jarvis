@@ -229,6 +229,54 @@ describe("socket CoreClient: requests", () => {
     expect(client.connection()).toEqual({ kind: "connected" });
   });
 
+  it("cannot carry attachment bytes as a JSON argument: they arrive as an object, not bytes", async () => {
+    const run = await runDirectory();
+    const fake = fakeCore();
+    fake.answers.set("terminal:agentAttach", () => ({ ok: false, reason: "invalid" }));
+    await startDaemon(run, fake.core);
+    const client = await connect(run);
+    await client.invoke("terminal:agentAttach", [
+      "t1",
+      { name: "a.png", bytes: new Uint8Array(3) },
+    ]);
+    const file = fake.calls[0]?.args[1] as { bytes: unknown };
+    expect(file.bytes).not.toBeInstanceOf(Uint8Array);
+  });
+
+  it("sends attachment bytes over the binary lane, whole, up to 25 MB, with the desktop origin", async () => {
+    const run = await runDirectory();
+    const fake = fakeCore();
+    fake.answers.set("terminal:agentAttach", () => ({ ok: true, path: "/p" }));
+    await startDaemon(run, fake.core);
+    const client = await connect(run);
+    for (const size of [5, 3_000_000, 25 * 1024 * 1024]) {
+      const bytes = new Uint8Array(size).map((_, i) => (i * 7) & 255);
+      await expect(client.attachAgentFile("t1", "a.png", bytes)).resolves.toEqual({
+        ok: true,
+        path: "/p",
+      });
+      const call = fake.calls.at(-1);
+      expect(call?.channel).toBe("terminal:agentAttach");
+      expect(call?.origin).toBe(DESKTOP_ORIGIN);
+      const [paneKey, file] = (call?.args ?? []) as [string, { name: string; bytes: Uint8Array }];
+      expect(paneKey).toBe("t1");
+      expect(file.name).toBe("a.png");
+      expect(Buffer.from(file.bytes).equals(Buffer.from(bytes))).toBe(true);
+    }
+  });
+
+  it("refuses an empty or over-limit attachment before it is sent", async () => {
+    const run = await runDirectory();
+    const fake = fakeCore();
+    await startDaemon(run, fake.core);
+    const client = await connect(run);
+    await expect(client.attachAgentFile("t1", "a.png", new Uint8Array(0))).rejects.toThrow();
+    await expect(
+      client.attachAgentFile("t1", "a.png", new Uint8Array(25 * 1024 * 1024 + 1)),
+    ).rejects.toThrow();
+    expect(fake.calls).toEqual([]);
+  });
+
   it("rejects a handler's failure with its message", async () => {
     const run = await runDirectory();
     const fake = fakeCore();

@@ -183,11 +183,22 @@ describe("daemon binding: dispatch", () => {
     await expect(early).resolves.toBe("late");
   });
 
-  it("refuses uploads: no blob channel is served on the control socket", async () => {
-    const { binding } = bindingDouble();
+  it("serves one blob channel, the agent attachment, and refuses every other upload", async () => {
+    const { binding, answers } = bindingDouble();
+    const { connection } = connectionDouble();
+    for (const channel of ["x:y", "terminal:attach", "settings:save", "daemon:stop"]) {
+      await expect(
+        binding.handlers.upload(channel, ["t1", "a.png"], new Uint8Array(1), connection),
+      ).rejects.toMatchObject({ code: "unsupported" });
+    }
     await expect(
-      binding.handlers.upload("x:y", [], new Uint8Array(1), connectionDouble().connection),
-    ).rejects.toMatchObject({ code: "unsupported" });
+      binding.handlers.upload("terminal:agentAttach", [1, "a.png"], new Uint8Array(1), connection),
+    ).rejects.toMatchObject({ code: "bad-request" });
+    answers.set("terminal:agentAttach", (args) => ({ ok: true, args }));
+    const bytes = new Uint8Array([9, 8]);
+    await expect(
+      binding.handlers.upload("terminal:agentAttach", ["t1", "a.png"], bytes, connection),
+    ).resolves.toEqual({ ok: true, args: ["t1", { name: "a.png", bytes }] });
   });
 
   it("pushes hostConfig when a request changed it, and on the poll", async () => {

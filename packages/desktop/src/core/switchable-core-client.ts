@@ -65,6 +65,7 @@ export function switchableCoreClient(
     firstRun: initial.firstRun,
     hostConfig: () => current.hostConfig(),
     invoke: (channel, args) => current.invoke(channel, args),
+    attachAgentFile: (paneKey, name, bytes) => current.attachAgentFile(paneKey, name, bytes),
     onPush(listener) {
       pushListeners.add(listener);
       return () => {

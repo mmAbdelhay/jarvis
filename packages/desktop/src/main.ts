@@ -1,3 +1,4 @@
+import { attachFromRenderer } from "./agent-attach-ipc.js";
 import { spawn } from "node:child_process";
 import { homedir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
@@ -706,7 +707,9 @@ app.whenReady().then(async () => {
       ipcMain.handle(channel, (event, ...args: unknown[]) =>
         channel === "office:viewing"
           ? reportViewing(event.sender.id, args[0])
-          : client.invoke(channel, args),
+          : channel === "terminal:agentAttach"
+            ? attachFromRenderer(client, args)
+            : client.invoke(channel, args),
       );
     }
 

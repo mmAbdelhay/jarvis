@@ -221,6 +221,10 @@ export const MESSAGES = {
     language === "ar"
       ? "الوكيل ينتظر إجابة. أجب عنه أولاً."
       : "The agent is waiting for an answer. Answer it first.",
+  agentChatSendDraft: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "في صندوق الوكيل نص مكتوب بالفعل. امسحه في الطرفية أولاً."
+      : "The agent's own input line already has typed text. Clear it in Term first.",
   agentChatSendGone: (language: "ar" | "en"): string =>
     language === "ar"
       ? "لا يعمل أي وكيل في هذه اللوحة بعد الآن."

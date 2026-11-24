@@ -397,6 +397,12 @@ export async function connectSocketCoreClient(
     hostConfig: () => ({ ...hostConfig }),
 
     invoke: (channel, args) => request(channel, args),
+    attachAgentFile(paneKey, name, bytes) {
+      if (connection === undefined) {
+        return Promise.reject(new Error("The Jarvis daemon is not connected"));
+      }
+      return connection.upload("terminal:agentAttach", [paneKey, name], bytes);
+    },
     onPush(listener) {
       pushListeners.add(listener);
       return () => {

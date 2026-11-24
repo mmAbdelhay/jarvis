@@ -82,6 +82,7 @@ const MODE_MESSAGES = {
 } as const;
 const SEND_REFUSALS = {
   prompt: "agentChatSendPrompt",
+  draft: "agentChatSendDraft",
   gone: "agentChatSendGone",
   invalid: "agentChatSendInvalid",
 } as const;

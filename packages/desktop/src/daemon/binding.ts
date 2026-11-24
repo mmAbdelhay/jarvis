@@ -81,6 +81,9 @@ export type DaemonBindingDeps = {
   pid?: number;
 };
 
+/** The one channel the control socket's binary lane serves. */
+const AGENT_ATTACH_CHANNEL = "terminal:agentAttach" as const;
+
 const refuse = (text: string): never => {
   throw new ControlRequestError("bad-request", text);
 };
@@ -262,8 +265,28 @@ export function createDaemonBinding(deps: DaemonBindingDeps): DaemonBinding {
         checkHostConfig();
       }
     },
-    async upload() {
-      throw new ControlRequestError("unsupported", "No upload channel is served here");
+    // One blob channel only: the Chat composer's pasted or dropped file
+    // (terminal:agentAttach), whose bytes JSON cannot carry. Every other
+    // upload is refused, and the attachment keeps its own size, type and
+    // pane checks in the table's handler.
+    async upload(channel, args, bytes, connection) {
+      if (channel !== AGENT_ATTACH_CHANNEL) {
+        throw new ControlRequestError("unsupported", "No upload channel is served here");
+      }
+      const core = await bound;
+      const [paneKey, name] = args;
+      if (typeof paneKey !== "string" || typeof name !== "string" || args.length !== 2) {
+        refuse("an attachment needs a pane key and a name");
+      }
+      initiator = connection.id;
+      try {
+        return await core.dispatch[AGENT_ATTACH_CHANNEL](
+          [paneKey, { name, bytes }],
+          DESKTOP_ORIGIN,
+        );
+      } finally {
+        initiator = undefined;
+      }
     },
   };
 
