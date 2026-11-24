@@ -5,6 +5,7 @@ import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 import { PERSONAL_PROJECT, isPersonalProject } from "../src/personal.js";
 import { detectLanguage } from "./format.js";
 import { initApi, renderApi } from "./api.js";
+import { isPopped, onPoppedChange } from "./popped.js";
 import { attachDockerPane, detachDockerPane } from "./workspace-docker.js";
 import {
   focusTerminalLeaf,
@@ -54,6 +55,62 @@ export function setBrowserSnapshot(value: BrowserConfig): void {
 }
 
 let latest: WorkspaceState = { tabs: [], activeTabId: undefined };
+/** Re-draws when the host's set of popped tabs changes, once for the module. */
+let poppedWired = false;
+
+/** The tab's name as the strip shows it. */
+function tabName(tab: WorkspaceTab): string {
+  return tab.customTitle ?? (tab.title === "" ? tab.url : tab.title);
+}
+
+/**
+ * The stage's stand-in for a tab shown in another window: what it is, and the
+ * two ways to get at it. Built here rather than written into index.html so a
+ * harness laying down only part of the page still renders; everything is text.
+ */
+function renderPoppedPlaceholder(tab: WorkspaceTab | undefined): void {
+  let card = document.getElementById("workspace-popped");
+  if (card === null) {
+    if (tab === undefined) return;
+    const anchor = document.getElementById("workspace-terminal");
+    if (anchor === null) return;
+    card = document.createElement("div");
+    card.id = "workspace-popped";
+    card.className = "workspace-popped";
+    const title = document.createElement("h3");
+    title.className = "workspace-popped-title";
+    const name = document.createElement("p");
+    name.className = "workspace-popped-name";
+    name.dir = "auto";
+    const actions = document.createElement("div");
+    actions.className = "workspace-popped-actions";
+    const show = document.createElement("button");
+    show.type = "button";
+    show.className = "workspace-popped-show";
+    const back = document.createElement("button");
+    back.type = "button";
+    back.className = "workspace-popped-back";
+    actions.append(show, back);
+    card.append(title, name, actions);
+    anchor.before(card);
+    title.textContent = MESSAGES.popoutPlaceholderTitle(PRIMARY_LANGUAGE);
+    show.textContent = MESSAGES.popoutShowWindow(PRIMARY_LANGUAGE);
+    back.textContent = MESSAGES.popoutBringBack(PRIMARY_LANGUAGE);
+    show.addEventListener("click", () => {
+      const id = card?.dataset["tabId"];
+      if (id !== undefined) void window.jarvis.popoutFocus(id);
+    });
+    back.addEventListener("click", () => {
+      const id = card?.dataset["tabId"];
+      if (id !== undefined) void window.jarvis.popoutReturn(id);
+    });
+  }
+  card.hidden = tab === undefined;
+  if (tab === undefined) return;
+  card.dataset["tabId"] = tab.id;
+  const name = card.querySelector(".workspace-popped-name");
+  if (name !== null) name.textContent = tabName(tab);
+}
 /** The activeTabId the last render saw — renderWorkspace follows the
  *  switcher to a tab's project only when this changes. */
 let followedActiveTabId: string | undefined;
@@ -254,6 +311,19 @@ export function focusTerminalPane(paneKey: string): boolean {
   const tab = latest.tabs.find((candidate) => candidate.id === tabId);
   if (tab === undefined) return false;
   focusTerminalLeaf(paneKey);
+  void window.jarvis.activateTab(tab.id);
+  document.getElementById("nav-workspace")?.click();
+  return true;
+}
+
+/**
+ * Shows the tab `tabId` on the Workspace route — the Office's way to an
+ * employee that is a tab. Its project follows (renderWorkspace selects the
+ * project of a newly active tab). False when no open tab has that id.
+ */
+export function openWorkspaceTab(tabId: string): boolean {
+  const tab = latest.tabs.find((candidate) => candidate.id === tabId);
+  if (tab === undefined) return false;
   void window.jarvis.activateTab(tab.id);
   document.getElementById("nav-workspace")?.click();
   return true;
@@ -1182,6 +1252,16 @@ export function initWorkspace(projects: string[]): void {
   // main only names which chip should start it, and the chip already knows
   // how (the same input double-click opens).
   window.jarvis.onTabRename((tabId) => tabChips.get(tabId)?.startRename());
+  if (!poppedWired) {
+    poppedWired = true;
+    onPoppedChange(() => {
+      try {
+        renderWorkspace(latest);
+      } catch {
+        // A page without the Workspace markup has nothing to redraw.
+      }
+    });
+  }
   loadDevToolsLayout();
   // Main starts at its own default; this is what brings it in line with the
   // side remembered from last time before any DevTools are opened.
@@ -1730,7 +1810,7 @@ function createTabChip(initialTab: WorkspaceTab, activeTabId: string | undefined
   const title = document.createElement("span");
   title.className = "workspace-tab-title";
 
-  const currentTitle = (): string => tab.customTitle ?? (tab.title === "" ? tab.url : tab.title);
+  const currentTitle = (): string => tabName(tab);
 
   // Shared by the double-click below and the menu's own Rename item, so
   // there is exactly one way an inline rename actually starts.
@@ -1795,13 +1875,25 @@ function createTabChip(initialTab: WorkspaceTab, activeTabId: string | undefined
     void window.jarvis.tabMenu(tab.id, event.clientX, event.clientY);
   });
 
-  element.append(title, close);
+  // A tab shown in another window keeps its place in the strip, marked.
+  const windowMark = document.createElement("span");
+  windowMark.className = "workspace-tab-window";
+  windowMark.textContent = "\u29c9";
+  windowMark.title = MESSAGES.popoutTabMark(PRIMARY_LANGUAGE);
+  windowMark.setAttribute("role", "img");
+  windowMark.setAttribute("aria-label", MESSAGES.popoutTabMark(PRIMARY_LANGUAGE));
+  windowMark.hidden = true;
+
+  element.append(title, windowMark, close);
 
   const update = (nextTab: WorkspaceTab, nextActiveTabId: string | undefined): void => {
     tab = nextTab;
     element.style.setProperty("--tab-color", colorFor(tab.project));
     element.classList.toggle("workspace-tab--on", tab.id === nextActiveTabId);
     element.classList.toggle("workspace-tab--loading", tab.loading);
+    const popped = isPopped(tab.id);
+    element.classList.toggle("workspace-tab--popped", popped);
+    windowMark.hidden = !popped;
     // A page picks its own title; it is text here and nothing else — but
     // never while the rename input is standing in for this span (see
     // `renaming` above).
@@ -1974,7 +2066,11 @@ export function renderWorkspace(state: WorkspaceState): void {
   // Hiding the slot also makes its rectangle zero, which is why
   // reportWorkspaceBounds below refuses to report a zero rect: a hosted view
   // must not be moved to nowhere just because a terminal is on top.
-  const pageHidden = tab !== undefined && RENDERER_DRAWN.has(tab.kind) && tab.project === selected;
+  // A tab shown in another window leaves a placeholder here, over the same
+  // region, and its hosted view (if any) is not this window's to place.
+  const poppedHere = tab !== undefined && isPopped(tab.id) && tab.project === selected;
+  const pageHidden =
+    poppedHere || (tab !== undefined && RENDERER_DRAWN.has(tab.kind) && tab.project === selected);
   ($("workspace-page") as HTMLElement).hidden = pageHidden;
   // The row wrapping the sidebar and the page slot must hide with the page:
   // otherwise, with the sidebar already hidden by hostedApp above, it would
@@ -1983,6 +2079,7 @@ export function renderWorkspace(state: WorkspaceState): void {
   ($("workspace-body") as HTMLElement).hidden = pageHidden;
   // And the stage wrapping the body and DevTools, for the same reason.
   ($("workspace-stage") as HTMLElement).hidden = pageHidden;
+  renderPoppedPlaceholder(poppedHere ? tab : undefined);
   renderWorkspaceTerminals(state.tabs, state.activeTabId, selected);
   renderApi(state.tabs, state.activeTabId, selected);
   renderDocker(state.tabs, state.activeTabId, selected);
@@ -2012,7 +2109,7 @@ export function renderWorkspace(state: WorkspaceState): void {
   // Read from the active tab alone: a background tab cannot hold full
   // screen (Chromium drops it when a page is hidden), and a stale flag on
   // one must never strip the chrome off the tab actually on screen.
-  const pageFullscreen = tab?.pageFullscreen ?? false;
+  const pageFullscreen = (tab?.pageFullscreen ?? false) && !poppedHere;
   document.body.classList.toggle("page-fullscreen", pageFullscreen);
   if (pageFullscreen) {
     strip.hidden = true;

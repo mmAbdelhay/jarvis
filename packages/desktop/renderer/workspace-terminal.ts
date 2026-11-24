@@ -1,6 +1,7 @@
 import type { WorkspaceTab } from "@jarvis/core";
 import { LOGIN_TERMINAL_DETAIL } from "../src/login-terminal.js";
 import { MESSAGES, PRIMARY_LANGUAGE, type MessageKey } from "../src/messages.js";
+import { type AgentChat, createAgentChat } from "./agent-chat.js";
 import { enhanceTerminal, handleSplitKey, type SplitKeys } from "./terminal-addons.js";
 import { openTerminalLink } from "./terminal-links.js";
 import { attachCompletion, type Completion } from "./terminal-completion.js";
@@ -17,6 +18,8 @@ import {
   type LinkChip,
   type ReviewsDock,
 } from "./reviews-dock.js";
+import { isPopped, isPoppedReady, takeInitialReturns } from "./popped.js";
+import { plainTerminalState, type PopoutTerminalState } from "../src/popout-state.js";
 import { createPane, type TerminalPane } from "./terminal-pane.js";
 import { createSplitTree, MIN_PANE_PX, type SplitTree } from "./terminal-splits.js";
 
@@ -98,12 +101,53 @@ function setSessionPlanPath(pane: Pane, path: string | undefined): void {
  *  pane that is gone. */
 const paneKeys = new WeakMap<TerminalPane, string>();
 
+/** Each pane's Chat | Term switch, by shell key — what main's "look again"
+ *  push and a pane's regaining focus are routed to. A pane's own entry goes
+ *  when the pane does. */
+const agentChats = new Map<string, AgentChat>();
+
 /** How many commands the command editor's arrows may walk back through.
  *  Long enough to reach this morning's command, short enough that a prompt
  *  costs one small read. */
 const HISTORY_LIMIT = 200;
 
 const panes = new Map<string, Pane>();
+
+/** Layouts staged for the next pane built for a tab: what came back from a
+ *  pop-out (see stageTerminalCarry). */
+const stagedCarry = new Map<string, PopoutTerminalState>();
+/** Command-editor text waiting for its pane's attach to settle, by pane key. */
+const pendingDrafts = new Map<string, string>();
+
+/**
+ * Everything about a tab's panes that main cannot rebuild: how it is split,
+ * which pane has the focus, and the text typed into a command editor but not
+ * yet sent. The shells and their output are main's (and come back through the
+ * attach backlog); text sent to a shell without an editor is already in the
+ * pty. Plain for a tab this window never drew.
+ */
+export function terminalCarry(tabId: string): PopoutTerminalState {
+  const entry = panes.get(tabId);
+  if (entry === undefined) return plainTerminalState(tabId);
+  const drafts: Record<string, string> = {};
+  for (const leaf of entry.tree.panes()) {
+    const key = paneKeys.get(leaf);
+    const text = leaf.readInput();
+    if (key !== undefined && text !== undefined && text !== "") drafts[key] = text;
+  }
+  const focused = paneKeys.get(entry.tree.focused());
+  return {
+    shape: entry.tree.shape(),
+    drafts,
+    ...(focused === undefined ? {} : { focused }),
+  };
+}
+
+/** The next pane built for `tabId` takes this layout and drafts (every pane in
+ *  it attaches to the shell it already has; none is started). */
+export function stageTerminalCarry(tabId: string, state: PopoutTerminalState): void {
+  stagedCarry.set(tabId, state);
+}
 
 /** The file sidebar switch's glyph: a window with its left column ruled
  *  off. Drawn rather than typed — no text glyph for it matches the plan
@@ -136,6 +180,32 @@ function sidebarIcon(): SVGSVGElement {
     rule.setAttribute(name, value);
   }
   svg.append(frame, rule);
+  return svg;
+}
+
+/** An eraser, for the clear button: same 14px stroke icon as the sidebar's. */
+function clearIcon(): SVGSVGElement {
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("width", "14");
+  svg.setAttribute("height", "14");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", "2");
+  svg.setAttribute("stroke-linecap", "round");
+  svg.setAttribute("stroke-linejoin", "round");
+  svg.setAttribute("aria-hidden", "true");
+  const body = document.createElementNS(SVG_NS, "path");
+  body.setAttribute(
+    "d",
+    "m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21",
+  );
+  const base = document.createElementNS(SVG_NS, "path");
+  base.setAttribute("d", "M22 21H7");
+  const edge = document.createElementNS(SVG_NS, "path");
+  edge.setAttribute("d", "m5 11 9 9");
+  svg.append(body, base, edge);
   return svg;
 }
 
@@ -637,6 +707,15 @@ export function initWorkspaceTerminals(): void {
     paneFor(paneKey)?.writeLive(chunk);
   });
 
+  // main says a pane's agent view changed (the transcript grew, the pane
+  // printed). Guarded: a preload without the channel is a terminal with no
+  // chat switch, never one that throws.
+  try {
+    window.jarvis.onTerminalClaudeViewChanged(({ paneKey }) => agentChats.get(paneKey)?.refresh());
+  } catch {
+    // No agent view channel.
+  }
+
   window.jarvis.onTerminalExit((paneKey, code) => {
     // The tab stays open: its scrollback is usually the reason you were
     // there. The shell is gone, and saying so beats a terminal that has
@@ -725,6 +804,19 @@ export function focusTerminalLeaf(paneKey: string): void {
   }
 }
 
+/** The tabs whose shell is running a command right now, as this window knows
+ *  it (a pane's `data-state` is "running"). The Office reads it to stand a
+ *  plain shell's employee up typing; main cannot tell. */
+export function runningTerminalTabs(): Set<string> {
+  const running = new Set<string>();
+  for (const [tabId, entry] of panes) {
+    if (entry.tree.panes().some((leaf) => leaf.element.dataset["state"] === "running")) {
+      running.add(tabId);
+    }
+  }
+  return running;
+}
+
 /**
  * The pane drawing `paneKey`'s shell, or undefined for a shell this window
  * has no pane for.
@@ -752,7 +844,18 @@ export function renderWorkspaceTerminals(
   selectedProject: string,
 ): void {
   const host = $("workspace-terminal");
-  const live = new Set(tabs.filter((tab) => tab.kind === "terminal").map((tab) => tab.id));
+  // Until the host has said which tabs are shown elsewhere nothing is drawn
+  // (a popped tab built here would size the pty a second time); the answer
+  // redraws. Then the staged returns of tabs that came back during a reload
+  // are taken, once, before the first draw.
+  if (!isPoppedReady()) return;
+  takeInitialReturns(tabs.filter((tab) => tab.kind === "terminal").map((tab) => tab.id));
+  // A tab shown in another window is not drawn here: its panes are disposed
+  // (no shell is killed, no size sent) and rebuilt from the backlog when it
+  // comes back.
+  const live = new Set(
+    tabs.filter((tab) => tab.kind === "terminal" && !isPopped(tab.id)).map((tab) => tab.id),
+  );
 
   // A tab that is gone takes its terminal with it. The shell is already
   // being reaped by main's own close handler.
@@ -782,7 +885,9 @@ export function renderWorkspaceTerminals(
   // A terminal is the renderer's own DOM, so it applies the same rule here
   // rather than going on showing another project's shell.
   const showing =
-    active?.kind === "terminal" && active.project === selectedProject ? active.id : undefined;
+    active?.kind === "terminal" && active.project === selectedProject && !isPopped(active.id)
+      ? active.id
+      : undefined;
   host.hidden = showing === undefined;
 
   // The AWS login tab is the one terminal in Jarvis drawn without blocks —
@@ -946,6 +1051,17 @@ function ensurePane(
   explorerToggle.setAttribute("aria-pressed", "false");
   explorerToggle.disabled = true;
 
+  // Clears the focused pane — its live screen and its frozen blocks — and
+  // nothing else: no shell is written to and no other pane is touched. In the
+  // same band as the sidebar switch, just after it. The keys go back to the
+  // pane, or the click would leave them on a button.
+  const clearButton = document.createElement("button");
+  clearButton.type = "button";
+  clearButton.className = "clear-toggle";
+  clearButton.append(clearIcon());
+  clearButton.title = planPanelT("terminalClearButton");
+  clearButton.setAttribute("aria-label", planPanelT("terminalClearButton"));
+
   // The tab's file sidebar, on the left — one for the whole tab, however
   // many panes it is split into, following whichever of them has the
   // focus. Appended before the tree so it sits left of the panes.
@@ -982,6 +1098,14 @@ function ensurePane(
         // A preload without the channel. Same fallback as `list` above.
       }
     },
+    // "Open in editor" on a folder: the same fire-and-forget as `choose`.
+    openFolder: (paneKey, path) => {
+      try {
+        void window.jarvis.openTerminalFolder(paneKey, path).catch(() => {});
+      } catch {
+        // A preload without the channel. Same fallback as `choose` above.
+      }
+    },
     // New file, New folder, Rename and Move to Trash. Main proves every
     // path inside the pane's project (ipc.ts's createEntry and friends);
     // these only carry the request. A preload without a channel throws
@@ -999,6 +1123,17 @@ function ensurePane(
    *  the sidebar follows the newly focused pane, and that pane's prompt
    *  may be minutes old. */
   const lastCwd = new Map<string, string>();
+
+  // A layout carried back from a pop-out: its panes' shells exist already.
+  const carried = stagedCarry.get(tabId);
+  stagedCarry.delete(tabId);
+  if (carried !== undefined) {
+    for (const key of carriedKeys(carried)) {
+      remoteStartedShells.add(key);
+      const draft = carried.drafts[key];
+      if (draft !== undefined) pendingDrafts.set(key, draft);
+    }
+  }
 
   const built = createSplitTree(
     element,
@@ -1035,7 +1170,14 @@ function ensurePane(
       ),
     tabId,
     {
+      ...(carried === undefined
+        ? {}
+        : {
+            restore: carried.shape,
+            ...(carried.focused === undefined ? {} : { focusKey: carried.focused }),
+          }),
       onFocus: (paneKey) => {
+        agentChats.get(paneKey)?.focused();
         const path = lastCwd.get(paneKey);
         // A pane that has never said where it is — a shell with no
         // integration, or one that has not drawn its first prompt yet —
@@ -1059,6 +1201,12 @@ function ensurePane(
   }
   explorerToggle.addEventListener("click", toggleExplorer);
   built.element.append(explorerToggle);
+  clearButton.addEventListener("click", () => {
+    const focused = built.focused();
+    focused.clearAll();
+    focused.focus();
+  });
+  built.element.append(clearButton);
 
   /** The focused pane's shell key. Resolved through the same WeakMap the
    *  pty stream is routed by, so it can never name a pane that is gone. */
@@ -1205,6 +1353,19 @@ function ensurePane(
   return pane;
 }
 
+function carriedKeys(state: PopoutTerminalState): string[] {
+  const keys: string[] = [];
+  const walk = (shape: PopoutTerminalState["shape"]): void => {
+    if ("key" in shape) keys.push(shape.key);
+    else {
+      walk(shape.first);
+      walk(shape.second);
+    }
+  };
+  walk(state.shape);
+  return keys;
+}
+
 /**
  * One leaf of a tab's tree: a whole terminal pane, with its own blocks, its
  * own editor and its own autocomplete, talking to the shell keyed
@@ -1258,6 +1419,9 @@ function makePane(
   // the cell grid and the shell's buffered prologue are all its business;
   // what stays here is everything that needs to know which shell this is.
   const view = createPane(element, {
+    // A command began: the moment an agent typed at the prompt may have
+    // started, so the Chat switch looks for one (agent-chat.ts).
+    onCommandStart: () => agentChats.get(paneKey)?.commandStarted(),
     // Every keystroke verbatim, control bytes included — that is what makes
     // Ctrl-C, arrows and Escape work rather than only plain text.
     sendInput: (data) => void window.jarvis.sendTerminalInput(paneKey, data),
@@ -1289,10 +1453,21 @@ function makePane(
     // exists, so a slow or unknown key here never leaves the pane blank.
     // What stops a chunk from landing twice is terminal-pane.ts's own
     // write-gate on its attach promise, not this wait.
-    attach: () =>
-      started === undefined
-        ? window.jarvis.attachTerminal(paneKey)
-        : started.then(() => window.jarvis.attachTerminal(paneKey)),
+    attach: () => {
+      const attached =
+        started === undefined
+          ? window.jarvis.attachTerminal(paneKey)
+          : started.then(() => window.jarvis.attachTerminal(paneKey));
+      const draft = pendingDrafts.get(paneKey);
+      if (draft === undefined) return attached;
+      pendingDrafts.delete(paneKey);
+      // Text typed in this pane's command editor before it moved: put back
+      // once the backlog (and with it the prompt) has been drawn.
+      return attached.then((backlog) => {
+        setTimeout(() => view.applyInput(draft), 0);
+        return backlog;
+      });
+    },
     settings,
     // What the command editor's arrows walk: Jarvis's own command log,
     // never zsh's line editor. Guarded because a preload without the
@@ -1361,6 +1536,31 @@ function makePane(
   });
   paneKeys.set(view, paneKey);
   const terminal = view.terminal;
+
+  // The Chat | Term switch for a pane running Claude, Copilot or Codex. It
+  // shows only while main reports an agent there. Guarded because it is an
+  // enhancement: a pane that could not build it is still a terminal.
+  try {
+    const chat = createAgentChat({
+      paneKey,
+      host: view.element,
+      api: window.jarvis,
+      t: planPanelT,
+      setChatView: (active, focusChat) => view.setChatView(active, focusChat),
+      focusTerm: () => view.focus(),
+      chatKey: (event) => view.chatKey(event),
+      isRunning: () => view.element.dataset["state"] === "running",
+    });
+    agentChats.set(paneKey, chat);
+    const disposePane = view.dispose;
+    view.dispose = () => {
+      agentChats.delete(paneKey);
+      chat.dispose();
+      disposePane();
+    };
+  } catch {
+    // No chat switch. The terminal is untouched.
+  }
 
   // Autocomplete: a dropdown under the cursor, completing from this user's
   // own shell history. Guarded because it is an enhancement and never a
@@ -1436,6 +1636,7 @@ function makePane(
     // on why this one, unlike ^R, is never gated on the editor or on
     // whether something is running.
     openPalette: () => view.openPalette(),
+    clearAll: () => view.clearAll(),
   });
 
   // The pane's own slot, which a divider drag or a sibling's closing

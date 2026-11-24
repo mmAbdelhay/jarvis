@@ -60,6 +60,7 @@ describe("electron-builder.yml", () => {
     expect(c.mac.files.filter((glob) => !glob.startsWith("!"))).toEqual([
       "dist/**/*",
       "renderer/index.html",
+      "renderer/popout.html",
       "renderer/styles.css",
       "renderer/vendor/**/*",
       "package.json",
@@ -89,7 +90,12 @@ describe("electron-builder.yml", () => {
     // is a runtime asset. A missing vendor file is not a crash — it is a
     // blank terminal, which is far harder to notice.
     const c = (await config()) as unknown as { files: string[] };
-    for (const glob of ["renderer/index.html", "renderer/styles.css", "renderer/vendor/**/*"]) {
+    for (const glob of [
+      "renderer/index.html",
+      "renderer/popout.html",
+      "renderer/styles.css",
+      "renderer/vendor/**/*",
+    ]) {
       expect(c.files).toContain(glob);
     }
   });

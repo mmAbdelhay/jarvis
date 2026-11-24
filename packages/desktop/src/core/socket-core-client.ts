@@ -216,6 +216,11 @@ export async function connectSocketCoreClient(
           MESSAGES.daemonRestartManual(PRIMARY_LANGUAGE),
         );
         return;
+      case DAEMON_PUSHES.notice: {
+        const notice = payload as { title: string; body: string };
+        host?.showNotice(String(notice.title), String(notice.body));
+        return;
+      }
       case DAEMON_PUSHES.alert: {
         const alert = payload as SecurityAlert;
         host?.showNotification(alert.title, alert.body);

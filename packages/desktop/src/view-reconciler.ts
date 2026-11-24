@@ -6,10 +6,20 @@ import type {
   HostedViewEvent,
   Rect,
   ViewFactory,
+  ViewTarget,
 } from "./browser-host.js";
-import { hasView, type TabReports, type TabSource, type ViewRequest } from "./core/tab-host.js";
+import {
+  hasView,
+  isAuthorizeTab,
+  type TabReports,
+  type TabSource,
+  type ViewRequest,
+} from "./core/tab-host.js";
 
 export type { TabReports, TabSource };
+
+const CAPTURE_TIMEOUT_MS = 1500;
+const JPEG_DATA_URL = "data:image/jpeg;base64,";
 
 type Held = { view: HostedView; project: string };
 
@@ -47,6 +57,11 @@ export class ViewReconciler {
    *  would look like a crash. */
   readonly #devToolsOpen = new Set<TabId>();
   readonly #devToolsClosedListeners = new Set<(id: TabId) => void>();
+  readonly #popoutCloseListeners = new Set<(id: TabId) => void>();
+  /** Tabs shown in a window of their own: the window, and the rectangle the
+   *  window's content box is. Kept apart from #views because a popped tab's
+   *  page may be rebuilt (a resume) and must land in the same window. */
+  readonly #popped = new Map<TabId, { target: ViewTarget; bounds: Rect }>();
   #visible = false;
   /** Set by hideAll — distinct from #visible, which means "leave the whole
    *  route". This means "nothing to show right now" while the route itself
@@ -145,9 +160,95 @@ export class ViewReconciler {
     this.#views.get(id)?.view.requestPictureInPicture();
   }
 
+  /**
+   * A still of this tab's page for the Office's hover card, or undefined: a
+   * tab with no page (suspended, a terminal, unknown), a failed or blank one,
+   * a sign-in page waiting for its result, an empty image, an error, or no
+   * answer within a second and a half. Asks the view to capture without
+   * showing it, so it never changes visibility, focus or bounds and never
+   * builds a page a suspended tab does not have. A popped page is captured
+   * where it is.
+   */
+  async capture(id: TabId): Promise<string | undefined> {
+    if (this.#destroyed) return undefined;
+    const held = this.#views.get(id);
+    const tab = this.#state.tabs.find((candidate) => candidate.id === id);
+    if (held === undefined || tab === undefined || !hasView(tab)) return undefined;
+    if (tab.error !== undefined || isAuthorizeTab(tab)) return undefined;
+    if (tab.url === "" || tab.url === "about:blank") return undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const shot = await Promise.race([
+        held.view.capture(),
+        new Promise<undefined>((resolve) => {
+          timer = setTimeout(() => resolve(undefined), CAPTURE_TIMEOUT_MS);
+        }),
+      ]);
+      return typeof shot === "string" && shot.startsWith(JPEG_DATA_URL) ? shot : undefined;
+    } catch {
+      return undefined;
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
+  }
+
   setBounds(bounds: Rect): void {
     this.#bounds = bounds;
-    for (const { view } of this.#views.values()) view.setBounds(bounds);
+    // A popped page is sized by its own window, never by the main layout.
+    for (const [id, { view }] of this.#views) if (!this.#popped.has(id)) view.setBounds(bounds);
+  }
+
+  /**
+   * Shows this tab's page in `target` (a window of its own), filling
+   * `bounds`. The page stays visible whatever the main window does — which
+   * tab is active, hideAll, leaving the route — and is not suspended. A tab
+   * whose page is not built (suspended) is remembered: the page lands in the
+   * window when it is. False for a tab that is unknown or has no page kind,
+   * or that already has a window.
+   */
+  popOut(id: TabId, target: ViewTarget, bounds: Rect): boolean {
+    if (this.#destroyed || this.#popped.has(id)) return false;
+    const tab = this.#state.tabs.find((candidate) => candidate.id === id);
+    if (tab === undefined || !hasView({ ...tab, suspended: false })) return false;
+    this.#popped.set(id, { target, bounds });
+    const held = this.#views.get(id);
+    if (held !== undefined) this.#place(held.view, { target, bounds });
+    this.#syncVisibility();
+    return true;
+  }
+
+  /** The window's content box changed. */
+  setPoppedBounds(id: TabId, bounds: Rect): void {
+    const popped = this.#popped.get(id);
+    if (popped === undefined) return;
+    popped.bounds = bounds;
+    this.#views.get(id)?.view.setBounds(bounds);
+  }
+
+  /** Brings the page back to the main window, at the main layout's bounds. */
+  popIn(id: TabId): void {
+    if (!this.#popped.delete(id)) return;
+    const held = this.#views.get(id);
+    if (held !== undefined) {
+      held.view.moveTo(undefined);
+      if (this.#bounds !== undefined) held.view.setBounds(this.#bounds);
+    }
+    this.#syncVisibility();
+  }
+
+  /** Told when Cmd/Ctrl+W is pressed in a page that is shown in a pop-out. */
+  onPopoutCloseRequested(listener: (id: TabId) => void): () => void {
+    this.#popoutCloseListeners.add(listener);
+    return () => this.#popoutCloseListeners.delete(listener);
+  }
+
+  isPopped(id: TabId): boolean {
+    return this.#popped.has(id);
+  }
+
+  #place(view: HostedView, popped: { target: ViewTarget; bounds: Rect }): void {
+    view.moveTo(popped.target);
+    view.setBounds(popped.bounds);
   }
 
   /**
@@ -181,7 +282,9 @@ export class ViewReconciler {
    *  rather than jumping on its first frame. */
   setDevToolsBounds(bounds: Rect): void {
     this.#devToolsBounds = bounds;
-    for (const { view } of this.#views.values()) view.setDevToolsBounds(bounds);
+    // The slot is the main layout's: a popped page's DevTools are undocked.
+    for (const [id, { view }] of this.#views)
+      if (!this.#popped.has(id)) view.setDevToolsBounds(bounds);
   }
 
   /**
@@ -227,6 +330,7 @@ export class ViewReconciler {
       if (tab.id === activeTabId) continue;
       if (tab.hasPlayingVideo) continue;
       if (this.#devToolsOpen.has(tab.id)) continue;
+      if (this.#popped.has(tab.id)) continue;
       if (!this.#views.has(tab.id)) continue;
       const since = this.#hiddenSince.get(tab.id);
       if (since === undefined || now - since < this.#suspendAfterMs) continue;
@@ -239,6 +343,7 @@ export class ViewReconciler {
     this.#destroyed = true;
     for (const { view } of this.#views.values()) view.destroy();
     this.#views.clear();
+    this.#popped.clear();
     this.#hiddenSince.clear();
   }
 
@@ -253,6 +358,12 @@ export class ViewReconciler {
       this.#hiddenSince.delete(id);
       this.#devToolsOpen.delete(id);
     }
+
+    // A popped tab that is no longer in the state at all has closed (its
+    // window goes, which popout.ts sees on its own). One merely suspended
+    // keeps its window, and its page returns to it when it is rebuilt.
+    const present = new Set(state.tabs.map((tab) => tab.id));
+    for (const id of [...this.#popped.keys()]) if (!present.has(id)) this.#popped.delete(id);
 
     for (const tab of wanted.values()) {
       if (this.#views.has(tab.id)) continue;
@@ -287,7 +398,9 @@ export class ViewReconciler {
     const view = this.#createView(`persist:project-${encodeURIComponent(project)}`, kind);
     this.#views.set(id, { view, project });
     view.onEvent((event) => this.#onViewEvent(id, project, event));
-    if (this.#bounds !== undefined) view.setBounds(this.#bounds);
+    const popped = this.#popped.get(id);
+    if (popped !== undefined) this.#place(view, popped);
+    else if (this.#bounds !== undefined) view.setBounds(this.#bounds);
     if (this.#devToolsBounds !== undefined) view.setDevToolsBounds(this.#devToolsBounds);
     view.setDevToolsDock(this.#devToolsDock);
     view.loadURL(url);
@@ -336,6 +449,10 @@ export class ViewReconciler {
           .then((playing) => this.#tabs.reportPage(id, { kind: "video", playing }))
           .catch(() => undefined);
         break;
+      case "popoutClose":
+        if (!this.#popped.has(id)) break;
+        for (const listener of [...this.#popoutCloseListeners]) listener(id);
+        break;
       case "devtoolsClosed":
         this.#devToolsOpen.delete(id);
         for (const listener of [...this.#devToolsClosedListeners]) listener(id);
@@ -353,7 +470,9 @@ export class ViewReconciler {
     const activeId = this.#state.activeTabId;
     const now = this.#now();
     for (const [id, { view }] of this.#views) {
-      const visible = this.#visible && !this.#suppressed && id === activeId;
+      // A popped page is on screen in its own window, whatever this one shows.
+      const visible =
+        this.#popped.has(id) || (this.#visible && !this.#suppressed && id === activeId);
       view.setVisible(visible);
       // The idle clock starts when a view stops being seen and is cleared the
       // moment it is seen again, so "hidden for fifteen minutes" means that

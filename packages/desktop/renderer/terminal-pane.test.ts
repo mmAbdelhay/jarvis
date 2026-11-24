@@ -46,6 +46,9 @@ function pane(
   hooks: {
     onCwd?: (path: string) => void;
     chips?: (path: string) => Promise<import("../src/ipc.js").TerminalChips | undefined>;
+    onCommandStart?: () => void;
+    resize?: (cols: number, rows: number) => void;
+    splitKeys?: import("./terminal-addons.js").SplitKeys;
   } = {},
 ) {
   const host = document.createElement("div");
@@ -58,6 +61,10 @@ function pane(
     notify: vi.fn(),
     ...hooks,
   });
+}
+
+function key(init: KeyboardEventInit): KeyboardEvent {
+  return new KeyboardEvent("keydown", { cancelable: true, bubbles: true, ...init });
 }
 
 beforeEach(() => {
@@ -2284,5 +2291,169 @@ describe("a font change while the live terminal is hidden", () => {
     pane.dispose();
     setTerminalFontBase(16);
     setTerminalFontBase(12);
+  });
+});
+
+// Clearing the whole terminal: the live screen and every frozen block, at
+// once. What it must never do is reach the shell — a running command keeps
+// running, and the line being typed stays.
+describe("a terminal pane's clearAll", () => {
+  function clearPane() {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const sendInput = vi.fn();
+    const p = createPane(host, {
+      sendInput,
+      resize: vi.fn(),
+      attach: async () => "",
+      settings: {
+        blocks: true,
+        inputEditor: true,
+        notifyAfterSeconds: 0,
+        home: "/Users/x",
+        scrollback: 0,
+      },
+      notify: vi.fn(),
+    });
+    return { p, sendInput };
+  }
+
+  const finished = (command: string, exitCode: number) =>
+    `${A}$ ${B}${command}\r\n${C(command)}out\r\n${D(exitCode)}`;
+  const blockElements = (p: { element: HTMLElement }) =>
+    p.element.querySelectorAll(".terminal-blocks > *").length;
+
+  it("removes every block and clears the live terminal", () => {
+    const { p } = clearPane();
+    p.write(`${finished("ls", 0)}${finished("pwd", 0)}${A}$ ${B}`);
+    expect(p.blocks()).toHaveLength(2);
+    expect(blockElements(p)).toBe(2);
+
+    p.clearAll();
+
+    expect(p.blocks()).toHaveLength(0);
+    expect(blockElements(p)).toBe(0);
+    expect(FakeTerminal.instances[0]?.cleared).toBe(1);
+  });
+
+  it("writes nothing to the pty", () => {
+    const { p, sendInput } = clearPane();
+    p.write(`${finished("ls", 0)}${A}$ ${B}`);
+
+    p.clearAll();
+
+    expect(sendInput).not.toHaveBeenCalled();
+  });
+
+  it("leaves a running command running: its block still appears when it ends", () => {
+    const { p } = clearPane();
+    p.write(`${finished("ls", 0)}${A}$ ${B}sleep 9\r\n${C("sleep 9")}`);
+    expect(p.element.dataset["state"]).toBe("running");
+
+    p.clearAll();
+    expect(p.blocks()).toHaveLength(0);
+    expect(p.element.dataset["state"]).toBe("running");
+
+    p.write(`${D(0)}${A}$ ${B}`);
+
+    expect(p.blocks().map((view) => view.record.command)).toEqual(["sleep 9"]);
+    expect(p.blocks()[0]?.element.hidden).toBe(false);
+  });
+
+  it("drops the selection and the filter, so new blocks are visible", () => {
+    const { p } = clearPane();
+    p.write(`${finished("ls", 0)}${finished("false", 1)}${A}$ ${B}`);
+    p.blockNav?.move(1);
+    p.blockNav?.toggleFailedFilter();
+    expect(p.blockNav?.isFiltered()).toBe(true);
+
+    p.clearAll();
+
+    expect(p.blockNav?.selected()).toBeUndefined();
+    expect(p.blockNav?.isFiltered()).toBe(false);
+    p.write(`${finished("echo hi", 0)}${A}$ ${B}`);
+    expect(p.blocks()).toHaveLength(1);
+    expect(p.blocks()[0]?.element.hidden).toBe(false);
+  });
+
+  it("is what the palette's Clear terminal runs", () => {
+    const { p } = clearPane();
+    p.write(`${finished("ls", 0)}${A}$ ${B}`);
+
+    p.openPalette();
+    const input = p.element.querySelector<HTMLInputElement>(".terminal-palette input");
+    if (input === null) throw new Error("no palette input");
+    input.value = "Clear terminal";
+    input.dispatchEvent(new Event("input"));
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }),
+    );
+
+    expect(p.blocks()).toHaveLength(0);
+    expect(FakeTerminal.instances[0]?.cleared).toBe(1);
+  });
+});
+
+describe("a terminal pane's chat view", () => {
+  it("tells the caller when a command starts", () => {
+    const onCommandStart = vi.fn();
+    const p = pane(undefined, { onCommandStart });
+    p.write(`${A}$ ${B}claude\r\n`);
+    expect(onCommandStart).not.toHaveBeenCalled();
+    p.write(C("claude"));
+    expect(onCommandStart).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides the terminal without detaching it or resizing the pty", () => {
+    const resize = vi.fn();
+    const p = pane(undefined, { resize });
+    const terminal = FakeTerminal.instances[0];
+    p.setChatView(true, vi.fn());
+    expect(p.element.dataset["view"]).toBe("chat");
+    expect(p.element.querySelector(".terminal-live")).not.toBeNull();
+    // The stylesheet hides exactly what is marked as the terminal's own.
+    const marked = [...p.element.querySelectorAll("[data-term-surface]")].map((n) => n.className);
+    expect(marked).toEqual(
+      expect.arrayContaining([
+        "terminal-sticky-header",
+        "terminal-blocks",
+        "terminal-live",
+        "terminal-chips",
+      ]),
+    );
+    expect(p.element.isConnected).toBe(true);
+    expect(resize).not.toHaveBeenCalled();
+    expect(terminal?.disposed).toBe(false);
+  });
+
+  it("sends focus to the chat while it shows, and back to the terminal after", () => {
+    const p = pane();
+    const terminal = FakeTerminal.instances[0];
+    const focusChat = vi.fn();
+    p.setChatView(true, focusChat);
+    p.focus();
+    expect(focusChat).toHaveBeenCalledTimes(1);
+    expect(terminal?.focused).toBe(0);
+    p.setChatView(false);
+    expect(p.element.dataset["view"]).toBeUndefined();
+    expect(terminal?.focused).toBe(0);
+    p.focus();
+    expect(terminal?.focused).toBe(1);
+  });
+
+  it("keeps the palette and the split chords working from the chat", () => {
+    const closeFocused = vi.fn(() => true);
+    const split = vi.fn();
+    const p = pane(undefined, {
+      splitKeys: { split, closeFocused, focus: vi.fn(), closeTab: vi.fn() },
+    });
+    p.setChatView(true, vi.fn());
+    const palette = key({ key: "p", metaKey: true });
+    expect(p.chatKey(palette)).toBe(false);
+    expect(palette.defaultPrevented).toBe(true);
+    expect(p.element.querySelector(".terminal-palette")).not.toBeNull();
+    const plain = key({ key: "a" });
+    expect(p.chatKey(plain)).toBe(true);
+    expect(plain.defaultPrevented).toBe(false);
   });
 });

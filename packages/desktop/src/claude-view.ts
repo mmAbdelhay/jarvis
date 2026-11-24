@@ -12,6 +12,7 @@ import { readClaudeScreen } from "@jarvis/core";
 import { type ExternalAgentProcess, parseChatTranscript } from "@jarvis/platform";
 import type { ClaudeAnswerResult, ClaudeView, TerminalPaneInfo } from "@jarvis/wire";
 import type { PaneClaudeLookup, PaneClaudeSession } from "./pane-claude-session.js";
+import { createChatCache, createPaneSessionCache } from "./pane-session-cache.js";
 
 /** Transcript-change pushes for one pane are at most this often apart. */
 export const CLAUDE_VIEW_DEBOUNCE_MS = 300;
@@ -24,7 +25,7 @@ export const PANE_SESSION_TTL_MS = 5000;
  *  throttle, so the next push after Claude starts scans again. Held for the
  *  full session TTL, a none read just before `claude` drew its screen
  *  outlived the last push, and a phone stayed on Term once Claude was idle. */
-const PANE_NONE_TTL_MS = CLAUDE_VIEW_OUTPUT_THROTTLE_MS - 100;
+export const PANE_NONE_TTL_MS = CLAUDE_VIEW_OUTPUT_THROTTLE_MS - 100;
 
 /** Where a pane's transcript appears: its directory and its file name, so a
  *  directory watch also sees a transcript Claude has not written yet. */
@@ -65,18 +66,16 @@ export function createClaudeViewHandlers(deps: ClaudeViewDeps): {
    *  undefined when it never had one. Never throws. */
   transcriptOf(paneKey: string): Promise<string | null | undefined>;
 } {
-  // Pane → its session (or none), reused for PANE_SESSION_TTL_MS (a none
-  // for PANE_NONE_TTL_MS) so a push storm does not run ps + lsof per call.
-  const sessions = new Map<string, { session: PaneClaudeSession | undefined; at: number }>();
-  // Session → the last parse of its transcript, keyed by size and mtime.
-  const parsed = new Map<string, { path: string; size: number; mtimeMs: number; chat: Chat }>();
-
-  function live(paneKey: unknown): paneKey is string {
-    return (
-      typeof paneKey === "string" &&
-      deps.panes().some((pane) => pane.paneKey === paneKey && !pane.exited)
-    );
-  }
+  const cache = createPaneSessionCache<PaneClaudeSession>({
+    panes: () => deps.panes(),
+    scanAgents: () => deps.scanAgents(),
+    lookup: deps.lookup,
+    now: () => deps.now(),
+    ttlMs: PANE_SESSION_TTL_MS,
+    noneTtlMs: PANE_NONE_TTL_MS,
+  });
+  const chats = createChatCache<Chat>(deps);
+  const live = cache.live;
 
   function none(token: string): ClaudeView {
     try {
@@ -93,70 +92,20 @@ export function createClaudeViewHandlers(deps: ClaudeViewDeps): {
 
   /** Keeps the caches to live panes and their sessions. */
   function prune(livePanes: ReadonlySet<string>): void {
-    for (const paneKey of sessions.keys()) if (!livePanes.has(paneKey)) sessions.delete(paneKey);
     for (const paneKey of lastTranscript.keys())
       if (!livePanes.has(paneKey)) lastTranscript.delete(paneKey);
-    const ids = new Set<string>();
-    for (const { session } of sessions.values()) if (session) ids.add(session.sessionId);
-    for (const id of parsed.keys()) if (!ids.has(id)) parsed.delete(id);
-    try {
-      deps.lookup.retain(ids);
-    } catch {
-      // Only a cache.
-    }
+    chats.retain(cache.prune(livePanes));
   }
 
-  async function sessionFor(paneKey: string): Promise<PaneClaudeSession | undefined> {
-    const cached = sessions.get(paneKey);
-    const ttl = cached?.session === undefined ? PANE_NONE_TTL_MS : PANE_SESSION_TTL_MS;
-    if (cached !== undefined && deps.now() - cached.at < ttl) {
-      return cached.session;
-    }
-    const processes = await deps.scanAgents().catch(() => {
-      throw new Error("scan");
-    });
-    // A job sent to the background does not own the screen, so its
-    // prompt and spinner would be the shell's. Unknown (no job columns)
-    // is allowed; the screen reader finds nothing in a plain shell.
-    const candidates = processes.filter(
-      (process) => process.terminalPaneKey === paneKey && process.foreground !== false,
-    );
-    let session: PaneClaudeSession | undefined;
-    try {
-      for (const process of candidates) {
-        session = await deps.lookup.forProcess(process);
-        if (session !== undefined) break;
-      }
-    } catch {
-      throw new Error("lookup");
-    }
-    // A session with no transcript yet is looked up again next time, so
-    // its first turn shows as soon as Claude writes it.
-    if (session === undefined || session.transcriptPath !== undefined) {
-      sessions.set(paneKey, { session, at: deps.now() });
-    } else sessions.delete(paneKey);
-    return session;
-  }
+  const sessionFor = cache.sessionFor;
 
-  async function chatOf(session: PaneClaudeSession, path: string): Promise<Chat> {
-    const stat = await deps.statFile(path);
-    const last = parsed.get(session.sessionId);
-    if (
-      last !== undefined &&
-      last.path === path &&
-      last.size === stat.size &&
-      last.mtimeMs === stat.mtimeMs
-    ) {
-      return last.chat;
-    }
-    const chat = parseChatTranscript(await deps.readTail(path));
-    parsed.set(session.sessionId, { path, size: stat.size, mtimeMs: stat.mtimeMs, chat });
-    return chat;
+  function chatOf(session: PaneClaudeSession, path: string): Promise<Chat> {
+    return chats.get(session.sessionId, path, (text) => parseChatTranscript(text));
   }
 
   return {
     forgetPane(paneKey) {
-      sessions.delete(paneKey);
+      cache.forget(paneKey);
       lastTranscript.delete(paneKey);
     },
 
@@ -211,7 +160,7 @@ export function createClaudeViewHandlers(deps: ClaudeViewDeps): {
       try {
         if (!live(paneKey)) {
           deps.forget(paneKey);
-          sessions.delete(paneKey);
+          cache.forget(paneKey);
           return NONE;
         }
       } catch {

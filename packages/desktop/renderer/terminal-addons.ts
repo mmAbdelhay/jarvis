@@ -50,6 +50,10 @@ export type TerminalHooks = {
    *  exactly why this key is left alone below when it is missing rather
    *  than claimed and made to do nothing. */
   openPalette?: (() => void) | undefined;
+  /** Clears the whole pane — the live screen and the frozen blocks — for
+   *  ⌘K. Absent for a terminal with no blocks (the Session route today),
+   *  where the chord stays xterm's own `clear()`. */
+  clearAll?: (() => void) | undefined;
 };
 
 /** What the split keys act on — the tab's tree of panes, plus the tab
@@ -447,7 +451,8 @@ function attachKeys(
     if (action === "paste") return false;
 
     if (action === "clearScreen") {
-      terminal.clear();
+      if (hooks.clearAll !== undefined) hooks.clearAll();
+      else terminal.clear();
       return claim(event);
     }
 

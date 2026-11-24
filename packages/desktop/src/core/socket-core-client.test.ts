@@ -196,6 +196,7 @@ function recordingHost() {
     sweepIdleViews: () => seen.push(["sweepIdleViews"]),
     destroyViews: () => seen.push(["destroyViews"]),
     showNotification: (...args) => seen.push(["showNotification", ...args]),
+    showNotice: (...args) => seen.push(["showNotice", ...args]),
     trashItem: async (path) => {
       seen.push(["trashItem", path]);
     },
@@ -509,6 +510,20 @@ describe("socket CoreClient: the desktop host", () => {
 
     detach();
     await until(() => daemon.binding.daemonHost.attachedCount === 0, "the detach");
+  });
+
+  it("shows a notice live, and a notice with no app attached is dropped, not replayed", async () => {
+    const run = await runDirectory();
+    const fake = fakeCore();
+    await startDaemon(run, fake.core);
+    fake.link.host.showNotice("Early", "Claude Code");
+    const client = await connect(run);
+    const { host, seen } = recordingHost();
+    client.attachHost(host);
+    await until(() => fake.link.host.isAwake(), "the attach");
+    fake.link.host.showNotice("Acme", "Claude Code");
+    await until(() => seen.length === 1, "the notice");
+    expect(seen).toEqual([["showNotice", "Acme", "Claude Code"]]);
   });
 
   it("holds the stay-awake the daemon's core wants, from before and after the attach", async () => {

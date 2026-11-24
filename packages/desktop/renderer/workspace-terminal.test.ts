@@ -1080,6 +1080,41 @@ describe("splitting a terminal tab", () => {
     expect(branch?.style.flexDirection).toBe("column");
   });
 
+  describe("the clear button", () => {
+    const clearButton = () => document.querySelector<HTMLButtonElement>(".clear-toggle");
+
+    it("is a labelled button in the panes' band, apart from the sidebar and plan switches", async () => {
+      const { renderWorkspaceTerminals } = await load();
+      renderWorkspaceTerminals([tab()], "tab-1", "acme");
+
+      const button = clearButton();
+      expect(button?.tagName).toBe("BUTTON");
+      expect(button?.type).toBe("button");
+      expect(button?.parentElement?.className).toBe("terminal-split");
+      expect(button?.title).toBe("Clear terminal");
+      expect(button?.getAttribute("aria-label")).toBe("Clear terminal");
+      expect(button?.querySelector("svg")).not.toBeNull();
+      expect(button).not.toBe(document.querySelector(".explorer-toggle"));
+      expect(button).not.toBe(document.querySelector(".plan-toggle"));
+    });
+
+    it("clears the focused pane only, sends nothing to a shell, and gives the keys back", async () => {
+      const { renderWorkspaceTerminals } = await load();
+      renderWorkspaceTerminals([tab()], "tab-1", "acme");
+      await split("d");
+      const sentBefore = calls.filter((entry) => entry.call === "sendTerminalInput").length;
+      const focusedBefore = FakeTerminal.instances[1]?.focused ?? 0;
+
+      clearButton()?.click();
+
+      // The split just made is the focused pane.
+      expect(FakeTerminal.instances[1]?.cleared).toBe(1);
+      expect(FakeTerminal.instances[0]?.cleared).toBe(0);
+      expect(FakeTerminal.instances[1]?.focused).toBeGreaterThan(focusedBefore);
+      expect(calls.filter((entry) => entry.call === "sendTerminalInput")).toHaveLength(sentBefore);
+    });
+  });
+
   // The renderer routes the pty stream by shell key, not by tab: the wrong
   // answer here would put one shell's output into another shell's pane.
   it("writes each pane's output into that pane and no other", async () => {
@@ -1448,6 +1483,55 @@ describe("the terminal tab's file sidebar", () => {
     await settle();
 
     expect(opened).toEqual([["tab-1", "/proj/a.ts"]]);
+  });
+
+  it("opens a folder through the editor IPC from its context menu, tagged with the pane's key", async () => {
+    const jarvis = (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
+    jarvis["terminalSettings"] = () =>
+      Promise.resolve({ blocks: true, inputEditor: false, notifyAfterSeconds: 0, home: "/h" });
+    jarvis["listTerminalDir"] = () => Promise.resolve([{ name: "src", directory: true }]);
+    const opened: [string, string][] = [];
+    jarvis["openTerminalFolder"] = (paneKey: string, path: string) => {
+      opened.push([paneKey, path]);
+      return Promise.resolve({ ok: true, value: undefined });
+    };
+    const { renderWorkspaceTerminals } = await load();
+    await settle();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    await settle();
+
+    dataListener?.("tab-1", CWD("/proj"));
+    await settle();
+    sidebar()
+      ?.querySelector<HTMLElement>('.file-tree-row[data-directory="true"]')
+      ?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 1, clientY: 1 }));
+    document.querySelector<HTMLButtonElement>(".terminal-explorer-menu-item")?.click();
+    await settle();
+
+    expect(opened).toEqual([["tab-1", "/proj/src"]]);
+  });
+
+  it("swallows a preload without the folder channel", async () => {
+    const jarvis = (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
+    jarvis["terminalSettings"] = () =>
+      Promise.resolve({ blocks: true, inputEditor: false, notifyAfterSeconds: 0, home: "/h" });
+    jarvis["listTerminalDir"] = () => Promise.resolve([{ name: "src", directory: true }]);
+    jarvis["openTerminalFolder"] = () => Promise.reject(new Error("gone"));
+    const { renderWorkspaceTerminals } = await load();
+    await settle();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    await settle();
+
+    dataListener?.("tab-1", CWD("/proj"));
+    await settle();
+    sidebar()
+      ?.querySelector<HTMLElement>('.file-tree-row[data-directory="true"]')
+      ?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 1, clientY: 1 }));
+    expect(() =>
+      document.querySelector<HTMLButtonElement>(".terminal-explorer-menu-item")?.click(),
+    ).not.toThrow();
+    await settle();
+    expect(document.getElementById("workspace-terminal")?.hidden).toBe(false);
   });
 
   // A refusal — no editor integration, the file outside the project,
@@ -2514,5 +2598,261 @@ describe("the terminal tab's reviews dock", () => {
     reviewsChanged?.(null);
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(document.querySelector(".terminal-chips .reviews-chip")).toBeNull();
+  });
+});
+
+// The Chat | Term switch: wired to the pane's command starts, its focus and
+// main's "look again" push, and gone with the pane.
+describe("the agent chat switch", () => {
+  const COMMAND = "\u001b]133;A\u0007$ \u001b]133;B\u0007claude\r\n\u001b]133;C;claude\u0007";
+  let viewListener: ((payload: { paneKey: string }) => void) | undefined;
+  let views: Record<string, unknown>;
+  let asked: string[];
+
+  beforeEach(() => {
+    harness();
+    viewListener = undefined;
+    views = {};
+    asked = [];
+    const jarvis = (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
+    jarvis["terminalSettings"] = () =>
+      Promise.resolve({ blocks: true, inputEditor: false, notifyAfterSeconds: 0, home: "/h" });
+    jarvis["onTerminalClaudeViewChanged"] = (cb: typeof viewListener) => {
+      viewListener = cb;
+    };
+    jarvis["terminalAgentView"] = (paneKey: string) => {
+      asked.push(paneKey);
+      return Promise.resolve(views[paneKey] ?? { kind: "none" });
+    };
+    jarvis["terminalAgentAnswer"] = () => Promise.resolve({ ok: true });
+    jarvis["terminalAgentSend"] = () => Promise.resolve({ ok: true });
+  });
+  afterEach(() => vi.useRealTimers());
+
+  const agent = { kind: "agent", vendor: "openai", sessionId: "s", turns: [] };
+  const bar = (index = 0) => document.querySelectorAll<HTMLElement>(".agent-bar")[index];
+
+  async function started() {
+    const { renderWorkspaceTerminals } = await load();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    vi.useFakeTimers();
+    return renderWorkspaceTerminals;
+  }
+
+  it("shows the switch in the pane that started an agent, after the first ask that finds one", async () => {
+    await started();
+    views["tab-1"] = agent;
+    dataListener?.("tab-1", COMMAND);
+    expect(bar()?.hidden).toBe(true);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(asked).toEqual(["tab-1"]);
+    expect(bar()?.hidden).toBe(false);
+    expect(bar()?.parentElement?.className).toBe("terminal-pane");
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(asked).toEqual(["tab-1"]);
+  });
+
+  it("keeps asking at 3s and 8s for a plain command, and never shows a switch", async () => {
+    await started();
+    dataListener?.("tab-1", COMMAND);
+    await vi.advanceTimersByTimeAsync(9000);
+    expect(asked).toEqual(["tab-1", "tab-1", "tab-1"]);
+    expect(bar()?.hidden).toBe(true);
+  });
+
+  it("refreshes on a push for its own pane only, and only once it knows of an agent", async () => {
+    await started();
+    viewListener?.({ paneKey: "tab-1" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(asked).toEqual([]);
+    views["tab-1"] = agent;
+    dataListener?.("tab-1", COMMAND);
+    await vi.advanceTimersByTimeAsync(1000);
+    viewListener?.({ paneKey: "tab-1" });
+    viewListener?.({ paneKey: "tab-9" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(asked).toEqual(["tab-1", "tab-1"]);
+  });
+
+  it("asks when a pane regains focus", async () => {
+    await started();
+    vi.useRealTimers();
+    const terminal = FakeTerminal.instances[0];
+    terminal?.pressKey({ key: "d", metaKey: true });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    asked.length = 0;
+    const leaves = document.querySelectorAll<HTMLElement>(".terminal-split-leaf");
+    leaves[0]?.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(asked).toEqual(["tab-1"]);
+  });
+
+  it("goes with its pane", async () => {
+    const render = await started();
+    vi.useRealTimers();
+    expect(document.querySelectorAll(".agent-bar")).toHaveLength(1);
+    render([], undefined, "");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(document.querySelectorAll(".agent-bar")).toHaveLength(0);
+  });
+
+  it("is harmless in a preload without the channels", async () => {
+    const jarvis = (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
+    jarvis["onTerminalClaudeViewChanged"] = undefined;
+    jarvis["terminalAgentView"] = undefined;
+    await started();
+    dataListener?.("tab-1", COMMAND);
+    await vi.advanceTimersByTimeAsync(9000);
+    expect(bar()?.hidden).toBe(true);
+  });
+});
+
+// A tab shown in another window (popout.ts): the main window's panes for it
+// go (disposing a pane kills no shell and sends no resize — the one owner of
+// the pty's size is the pop-out), and come back from the backlog on return,
+// with the layout and any unsent command-editor text carried explicitly.
+describe("a terminal tab's layout and drafts across a pop-out", () => {
+  const A = "\u001b]133;A\u0007";
+  const B = "\u001b]133;B\u0007";
+  const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+  const SPLIT = {
+    shape: {
+      direction: "row" as const,
+      first: { key: "tab-1" },
+      second: { key: "tab-1:p3" },
+    },
+    drafts: { "tab-1:p3": "git sta" },
+    focused: "tab-1:p3",
+  };
+
+  async function loadWithEditor() {
+    harness("");
+    const jarvis = (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
+    jarvis["terminalSettings"] = () =>
+      Promise.resolve({ blocks: true, inputEditor: true, notifyAfterSeconds: 0, home: "/h" });
+    const mod = await load();
+    await settle();
+    const popped = await import("./popped.js");
+    popped.setPoppedTabs([]);
+    return { ...mod, popped };
+  }
+
+  const editors = () => [
+    ...document.querySelectorAll<HTMLTextAreaElement>("textarea.terminal-input-text"),
+  ];
+
+  it("reads an unsplit tab as its one pane, with the editor's unsent text as a draft", async () => {
+    const { renderWorkspaceTerminals, terminalCarry } = await loadWithEditor();
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    await settle();
+    dataListener?.("tab-1", `${A}$ ${B}`);
+    expect(terminalCarry("tab-1")).toEqual({
+      shape: { key: "tab-1" },
+      drafts: {},
+      focused: "tab-1",
+    });
+    const box = editors()[0] as HTMLTextAreaElement;
+    box.value = "git status";
+    expect(terminalCarry("tab-1")).toEqual({
+      shape: { key: "tab-1" },
+      drafts: { "tab-1": "git status" },
+      focused: "tab-1",
+    });
+  });
+
+  it("answers a plain state for a tab it never drew", async () => {
+    const { terminalCarry } = await loadWithEditor();
+    expect(terminalCarry("tab-9")).toEqual({ shape: { key: "tab-9" }, drafts: {} });
+  });
+
+  it("builds a staged layout without starting any shell, and puts the drafts back in their editors", async () => {
+    const { renderWorkspaceTerminals, stageTerminalCarry } = await loadWithEditor();
+    stageTerminalCarry("tab-1", SPLIT);
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    await settle();
+    expect(calls.filter((c) => c.call === "splitTerminal")).toEqual([]);
+    expect(calls.filter((c) => c.call === "closeTerminalPane" || c.call === "closeTab")).toEqual(
+      [],
+    );
+    expect(
+      calls
+        .filter((c) => c.call === "attachTerminal")
+        .map((c) => c.args[0])
+        .sort(),
+    ).toEqual(["tab-1", "tab-1:p3"]);
+    expect(FakeTerminal.instances).toHaveLength(2);
+    await settle();
+    expect(editors().map((box) => box.value)).toEqual(["", "git sta"]);
+    // The next split never reuses p3.
+    const focused = document.querySelector(".terminal-split-leaf.focused");
+    expect(focused?.querySelector("textarea")?.value).toBe("git sta");
+  });
+
+  it("disposes a popped tab's panes without killing a shell or sending a resize, and rebuilds from the backlog on return", async () => {
+    const { renderWorkspaceTerminals, terminalCarry, stageTerminalCarry, popped } =
+      await loadWithEditor();
+    const tabs = [tab()];
+    renderWorkspaceTerminals(tabs, "tab-1", "acme");
+    await settle();
+    const carried = terminalCarry("tab-1");
+    calls.length = 0;
+
+    popped.setPoppedTabs(["tab-1"]);
+    renderWorkspaceTerminals(tabs, "tab-1", "acme");
+    expect(document.querySelectorAll(".workspace-terminal-pane")).toHaveLength(0);
+    expect(document.getElementById("workspace-terminal")?.hidden).toBe(true);
+    expect(FakeTerminal.instances.every((terminal) => terminal.disposed)).toBe(true);
+    window.dispatchEvent(new Event("focus"));
+    expect(
+      calls.filter((c) =>
+        ["resizeTerminal", "closeTerminalPane", "closeTab", "splitTerminal"].includes(c.call),
+      ),
+    ).toEqual([]);
+
+    popped.setPoppedTabs([]);
+    stageTerminalCarry("tab-1", carried);
+    renderWorkspaceTerminals(tabs, "tab-1", "acme");
+    await settle();
+    expect(calls.filter((c) => c.call === "attachTerminal").map((c) => c.args)).toEqual([
+      ["tab-1"],
+    ]);
+    expect(document.querySelectorAll(".workspace-terminal-pane")).toHaveLength(1);
+  });
+
+  it("draws no terminal and sends no size until the host's list has answered, in either order", async () => {
+    const { renderWorkspaceTerminals, popped } = await loadWithEditor();
+    let answer: (ids: string[]) => void = () => {};
+    const started = popped.initPopped({
+      onPopoutChanged: () => () => {},
+      popoutList: () => new Promise<string[]>((resolve) => (answer = resolve)),
+    });
+    // The snapshot first: nothing is built, nothing sized.
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    await settle();
+    expect(FakeTerminal.instances).toHaveLength(0);
+    expect(calls.filter((c) => ["attachTerminal", "resizeTerminal"].includes(c.call))).toEqual([]);
+    // The list says it is popped: still nothing.
+    answer(["tab-1"]);
+    await started;
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    await settle();
+    expect(FakeTerminal.instances).toHaveLength(0);
+    popped.resetPopped();
+    // The list first: drawn once.
+    await popped.initPopped({ onPopoutChanged: () => () => {}, popoutList: async () => [] });
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    await settle();
+    expect(document.querySelectorAll(".workspace-terminal-pane")).toHaveLength(1);
+  });
+
+  it("builds nothing for a popped tab even when it is the active one", async () => {
+    const { renderWorkspaceTerminals, popped } = await loadWithEditor();
+    popped.setPoppedTabs(["tab-1"]);
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    expect(FakeTerminal.instances).toHaveLength(0);
+    expect(calls.filter((c) => c.call === "attachTerminal")).toEqual([]);
+    popped.setPoppedTabs([]);
   });
 });

@@ -8,6 +8,48 @@ version and the downloads. This file is the index.
 
 ## Unreleased
 
+## [0.1.15] — 2026-11-24
+
+- File sidebar: right-clicking a folder (or the empty area) in the Terminal tab now
+  offers "Open in editor", which opens that folder in the project's editor.
+- Terminal: "Clear terminal" (palette, the clear-screen chord and a new button beside the
+  sidebar switch) now removes every command block at once, not just the screen. A
+  running command is not touched.
+- Terminal: a pane running Claude Code, Copilot or Codex now has a Chat | Term switch.
+  Chat shows the conversation as bubbles with the tools used, a question card for
+  permission prompts, and a box to message the agent; Term is the terminal as before,
+  and the choice is remembered. Desktop only — the phone's chat view is unchanged.
+
+- Office: a new view under the Workspace button's chevron (Tabs | Office). One isometric
+  room per project, one cubicle and employee per tab or agent, with a card on hover and
+  a raised hand, a notification and a badge when an agent asks a question. Pan and zoom,
+  minimap, sidebar of projects. Desktop only; the phone is unchanged.
+- Office: the hover card now shows what is happening inside the tab, live: the last rows of a
+  Terminal tab's screen (each pane of a split tab) or an agent session's output, and a small
+  picture of a web, editor, database, cluster or chat page. A sleeping page is not woken. The
+  card is wider and stays open while the pointer is on it. Desktop only; nothing is logged or
+  sent to a phone.
+- Tabs: right-click a tab (or an employee in the Office, with a right click, the Menu key
+  or Shift+F10) and choose "Open in new window" to move it into a window of its own;
+  "Return to main window", or closing the window, puts it back. A web page, editor,
+  database, cluster, chat or Terminal tab can go (a Terminal keeps its shells, its split
+  layout and any text typed but not yet sent); the API client and Docker tabs stay in the
+  main window for now. Cmd/Ctrl+W in a pop-out returns its tab. Not restored after a restart.
+- Office: a raised hand no longer waits behind or pushes out a security alert when no app is
+  attached to the background service, watching the agents no longer marks every pane as
+  watched or re-reads them all while one is busy, the card says "Last" rather than "Doing"
+  for an idle agent, and name tags, hand badges and bubbles are never hidden behind a
+  neighbouring cubicle.
+- Terminal: the Chat view keeps looking for an agent while its command runs (a Codex or
+  Copilot session may only appear after the first message), no longer drops out of Chat
+  on one failed read, and shows a card when an agent asks something only the terminal
+  can answer.
+- Terminal agents: a Claude turn whose spinner shows several words is read as working.
+- macOS: turning on Tailscale access no longer fails with "could not read
+  Tailscale's settings". Jarvis's background service ran the Tailscale app's
+  binary, which then started as the GUI instead of the CLI, so every Tailscale
+  read failed (Funnel check, certificate, machine list, relay).
+
 ## [0.1.14] — 2026-11-22
 
 - Tailscale access: a new Settings → Remote access switch (off by default,

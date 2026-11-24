@@ -68,6 +68,173 @@ export const MESSAGES = {
   // and goes through MESSAGES from the start.
   explorerToggle: (language: "ar" | "en"): string =>
     language === "ar" ? "تبديل الشريط الجانبي للملفات" : "Toggle file sidebar",
+  terminalClearButton: (language: "ar" | "en"): string =>
+    language === "ar" ? "مسح الطرفية" : "Clear terminal",
+  agentSwitchLabel: (language: "ar" | "en"): string =>
+    language === "ar" ? "عرض الوكيل" : "Agent view",
+  agentChatTab: (language: "ar" | "en"): string => (language === "ar" ? "محادثة" : "Chat"),
+  agentTermTab: (language: "ar" | "en"): string => (language === "ar" ? "الطرفية" : "Term"),
+  agentChatFeedLabel: (language: "ar" | "en"): string =>
+    language === "ar" ? "المحادثة" : "Conversation",
+  agentChatEmpty: (language: "ar" | "en"): string =>
+    language === "ar" ? "لا توجد رسائل بعد." : "No messages yet.",
+  agentChatWorking: (language: "ar" | "en"): string => (language === "ar" ? "يعمل…" : "Working…"),
+  agentChatQuestionLabel: (language: "ar" | "en"): string =>
+    language === "ar" ? "سؤال من الوكيل" : "Question from the agent",
+  agentChatComposer: (language: "ar" | "en"): string =>
+    language === "ar" ? "اكتب رسالة للوكيل…" : "Message the agent…",
+  agentChatSend: (language: "ar" | "en"): string => (language === "ar" ? "إرسال" : "Send"),
+  agentChatNeedsTerm: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "الوكيل يسأل شيئاً. أجب عنه في الطرفية."
+      : "The agent is asking something. Answer it in Term.",
+  agentChatNeedsTermButton: (language: "ar" | "en"): string =>
+    language === "ar" ? "افتح الطرفية" : "Switch to Term",
+  // The Office (office-activity.ts): a desktop notification when an agent
+  // raises a hand. The title names the project (or the Lounge); the body is
+  // the agent's name only — never the question.
+  officeMenuLabel: (language: "ar" | "en"): string =>
+    language === "ar" ? "عروض مساحة العمل" : "Workspace views",
+  officeMoreLabel: (language: "ar" | "en"): string =>
+    language === "ar" ? "عروض مساحة العمل" : "Workspace views",
+  officeMoreLabelHands: (hands: number, language: "ar" | "en"): string =>
+    language === "ar"
+      ? `عروض مساحة العمل، ${hands} أيدٍ مرفوعة`
+      : `Workspace views, ${hands} ${hands === 1 ? "hand" : "hands"} raised`,
+  officeMenuTabs: (language: "ar" | "en"): string => (language === "ar" ? "التبويبات" : "Tabs"),
+  officeMenuOffice: (language: "ar" | "en"): string => (language === "ar" ? "المكتب" : "Office"),
+  // The Office view (renderer/office-view.ts).
+  officeTitle: (language: "ar" | "en"): string => (language === "ar" ? "المكتب" : "Office"),
+  officeShowAll: (language: "ar" | "en"): string =>
+    language === "ar" ? "إظهار المكتب كله" : "Show whole office",
+  officeProjectsHint: (language: "ar" | "en"): string =>
+    language === "ar" ? "المشاريع، والأيدي المرفوعة أولاً" : "Projects, raised hands first",
+  officeSidebarLabel: (language: "ar" | "en"): string =>
+    language === "ar" ? "مشاريع المكتب" : "Office projects",
+  officeStageLabel: (language: "ar" | "en"): string =>
+    language === "ar" ? "أرضية المكتب" : "Office floor",
+  officeMinimapLabel: (language: "ar" | "en"): string =>
+    language === "ar" ? "خريطة مصغرة للمكتب" : "Office minimap",
+  officeSummary: (
+    employees: number,
+    open: number,
+    closed: number,
+    language: "ar" | "en",
+  ): string =>
+    language === "ar"
+      ? `${employees} موظفاً، ${open} مشاريع مفتوحة، ${closed} مغلقة`
+      : `${employees} ${employees === 1 ? "employee" : "employees"}, ${open} open ${open === 1 ? "project" : "projects"}, ${closed} closed`,
+  officeHandsPill: (hands: number, language: "ar" | "en"): string =>
+    language === "ar" ? `${hands} أيدٍ مرفوعة` : `${hands} ${hands === 1 ? "hand" : "hands"} raised`,
+  officeHandsText: (hands: number, language: "ar" | "en"): string =>
+    language === "ar"
+      ? `${hands} ${hands === 1 ? "يد" : "أيدٍ"}`
+      : `${hands} ${hands === 1 ? "hand" : "hands"}`,
+  officeClosedWord: (language: "ar" | "en"): string => (language === "ar" ? "مغلق" : "closed"),
+  officeZoomIn: (language: "ar" | "en"): string => (language === "ar" ? "تكبير" : "Zoom in"),
+  officeZoomOut: (language: "ar" | "en"): string => (language === "ar" ? "تصغير" : "Zoom out"),
+  officeEmptyTitle: (language: "ar" | "en"): string =>
+    language === "ar" ? "لا أحد هنا بعد" : "Nobody is in yet",
+  officeEmptyAction: (language: "ar" | "en"): string =>
+    language === "ar" ? "افتح تبويباً" : "Open a tab",
+  officePose: (pose: string, language: "ar" | "en"): string => {
+    const names: Record<string, [string, string]> = {
+      typing: ["working", "يعمل"],
+      hand: ["needs you", "يحتاجك"],
+      idle: ["idle", "خامل"],
+      walking: ["arriving", "يصل"],
+      done: ["done", "انتهى"],
+      dead: ["stopped", "توقف"],
+      asleep: ["asleep", "نائم"],
+    };
+    const pair = names[pose] ?? names["idle"] ?? ["idle", "خامل"];
+    return language === "ar" ? pair[1] : pair[0];
+  },
+  officeKind: (kind: string, language: "ar" | "en"): string => {
+    const names: Record<string, [string, string]> = {
+      claude: ["Claude", "Claude"],
+      codex: ["Codex", "Codex"],
+      copilot: ["Copilot", "Copilot"],
+      agent: ["Agent", "وكيل"],
+      terminal: ["Terminal", "طرفية"],
+      editor: ["Editor", "محرر"],
+      browser: ["Browser", "متصفح"],
+      database: ["Database", "قاعدة بيانات"],
+      api: ["API", "API"],
+      cluster: ["Cluster", "عنقود"],
+      docker: ["Docker", "Docker"],
+      chat: ["Chat", "دردشة"],
+    };
+    const pair = names[kind] ?? names["agent"] ?? ["Agent", "وكيل"];
+    return language === "ar" ? pair[1] : pair[0];
+  },
+  officeSeatLabel: (
+    kind: string,
+    label: string,
+    room: string,
+    pose: string,
+    language: "ar" | "en",
+  ): string =>
+    language === "ar"
+      ? `${MESSAGES.officeKind(kind, language)}: ${label} في ${room}، ${MESSAGES.officePose(pose, language)}`
+      : `${MESSAGES.officeKind(kind, language)}: ${label} in ${room}, ${MESSAGES.officePose(pose, language)}`,
+  officeRoomLabel: (name: string, count: number, hands: number, language: "ar" | "en"): string =>
+    language === "ar"
+      ? `${name}، ${count} موظفاً${hands > 0 ? `، ${hands} أيدٍ مرفوعة` : ""}`
+      : `${name}, ${count} ${count === 1 ? "employee" : "employees"}${hands > 0 ? `, ${hands} ${hands === 1 ? "hand" : "hands"} raised` : ""}`,
+  officeCardProject: (language: "ar" | "en"): string => (language === "ar" ? "المشروع" : "Project"),
+  officeCardAgent: (language: "ar" | "en"): string => (language === "ar" ? "الوكيل" : "Agent"),
+  officeCardDoing: (language: "ar" | "en"): string => (language === "ar" ? "يفعل" : "Doing"),
+  officeCardLast: (language: "ar" | "en"): string => (language === "ar" ? "آخر عمل" : "Last"),
+  officeCardBranch: (language: "ar" | "en"): string => (language === "ar" ? "الفرع" : "Branch"),
+  officeCardChanges: (language: "ar" | "en"): string =>
+    language === "ar" ? "التغييرات" : "Changes",
+  officeCardLastActive: (language: "ar" | "en"): string =>
+    language === "ar" ? "آخر نشاط" : "Last active",
+  officeCardQuestion: (language: "ar" | "en"): string =>
+    language === "ar" ? "السؤال" : "Question",
+  officeCardOpenTab: (language: "ar" | "en"): string =>
+    language === "ar" ? "انقر لفتح هذا التبويب" : "Click to open this tab",
+  officeCardOpenPane: (language: "ar" | "en"): string =>
+    language === "ar" ? "انقر لفتح هذه اللوحة" : "Click to open this pane",
+  officeCardOpenSession: (language: "ar" | "en"): string =>
+    language === "ar" ? "انقر لفتح هذه الجلسة" : "Click to open this session",
+  officePreviewUnavailable: (language: "ar" | "en"): string =>
+    language === "ar" ? "المعاينة غير متاحة" : "Preview unavailable",
+  officePreviewAsleep: (language: "ar" | "en"): string =>
+    language === "ar" ? "لا معاينة أثناء النوم" : "No preview while asleep",
+  officePreviewPane: (index: number, language: "ar" | "en"): string =>
+    language === "ar" ? `اللوحة ${index}` : `Pane ${index}`,
+  officePreviewScreen: (language: "ar" | "en"): string =>
+    language === "ar" ? "الشاشة الآن" : "Screen right now",
+  officeLounge: (language: "ar" | "en"): string => (language === "ar" ? "الاستراحة" : "Lounge"),
+  officeHandTitle: (project: string, language: "ar" | "en"): string =>
+    language === "ar" ? `رُفعت يد في ${project}` : `Hand raised in ${project}`,
+  officeAnAgent: (language: "ar" | "en"): string => (language === "ar" ? "وكيل" : "An agent"),
+  agentChatModeDefault: (language: "ar" | "en"): string =>
+    language === "ar" ? "افتراضي" : "Default",
+  agentChatModeAuto: (language: "ar" | "en"): string => (language === "ar" ? "تلقائي" : "Auto"),
+  agentChatModePlan: (language: "ar" | "en"): string => (language === "ar" ? "خطة" : "Plan"),
+  agentChatModeAcceptEdits: (language: "ar" | "en"): string =>
+    language === "ar" ? "قبول التعديلات" : "Accept edits",
+  agentChatSendPrompt: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "الوكيل ينتظر إجابة. أجب عنه أولاً."
+      : "The agent is waiting for an answer. Answer it first.",
+  agentChatSendGone: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "لا يعمل أي وكيل في هذه اللوحة بعد الآن."
+      : "No agent is running in this pane any more.",
+  agentChatSendInvalid: (language: "ar" | "en"): string =>
+    language === "ar" ? "الرسالة فارغة أو طويلة جداً." : "That message is empty or too long.",
+  agentChatSendFailed: (language: "ar" | "en"): string =>
+    language === "ar" ? "تعذر الإرسال. حاول مرة أخرى." : "Could not send. Try again.",
+  agentChatAnswerGone: (language: "ar" | "en"): string =>
+    language === "ar" ? "هذا السؤال لم يعد مفتوحاً." : "That question is no longer open.",
+  agentChatAnswerChanged: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "تغيّر السؤال. اقرأه واختر مجدداً."
+      : "The question changed. Read it and choose again.",
   planPanelToggle: (language: "ar" | "en"): string =>
     language === "ar" ? "تبديل لوحة الخطة" : "Toggle plan panel",
   // ---- Reviews (Task 12): the Terminal tab's dock, its PR link chip and
@@ -571,6 +738,8 @@ export const MESSAGES = {
   explorerNewFile: (language: "ar" | "en"): string => (language === "ar" ? "ملف جديد" : "New file"),
   explorerNewFolder: (language: "ar" | "en"): string =>
     language === "ar" ? "مجلد جديد" : "New folder",
+  explorerOpenInEditor: (language: "ar" | "en"): string =>
+    language === "ar" ? "فتح في المحرر" : "Open in editor",
   explorerRename: (language: "ar" | "en"): string => (language === "ar" ? "إعادة تسمية" : "Rename"),
   explorerTrash: (language: "ar" | "en"): string =>
     language === "ar" ? "نقل إلى سلة المهملات" : "Move to Trash",
@@ -1412,6 +1581,18 @@ export const MESSAGES = {
   tabMenuClose: (language: "ar" | "en"): string => (language === "ar" ? "إغلاق" : "Close"),
   // Task 8: the tab menu's fourth item, opening this tab's own plan panel.
   tabMenuPlans: (language: "ar" | "en"): string => (language === "ar" ? "الخطط" : "Plans"),
+  tabMenuPopOut: (language: "ar" | "en"): string =>
+    language === "ar" ? "فتح في نافذة جديدة" : "Open in new window",
+  tabMenuPopIn: (language: "ar" | "en"): string =>
+    language === "ar" ? "العودة إلى النافذة الرئيسية" : "Return to main window",
+  popoutPlaceholderTitle: (language: "ar" | "en"): string =>
+    language === "ar" ? "مفتوح في نافذة أخرى" : "Open in another window",
+  popoutShowWindow: (language: "ar" | "en"): string =>
+    language === "ar" ? "إظهار النافذة" : "Show window",
+  popoutBringBack: (language: "ar" | "en"): string =>
+    language === "ar" ? "إعادته إلى هنا" : "Bring back here",
+  popoutTabMark: (language: "ar" | "en"): string =>
+    language === "ar" ? "مفتوح في نافذة أخرى" : "In another window",
   // Ruling P22: gitChanges() always reads the repository's current working
   // tree, never a per-session snapshot. For a session that has already
   // ended, showing that data under its name would repeat exactly the lie

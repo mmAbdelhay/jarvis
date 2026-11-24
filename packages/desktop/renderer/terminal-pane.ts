@@ -22,7 +22,13 @@ import type { TerminalChips } from "../src/ipc.js";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 import { createBlockNav, type BlockNav } from "./block-nav.js";
 import { createBlockView, type BlockView } from "./block-view.js";
-import { handlePaletteKey, type PaletteKeys, type SplitKeys } from "./terminal-addons.js";
+import { hostPlatform, matchChord } from "./keys.js";
+import {
+  handlePaletteKey,
+  handleSplitKey,
+  type PaletteKeys,
+  type SplitKeys,
+} from "./terminal-addons.js";
 import { createSplitter, type BlockEvent, type BlockRecord } from "./terminal-blocks.js";
 import { createChipRow } from "./terminal-chips.js";
 import { onTerminalFontSize, terminalFontSize } from "./terminal-font.js";
@@ -68,6 +74,10 @@ export type PaneHooks = {
    *  gated on that). Absent means nothing is ever reported — the Session
    *  route's pane, which has no push story of its own. */
   onCommandFinished?: ((seconds: number, ok: boolean) => void) | undefined;
+  /** A command began in this pane (the shell's own mark): the moment an
+   *  agent typed at the prompt may have started. The Chat view uses it to
+   *  look for one. Absent for a pane that never shows a chat. */
+  onCommandStart?: (() => void) | undefined;
   /** The most recent commands from Jarvis's own command log, newest first —
    *  what ↑/↓ in the command editor walk. Absent (or failing) means the
    *  arrows find nothing, which is a line that simply does not change. */
@@ -172,6 +182,9 @@ export type TerminalPane = {
    *  Terminal tab never needs this — its pane and its shell begin and end
    *  together. */
   reset(): void;
+  /** Clears the live terminal and every frozen block at once, writing
+   *  nothing to the shell — see the function itself. */
+  clearAll(): void;
   dispose(): void;
   /** The frozen blocks, oldest first — what Tasks 6, 7 and 12 act on. */
   blocks(): readonly BlockView[];
@@ -216,6 +229,18 @@ export type TerminalPane = {
    *  editor or on `idle()` the way `^R` is — see terminal-addons.ts's
    *  `openPalette` hook for why the two chords differ. */
   openPalette(): void;
+  /**
+   * Shows or hides the pane's Chat view. The terminal is hidden, never
+   * detached: its element, its pty and its size stay as they are (a hidden
+   * live terminal measures as nothing, and refit() declines to fit that), so
+   * the shell sees no resize while a chat shows. `focusChat` is where the
+   * keys go while it does. Turning it off refits; the caller hands the keys
+   * back with focus().
+   */
+  setChatView(active: boolean, focusChat?: () => void): void;
+  /** A keydown in the chat's composer: ⌘P opens this pane's palette and the
+   *  split chords act, as in the terminal. False when claimed. */
+  chatKey(event: KeyboardEvent): boolean;
 };
 
 /** Blocks a pane keeps, oldest dropped first. A session that ran thousands
@@ -307,6 +332,9 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
   // flex-column pane lays out its children in that order without this file
   // measuring anything.
   const chipRow = createChipRow(element, hooks.settings.home);
+  // What the Chat view hides while it shows (styles.css): the terminal's own
+  // surfaces, marked here so the stylesheet need not name each one.
+  for (const surface of [sticky, list, live, chipRow.element]) surface.dataset["termSurface"] = "";
 
   // Selection, jumping and filtering: nothing to navigate with blocks off,
   // so `nav` stays undefined and the pane's `blockNav` — what
@@ -461,12 +489,15 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
    *  a command finishing in a background tab must not steal the caret from
    *  wherever the user actually is. */
   function refocus(editorEl: TerminalEditor): void {
+    // The keys are in the chat's composer, not a terminal that is hidden.
+    if (chatFocus !== undefined) return;
     if (!element.contains(document.activeElement)) return;
     if (editorEl.isVisible()) editorEl.focus();
     else terminal.focus();
   }
 
   const editor = hooks.settings.inputEditor ? buildEditor() : undefined;
+  if (editor !== undefined) editor.element.dataset["termSurface"] = "";
 
   // The palette and the dropdown's first look at an editor keystroke. A
   // capture-phase listener on the pane's own root sees a keydown before it
@@ -554,10 +585,16 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
     element.scrollTop = element.scrollHeight;
   }
 
+  /** Where the keys go while the Chat view shows; undefined otherwise. */
+  let chatFocus: (() => void) | undefined;
   /** The keys go to the editor whenever it is on screen, and to the live
    *  terminal every other moment. Both `focus()` and the palette's own
    *  hand-back call this, so there is one answer to "who has the keys". */
   function focusPane(): void {
+    if (chatFocus !== undefined) {
+      chatFocus();
+      return;
+    }
     if (editor?.isVisible()) {
       editor.focus();
       return;
@@ -756,7 +793,7 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
     actions.push({
       id: "clear",
       label: "Clear terminal",
-      run: () => attempt(() => terminal.clear()),
+      run: clearAll,
     });
     const toggleExplorer = hooks.toggleExplorer;
     if (toggleExplorer !== undefined) {
@@ -1055,6 +1092,19 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
     hooks.notify("Command finished", `${record.command} ${status}`);
   }
 
+  /** Everything on screen except the line being typed: the live terminal
+   *  and every frozen block, with the selection, filter and sticky header
+   *  that pointed at them. Nothing reaches the pty and nothing is killed —
+   *  a running command carries on, and its block is added when it ends,
+   *  into a nav with no filter to hide it. */
+  function clearAll(): void {
+    // The nav first, so the selection is dropped while its block is still
+    // in the list — the order `reset` below relies on too.
+    attempt(() => nav?.reset());
+    for (const view of views.splice(0)) attempt(() => view.element.remove());
+    attempt(() => terminal.clear());
+  }
+
   function freeze(record: BlockRecord): void {
     const view = createBlockView(record, {
       cols: terminal.cols,
@@ -1150,6 +1200,7 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
       // clear() keeps) has painted first, and only where repaints happen.
       if (repaintsOnResize) terminal.write("", () => attempt(() => terminal.clear()));
       attempt(() => applyState("running"));
+      attempt(() => hooks.onCommandStart?.());
       return;
     }
     if (event.type === "cwd") {
@@ -1316,6 +1367,7 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
     // A pane with no layout yet (hidden, or the window minimised) measures
     // as zero and would make the addon throw — refit() guards that.
     refit,
+    clearAll,
     reset: () => {
       // The pane is being pointed at something else entirely (the Session
       // view switching agents), so what the *last* thing's shell proved
@@ -1354,6 +1406,28 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
     editorElement: () => editor?.element,
     setChipExtra: (node) => chipRow.setExtra(node),
     atPrompt: () => idle(),
+    setChatView: (active, focusChat) => {
+      chatFocus = active ? focusChat : undefined;
+      if (active) element.dataset["view"] = "chat";
+      else delete element.dataset["view"];
+      // Back to a terminal: re-measured once it has a box again. The keys
+      // are the caller's to hand back (focus()), so a chat that ends in a
+      // background pane never takes them from where the user is.
+      if (!active) attempt(() => refit());
+    },
+    chatKey: (event) => {
+      if (event.type !== "keydown") return true;
+      if (matchChord(event, hostPlatform()) === "palette") {
+        event.preventDefault();
+        event.stopPropagation();
+        attempt(() => {
+          hooks.closeCompletion?.();
+          palette.open(paletteActions(), "Actions");
+        });
+        return false;
+      }
+      return hooks.splitKeys === undefined || handleSplitKey(event, hooks.splitKeys);
+    },
     // Unconditional — no state check here. That is the whole point: the
     // palette must open whether a command is running, the alt screen is
     // held, or there is no editor at all. Only the *actions* it offers

@@ -676,3 +676,44 @@ See **[configuration](configuration.md)** for `historyPath` and
 
 A request builder over the project's own Bruno collections. See
 **[the API client](api-client.md)**.
+
+## A tab in its own window
+
+Right-click a tab and choose **Open in new window** to move it into a window of
+its own; **Return to main window** (or closing that window, or Cmd/Ctrl+W in it)
+puts it back. A web page, editor, database, cluster, chat or Terminal tab can go.
+The API client and Docker tabs stay in the main window for now.
+
+The tab keeps its place in the strip, marked, and selecting it in the main window
+shows a card with **Show window** and **Bring back here**. A Terminal keeps its
+shells, its split layout and any text typed in its command editor but not yet sent;
+its pane in the main window is rebuilt from the shell's own backlog when it comes
+back. Closing the tab closes its window; quitting or closing the main window closes
+every pop-out. Pop-outs are not restored after a restart. In the Office, an employee
+has the same menu (right click, the Menu key or Shift+F10), and clicking the employee
+of a popped tab brings its window forward.
+
+## The Office
+
+The chevron beside **Workspace** in the top bar opens a menu with **Tabs** (the
+Workspace as above) and **Office**. The Office draws one room per project with
+open tabs, one cubicle and one employee per tab (a Terminal tab's split panes
+are one employee), and one more for each agent running without a tab. Tabs and
+agents with no project sit in a **Lounge** room. Projects with nothing open are
+not drawn; they are listed last in the sidebar.
+
+Hover or focus an employee for a card: what it is, its project, the agent and
+model, what it is doing, its branch and changes, and when it was last active.
+The card also shows what is happening inside the tab, live while it is open: a
+Terminal tab shows the last rows of its screen (one block per pane for a split tab,
+at most four), an agent session shows the tail of its output, and a web page,
+editor, database, cluster or chat tab shows a small picture of the page with its
+address. A page that is asleep is not woken for this and says so; an API or Docker
+tab shows only its name and state. Text refreshes every second and pictures every
+two, only while the card is open and the Office is on screen. The card stays open
+while the pointer is on it. What the card reads is never logged and never sent to
+another device. Click it to open that tab, pane or session. An agent that stops to ask a question
+raises its hand, and Jarvis shows a desktop notification naming the project and
+the agent — never the question itself. The badge on the Office item counts the
+raised hands. Drag to pan, scroll or pinch to zoom, **Show whole office** to see
+everything. The Office is desktop-only: it is never offered to another device.

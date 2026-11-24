@@ -24,6 +24,9 @@ export type TabMenuCallbacks = {
 };
 
 export type TabMenuOptions = {
+  /** Open in new window / Return to main window: appended after a separator
+   *  for a tab that can go, left off for one that cannot. */
+  popout?: { label: string; onClick: () => void };
   /** Task 8 fix round 1: a non-terminal tab has no plan panel to toggle —
    *  omitting the item entirely (rather than offering a Plans action that
    *  does nothing) is the caller's call, made from the tab's own kind.
@@ -48,6 +51,12 @@ export function tabMenuTemplate(
   ];
   if (options.showPlans ?? true) {
     items.push({ label: labels.plans, click: callbacks.onPlans });
+  }
+  if (options.popout !== undefined) {
+    items.push(
+      { type: "separator" },
+      { label: options.popout.label, click: options.popout.onClick },
+    );
   }
   return items;
 }

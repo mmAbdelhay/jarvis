@@ -111,7 +111,8 @@ that the terminal itself cannot show.
 ## Workspace
 
 A browser with tabs, per project — and the tabs are not only web pages. See
-**[Workspace tabs](workspace-tabs.md)**.
+**[Workspace tabs](workspace-tabs.md)**. The chevron beside the button also opens
+the **Office**, a floor plan of every tab and agent.
 
 ## Settings
 

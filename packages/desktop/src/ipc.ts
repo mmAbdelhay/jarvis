@@ -30,7 +30,10 @@ import {
   type SystemMetrics,
   type Turn,
 } from "@jarvis/core";
-import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
+import type { AgentAnswerResult, AgentSendResult, AgentView } from "./agent-view.js";
+import type { OfficeActivity } from "./office-activity.js";
+import type { OfficeScreen } from "./office-screen.js";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { Brain, ReviewComment, WorkspaceState, WorkspaceTab } from "@jarvis/core";
 import type { BindChoice, OwnerStatus, RemoteStatus, SetOwnerPasswordResult } from "@jarvis/remote";
 import type {
@@ -107,6 +110,8 @@ import type { UsageHistory } from "./usage-history.js";
 import type { TailnetSwitchResult } from "./tailnet-switch.js";
 import type { TailscaleCertResult } from "./tailscale-cert.js";
 import type { IpLocateResult } from "./ip-locate.js";
+import type { OpenResult } from "./popout.js";
+import type { PopoutTerminalState } from "./popout-state.js";
 import type {
   DeliveryOutcome,
   ReviewListItem,
@@ -154,6 +159,9 @@ export type IpcChannels = {
   // The phone's chat view of a pane (claude-view.ts): "look again", keyed
   // by pane and throttled per pane. The key is the whole payload.
   "terminal:claudeViewChanged": { paneKey: string };
+  // The Office's activity changed (office-activity.ts). No content: the
+  // renderer asks office:activity again.
+  "office:changed": Record<string, never>;
 };
 
 /**
@@ -841,6 +849,10 @@ export type RendererApi = {
    *  dialog: the renderer fires this and forgets it, exactly as it already
    *  does for the file listing. */
   openTerminalFile(paneKey: string, path: string): Promise<GitViewResult<void>>;
+  /** A folder chosen in that sidebar, opened in the pane's project's Editor
+   *  — see TerminalHandlers.openFolder. Never rejects and never shows a
+   *  dialog, same as `openTerminalFile`. */
+  openTerminalFolder(paneKey: string, path: string): Promise<GitViewResult<void>>;
   /** A new, empty file or folder named `name` inside `parentPath`, from the
    *  file sidebar — see TerminalHandlers.createEntry. */
   createTerminalEntry(
@@ -1007,7 +1019,30 @@ export type RendererApi = {
    *  pane's project (`.jarvis/uploads/`), answering its path relative to
    *  there. A phone's call only: a desktop origin is refused. */
   terminalAttachUpload(paneKey: string, fileId: string): Promise<AttachUploadResult>;
+  /** The desktop's Chat view of a pane running Claude Code, Copilot or
+   *  Codex: the session's recent turns plus the prompt and spinner on its
+   *  screen; `none` when no agent runs there. Never carries prompt keys. */
+  terminalAgentView(paneKey: string): Promise<AgentView>;
+  /** Chooses option `index` of the pane's prompt; the screen is read again
+   *  first and a prompt that is gone or changed is refused. */
+  terminalAgentAnswer(paneKey: string, index: number, label: string): Promise<AgentAnswerResult>;
+  /** Types `text` into the agent in the pane as one bracketed paste and an
+   *  Enter. Refused with `gone` when no agent runs there (never a plain
+   *  shell), `prompt` at a menu, `invalid` for empty or over-long text. */
+  terminalAgentSend(paneKey: string, text: string): Promise<AgentSendResult>;
   onTerminalClaudeViewChanged(cb: (payload: { paneKey: string }) => void): void;
+  /** What each agent pane and Jarvis session is doing, for the Office:
+   *  state, question, what it is doing. Desktop only. */
+  officeActivity(): Promise<OfficeActivity>;
+  /** Tells main which tabs and session this window shows, so a hand raised
+   *  for one of them is not announced. Desktop only. */
+  officeViewing(keys: string[]): Promise<void>;
+  /** What a terminal tab, pane or session shows right now (its last rows),
+   *  for the hover card. Read-only; desktop only. */
+  officeScreen(target: { type: "tab" | "pane" | "session"; id: string }): Promise<OfficeScreen>;
+  /** A JPEG data URL still of a hosted page, or undefined. Main window only. */
+  officePageShot(tabId: string): Promise<string | undefined>;
+  onOfficeChanged(cb: () => void): void;
   /** Starts a second shell in the same tab and the same directory, for a
    *  pane the renderer has just split off. */
   splitTerminal(tabId: string, paneId: string): Promise<void>;
@@ -1237,6 +1272,37 @@ export type RendererApi = {
   closeMachine(name: string): Promise<void>;
   /** A machine view's load state changed. Returns the unsubscribe. */
   onMachineState(cb: (state: MachineViewState) => void): () => void;
+  /** The tab id this window is the pop-out of, from its launch arguments;
+   *  undefined in the main window. */
+  popoutTabId: string | undefined;
+  /** Opens a tab in a window of its own (the main window only). For a
+   *  terminal it first asks this window for the tab's layout and drafts —
+   *  see onPopoutHandover. */
+  popoutOpen(tabId: string): Promise<OpenResult>;
+  /** Brings a popped tab back (the main window: any; a pop-out: its own). */
+  popoutReturn(tabId: string): Promise<boolean>;
+  /** Focuses a popped tab's window, and a pane in it. */
+  popoutFocus(tabId: string, paneKey?: string): Promise<boolean>;
+  /** The tab ids shown in pop-outs now. */
+  popoutList(): Promise<string[]>;
+  /** Pops the native "Open in new window" / "Return to main window" menu for
+   *  an Office employee, at (x, y). */
+  popoutEmployeeMenu(tabId: string, x: number, y: number): Promise<void>;
+  /** A pop-out asks what it starts from: its tab and, for a terminal, the
+   *  layout and drafts handed over. */
+  popoutReady(): Promise<{ tabId: string; state?: PopoutTerminalState } | undefined>;
+  /** A pop-out's latest layout and drafts, kept by the host for the return. */
+  popoutReportState(state: PopoutTerminalState): Promise<void>;
+  /** The answer to onPopoutHandover. */
+  popoutHandedOver(tabId: string, state: PopoutTerminalState): Promise<void>;
+  /** What a returned terminal tab carried back; handed over once. */
+  popoutTakeReturned(tabId: string): Promise<PopoutTerminalState | undefined>;
+  /** The popped tab ids changed. */
+  onPopoutChanged(cb: (tabIds: string[]) => void): () => void;
+  /** The host needs this window's layout and drafts for a tab, now. */
+  onPopoutHandover(cb: (tabId: string) => void): () => void;
+  /** Focus a pane of the tab this pop-out shows. */
+  onPopoutFocusPane(cb: (paneKey: string) => void): () => void;
 };
 
 export type WiringDeps = {
@@ -2323,6 +2389,15 @@ export type TerminalHandlers = {
    *  `editor` integration configured, or a code-server that fails to start
    *  are all a click that opens nothing. */
   openFile(paneKey: string, path: string): Promise<GitViewResult<void>>;
+  /** A folder from the file sidebar, opened in the Editor. Resolved and
+   *  contained exactly as `openFile` does, and it must really be a
+   *  directory. code-server stays rooted at the **project** — one process
+   *  per project, never one per folder — and the URL's `folder` is
+   *  replaced with the folder, so the workbench opens it. The tab is the
+   *  project's own editor tab for the project root and one per folder
+   *  (`detail` = "./" and its path under the project) otherwise. Never rejects and
+   *  never surfaces a dialog, same as `openFile`. */
+  openFolder(paneKey: string, path: string): Promise<GitViewResult<void>>;
   /** A new, empty file or folder, from the file sidebar. `parentPath` goes
    *  through the same resolveWithin boundary listDir applies, `name` must
    *  be a single valid segment (isValidEntryName), and an existing entry
@@ -3129,6 +3204,49 @@ export function createTerminalHandlers(deps: TerminalHandlerDeps): TerminalHandl
       } catch {
         // A code-server that failed to start is a click that opens
         // nothing, never an error dialog over a terminal.
+        return fail();
+      }
+    },
+
+    async openFolder(paneKey, path) {
+      const fail = (): GitViewResult<void> => ({
+        ok: false,
+        text: MESSAGES.editorUnavailable(deps.language),
+        language: deps.language,
+      });
+      // Same checks, in the same order, as openFile — see the notes there.
+      if (!isString(paneKey) || !isString(path)) return fail();
+      const files = deps.files;
+      const editor = deps.editor;
+      if (files === undefined || editor === undefined) return fail();
+      const paneCwd = directories.get(paneKey) ?? directoryOf(paneKey.split(":")[0] ?? paneKey);
+      if (paneCwd === undefined) return fail();
+      const project = projectFor(paneCwd);
+      if (project === undefined) return fail();
+      const root = resolveWithin(project.dir, project.dir, files.realPath);
+      if (root === undefined) return fail();
+      const target = resolveWithin(root, path, files.realPath);
+      if (target === undefined) return fail();
+      try {
+        // A file makes readDir throw, and so does an unreadable folder:
+        // either way there is nothing to open.
+        files.readDir(target);
+        // Still the project's one code-server — never rooted at `target`
+        // (a ~200MB process per folder). Only the URL's `folder` moves.
+        const result = await editor.open(root, root);
+        if (!result.ok) return fail();
+        const url = new URL(result.url);
+        url.searchParams.set("folder", target);
+        // `undefined` is the project's own editor tab, so the project root
+        // and the Editor button converge on one tab; any other folder gets
+        // a tab of its own, reused by the next click on it.
+        // The "./" keeps a folder's tab apart from an `editors:` root of the
+        // same name ("web" is the root's detail, "./web" the folder's).
+        const detail =
+          target === root ? undefined : `./${relative(root, target).split(sep).join("/")}`;
+        editor.openTab(project.name, url.toString(), detail);
+        return { ok: true, value: undefined };
+      } catch {
         return fail();
       }
     },

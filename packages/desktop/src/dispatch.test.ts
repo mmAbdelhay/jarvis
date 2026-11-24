@@ -88,6 +88,7 @@ export function fakeDeps(overrides: Partial<DispatchDeps> = {}): DispatchDeps {
       history: vi.fn(async () => []),
       listDir: vi.fn(async () => []),
       openFile: vi.fn(async () => ({ ok: true, value: undefined })),
+      openFolder: vi.fn(async () => ({ ok: true, value: undefined })),
       settings: vi.fn(() => ({
         blocks: false,
         inputEditor: false,
@@ -306,6 +307,16 @@ export function fakeDeps(overrides: Partial<DispatchDeps> = {}): DispatchDeps {
     claudeView: {
       view: vi.fn(async () => ({ kind: "none" as const })),
       answer: vi.fn(() => ({ ok: true as const })),
+    },
+    agentView: {
+      view: vi.fn(async () => ({ kind: "none" as const })),
+      answer: vi.fn(() => ({ ok: true as const })),
+      send: vi.fn(async () => ({ ok: true as const })),
+    },
+    office: {
+      read: vi.fn(async () => ({ panes: {}, sessions: {} })),
+      setViewing: vi.fn(),
+      screen: vi.fn(() => ({ kind: "none" as const })),
     },
     attachUpload: {
       attach: vi.fn(async () => ({ ok: true as const, path: ".jarvis/uploads/x.png" })),
@@ -1312,6 +1323,33 @@ describe("dispatch table: api, dialog, voices", () => {
       ok: true,
     });
     expect(deps.claudeView.answer).toHaveBeenCalledWith("t1", 0, "Yes");
+  });
+
+  it("office:activity and office:viewing reach the watcher", async () => {
+    const deps = fakeDeps();
+    const table = createDispatchTable(deps);
+    expect(await call(table, "office:activity")).toEqual({ panes: {}, sessions: {} });
+    await call(table, "office:viewing", ["t1"]);
+    expect(deps.office.setViewing).toHaveBeenCalledWith(["t1"]);
+  });
+
+  it("office:screen hands its target to the reader, for the desktop only", async () => {
+    const deps = fakeDeps();
+    const table = createDispatchTable(deps);
+    expect(await call(table, "office:screen", { type: "tab", id: "t1" })).toEqual({ kind: "none" });
+    expect(deps.office.screen).toHaveBeenCalledWith({ type: "tab", id: "t1" });
+    expect("office:pageShot" in table).toBe(false);
+  });
+
+  it("terminal:agentView, agentAnswer and agentSend pass their arguments through", async () => {
+    const deps = fakeDeps();
+    const table = createDispatchTable(deps);
+    expect(await call(table, "terminal:agentView", "t1")).toEqual({ kind: "none" });
+    expect(deps.agentView.view).toHaveBeenCalledWith("t1");
+    expect(await call(table, "terminal:agentAnswer", "t1", 0, "Yes")).toEqual({ ok: true });
+    expect(deps.agentView.answer).toHaveBeenCalledWith("t1", 0, "Yes");
+    expect(await call(table, "terminal:agentSend", "t1", "hello")).toEqual({ ok: true });
+    expect(deps.agentView.send).toHaveBeenCalledWith("t1", "hello");
   });
 
   it("terminal:attachUpload attaches with the authenticated origin's deviceId", async () => {

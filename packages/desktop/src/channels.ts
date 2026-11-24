@@ -3,6 +3,7 @@ import type { DevToolsDock } from "./browser-host.js";
 import type { IpcChannels, RendererApi } from "./ipc.js";
 import type { AwakeStatus } from "./keep-awake.js";
 import type { MachineViewState } from "./machine-views.js";
+
 import type { UpdateState } from "./updater.js";
 
 /**
@@ -65,6 +66,12 @@ export type PushChannels = IpcChannels & {
   // Tailnet machines: a machine view's load state (machine-views.ts). Local
   // to this window: the views are this app's own.
   "machine:state": MachineViewState;
+  // Pop-outs (popout.ts), all to this host's own windows: the popped tab
+  // ids after a change; a request for a terminal tab's layout and drafts
+  // (answered with popout:handedOver); a pane to focus in a pop-out.
+  "popout:changed": string[];
+  "popout:handover": string;
+  "popout:focusPane": string;
 };
 
 /**
@@ -185,6 +192,7 @@ export const INVOKE_CHANNELS = {
   terminalHistory: "terminal:history",
   listTerminalDir: "terminal:listDir",
   openTerminalFile: "terminal:openFile",
+  openTerminalFolder: "terminal:openFolder",
   createTerminalEntry: "terminal:createEntry",
   renameTerminalEntry: "terminal:renameEntry",
   trashTerminalEntry: "terminal:trashEntry",
@@ -196,6 +204,14 @@ export const INVOKE_CHANNELS = {
   terminalSnapshot: "terminal:snapshot",
   terminalClaudeView: "terminal:claudeView",
   terminalAnswer: "terminal:answer",
+  terminalAgentView: "terminal:agentView",
+  terminalAgentAnswer: "terminal:agentAnswer",
+  terminalAgentSend: "terminal:agentSend",
+  officeActivity: "office:activity",
+  officeViewing: "office:viewing",
+  officeScreen: "office:screen",
+  // Electron-bound (the page's view): a still of a hosted page.
+  officePageShot: "office:pageShot",
   terminalAttachUpload: "terminal:attachUpload",
   sendTerminalInput: "terminal:input",
   resizeTerminal: "terminal:resize",
@@ -328,6 +344,17 @@ export const INVOKE_CHANNELS = {
   showLocalMachine: "machine:showLocal",
   setMachineBounds: "machine:bounds",
   closeMachine: "machine:close",
+  // Pop-outs (popout.ts): a tab in a window of its own. Electron-bound and
+  // desktop-only: the windows are this host's.
+  popoutOpen: "popout:open",
+  popoutReturn: "popout:return",
+  popoutFocus: "popout:focus",
+  popoutList: "popout:list",
+  popoutEmployeeMenu: "popout:employeeMenu",
+  popoutReady: "popout:ready",
+  popoutReportState: "popout:state",
+  popoutHandedOver: "popout:handedOver",
+  popoutTakeReturned: "popout:take",
   // The updater (updater.ts). Electron-bound and desktop-only: they act on
   // this app's own install and quit it.
   updateCheck: "update:check",
@@ -360,6 +387,7 @@ export const PUSH_CHANNELS = {
   onTerminalExit: "terminal:exit",
   onTerminalLayout: "terminal:layout",
   onTerminalClaudeViewChanged: "terminal:claudeViewChanged",
+  onOfficeChanged: "office:changed",
   onDockerLog: "docker:log",
   onRemoteStatus: "remote:update",
   onTabRename: "workspace:tabRename",
@@ -369,6 +397,9 @@ export const PUSH_CHANNELS = {
   onTabPlans: "workspace:tabPlans",
   onUpdateState: "update:state",
   onMachineState: "machine:state",
+  onPopoutChanged: "popout:changed",
+  onPopoutHandover: "popout:handover",
+  onPopoutFocusPane: "popout:focusPane",
 } as const satisfies Record<PushKey, string>;
 
 /**

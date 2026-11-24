@@ -56,6 +56,21 @@ describe("remote policy", () => {
     "plans:openLink",
     // Reviews: opens the laptop's own browser.
     "reviews:openOnGithub",
+    // The file sidebar's "Open in editor" for a folder: opens a tab on the
+    // laptop, like terminal:openFile.
+    "terminal:openFolder",
+    "terminal:openFile",
+    // The desktop's Chat view of an agent pane: typing into an agent and
+    // answering its prompts stay on the laptop (the phone has its own
+    // terminal:claudeView / terminal:answer).
+    "terminal:agentView",
+    "terminal:agentAnswer",
+    "terminal:agentSend",
+    // The Office: never read for a phone.
+    "office:activity",
+    "office:viewing",
+    "office:screen",
+    "office:pageShot",
   ])("denies %s remotely", (channel) => {
     expect(CHANNEL_POLICY[channel as keyof typeof CHANNEL_POLICY]).toBe("desktop-only");
     expect(isRemoteAllowed(channel)).toBe(false);
@@ -265,6 +280,24 @@ describe("machine:* policy", () => {
       expect(isRemoteAllowed(channel)).toBe(false);
     },
   );
+});
+
+describe("popout:* policy", () => {
+  // A pop-out is a window of the laptop's own: never a phone's.
+  it.each([
+    "popout:open",
+    "popout:return",
+    "popout:focus",
+    "popout:list",
+    "popout:employeeMenu",
+    "popout:ready",
+    "popout:state",
+    "popout:handedOver",
+    "popout:take",
+  ])("keeps %s desktop-only", (channel) => {
+    expect(CHANNEL_POLICY[channel as keyof typeof CHANNEL_POLICY]).toBe("desktop-only");
+    expect(isRemoteAllowed(channel)).toBe(false);
+  });
 });
 
 describe("tailnet:peers policy", () => {

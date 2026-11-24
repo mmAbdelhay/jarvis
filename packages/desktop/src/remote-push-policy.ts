@@ -102,12 +102,18 @@ export const REMOTE_PUSH_POLICY: {
   "update:state": "desktop-only",
   // This window's own machine views (machine-views.ts).
   "machine:state": "desktop-only",
+  // Pop-outs are this host's own windows (popout.ts).
+  "popout:changed": "desktop-only",
+  "popout:handover": "desktop-only",
+  "popout:focusPane": "desktop-only",
   // Each names a local child process a phone never started.
   "setup:output": "desktop-only",
   "voice:hotkeys": "desktop-only",
   // Local to this window only (remote-access.ts's onStatus, ruling 36) — the
   // wire protocol has no message that carries a RemoteStatus at all.
   "remote:update": "desktop-only",
+  // The Office's activity changed; this window's own.
+  "office:changed": "desktop-only",
 
   "metrics:update": { kind: "latest" },
   "sessions:update": { kind: "latest" },

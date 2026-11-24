@@ -19,6 +19,7 @@ export * from "./stt.js";
 export * from "./brain.js";
 export * from "./session-store.js";
 export * from "./usage-store.js";
+export * from "./agent-chat.js";
 export * from "./session-import.js";
 export * from "./process-scan.js";
 export * from "./paths.js";

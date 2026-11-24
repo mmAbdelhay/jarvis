@@ -100,6 +100,7 @@ function recordingHost(): { host: DesktopHost; seen: unknown[][]; state: { focus
       sweepIdleViews: () => seen.push(["sweepIdleViews"]),
       destroyViews: () => seen.push(["destroyViews"]),
       showNotification: (...args) => seen.push(["showNotification", ...args]),
+      showNotice: (...args) => seen.push(["showNotice", ...args]),
       trashItem: async (path) => {
         seen.push(["trashItem", path]);
       },
@@ -263,6 +264,7 @@ describe("inProcessCoreClient: host hooks", () => {
     link.host.requestFavicon("acme", "https://example.com/a");
     link.host.sweepIdleViews();
     link.host.showNotification("Locked out", "Too many attempts");
+    link.host.showNotice("Acme", "Claude Code");
     await link.host.openExternal("https://web.example/");
     link.host.restart();
     link.host.destroyViews();
@@ -270,6 +272,7 @@ describe("inProcessCoreClient: host hooks", () => {
       ["requestFavicon", "acme", "https://example.com/a"],
       ["sweepIdleViews"],
       ["showNotification", "Locked out", "Too many attempts"],
+      ["showNotice", "Acme", "Claude Code"],
       ["openExternal", "https://web.example/"],
       ["restart"],
       ["destroyViews"],
@@ -285,6 +288,7 @@ describe("inProcessCoreClient: host hooks", () => {
       link.host.destroyViews();
       link.host.requestFavicon("acme", "https://example.com/");
       link.host.showNotification("Locked out", "body");
+      link.host.showNotice("Acme", "Claude Code");
       expect(link.host.restart()).toBe("no-service");
       await expect(link.host.openExternal("https://web.example/")).rejects.toThrow(
         "No desktop app",
@@ -487,6 +491,7 @@ describe("inProcessCoreClient: round-trip mode", () => {
     fake.link.host.requestFavicon("acme", "https://a.com/");
     fake.link.host.sweepIdleViews();
     fake.link.host.showNotification("title", "body");
+    fake.link.host.showNotice("title", "body");
     await fake.link.host.openExternal("https://web.example/");
     fake.link.host.restart();
     fake.link.host.destroyViews();
@@ -520,6 +525,7 @@ describe("inProcessCoreClient: round-trip mode", () => {
       "requestFavicon",
       "sweepIdleViews",
       "showNotification",
+      "showNotice",
       "openExternal",
       "restart",
       "destroyViews",

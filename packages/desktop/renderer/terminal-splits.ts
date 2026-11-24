@@ -20,7 +20,10 @@
 // Disposing the whole tree kills nothing: the tab is closing, and main's
 // own close(tabId) reaps the tab and every split under it in one go.
 
+import type { SplitShape } from "../src/popout-state.js";
 import type { TerminalPane } from "./terminal-pane.js";
+
+export type { SplitShape };
 
 export type SplitTree = {
   element: HTMLElement;
@@ -42,6 +45,9 @@ export type SplitTree = {
   removeLeaf(paneKey: string): boolean;
   /** Every pane, in the order they are laid out. */
   panes(): readonly TerminalPane[];
+  /** The layout, as a value: pane keys and the direction of each division
+   *  (not the divider positions). What a pop-out and a return carry. */
+  shape(): SplitShape;
   dispose(): void;
 };
 
@@ -53,6 +59,12 @@ export type SplitTreeOptions = {
    *  close, ⌥⌘arrow, a click on a pane — which is why it lives here rather
    *  than being reconstructed from the callers of those. */
   onFocus?: ((paneKey: string) => void) | undefined;
+  /** Builds this layout instead of the tab's single pane: every leaf is a
+   *  pane whose shell already exists (the caller must not start another for
+   *  it). Pane ids are never reused afterwards. */
+  restore?: SplitShape | undefined;
+  /** With `restore`: the pane that has the focus afterwards. */
+  focusKey?: string | undefined;
 };
 
 /** How narrow a dragged pane may get. Below this a terminal is no longer
@@ -93,7 +105,11 @@ export function createSplitTree(
   tabId: string,
   options: SplitTreeOptions = {},
 ): SplitTree {
-  const { onFocus } = options;
+  const { onFocus, restore, focusKey } = options;
+  const leftmost = (shape: SplitShape): string =>
+    "key" in shape ? shape.key : leftmost(shape.first);
+  const keysOf = (shape: SplitShape): string[] =>
+    "key" in shape ? [shape.key] : [...keysOf(shape.first), ...keysOf(shape.second)];
   const element = document.createElement("div");
   element.className = "terminal-split";
   host.append(element);
@@ -104,6 +120,12 @@ export function createSplitTree(
   /** Pane ids never come round again, even after a close: a reused key
    *  would be a second shell under a name main still remembers. */
   let nextPaneId = 0;
+  if (restore !== undefined) {
+    for (const key of keysOf(restore)) {
+      const id = /:p(\d+)$/.exec(key)?.[1];
+      if (id !== undefined) nextPaneId = Math.max(nextPaneId, Number(id));
+    }
+  }
 
   const leafElement = (): HTMLElement => {
     const created = document.createElement("div");
@@ -127,7 +149,7 @@ export function createSplitTree(
   // leaf, and every one of its shell keys is what it was before splits.
   const firstElement = leafElement();
   element.append(firstElement);
-  const first = makeLeafIn(tabId, firstElement);
+  const first = makeLeafIn(restore === undefined ? tabId : leftmost(restore), firstElement);
   first.element.classList.add("focused");
   let root: Node = first;
   /** The focused leaf. Exactly one, always — every path that changes it
@@ -333,8 +355,36 @@ export function createSplitTree(
     return true;
   };
 
+  const shapeOf = (node: Node): SplitShape =>
+    node.kind === "leaf"
+      ? { key: node.key }
+      : {
+          direction: node.direction,
+          first: shapeOf(node.children[0]),
+          second: shapeOf(node.children[1]),
+        };
+
+  if (restore !== undefined) {
+    // Top down, so each leaf's region is divided before its own contents are:
+    // the leaf keeps the first key of its half and the new leaf takes the
+    // first key of the other.
+    const realize = (leaf: Leaf, shape: SplitShape): void => {
+      if ("key" in shape) return;
+      const key = leftmost(shape.second);
+      if (!splitLeaf(leaf, key, shape.direction, false)) return;
+      const created = leaves().find((candidate) => candidate.key === key);
+      realize(leaf, shape.first);
+      if (created !== undefined) realize(created, shape.second);
+    };
+    realize(first, restore);
+    const wanted = leaves().find((candidate) => candidate.key === focusKey);
+    if (wanted !== undefined) focusLeaf(wanted);
+  }
+
   return {
     element,
+
+    shape: () => shapeOf(root),
 
     split(direction) {
       nextPaneId += 1;

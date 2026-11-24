@@ -37,6 +37,11 @@ describe("the topbar as a drag region", () => {
     expect(body).toMatch(/-webkit-app-region:\s*no-drag/);
   });
 
+  it("the Workspace split control opts out of the drag region too", () => {
+    const body = ruleBody(/\.nav-split\s*\{([^}]*)\}/);
+    expect(body).toMatch(/-webkit-app-region:\s*no-drag/);
+  });
+
   it("reserves room for the titlebar overlay's buttons on Linux/Windows, with a zero fallback", () => {
     expect(css).toMatch(/body\.platform-linux \.topbar,\s*\n?\s*body\.platform-win32 \.topbar/);
     expect(css).toMatch(/env\(titlebar-area-width,\s*100vw\)/);

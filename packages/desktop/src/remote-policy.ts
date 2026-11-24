@@ -131,6 +131,21 @@ export const CHANNEL_POLICY = {
   "terminal:history": "remote",
   "terminal:listDir": "remote",
   "terminal:openFile": "desktop-only",
+  "terminal:openFolder": "desktop-only",
+  // The desktop's Chat view of a pane running Claude, Copilot or Codex
+  // (agent-view.ts): reading it, answering its prompt and typing into the
+  // agent all stay on the laptop. The phone has terminal:claudeView and
+  // terminal:answer for Claude only, and its protocol is unchanged.
+  "terminal:agentView": "desktop-only",
+  "terminal:agentAnswer": "desktop-only",
+  "terminal:agentSend": "desktop-only",
+  // The Office (office-activity.ts): what each agent is doing and which tabs
+  // this window shows. Never run for a phone.
+  "office:activity": "desktop-only",
+  "office:viewing": "desktop-only",
+  // What a tab shows right now, for the hover card: never leaves the laptop.
+  "office:screen": "desktop-only",
+  "office:pageShot": "desktop-only",
   // The file sidebar's writes. Owner decision 2026-10-03: rename and trash
   // are remote — the phone's file list drives them. Both stay inside a
   // configured project root (ipc.ts's resolveWithin/entryWithin, the same
@@ -336,6 +351,16 @@ export const CHANNEL_POLICY = {
   "machine:showLocal": "desktop-only",
   "machine:bounds": "desktop-only",
   "machine:close": "desktop-only",
+  // Pop-outs are windows of the laptop's own; never a phone's.
+  "popout:open": "desktop-only",
+  "popout:return": "desktop-only",
+  "popout:focus": "desktop-only",
+  "popout:list": "desktop-only",
+  "popout:employeeMenu": "desktop-only",
+  "popout:ready": "desktop-only",
+  "popout:state": "desktop-only",
+  "popout:handedOver": "desktop-only",
+  "popout:take": "desktop-only",
   // The updater replaces and quits the laptop's own app; never a phone's
   // call to make.
   "update:check": "desktop-only",

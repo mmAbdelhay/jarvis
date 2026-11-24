@@ -83,6 +83,15 @@ export type TabReports = Pick<TabHost, "open" | "suspend" | "reportPage">;
 /** What a host's pages follow. */
 export type TabSource = Pick<TabHost, "state" | "onChange" | "onViewRequest">;
 
+/** The title openForResult gives its tab: a sign-in page waiting for its
+ *  redirect, which nothing but the user should see. */
+export const AUTHORIZE_TITLE_SUFFIX = " — Authorize";
+
+/** Whether `tab` is an openForResult tab (a sign-in page, no still of it). */
+export function isAuthorizeTab(tab: Pick<WorkspaceTab, "title">): boolean {
+  return tab.title.endsWith(AUTHORIZE_TITLE_SUFFIX);
+}
+
 type PendingResult = { redirectPrefix: string; resolve(url: string): void };
 
 export class TabHost {
@@ -203,7 +212,7 @@ export class TabHost {
       this.#evictIfFull();
       const tab = this.#store.open(project, target.url, "web");
       this.#pending.set(tab.id, { redirectPrefix, resolve });
-      this.#store.update(tab.id, { title: `${project} — Authorize` });
+      this.#store.update(tab.id, { title: `${project}${AUTHORIZE_TITLE_SUFFIX}` });
       this.#request({ kind: "reveal" });
     });
   }

@@ -76,6 +76,7 @@ import {
   certificateExpiry,
   obtainCertificate,
   readTailscaleIps,
+  tailscaleCliEnv,
   type TailscaleCertDeps,
 } from "../tailscale-cert.js";
 import { createTailnetPeers, probePeerFile } from "../tailnet-peers.js";
@@ -250,7 +251,16 @@ import { writeDaemonEnabled } from "../daemon/config-file.js";
 import { errorMessage, MESSAGES, PRIMARY_LANGUAGE } from "../messages.js";
 import { createPaneScreens } from "../pane-screen.js";
 import { createPaneClaudeLookup } from "../pane-claude-session.js";
+import {
+  createPaneAgentLookup,
+  listCodexRollouts,
+  parseChildPids,
+  parseLsofFileNames,
+} from "../pane-agent-session.js";
 import { createPaneAttach, createPaneAttachCwd } from "../pane-attach.js";
+import { createAgentViewHandlers } from "../agent-view.js";
+import { createOfficeActivity, createOfficeViewing } from "../office-activity.js";
+import { createOfficeScreen } from "../office-screen.js";
 import { createClaudeViewHandlers, createClaudeViewNotifier } from "../claude-view.js";
 import { createRecorderDeps, Recorder } from "../recorder.js";
 import { capacityReport, startupReport } from "../startup.js";
@@ -2185,6 +2195,10 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     });
     // The chat view's transcript watches and its pending pushes.
     safely("claude view", () => claudeViewNotifier.stop());
+    safely("office", () => {
+      officeWatcher.stop();
+      for (const stopFeed of stopOfficeFeeds) stopFeed();
+    });
     // One headless terminal per pane that printed.
     safely("pane screens", () => paneScreens.dispose());
     // A recording started but never stopped holds ffmpeg — and the
@@ -2393,7 +2407,8 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
   // `platform` is handed in here, the same place defaultHeadlampBinary
   // gets it, rather than read inside tailscale-cert.ts itself.
   const tailscaleCertDeps: TailscaleCertDeps = {
-    exec: (command, args, limits) => runCommandWithLimits(command, args, limits),
+    exec: (command, args, limits) =>
+      runCommandWithLimits(command, args, limits, tailscaleCliEnv(process.env)),
     fs: {
       access: (path) => access(path),
       mkdir: async (path, options) => {
@@ -2453,6 +2468,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     onExit: (cb) =>
       shells.onShellExit(({ paneKey }) => {
         claudeView.forgetPane(paneKey);
+        agentView.forgetPane(paneKey);
         cb(paneKey);
       }),
     watch: (dir, cb, onError) => {
@@ -2492,6 +2508,94 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     follow: (paneKey, transcript) => claudeViewNotifier.follow(paneKey, transcript),
     forget: (paneKey) => claudeViewNotifier.forget(paneKey),
   });
+  // The desktop's Chat view of a pane running Claude, Copilot or Codex
+  // (agent-view.ts). The same notifier as the phone's: it only learns of a
+  // pane once an agent is found there.
+  const agentView = createAgentViewHandlers({
+    panes: () => shells.panes(),
+    scanAgents: scanPaneAgents,
+    lookup: createPaneAgentLookup({
+      agents: () => registry.list(),
+      home: homedir(),
+      env: process.env,
+      platform,
+      readFile: (path) => importFs.readHead(path),
+      listTranscripts: (dir) => importFs.listFiles(dir, "claude"),
+      listDir: (path) => readdir(path),
+      childPids: async (pid) => {
+        const out = await runCommand("ps", ["-axo", "pid=,ppid="]);
+        return out.code === 0 ? parseChildPids(out.stdout, pid) : [];
+      },
+      openFiles: async (pids) => {
+        if (pids.length === 0) return [];
+        const out = await runCommand("lsof", ["-p", pids.join(","), "-Fn"]);
+        return parseLsofFileNames(out.stdout);
+      },
+      listRollouts: (dir) =>
+        listCodexRollouts(dir, {
+          readDir: (path) => readdir(path),
+          mtimeMs: async (path) => (await stat(path)).mtimeMs,
+        }),
+      readHead: (path) => importFs.readHead(path),
+    }),
+    readTail: (path) => readFileTail(path, CHAT_TAIL_BYTES),
+    statFile: async (path) => {
+      const { size, mtimeMs } = await stat(path);
+      return { size, mtimeMs };
+    },
+    now: () => Date.now(),
+    notice: (paneKey) => claudeViewNotifier.notice(paneKey),
+    screenText: (paneKey) => paneScreens.screenText(paneKey),
+    write: (paneKey, data) => shells.write(paneKey, data),
+    log: (token) => console.warn(token),
+    follow: (paneKey, transcript) => claudeViewNotifier.follow(paneKey, transcript),
+    forget: (paneKey) => claudeViewNotifier.forget(paneKey),
+  });
+  // The Office (office-activity.ts): one shared watcher over every agent
+  // pane and Jarvis session. Quiet until something prints; its changes go to
+  // this window only (never a phone), and a raised hand is a desktop
+  // notification that names the agent, not the question.
+  const officeViewing = createOfficeViewing();
+  const officeWatcher = createOfficeActivity({
+    panes: () => shells.panes(),
+    agentView: (paneKey) => agentView.peek(paneKey),
+    sessions: () => sessions.list(),
+    sessionLog: (id) => sessions.log(id),
+    vendorOf: (agentId) => registry.list().find((agent) => agent.id === agentId)?.vendor,
+    projectOf: (target) =>
+      workspace.state().tabs.find((tab) => tab.id === target)?.project ||
+      sessions.list().find((session) => session.id === target)?.project ||
+      null,
+    now: () => Date.now(),
+    schedule: (fn, ms) => {
+      const timer = setTimeout(fn, ms);
+      timer.unref();
+      return () => clearTimeout(timer);
+    },
+    emitChanged: () => broadcast.local("office:changed", {}),
+    notify: (title, body) => host.showNotice(title, body),
+    focused: () => host.isFocused(),
+    viewing: () => officeViewing.keys(),
+    language: PRIMARY_LANGUAGE,
+    log: (token) => console.warn(token),
+  });
+  // office:screen: what a tab, pane or session shows now. Reads only.
+  const officeScreen = createOfficeScreen({
+    tabs: () => workspace.state().tabs,
+    panes: () => shells.panes(),
+    screenText: (paneKey) => paneScreens.screenText(paneKey),
+    paneLog: (paneKey) => shells.log(paneKey),
+    sessions: () => sessions.list(),
+    sessionLog: (id) => sessions.log(id),
+    agentOf: (paneKey) => officeWatcher.agentOf(paneKey),
+    log: (token) => console.warn(token),
+  });
+  const stopOfficeFeeds = [
+    shells.onOutput(({ paneKey }) => officeWatcher.markDirty(paneKey)),
+    shells.onShellExit(() => officeWatcher.markDirty()),
+    sessions.onOutput(({ sessionId }) => officeWatcher.markDirty(sessionId)),
+    sessions.onChange(() => officeWatcher.markDirty()),
+  ];
   const paneAttach = createPaneAttach({
     uploads: uploadStore,
     cwdFor: createPaneAttachCwd({
@@ -2604,6 +2708,12 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     awake,
     tailnetPeers,
     claudeView,
+    agentView,
+    office: {
+      read: () => officeWatcher.read(),
+      setViewing: (keys) => officeViewing.set(keys),
+      screen: (target) => officeScreen.read(target),
+    },
     attachUpload: paneAttach,
     terminalLayout: { announce: (change) => broadcast.send("terminal:layout", change) },
     plans: {

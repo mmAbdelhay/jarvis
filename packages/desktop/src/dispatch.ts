@@ -31,6 +31,9 @@ import {
 import type { DockerConfig, PlanCommentStore, PlanFiles, SnippetLanguage } from "@jarvis/platform";
 import { isWithin } from "@jarvis/platform";
 import { randomInt } from "node:crypto";
+import type { AgentAnswerResult, AgentSendResult, AgentView } from "./agent-view.js";
+import type { OfficeActivity } from "./office-activity.js";
+import type { OfficeScreen } from "./office-screen.js";
 import { bracketedSubmit } from "./bracketed.js";
 import {
   type AttachUploadResult,
@@ -241,7 +244,19 @@ export type ElectronBoundChannel =
   | "machine:show"
   | "machine:showLocal"
   | "machine:bounds"
-  | "machine:close";
+  | "machine:close"
+  // Pop-outs: windows of this host (popout.ts).
+  | "popout:open"
+  | "popout:return"
+  | "popout:focus"
+  | "popout:list"
+  | "popout:employeeMenu"
+  | "popout:ready"
+  | "popout:state"
+  | "popout:handedOver"
+  | "popout:take"
+  // The Office's still of a hosted page (view-reconciler.ts's capture).
+  | "office:pageShot";
 
 export type TableChannel = Exclude<InvokeChannel, ElectronBoundChannel>;
 
@@ -464,6 +479,22 @@ export type DispatchDeps = {
   claudeView: {
     view(paneKey: unknown): Promise<ClaudeView>;
     answer(paneKey: unknown, index: unknown, label: unknown): ClaudeAnswerResult;
+  };
+  // The desktop's Chat view of a pane running any agent (agent-view.ts's
+  // handlers, built in compose.ts). Desktop-only channels; each validates
+  // its own arguments.
+  agentView: {
+    view(paneKey: unknown): Promise<AgentView>;
+    answer(paneKey: unknown, index: unknown, label: unknown): AgentAnswerResult;
+    send(paneKey: unknown, text: unknown): Promise<AgentSendResult>;
+  };
+  // The Office's watcher and window-viewing keys (office-activity.ts, built
+  // in compose.ts). Desktop-only channels.
+  office: {
+    read(): Promise<OfficeActivity>;
+    setViewing(keys: unknown): void;
+    /** office:screen: what a terminal or session shows now (office-screen.ts). */
+    screen(target: unknown): OfficeScreen;
   };
   // pane-attach.ts's createPaneAttach, built in compose.ts over the same
   // upload store remote:uploadFile stages into. `deviceId` is always the
@@ -1204,6 +1235,15 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
     // tap, never trusted from the call (session:answer's rule).
     "terminal:claudeView": ([paneKey]) => deps.claudeView.view(paneKey),
     "terminal:answer": ([paneKey, index, label]) => deps.claudeView.answer(paneKey, index, label),
+    "terminal:agentView": ([paneKey]) => deps.agentView.view(paneKey),
+    "terminal:agentAnswer": ([paneKey, index, label]) =>
+      deps.agentView.answer(paneKey, index, label),
+    "terminal:agentSend": ([paneKey, text]) => deps.agentView.send(paneKey, text),
+    "office:activity": () => deps.office.read(),
+    "office:screen": ([target]) => deps.office.screen(target),
+    "office:viewing": ([keys]) => {
+      deps.office.setViewing(keys);
+    },
     // A file this same device staged with remote:uploadFile, copied into
     // the pane's project. Like remote:readJsonUpload, a desktop origin is
     // refused here, not by policy alone, and the owner is always the
@@ -1286,6 +1326,8 @@ export function createDispatchTable(deps: DispatchDeps): DispatchTable {
       ),
     "terminal:listDir": ([paneKey, path]) => terminal.listDir(paneKey as string, path as string),
     "terminal:openFile": ([paneKey, path]) => terminal.openFile(paneKey as string, path as string),
+    "terminal:openFolder": ([paneKey, path]) =>
+      terminal.openFolder(paneKey as string, path as string),
     "terminal:createEntry": ([paneKey, parentPath, name, kind], origin) => {
       // The handler's own checks (project root containment, a plain new
       // name) stay; a remote caller's arguments are typed first.
