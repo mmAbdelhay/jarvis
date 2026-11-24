@@ -215,6 +215,7 @@ function decode(raw: unknown): Cursor | undefined {
   }
 }
 
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 /** A reset time of the transcript as the screen words it: "04:20" today, "Wed 22:00" later. */
@@ -227,7 +228,11 @@ function resetText(epochSeconds: number, nowMs: number): string {
     at.getFullYear() === today.getFullYear() &&
     at.getMonth() === today.getMonth() &&
     at.getDate() === today.getDate();
-  return sameDay ? `${hh}:${mm}` : `${WEEKDAYS[at.getDay()]} ${hh}:${mm}`;
+  if (sameDay) return `${hh}:${mm}`;
+  if (at.getTime() - nowMs > 6 * 24 * 3600 * 1000) {
+    return `${at.getDate()} ${MONTHS[at.getMonth()]} ${hh}:${mm}`;
+  }
+  return `${WEEKDAYS[at.getDay()]} ${hh}:${mm}`;
 }
 
 /** The transcript's limits that have not reset yet, worded like the screen's. */

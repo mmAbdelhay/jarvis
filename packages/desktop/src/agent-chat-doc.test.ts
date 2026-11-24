@@ -535,6 +535,17 @@ describe("agentChat", () => {
       expect(view.status?.limits[0]?.resets).toMatch(/\d\d:\d\d/);
     });
 
+    it("words a reset more than six days away with its date", async () => {
+      const now = new Date(2026, 10, 24, 10, 0).getTime();
+      const far = new Date(2026, 11, 19, 12, 43).getTime() / 1000;
+      const t = setup(
+        codexLimitsLine({ used_percent: 3, window_minutes: 43200, resets_at: far }, null),
+        { vendor: "openai", screen: "" },
+      );
+      t.deps.now = () => now;
+      expect(agent(await t.handlers.chat("t1")).status?.limits[0]?.resets).toBe("19 Dec 12:43");
+    });
+
     it("shows transcript limits even with no screen rows", async () => {
       const t = setup(codexLimitsLine({ used_percent: 3, window_minutes: 300 }, null), {
         vendor: "openai",

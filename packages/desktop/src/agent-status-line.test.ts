@@ -65,6 +65,53 @@ describe("readAgentStatusLine — Claude", () => {
     expect(view.lines).toEqual([]);
   });
 
+  it("reads limits only from the statusline rows and the note beside the box", () => {
+    const view = readAgentStatusLine(
+      "anthropic",
+      [
+        "Session 90% resets 5pm",
+        "The answer: week 99% is high",
+        RULE,
+        "❯ week 99%",
+        RULE,
+        "  Session 13% resets 04:20",
+        "  ? for shortcuts",
+      ].join("\n"),
+    );
+    expect(view.limits).toEqual([{ label: "Session", usedPercent: 13, resets: "04:20" }]);
+    const inBox = readAgentStatusLine(
+      "anthropic",
+      [RULE, "❯ You've used 92% of your 5-hour limit", RULE, "  ? for shortcuts"].join("\n"),
+    );
+    expect(inBox.limits).toEqual([]);
+    const sentence = readAgentStatusLine(
+      "anthropic",
+      [
+        "I said You've used 92% of your 5-hour limit · resets 11:20pm",
+        RULE,
+        "❯ ",
+        RULE,
+        "  ? for shortcuts",
+      ].join("\n"),
+    );
+    expect(sentence.limits).toEqual([]);
+  });
+
+  it("shows a window once, preferring the statusline over the note", () => {
+    const view = readAgentStatusLine(
+      "anthropic",
+      [
+        "You've used 92% of your 5-hour limit · resets 11:20pm",
+        RULE,
+        "❯ ",
+        RULE,
+        "  Session 13% resets 04:20",
+        "  ? for shortcuts",
+      ].join("\n"),
+    );
+    expect(view.limits).toEqual([{ label: "Session", usedPercent: 13, resets: "04:20" }]);
+  });
+
   it("shows nothing for the default statusline and nothing while a menu is open", () => {
     expect(readAgentStatusLine("anthropic", claude("  ? for shortcuts"))).toEqual({
       lines: [],

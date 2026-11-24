@@ -20,7 +20,6 @@ export const STATUS_MAX_LINES = 6;
 export const STATUS_MAX_CHARS = 300;
 const MAX_LIMITS = 8;
 const TAIL_ROWS = 40;
-const BOTTOM_ROWS = 12;
 
 const EMPTY = (): AgentStatusLine => ({ lines: [], limits: [] });
 
@@ -69,8 +68,8 @@ const INPUT_ROW = /^\s*[>❯›]/;
 const MODE_ROW =
   /^\s*(?:[⏸⏵⏯▶]|\? for shortcuts|esc to |shift\+tab|ctrl\+[a-z] to )|\(shift\+tab to cycle\)|for shortcuts\s*$/i;
 
-/** Rows of the user's own statusline: between the box's closing rule and the mode row. */
-function claudeLines(rows: string[]): string[] {
+/** The input box's opening and closing rules, or undefined without a box. */
+function claudeBox(rows: string[]): { open: number; close: number } | undefined {
   let close = -1;
   for (let i = rows.length - 1; i >= 0; i--) {
     if (RULE.test(rows[i] as string)) {
@@ -78,7 +77,7 @@ function claudeLines(rows: string[]): string[] {
       break;
     }
   }
-  if (close < 1) return [];
+  if (close < 1) return undefined;
   let open = -1;
   for (let i = close - 1; i >= 0 && i >= close - 12; i--) {
     if (RULE.test(rows[i] as string)) {
@@ -86,9 +85,16 @@ function claudeLines(rows: string[]): string[] {
       break;
     }
   }
-  if (open === -1 || !INPUT_ROW.test(rows[open + 1] ?? "")) return [];
+  if (open === -1 || !INPUT_ROW.test(rows[open + 1] ?? "")) return undefined;
+  return { open, close };
+}
+
+/** Rows of the user's own statusline: between the box's closing rule and the mode row. */
+function claudeLines(rows: string[]): string[] {
+  const box = claudeBox(rows);
+  if (box === undefined) return [];
   const out: string[] = [];
-  for (const row of rows.slice(close + 1)) {
+  for (const row of rows.slice(box.close + 1)) {
     if (MODE_ROW.test(row)) break;
     out.push(row);
   }
@@ -126,32 +132,46 @@ function limitOf(segment: string): AgentLimit | undefined {
 }
 
 const NOTE =
-  /You['’]ve used (\d{1,3}(?:\.\d+)?)% of your ([\w -]{1,24}?) limit(?:\s*[·•-]\s*resets\s+(.{1,40}))?\s*$/i;
+  /^You['’]ve used (\d{1,3}(?:\.\d+)?)% of your ([\w -]{1,24}?) limit(?:\s*[·•-]\s*resets\s+(.{1,40}))?\s*$/i;
+
+/** One key per usage window, so the CLI's "5-hour" and a statusline's "Session" are one. */
+function windowKey(label: string): string {
+  const text = label.toLowerCase().replace(/[\s-]/g, "");
+  if (/^(session|5h|5hours?)$/.test(text)) return "5h";
+  if (/^(week|weekly|7d|7days?)$/.test(text)) return "week";
+  return text;
+}
 
 function claudeLimits(rows: string[]): AgentLimit[] {
+  const box = claudeBox(rows);
+  if (box === undefined) return [];
   const out: AgentLimit[] = [];
+  const seen = new Set<string>();
   const add = (limit: AgentLimit): void => {
-    if (!out.some((seen) => seen.label.toLowerCase() === limit.label.toLowerCase())) {
-      out.push(limit);
-    }
+    const key = windowKey(limit.label);
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(limit);
   };
-  for (const row of rows.slice(-BOTTOM_ROWS)) {
-    const text = clean(row);
-    const note = NOTE.exec(text);
-    const used = percentOf(note?.[1] ?? "");
-    if (note !== null && used !== undefined) {
-      const resets = note[3]?.trim();
-      add({
-        label: (note[2] ?? "").trim(),
-        usedPercent: used,
-        ...(resets === undefined || resets === "" ? {} : { resets }),
-      });
-      continue;
-    }
-    for (const segment of text.split(/\s[│|¦]\s/)) {
+  // Generic groups only from the user's own statusline rows.
+  for (const row of claudeLines(rows)) {
+    for (const segment of clean(row).split(/\s[│|¦]\s/)) {
       const limit = limitOf(segment.trim());
       if (limit !== undefined) add(limit);
     }
+  }
+  // The CLI's own note: the whole row, directly beside the box.
+  const beside = [rows[box.open - 1], ...rows.slice(box.close + 1)];
+  for (const row of beside) {
+    const note = NOTE.exec(clean(row ?? ""));
+    const used = percentOf(note?.[1] ?? "");
+    if (note === null || used === undefined || note.index !== 0) continue;
+    const resets = note[3]?.trim();
+    add({
+      label: (note[2] ?? "").trim(),
+      usedPercent: used,
+      ...(resets === undefined || resets === "" ? {} : { resets }),
+    });
   }
   return out;
 }
