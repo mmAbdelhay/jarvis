@@ -34,7 +34,8 @@ describe("the side panel", () => {
     const side = s.q<HTMLElement>(".ac-side");
     expect(side.hidden).toBe(false);
     const titles = [...side.querySelectorAll(".ac-section__title")].map((n) => n.textContent);
-    expect(titles).toEqual(["To-do, 2 of 4", "Sub-agents", "Changed files", "Context, 62% left"]);
+    expect(titles).toEqual(["To-do, 2 of 4", "Sub-agents", "Changed files", "Context"]);
+    expect(side.querySelector(".ac-section__value")?.textContent).toBe("62% left");
     expect(side.querySelector(".ac-agent")?.textContent).toContain("Check other totals");
     expect(side.querySelector(".ac-agent__state")?.textContent).toBe("Running 0s");
     const files = [...side.querySelectorAll<HTMLButtonElement>(".ac-file")];
@@ -53,7 +54,8 @@ describe("the side panel", () => {
     const some = await open(agentView({ context: { used: 5000 } }));
     expect(
       [...some.host.querySelectorAll(".ac-side .ac-section__title")].map((n) => n.textContent),
-    ).toEqual(["Context, 5k tokens used"]);
+    ).toEqual(["Context"]);
+    expect(some.host.querySelector(".ac-section__value")?.textContent).toBe("5k tokens used");
     expect(some.host.querySelector(".ac-side [role='progressbar']")).toBeNull();
     const none = await open(agentView());
     expect(none.q<HTMLElement>(".ac-side").hidden).toBe(true);
@@ -113,7 +115,7 @@ describe("a narrow pane", () => {
     expect(s.q<HTMLElement>(".ac-side").hidden).toBe(true);
     expect(s.q<HTMLElement>(".agent-chat").dataset["narrow"]).toBe("true");
     const chips = [...s.host.querySelectorAll(".ac-chip")].map((c) => c.textContent);
-    expect(chips).toEqual(["To-do 2 of 4", "Sub-agents 1", "Changed files 2", "Context 62%"]);
+    expect(chips).toEqual(["To-do 2 of 4", "Sub-agents 1", "Changed files 2", "Context 62% left"]);
     expect(s.q<HTMLElement>(".ac-panel-toggle").hidden).toBe(true);
   });
 

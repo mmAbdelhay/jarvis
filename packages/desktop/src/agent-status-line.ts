@@ -14,14 +14,27 @@ export type AgentLimit = {
   resets?: string;
 };
 
-export type AgentStatusLine = { lines: string[]; limits: AgentLimit[] };
+/** What the rows plainly say about the session; a field the rows do not state is absent. */
+export type AgentStatusDetails = {
+  account?: string;
+  folder?: string;
+  branch?: string;
+  model?: string;
+  context?: { usedPercent: number; usedText?: string; totalText?: string };
+};
+
+export type AgentStatusLine = {
+  lines: string[];
+  limits: AgentLimit[];
+  details: AgentStatusDetails;
+};
 
 export const STATUS_MAX_LINES = 6;
 export const STATUS_MAX_CHARS = 300;
 const MAX_LIMITS = 8;
 const TAIL_ROWS = 40;
 
-const EMPTY = (): AgentStatusLine => ({ lines: [], limits: [] });
+const EMPTY = (): AgentStatusLine => ({ lines: [], limits: [], details: {} });
 
 /** The text without control characters (a newline is split on before this). */
 function withoutControls(text: string): string {
@@ -193,7 +206,7 @@ function codexLines(rows: string[]): string[] {
 const RUN_ON = /\s*(?:·\s*)?Run on:.*$/;
 const PLAN = /Plan:\s*([\d,]+\/[\d,]+)\s*\((\d{1,3}(?:\.\d+)?)%\s*used\)/i;
 
-function copilot(rows: string[]): AgentStatusLine {
+function copilot(rows: string[]): Omit<AgentStatusLine, "details"> {
   const bottom = rows.slice(-8);
   let below = -1;
   for (let i = bottom.length - 1; i >= 0; i--) {
@@ -226,6 +239,103 @@ function copilot(rows: string[]): AgentStatusLine {
   return { lines, limits };
 }
 
+// ---- details: only what a row plainly says --------------------------------
+
+const EMAIL = /^(?:(\S+)\s+)?([\w.+-]+@[\w-]+(?:\.[\w-]+)+)$/;
+const PATH = String.raw`[~/][^\s\]]*`;
+const GLYPH_BRANCH = /^[\uE0A0⎇]\s*(\S+)$/;
+
+function setOnce(
+  details: AgentStatusDetails,
+  key: "account" | "folder" | "branch" | "model",
+  value: string | undefined,
+): void {
+  if (value !== undefined && value !== "" && details[key] === undefined) details[key] = value;
+}
+
+/** The inside of one `[...]` group of a Claude statusline. */
+function claudeGroup(inner: string, details: AgentStatusDetails): void {
+  const where = new RegExp(`^[^\\s@]+@[^\\s:]+:(${PATH})(?:\\s+\\(([^)\\s]+)\\))?$`).exec(inner);
+  if (where !== null) {
+    setOnce(details, "folder", where[1]);
+    setOnce(details, "branch", where[2]);
+    return;
+  }
+  const ctx = /^(.{1,40}?)\s+ctx:(\d{1,3})%(?:\s*\((\d[\d.]*[a-z]?)\/(\d[\d.]*[a-z]?)\))?$/i.exec(
+    inner,
+  );
+  if (ctx !== null) {
+    const used = percentOf(ctx[2] ?? "");
+    setOnce(details, "model", ctx[1]);
+    if (used !== undefined && details.context === undefined) {
+      details.context = {
+        usedPercent: used,
+        ...(ctx[3] === undefined ? {} : { usedText: ctx[3] }),
+        ...(ctx[4] === undefined ? {} : { totalText: ctx[4] }),
+      };
+    }
+    return;
+  }
+  if (/^[\w][\w .+-]{0,39}$/.test(inner)) setOnce(details, "model", inner);
+}
+
+function claudeDetails(lines: string[]): AgentStatusDetails {
+  const details: AgentStatusDetails = {};
+  for (const line of lines) {
+    const email = EMAIL.exec(line);
+    if (email !== null) {
+      setOnce(details, "account", email[1] ?? email[2]);
+      continue;
+    }
+    const groups = [...line.matchAll(/\[([^\]]*)\]/g)];
+    if (groups.length > 0) {
+      for (const group of groups) claudeGroup((group[1] ?? "").trim(), details);
+      continue;
+    }
+    const path = new RegExp(`^(${PATH})(?:\\s+(?:\\(([^)\\s]+)\\)|[\\uE0A0⎇]\\s*(\\S+)))?$`).exec(
+      line,
+    );
+    if (path !== null) {
+      setOnce(details, "folder", path[1]);
+      setOnce(details, "branch", path[2] ?? path[3]);
+      continue;
+    }
+    const branch = /^\(([^)\s]+)\)$/.exec(line) ?? GLYPH_BRANCH.exec(line);
+    if (branch !== null) setOnce(details, "branch", branch[1]);
+  }
+  return details;
+}
+
+function codexDetails(lines: string[]): AgentStatusDetails {
+  const details: AgentStatusDetails = {};
+  for (const line of lines) {
+    const parts = line.split(" · ").map((part) => part.trim());
+    const at = parts.findIndex((part) => new RegExp(`^${PATH}$`).test(part));
+    if (parts.length < 2 || at === -1) continue;
+    if (at > 0) setOnce(details, "model", parts[0]);
+    setOnce(details, "folder", parts[at]);
+  }
+  return details;
+}
+
+function copilotDetails(lines: string[]): AgentStatusDetails {
+  const details: AgentStatusDetails = {};
+  for (const line of lines) {
+    const where = new RegExp(`^([^\\s:]+):(${PATH})(?:\\s+\\[⎇\\s*([^\\]]+)\\])?(?:\\s|$)`).exec(
+      line,
+    );
+    if (where !== null) {
+      setOnce(details, "account", where[1]);
+      setOnce(details, "folder", where[2]);
+      setOnce(details, "branch", where[3]?.trim());
+      continue;
+    }
+    const model = /^(.{1,60}?) · [^·]{1,30} · \(\d{1,3}%\)$/.exec(line);
+    if (model !== null) setOnce(details, "model", model[1]);
+  }
+  return details;
+}
+
 /** The agent's own status line and usage limits from its pane's screen. */
 export function readAgentStatusLine(vendor: AgentVendor, screen: string): AgentStatusLine {
   try {
@@ -242,12 +352,18 @@ export function readAgentStatusLine(vendor: AgentVendor, screen: string): AgentS
     }
     if (vendor === "github") {
       const out = copilot(rows);
-      return { lines: bounded(out.lines), limits: out.limits.slice(0, MAX_LIMITS) };
+      const lines = bounded(out.lines);
+      return { lines, limits: out.limits.slice(0, MAX_LIMITS), details: copilotDetails(lines) };
     }
-    if (vendor === "openai") return { lines: bounded(codexLines(rows)), limits: [] };
+    if (vendor === "openai") {
+      const lines = bounded(codexLines(rows));
+      return { lines, limits: [], details: codexDetails(lines) };
+    }
+    const lines = bounded(claudeLines(rows));
     return {
-      lines: bounded(claudeLines(rows)),
+      lines,
       limits: claudeLimits(rows).slice(0, MAX_LIMITS),
+      details: claudeDetails(lines),
     };
   } catch {
     return EMPTY();

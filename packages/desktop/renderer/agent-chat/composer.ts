@@ -25,13 +25,13 @@ import {
   ICONS,
   icon,
   quotePath,
-  tokens,
   type Translate,
 } from "./dom.js";
 import { hostPlatform } from "../keys.js";
 import { clockText, createDictationControl, type DictationApi } from "./dictation.js";
 import { fileIcon } from "../file-icons.js";
 import { createMenu, type MenuItem } from "./menus.js";
+import { contextOf, contextValue } from "./status.js";
 
 /** The most one send carries, as agentSend counts it. */
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
@@ -1155,12 +1155,16 @@ export function createComposer(options: ComposerOptions): Composer {
   });
 
   function contextNode(next: AgentOf): DocumentFragment | undefined {
-    const used = next.context;
-    if (used === undefined) return undefined;
-    if (used.leftPercent !== undefined) {
-      return fmtNode(t("agentChatContextLeft"), { n: `${used.leftPercent}%` });
-    }
-    return fmtNode(t("agentChatContextUsed"), { n: tokens(used.used) });
+    const info = contextOf(next);
+    if (info === undefined) return undefined;
+    const value = contextValue(info, t);
+    const key =
+      info.usedPercent !== undefined
+        ? "agentChatContextPercent"
+        : info.leftPercent !== undefined
+          ? "agentChatContextLeft"
+          : "agentChatContextUsed";
+    return fmtNode(t(key), { n: value.n });
   }
 
   grow();

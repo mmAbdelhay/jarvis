@@ -2780,35 +2780,44 @@
   .ac-deriving { margin: 0; color: var(--text-muted); font-size: 13px; }
   .ac-hide-panel { min-height: 40px; border: 1px solid var(--border); border-radius: var(--r-control);
     background: transparent; color: var(--text-secondary); }
-  .ac-meter--mini { display: block; inline-size: 44px; height: 4px; }
+  .ac-meter--mini { display: block; inline-size: 48px; height: 4px; }
   .ac-meter--mini .ac-meter__fill { display: block; height: 4px; }
   .ac-meter--wide { display: block; }
   .ac-meter--wide .ac-meter__fill { display: block; }
-  /* The status strip under the composer: limits as chips, then the agent's own rows. */
-  .ac-status { display: flex; flex-direction: column; gap: 4px; min-width: 0; padding-block-start: 6px; }
+  /* The status row under the composer: who on the left, each limit on the right, one line. */
+  .ac-status { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    box-sizing: border-box; min-width: 0; min-height: 28px; padding-inline: 15px; overflow: hidden;
+    container-type: inline-size; color: var(--text-muted); font: 13px/1.4 var(--font-ui); white-space: nowrap; }
+  .ac-status[hidden] { display: none; }
   .ac-status[data-stale="true"] { opacity: 0.7; }
-  .ac-status__limits { display: flex; flex-wrap: wrap; gap: 4px 8px; min-width: 0; }
-  .ac-limit { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-inline-size: 100%;
-    padding: 2px 8px; border-radius: var(--r-control); background: var(--surface); color: var(--text-secondary);
-    font-size: 12px; line-height: 1.4; white-space: nowrap; }
-  .ac-limit:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-  .ac-limit__label { overflow: hidden; text-overflow: ellipsis; max-inline-size: 12ch; }
-  .ac-limit__pct { color: var(--text); font-variant-numeric: tabular-nums; }
-  .ac-limit__resets { overflow: hidden; text-overflow: ellipsis; max-inline-size: 18ch; color: var(--text-muted); }
-  .ac-limit__word { font-weight: 600; }
+  .ac-status__who { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .ac-status__limits { flex: none; display: flex; align-items: center; gap: 14px; margin-inline-start: auto; }
+  .ac-status__limits[hidden] { display: none; }
+  .ac-limit { display: inline-flex; align-items: center; gap: 6px; flex: none; min-height: 24px; padding: 0;
+    border: 0; border-radius: var(--r-control); background: transparent; color: inherit; font: inherit;
+    white-space: nowrap; cursor: pointer; }
+  .ac-limit:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .ac-limit__pct { font-variant-numeric: tabular-nums; }
+  .ac-limit[data-level="warn"], .ac-limit[data-level="warn"] .ac-limit__pct { color: var(--warn); }
+  .ac-limit[data-level="danger"], .ac-limit[data-level="danger"] .ac-limit__pct { color: var(--bad-text); }
   .ac-limit[data-level="warn"] .ac-meter__fill, .ac-limit-full[data-level="warn"] .ac-meter__fill { background: var(--warn); }
-  .ac-limit[data-level="warn"] .ac-limit__word, .ac-limit-full[data-level="warn"] .ac-limit-full__note { color: var(--warn); }
   .ac-limit[data-level="danger"] .ac-meter__fill, .ac-limit-full[data-level="danger"] .ac-meter__fill { background: var(--bad); }
-  .ac-limit[data-level="danger"] .ac-limit__word, .ac-limit-full[data-level="danger"] .ac-limit-full__note { color: var(--bad-text); }
-  .ac-status__lines { display: flex; flex-direction: column; min-width: 0; }
-  .ac-status__line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
-    color: var(--text-muted); font: 12px/1.5 var(--font-mono); user-select: text; }
-  .ac-status__more { align-self: flex-start; min-height: 24px; padding: 0 6px; border: 0; background: transparent;
-    color: var(--text-secondary); font-size: 12px; cursor: pointer; }
+  .ac-limit-full[data-level="warn"] .ac-limit-full__note { color: var(--warn); }
+  .ac-limit-full[data-level="danger"] .ac-limit-full__note { color: var(--bad-text); }
+  /* A narrow pane gives up the left part first, then the meters; the percentages stay. */
+  @container (max-width: 560px) { .ac-status__who { display: none; } .ac-limit__resets { display: none; } }
+  @container (max-width: 300px) { .ac-limit__slot { display: none; } .ac-status__limits { gap: 10px; } }
   .ac-limit-full { display: flex; flex-direction: column; gap: 4px; margin-block-end: var(--s3); }
   .ac-limit-full__head { display: flex; align-items: baseline; gap: 8px; color: var(--text); font-size: 13px; }
   .ac-limit-full__note { color: var(--text-muted); font-size: 12px; }
-  .ac-limit-line { color: var(--text-muted); font: 12px/1.5 var(--font-mono); overflow-wrap: anywhere; user-select: text; }
+  .ac-section__head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+  .ac-section__value { color: var(--text-secondary); font-size: 13px; font-variant-numeric: tabular-nums; }
+  .ac-kv { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font-size: 13px; }
+  .ac-kv__key { flex: none; color: var(--text-muted); }
+  .ac-kv__value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); }
+  .ac-raw__summary { color: var(--text); font-size: 14px; font-weight: 600; cursor: pointer; }
+  .ac-raw[open] .ac-raw__summary { margin-block-end: 10px; }
+  .ac-raw__line { color: var(--text-muted); font: 12px/1.5 var(--font-mono); overflow-wrap: anywhere; user-select: text; }
   .ac-chips { position: relative; display: flex; flex-wrap: wrap; gap: var(--s2); }
   .ac-chip { min-height: 32px; padding: 0 12px; border: 0; border-radius: var(--r-control);
     background: var(--surface); color: var(--text-secondary); }

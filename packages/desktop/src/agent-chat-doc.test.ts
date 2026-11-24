@@ -490,6 +490,7 @@ describe("agentChat", () => {
       expect(view.status).toEqual({
         lines: ["Session 13% resets 04:20", "work-account"],
         limits: [{ label: "Session", usedPercent: 13, resets: "04:20" }],
+        details: {},
       });
       expect(
         agent(await setup(userLine(1), { screen: claudeScreen() }).handlers.chat("t1")).status,
@@ -501,11 +502,13 @@ describe("agentChat", () => {
       expect(agent(await t.handlers.chat("t1")).status).toEqual({
         lines: ["work-account"],
         limits: [],
+        details: {},
       });
       t.state.screen = ["Do you want to proceed?", "❯ 1. Yes", "  2. No"].join("\n");
       expect(agent(await t.handlers.chat("t1")).status).toEqual({
         lines: ["work-account"],
         limits: [],
+        details: {},
         stale: true,
       });
       t.state.screen = claudeScreen("  other-account");
@@ -530,6 +533,10 @@ describe("agentChat", () => {
       t.deps.now = () => now;
       const view = agent(await t.handlers.chat("t1"));
       expect(view.status?.lines).toEqual(["GPT-6-Luna default · /private/tmp/x"]);
+      expect(view.status?.details).toEqual({
+        model: "GPT-6-Luna default",
+        folder: "/private/tmp/x",
+      });
       expect(view.status?.limits).toHaveLength(1);
       expect(view.status?.limits[0]).toMatchObject({ label: "5h", usedPercent: 10 });
       expect(view.status?.limits[0]?.resets).toMatch(/\d\d:\d\d/);
@@ -554,6 +561,7 @@ describe("agentChat", () => {
       expect(agent(await t.handlers.chat("t1")).status).toEqual({
         lines: [],
         limits: [{ label: "5h", usedPercent: 3 }],
+        details: {},
       });
     });
   });

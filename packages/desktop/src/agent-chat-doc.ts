@@ -32,7 +32,11 @@ import {
 import type { ClaudeMode } from "@jarvis/wire";
 import { StringDecoder } from "node:string_decoder";
 import { basename, dirname } from "node:path";
-import { type AgentLimit, readAgentStatusLine } from "./agent-status-line.js";
+import {
+  type AgentLimit,
+  type AgentStatusDetails,
+  readAgentStatusLine,
+} from "./agent-status-line.js";
 import { type AgentVendor, isMissingFile, readAgentScreen } from "./agent-view.js";
 import { sameAgentSession, type PaneAgentSession } from "./pane-agent-session.js";
 
@@ -145,7 +149,12 @@ export type AgentChatView =
       context?: { used: number; leftPercent?: number };
       /** The agent's own status line and usage limits; `stale`: the screen
        *  shows none right now and these are the last it showed. */
-      status?: { lines: string[]; limits: AgentLimit[]; stale?: true };
+      status?: {
+        lines: string[];
+        limits: AgentLimit[];
+        details: AgentStatusDetails;
+        stale?: true;
+      };
       /** The question or plan the agent is waiting on, read-only. */
       asking?: ChatAsking;
       /** The whole file is still being read: side data fills in later. */
@@ -284,7 +293,12 @@ export function createAgentChatHandlers(deps: AgentChatDeps): {
   /** The last status the screen showed, per pane, for the session that showed it. */
   const lastStatus = new Map<
     string,
-    { session: PaneAgentSession; lines: string[]; limits: AgentLimit[] }
+    {
+      session: PaneAgentSession;
+      lines: string[];
+      limits: AgentLimit[];
+      details: AgentStatusDetails;
+    }
   >();
   let tick = 0;
 
@@ -631,12 +645,22 @@ export function createAgentChatHandlers(deps: AgentChatDeps): {
         const fromTranscript = transcriptLimits(doc.limits, (deps.now ?? Date.now)());
         let status: AgentView["status"];
         if (read.lines.length > 0 || read.limits.length > 0) {
-          lastStatus.set(paneKey, { session, lines: read.lines, limits: read.limits });
-          status = { lines: read.lines, limits: read.limits };
+          lastStatus.set(paneKey, {
+            session,
+            lines: read.lines,
+            limits: read.limits,
+            details: read.details,
+          });
+          status = { lines: read.lines, limits: read.limits, details: read.details };
         } else {
           const kept = lastStatus.get(paneKey);
           if (kept !== undefined && sameAgentSession(kept.session, session)) {
-            status = { lines: kept.lines, limits: kept.limits, stale: true };
+            status = {
+              lines: kept.lines,
+              limits: kept.limits,
+              details: kept.details,
+              stale: true,
+            };
           } else {
             lastStatus.delete(paneKey);
           }
@@ -650,6 +674,7 @@ export function createAgentChatHandlers(deps: AgentChatDeps): {
           status = {
             lines: status?.lines ?? [],
             limits,
+            details: status?.details ?? {},
             ...(status?.stale ? { stale: true as const } : {}),
           };
         }

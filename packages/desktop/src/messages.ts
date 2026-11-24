@@ -399,10 +399,6 @@ export const MESSAGES = {
     language === "ar" ? "تم اختصار الخرج." : "The output was shortened.",
   agentChatPanelAgents: (language: "ar" | "en"): string =>
     language === "ar" ? "الوكلاء الفرعيون" : "Sub-agents",
-  agentChatPanelContextLeft: (language: "ar" | "en"): string =>
-    language === "ar" ? "السياق، متبقٍ {n}" : "Context, {n} left",
-  agentChatPanelContextUsed: (language: "ar" | "en"): string =>
-    language === "ar" ? "السياق، استُخدم {n} رمزاً" : "Context, {n} tokens used",
   agentChatPanelFiles: (language: "ar" | "en"): string =>
     language === "ar" ? "الملفات المعدّلة" : "Changed files",
   agentChatPanelLabel: (language: "ar" | "en"): string =>
@@ -454,7 +450,23 @@ export const MESSAGES = {
     language === "ar" ? "إظهار اللوحة" : "Show panel",
   agentChatShowTerminal: (language: "ar" | "en"): string =>
     language === "ar" ? "إظهار الطرفية" : "Show terminal",
-  agentChatChipLimits: (language: "ar" | "en"): string => (language === "ar" ? "الحدود" : "Limits"),
+  agentChatContextPercent: (language: "ar" | "en"): string =>
+    language === "ar" ? "السياق: استُخدم {n}" : "Context {n} used",
+  agentChatFieldAccount: (language: "ar" | "en"): string =>
+    language === "ar" ? "الحساب" : "Account",
+  agentChatFieldBranch: (language: "ar" | "en"): string => (language === "ar" ? "الفرع" : "Branch"),
+  agentChatFieldFolder: (language: "ar" | "en"): string =>
+    language === "ar" ? "المجلد" : "Folder",
+  agentChatPanelRaw: (language: "ar" | "en"): string =>
+    language === "ar" ? "سطر الحالة" : "Status line",
+  agentChatPanelSession: (language: "ar" | "en"): string =>
+    language === "ar" ? "الجلسة" : "Session",
+  agentChatValueLeft: (language: "ar" | "en"): string =>
+    language === "ar" ? "متبقٍ {n}" : "{n} left",
+  agentChatValueTokens: (language: "ar" | "en"): string =>
+    language === "ar" ? "استُخدم {n} رمزاً" : "{n} tokens used",
+  agentChatValueUsed: (language: "ar" | "en"): string =>
+    language === "ar" ? "استُخدم {n}" : "{n} used",
   agentChatLimitAlmostOut: (language: "ar" | "en"): string =>
     language === "ar" ? "أوشك على النفاد" : "Almost out",
   agentChatLimitHigh: (language: "ar" | "en"): string => (language === "ar" ? "مرتفع" : "High"),
@@ -466,10 +478,6 @@ export const MESSAGES = {
     language === "ar" ? "حدود الاستخدام" : "Usage limits",
   agentChatStatusLabel: (language: "ar" | "en"): string =>
     language === "ar" ? "حالة الوكيل" : "Agent status",
-  agentChatStatusLess: (language: "ar" | "en"): string => (language === "ar" ? "أقل" : "Less"),
-  agentChatStatusMore: (language: "ar" | "en"): string => (language === "ar" ? "المزيد" : "More"),
-  agentChatStatusStale: (language: "ar" | "en"): string =>
-    language === "ar" ? "آخر ما ظهر" : "last seen",
   agentChatStop: (language: "ar" | "en"): string => (language === "ar" ? "إيقاف" : "Stop"),
   agentChatStopDraft: (language: "ar" | "en"): string =>
     language === "ar"

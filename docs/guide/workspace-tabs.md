@@ -549,17 +549,24 @@ the phone's chat view is unchanged.
   works the button says **Queue** for an agent that queues messages (Claude
   Code). If the agent's own input line already holds typed text, nothing is sent
   and the chat says so.
-- **Limits and status line.** Under the box, small chips show the agent's usage
-  limits (Claude Code's session and weekly windows, Codex's 5-hour and weekly
-  windows, Copilot's plan) with a meter, the percent used and when it resets;
-  from 80% used they turn amber and say *High*, from 95% red and say *Almost
-  out*. Below them are the agent's own status line rows (the custom status line
-  you set in Claude Code, Codex's model and folder row, Copilot's account and
-  model rows), two rows then **More**. They are read from what the pane shows
-  and from Codex's transcript, never guessed: a limit the agent does not show
-  is not shown, and while a menu hides the screen the last rows stay, dimmed.
-  The side panel's **Usage limits** section (a chip in a narrow pane) has the
-  same data in full. Desktop only.
+- **Limits and status line.** One quiet row under the box: on the left the
+  account and the git branch (the folder when there is no branch), on the right
+  each usage limit (Claude Code's session and weekly windows, Codex's 5-hour and
+  weekly windows, Copilot's plan) as a small meter and the percent used. From
+  80% used a limit turns amber and adds when it resets (screen readers hear
+  *High*), from 95% red (*Almost out*); every limit has the used percent and
+  reset time as its tooltip. Clicking a limit opens the side panel (a popover in
+  a narrow pane); in a narrow pane the account and branch go first, then the
+  meters, and the percents stay. The side panel, after To-do, Sub-agents and
+  Changed files, has **Usage limits**, **Context**, **Session** (account, folder,
+  branch, model) and a closed **Status line** with the agent's own rows as they
+  were drawn. Everything is read from what the pane shows and from Codex's
+  transcript, never guessed: what cannot be read is only in the raw rows, a
+  section with nothing to show is left out, and while a menu hides the screen
+  the last values stay, dimmed. The context reads the same everywhere (the
+  composer and the panel): the used percent from your Claude status line when it
+  shows one, else what is left until auto-compact, else the tokens used. Desktop
+  only.
 - **File icons.** Files and folders in the Terminal tab's file sidebar, the
   chat's `@` list, changed files and attachments, and the Changes and Reviews
   pages wear the Material icon of their name (the set VS Code uses), always on.

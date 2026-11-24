@@ -115,6 +115,7 @@ describe("readAgentStatusLine — Claude", () => {
   it("shows nothing for the default statusline and nothing while a menu is open", () => {
     expect(readAgentStatusLine("anthropic", claude("  ? for shortcuts"))).toEqual({
       lines: [],
+      details: {},
       limits: [],
     });
     const menu = [
@@ -126,12 +127,13 @@ describe("readAgentStatusLine — Claude", () => {
       RULE,
       "  Session 13% resets 04:20",
     ].join("\n");
-    expect(readAgentStatusLine("anthropic", menu)).toEqual({ lines: [], limits: [] });
+    expect(readAgentStatusLine("anthropic", menu)).toEqual({ lines: [], limits: [], details: {} });
   });
 
   it("needs the input box: a lone rule and its text is not a statusline", () => {
     expect(readAgentStatusLine("anthropic", `${RULE}\n  hello\n`)).toEqual({
       lines: [],
+      details: {},
       limits: [],
     });
   });
@@ -166,6 +168,7 @@ describe("readAgentStatusLine — Codex", () => {
     expect(view).toEqual({
       lines: ["GPT-6-Luna default · /private/tmp/x/demo-api · Create note.txt"],
       limits: [],
+      details: { model: "GPT-6-Luna default", folder: "/private/tmp/x/demo-api" },
     });
   });
 
@@ -176,8 +179,12 @@ describe("readAgentStatusLine — Codex", () => {
       "  2. No, and tell Codex what to do differently (esc)",
       "  GPT-6-Luna default · /private/tmp/x",
     ].join("\n");
-    expect(readAgentStatusLine("openai", menu)).toEqual({ lines: [], limits: [] });
-    expect(readAgentStatusLine("openai", "just text\nmore")).toEqual({ lines: [], limits: [] });
+    expect(readAgentStatusLine("openai", menu)).toEqual({ lines: [], limits: [], details: {} });
+    expect(readAgentStatusLine("openai", "just text\nmore")).toEqual({
+      lines: [],
+      limits: [],
+      details: {},
+    });
   });
 });
 
@@ -201,11 +208,93 @@ describe("readAgentStatusLine — Copilot", () => {
   });
 
   it("is empty while a menu is open and never throws on junk", () => {
-    expect(readAgentStatusLine("github", "")).toEqual({ lines: [], limits: [] });
+    expect(readAgentStatusLine("github", "")).toEqual({ lines: [], limits: [], details: {} });
     expect(readAgentStatusLine("github", "\u0000\u001b[".repeat(50))).toEqual({
       lines: [],
+      details: {},
       limits: [],
     });
-    expect(readAgentStatusLine("nope" as never, screen)).toEqual({ lines: [], limits: [] });
+    expect(readAgentStatusLine("nope" as never, screen)).toEqual({
+      lines: [],
+      limits: [],
+      details: {},
+    });
+  });
+});
+
+describe("readAgentStatusLine — details", () => {
+  it("reads the account from an email row, the word before it, or the email itself", () => {
+    const named = readAgentStatusLine("anthropic", claude("  work-account  someone@example.com"));
+    expect(named.details).toEqual({ account: "work-account" });
+    const bare = readAgentStatusLine("anthropic", claude("  someone@example.com"));
+    expect(bare.details).toEqual({ account: "someone@example.com" });
+  });
+
+  it("reads folder and branch, then model and context, from the bracket groups", () => {
+    const view = readAgentStatusLine(
+      "anthropic",
+      claude(
+        "  [user@host:/repo/app (feat/x)]  [Haiku 5.5 ctx:6% (64k/1000k)]",
+        "  ? for shortcuts",
+      ),
+    );
+    expect(view.details).toEqual({
+      folder: "/repo/app",
+      branch: "feat/x",
+      model: "Haiku 5.5",
+      context: { usedPercent: 6, usedText: "64k", totalText: "1000k" },
+    });
+  });
+
+  it("reads a bare model group and a context group without the counts", () => {
+    expect(readAgentStatusLine("anthropic", claude("  [Haiku 5.5]")).details).toEqual({
+      model: "Haiku 5.5",
+    });
+    expect(readAgentStatusLine("anthropic", claude("  [Haiku ctx:41%]")).details).toEqual({
+      model: "Haiku",
+      context: { usedPercent: 41 },
+    });
+  });
+
+  it("reads a plain path row, a (branch) row and a glyph branch row, and nothing vague", () => {
+    expect(readAgentStatusLine("anthropic", claude("  ~/work/app", "  (main)")).details).toEqual({
+      folder: "~/work/app",
+      branch: "main",
+    });
+    expect(readAgentStatusLine("anthropic", claude("  /repo/app  dev")).details).toEqual({
+      folder: "/repo/app",
+      branch: "dev",
+    });
+    expect(
+      readAgentStatusLine("anthropic", claude("  building things now", "  [a/b: c]")).details,
+    ).toEqual({});
+  });
+
+  it("reads Codex model and folder", () => {
+    const view = readAgentStatusLine(
+      "openai",
+      ["› Ask", "", "  GPT-6-Luna default · /private/tmp/x/demo-api · Create note.txt"].join("\n"),
+    );
+    expect(view.details).toEqual({
+      model: "GPT-6-Luna default",
+      folder: "/private/tmp/x/demo-api",
+    });
+  });
+
+  it("reads Copilot account, folder and branch, and the model row alone", () => {
+    const view = readAgentStatusLine(
+      "github",
+      [
+        "account:/private/tmp/x/demo-web [⎇ master] +0 -0      Plan: 1,029/21,900 (4% used)",
+        "│ >            │",
+        "← open sidebar · / commands · ? help      Claude Sonnet 5.5 · Medium · (13%)",
+      ].join("\n"),
+    );
+    expect(view.details).toEqual({
+      account: "account",
+      folder: "/private/tmp/x/demo-web",
+      branch: "master",
+      model: "Claude Sonnet 5.5",
+    });
   });
 });

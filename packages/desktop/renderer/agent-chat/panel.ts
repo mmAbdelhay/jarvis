@@ -1,10 +1,11 @@
-// The side panel (To-do, Sub-agents, Changed files, Context) and, under 1000px
-// of pane width, the chips above the composer that open the same sections in
-// a popover. A section with no data is not drawn; the panel can be hidden and
-// that is remembered.
+// The side panel (To-do, Sub-agents, Changed files, then Usage limits,
+// Context, Session and the raw status rows) and, under 1000px of pane width,
+// the chips above the composer that open the same sections in a popover. A
+// section with no data is not drawn; the panel can be hidden and that is
+// remembered.
 import type { ChatAgent, ChatFile, ChatTodo } from "@jarvis/platform";
 import { fileIcon } from "../file-icons.js";
-import { buildLimitBlock, type StatusData } from "./status.js";
+import { buildLimitBlock, type ContextInfo, contextValue, type StatusData } from "./status.js";
 import { count } from "./tool-row.js";
 import {
   basename,
@@ -15,42 +16,48 @@ import {
   fmtNode,
   ICONS,
   icon,
-  tokens,
   type Translate,
 } from "./dom.js";
 
-export type SectionKind = "limits" | "todo" | "agents" | "files" | "context";
+export type SectionKind = "todo" | "agents" | "files" | "limits" | "context" | "session" | "raw";
 
 export type PanelData = {
   todos?: readonly ChatTodo[];
   agents: readonly ChatAgent[];
   files: readonly ChatFile[];
-  context?: { used: number; leftPercent?: number };
-  /** The agent's usage limits and own status line. */
+  context?: ContextInfo;
+  /** The agent's usage limits and what its status line says. */
   status?: StatusData;
   /** The whole session is still being read: the lists fill in later. */
   deriving?: boolean;
   now: number;
 };
 
+const SESSION_FIELDS = ["account", "folder", "branch", "model"] as const;
+
 export function sectionsOf(data: PanelData): SectionKind[] {
   const kinds: SectionKind[] = [];
-  if (
-    data.status !== undefined &&
-    (data.status.limits.length > 0 || data.status.lines.length > 0)
-  ) {
-    kinds.push("limits");
-  }
   if (data.todos !== undefined && data.todos.length > 0) kinds.push("todo");
   if (data.agents.length > 0) kinds.push("agents");
   if (data.files.length > 0) kinds.push("files");
+  if ((data.status?.limits.length ?? 0) > 0) kinds.push("limits");
   if (data.context !== undefined) kinds.push("context");
+  if (SESSION_FIELDS.some((field) => data.status?.details?.[field] !== undefined)) {
+    kinds.push("session");
+  }
+  if ((data.status?.lines.length ?? 0) > 0) kinds.push("raw");
   return kinds;
 }
 
-/** "To-do, 2 of 4", "Context, 62% left": the heading text of a section. */
+/** The kinds that get a chip above the composer in a narrow pane. */
+export function chipKinds(kinds: readonly SectionKind[]): SectionKind[] {
+  return kinds.filter(
+    (kind) => kind === "todo" || kind === "agents" || kind === "files" || kind === "context",
+  );
+}
+
+/** "To-do, 2 of 4", "Sub-agents": the heading text of a section. */
 export function headingOf(kind: SectionKind, data: PanelData, t: Translate): string {
-  if (kind === "limits") return t("agentChatPanelLimits");
   if (kind === "todo") {
     const todos = data.todos ?? [];
     const done = todos.filter((todo) => todo.state === "done").length;
@@ -58,30 +65,18 @@ export function headingOf(kind: SectionKind, data: PanelData, t: Translate): str
   }
   if (kind === "agents") return t("agentChatPanelAgents");
   if (kind === "files") return t("agentChatPanelFiles");
-  const context = data.context;
-  return context?.leftPercent !== undefined
-    ? fmt(t("agentChatPanelContextLeft"), { n: `${context.leftPercent}%` })
-    : fmt(t("agentChatPanelContextUsed"), { n: tokens(context?.used ?? 0) });
+  if (kind === "limits") return t("agentChatPanelLimits");
+  if (kind === "session") return t("agentChatPanelSession");
+  if (kind === "raw") return t("agentChatPanelRaw");
+  return t("agentChatChipContext");
 }
 
-/** The short chip: "To-do 2 of 4", "Sub-agents 1", "Changed files 2". */
+/** The short chip: "To-do 2 of 4", "Sub-agents 1", "Changed files 2", "Context 6% used". */
 export function chipOf(
   kind: SectionKind,
   data: PanelData,
   t: Translate,
 ): { name: string; value: string } {
-  if (kind === "limits") {
-    const percents = (data.status?.limits ?? []).flatMap((limit) =>
-      limit.usedPercent === undefined ? [] : [limit.usedPercent],
-    );
-    return {
-      name: t("agentChatChipLimits"),
-      value:
-        percents.length > 0
-          ? `${Math.round(Math.max(...percents))}%`
-          : String(data.status?.lines.length ?? 0),
-    };
-  }
   if (kind === "todo") {
     const todos = data.todos ?? [];
     const done = todos.filter((todo) => todo.state === "done").length;
@@ -98,11 +93,9 @@ export function chipOf(
     };
   }
   if (kind === "files") return { name: t("agentChatPanelFiles"), value: String(data.files.length) };
-  const context = data.context;
   return {
-    name: t("agentChatChipContext"),
-    value:
-      context?.leftPercent !== undefined ? `${context.leftPercent}%` : tokens(context?.used ?? 0),
+    name: headingOf(kind, data, t),
+    value: data.context === undefined ? "" : contextValue(data.context, t).text,
   };
 }
 
@@ -121,26 +114,71 @@ function agentState(agent: ChatAgent, now: number, t: Translate): string {
     : t("agentChatAgentDone");
 }
 
-export function buildSection(
-  kind: SectionKind,
-  data: PanelData,
-  ctx: { t: Translate; openFile(path: string): void },
-): HTMLElement {
+/** The last two parts of a path: "/home/me/code/app" is "code/app". */
+function shortFolder(path: string): string {
+  const parts = path.split("/").filter((part) => part !== "");
+  return parts.length <= 2 ? path : parts.slice(-2).join("/");
+}
+
+function keyValue(label: string, value: string, title?: string): HTMLElement {
+  const row = el("div", "ac-kv");
+  const node = el("span", "ac-kv__value", value);
+  node.dir = "auto";
+  node.title = title ?? value;
+  row.append(el("span", "ac-kv__key", label), node);
+  return row;
+}
+
+export type SectionContext = {
+  t: Translate;
+  openFile(path: string): void;
+  /** Whether the raw rows were opened, kept across repaints. */
+  raw?: { open(): boolean; set(open: boolean): void };
+};
+
+export function buildSection(kind: SectionKind, data: PanelData, ctx: SectionContext): HTMLElement {
   const { t } = ctx;
+  if (kind === "raw") {
+    const box = el("details", "ac-section ac-raw");
+    box.dataset["section"] = kind;
+    box.open = ctx.raw?.open() === true;
+    box.addEventListener("toggle", () => ctx.raw?.set(box.open));
+    box.append(el("summary", "ac-raw__summary", headingOf(kind, data, t)));
+    for (const text of data.status?.lines ?? []) {
+      const line = el("div", "ac-raw__line", text);
+      line.dir = "auto";
+      box.append(line);
+    }
+    return box;
+  }
   const section = el("section", "ac-section");
   section.dataset["section"] = kind;
-  const title = el("h2", "ac-section__title");
-  if (kind === "context" && data.context?.leftPercent !== undefined) {
-    title.append(fmtNode(t("agentChatPanelContextLeft"), { n: `${data.context.leftPercent}%` }));
-  } else title.textContent = headingOf(kind, data, t);
-  section.append(title);
+  const title = el("h2", "ac-section__title", headingOf(kind, data, t));
+  if (kind === "context" && data.context !== undefined) {
+    const value = contextValue(data.context, t);
+    const head = el("div", "ac-section__head");
+    const text = el("span", "ac-section__value");
+    text.append(fmtNode(value.template, { n: value.n }));
+    head.append(title, text);
+    section.append(head);
+  } else section.append(title);
   if (kind === "limits") {
     for (const limit of data.status?.limits ?? []) section.append(buildLimitBlock(limit, t));
-    for (const text of data.status?.lines ?? []) {
-      const line = el("div", "ac-limit-line", text);
-      line.dir = "auto";
-      line.title = text;
-      section.append(line);
+  } else if (kind === "session") {
+    const details = data.status?.details;
+    if (details?.account !== undefined) {
+      section.append(keyValue(t("agentChatFieldAccount"), details.account));
+    }
+    if (details?.folder !== undefined) {
+      section.append(
+        keyValue(t("agentChatFieldFolder"), shortFolder(details.folder), details.folder),
+      );
+    }
+    if (details?.branch !== undefined) {
+      section.append(keyValue(t("agentChatFieldBranch"), details.branch));
+    }
+    if (details?.model !== undefined) {
+      section.append(keyValue(t("agentChatModel"), details.model));
     }
   } else if (kind === "todo") {
     for (const todo of data.todos ?? []) {
@@ -203,19 +241,21 @@ export function buildSection(
       button.addEventListener("click", () => ctx.openFile(file.path));
       section.append(button);
     }
-  } else if (data.context?.leftPercent !== undefined) {
-    // The label says what is left, so the fill is what is left.
-    const left = Math.min(100, Math.max(0, data.context.leftPercent));
-    const track = el("div", "ac-meter");
-    track.setAttribute("role", "progressbar");
-    track.setAttribute("aria-valuemin", "0");
-    track.setAttribute("aria-valuemax", "100");
-    track.setAttribute("aria-valuenow", String(left));
-    track.setAttribute("aria-label", headingOf("context", data, t));
-    const fill = el("div", "ac-meter__fill");
-    fill.style.inlineSize = `${left}%`;
-    track.append(fill);
-    section.append(track);
+  } else if (kind === "context" && data.context !== undefined) {
+    const fill = contextValue(data.context, t).fill;
+    if (fill !== undefined) {
+      // The value says what is used (or what is left), and the fill is the same number.
+      const track = el("div", "ac-meter");
+      track.setAttribute("role", "progressbar");
+      track.setAttribute("aria-valuemin", "0");
+      track.setAttribute("aria-valuemax", "100");
+      track.setAttribute("aria-valuenow", String(fill));
+      track.setAttribute("aria-label", contextValue(data.context, t).text);
+      const bar = el("div", "ac-meter__fill");
+      bar.style.inlineSize = `${fill}%`;
+      track.append(bar);
+      section.append(track);
+    }
   }
   return section;
 }
@@ -235,6 +275,8 @@ export type Panel = {
   toggle: HTMLButtonElement;
   update(data: PanelData, narrow: boolean): void;
   closePopover(): void;
+  /** Bring a section into view: the side panel (shown if it was hidden), or the popover. */
+  reveal(kind: SectionKind): void;
 };
 
 export function createPanel(options: PanelOptions): Panel {
@@ -257,6 +299,17 @@ export function createPanel(options: PanelOptions): Panel {
   /** What the last full paint was made from: the same again repaints only the clocks. */
   let painted = "";
   let narrow = false;
+  let rawOpen = false;
+  const sectionOptions: SectionContext = {
+    t,
+    openFile: (path) => options.openFile(path),
+    raw: {
+      open: () => rawOpen,
+      set: (open) => {
+        rawOpen = open;
+      },
+    },
+  };
   let openChip: SectionKind | undefined;
   let outside: ((event: Event) => void) | undefined;
 
@@ -272,7 +325,7 @@ export function createPanel(options: PanelOptions): Panel {
 
   function showPopover(kind: SectionKind): void {
     openChip = kind;
-    popover.replaceChildren(buildSection(kind, data, options));
+    popover.replaceChildren(buildSection(kind, data, sectionOptions));
     popover.hidden = false;
     popover.setAttribute("aria-label", headingOf(kind, data, t));
     for (const chip of chips.querySelectorAll<HTMLButtonElement>("button")) {
@@ -303,7 +356,7 @@ export function createPanel(options: PanelOptions): Panel {
       line.setAttribute("role", "status");
       aside.append(line);
     }
-    for (const kind of kinds) aside.append(buildSection(kind, data, options));
+    for (const kind of kinds) aside.append(buildSection(kind, data, sectionOptions));
     aside.append(el("span", "ac-spacer"));
     const hide = el("button", "ac-hide-panel", t("agentChatHidePanel"));
     hide.type = "button";
@@ -356,10 +409,11 @@ export function createPanel(options: PanelOptions): Panel {
 
     const keep =
       openChip !== undefined && kinds.includes(openChip) && narrow ? openChip : undefined;
-    chips.hidden = !narrow || kinds.length === 0;
+    const chipped = chipKinds(kinds);
+    chips.hidden = !narrow || (chipped.length === 0 && keep === undefined);
     for (const old of [...chips.querySelectorAll("button")]) old.remove();
     if (!chips.hidden) {
-      for (const kind of kinds) {
+      for (const kind of chipped) {
         const chip = chipOf(kind, data, t);
         const button = el("button", "ac-chip");
         button.type = "button";
@@ -380,5 +434,20 @@ export function createPanel(options: PanelOptions): Panel {
     else closePopover();
   }
 
-  return { aside, chips, toggle, update, closePopover };
+  function reveal(kind: SectionKind): void {
+    if (!sectionsOf(data).includes(kind)) return;
+    if (narrow) {
+      chips.hidden = false;
+      showPopover(kind);
+      return;
+    }
+    if (options.hidden()) {
+      options.setHidden(false);
+      update(data, narrow);
+    }
+    const section = aside.querySelector<HTMLElement>(`[data-section="${kind}"]`);
+    section?.scrollIntoView?.({ block: "nearest" });
+  }
+
+  return { aside, chips, toggle, update, closePopover, reveal };
 }

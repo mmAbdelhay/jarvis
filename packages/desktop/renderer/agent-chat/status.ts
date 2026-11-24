@@ -1,16 +1,64 @@
-// The agent's usage limits and its own status line: a compact strip directly
-// under the composer, and the same data in full in the panel's Limits
-// section. Everything the agent drew reaches the DOM as text only. The strip
-// keeps its nodes between refreshes (one per limit label, one per row), so a
-// new number changes text and never the layout.
-import type { AgentLimit } from "../../src/agent-status-line.js";
-import { el, fmt, type Translate } from "./dom.js";
+// The agent's usage limits and what its status line says about the session:
+// one quiet row directly under the composer, and the same data in full in the
+// panel. Everything the agent drew reaches the DOM as text only. The row keeps
+// its nodes between refreshes (one per limit label), so a new number changes
+// text and never the layout.
+import type { AgentLimit, AgentStatusDetails } from "../../src/agent-status-line.js";
+import { basename, el, fmt, tokens, type Translate } from "./dom.js";
 
 export type StatusData = {
   lines: readonly string[];
   limits: readonly AgentLimit[];
+  details?: AgentStatusDetails | undefined;
   stale?: boolean | undefined;
 };
+
+/** The context as far as it is known: the status line's used percent comes first. */
+export type ContextInfo = { used?: number; usedPercent?: number; leftPercent?: number };
+
+export function contextOf(view: {
+  context?: { used: number; leftPercent?: number } | undefined;
+  status?: StatusData | undefined;
+}): ContextInfo | undefined {
+  const percent = view.status?.details?.context?.usedPercent;
+  if (percent !== undefined) return { usedPercent: percent };
+  if (view.context === undefined) return undefined;
+  return {
+    used: view.context.used,
+    ...(view.context.leftPercent === undefined ? {} : { leftPercent: view.context.leftPercent }),
+  };
+}
+
+/** "6% used", "62% left" or "38k tokens used", and how full the bar is (none for tokens). */
+export function contextValue(
+  info: ContextInfo,
+  t: Translate,
+): { text: string; template: string; n: string; fill?: number } {
+  if (info.usedPercent !== undefined) {
+    const n = `${shown(info.usedPercent)}%`;
+    return {
+      template: t("agentChatValueUsed"),
+      n,
+      text: fmt(t("agentChatValueUsed"), { n }),
+      fill: shown(info.usedPercent),
+    };
+  }
+  if (info.leftPercent !== undefined) {
+    const n = `${info.leftPercent}%`;
+    return {
+      template: t("agentChatValueLeft"),
+      n,
+      text: fmt(t("agentChatValueLeft"), { n }),
+      fill: shown(info.leftPercent),
+    };
+  }
+  const n = tokens(info.used ?? 0);
+  return {
+    template: t("agentChatValueTokens"),
+    n,
+    text: fmt(t("agentChatValueTokens"), { n }),
+  };
+}
 
 export type Level = "ok" | "warn" | "danger";
 
@@ -59,7 +107,7 @@ function meter(percent: number, t: Translate, wide: boolean): HTMLElement {
 }
 
 type Chip = {
-  root: HTMLElement;
+  root: HTMLButtonElement;
   label: HTMLElement;
   slot: HTMLElement;
   pct: HTMLElement;
@@ -68,13 +116,13 @@ type Chip = {
 };
 
 function buildChip(): Chip {
-  const root = el("span", "ac-limit");
-  root.tabIndex = 0;
+  const root = el("button", "ac-limit");
+  root.type = "button";
   const label = el("span", "ac-limit__label");
   label.dir = "auto";
   const slot = el("span", "ac-limit__slot");
   const pct = el("bdi", "ac-limit__pct");
-  const word = el("span", "ac-limit__word");
+  const word = el("span", "ac-sr-only");
   const resets = el("span", "ac-limit__resets");
   resets.dir = "auto";
   root.append(label, slot, pct, word, resets);
@@ -86,6 +134,7 @@ function setText(node: HTMLElement, text: string): void {
   node.hidden = text === "";
 }
 
+/** A limit's reset time is shown only once it matters: from 80% used. */
 function paintChip(chip: Chip, limit: AgentLimit, t: Translate): void {
   const level = levelOf(limit.usedPercent);
   const summary = limitSummary(limit, t);
@@ -96,7 +145,7 @@ function paintChip(chip: Chip, limit: AgentLimit, t: Translate): void {
   const percent = limit.usedPercent;
   chip.slot.hidden = percent === undefined;
   if (percent === undefined) {
-    setText(chip.pct, "");
+    setText(chip.pct, limit.detail ?? "");
   } else {
     const next = meter(percent, t, false);
     const old = chip.slot.firstElementChild;
@@ -109,68 +158,71 @@ function paintChip(chip: Chip, limit: AgentLimit, t: Translate): void {
     }
     setText(chip.pct, `${shown(percent)}%`);
   }
-  setText(chip.word, percent === undefined ? (limit.detail ?? "") : levelWord(level, t));
+  setText(chip.word, levelWord(level, t));
   setText(
     chip.resets,
-    limit.resets === undefined ? "" : fmt(t("agentChatLimitResets"), { when: limit.resets }),
+    level === "ok" || limit.resets === undefined
+      ? ""
+      : fmt(t("agentChatLimitResets"), { when: limit.resets }),
   );
 }
 
-const COLLAPSED_ROWS = 2;
+/** "someone@example.com" is named "someone"; any other account as it was written. */
+function shortAccount(account: string): string {
+  const at = account.indexOf("@");
+  return at > 0 ? account.slice(0, at) : account;
+}
+
+/** The left of the row: the account, then the branch (the folder only without one). */
+export function whoOf(details: AgentStatusDetails | undefined): { text: string; title: string } {
+  const parts: string[] = [];
+  if (details?.account !== undefined) parts.push(shortAccount(details.account));
+  if (details?.branch !== undefined) parts.push(details.branch);
+  else if (details?.folder !== undefined) parts.push(basename(details.folder));
+  const full = [details?.account, details?.folder, details?.branch].filter(
+    (part): part is string => part !== undefined,
+  );
+  return { text: parts.join(" · "), title: full.join(" · ") };
+}
 
 export type StatusStrip = {
   element: HTMLElement;
   update(status: StatusData | undefined): void;
 };
 
-export function createStatusStrip(options: { t: Translate }): StatusStrip {
+/** One row: who on the left, the limits on the right. A limit opens the panel. */
+export function createStatusStrip(options: {
+  t: Translate;
+  /** A limit was clicked or entered: show the panel's Usage limits. */
+  open(): void;
+  /** Escape on a limit: close what it opened. */
+  close(): void;
+}): StatusStrip {
   const { t } = options;
   const element = el("div", "ac-status");
   element.hidden = true;
   element.setAttribute("role", "group");
   element.setAttribute("aria-label", t("agentChatStatusLabel"));
-  const limitsRow = el("div", "ac-status__limits");
-  const linesBox = el("div", "ac-status__lines");
-  const more = el("button", "ac-status__more");
-  more.type = "button";
-  more.hidden = true;
-  element.append(limitsRow, linesBox, more);
+  const who = el("span", "ac-status__who");
+  who.dir = "auto";
+  const limitsRow = el("span", "ac-status__limits");
+  element.append(who, limitsRow);
+  element.addEventListener("click", (event) => {
+    if ((event.target as Element | null)?.closest(".ac-limit") !== null) options.open();
+  });
+  element.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") options.close();
+  });
 
   const chips = new Map<string, Chip>();
-  const rows: HTMLElement[] = [];
-  let expanded = false;
-  let lines: readonly string[] = [];
-
-  function paintLines(): void {
-    const count = expanded ? lines.length : Math.min(lines.length, COLLAPSED_ROWS);
-    while (rows.length < count) {
-      const row = el("div", "ac-status__line");
-      row.dir = "auto";
-      rows.push(row);
-      linesBox.append(row);
-    }
-    while (rows.length > count) rows.pop()?.remove();
-    rows.forEach((row, index) => {
-      const text = lines[index] ?? "";
-      if (row.textContent !== text) row.textContent = text;
-      row.title = text;
-    });
-    more.hidden = lines.length <= COLLAPSED_ROWS;
-    more.setAttribute("aria-expanded", String(expanded));
-    more.textContent = expanded ? t("agentChatStatusLess") : t("agentChatStatusMore");
-  }
-
-  more.addEventListener("click", () => {
-    expanded = !expanded;
-    paintLines();
-  });
 
   return {
     element,
     update(status) {
       const limits = status?.limits ?? [];
-      lines = status?.lines ?? [];
-      element.hidden = limits.length === 0 && lines.length === 0;
+      const left = whoOf(status?.details);
+      setText(who, left.text);
+      who.title = left.title;
       if (status?.stale === true) element.dataset["stale"] = "true";
       else delete element.dataset["stale"];
       const wanted = new Set<string>();
@@ -198,7 +250,7 @@ export function createStatusStrip(options: { t: Translate }): StatusStrip {
         }
       }
       limitsRow.hidden = wanted.size === 0;
-      paintLines();
+      element.hidden = wanted.size === 0 && left.text === "";
     },
   };
 }

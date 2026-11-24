@@ -22,7 +22,7 @@ import { el } from "./agent-chat/dom.js";
 import { createFeed } from "./agent-chat/feed.js";
 import { mergeLive, prependOlder } from "./agent-chat/paging.js";
 import { createPanel } from "./agent-chat/panel.js";
-import { createStatusStrip } from "./agent-chat/status.js";
+import { type ContextInfo, contextOf, createStatusStrip } from "./agent-chat/status.js";
 import { createQuestion } from "./agent-chat/question.js";
 import { createSearch } from "./agent-chat/search.js";
 import { createShell, type Mode } from "./agent-chat/shell.js";
@@ -252,7 +252,11 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
       setPanelHidden(hidden);
     },
   });
-  const strip = createStatusStrip({ t });
+  const strip = createStatusStrip({
+    t,
+    open: () => side.reveal("limits"),
+    close: () => side.closePopover(),
+  });
   const composer = createComposer({
     t,
     paneKey,
@@ -370,7 +374,7 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
         ...(view.todos === undefined ? {} : { todos: view.todos }),
         agents: view.agents,
         files: view.files,
-        ...(view.context === undefined ? {} : { context: view.context }),
+        ...(contextOf(view) === undefined ? {} : { context: contextOf(view) as ContextInfo }),
         ...(view.status === undefined ? {} : { status: view.status }),
         ...(view.deriving === true ? { deriving: true } : {}),
         now: now(),
