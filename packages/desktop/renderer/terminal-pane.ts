@@ -607,6 +607,9 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
    *  idle prompt (the editor is the prompt line there), and fitting a box
    *  with no layout at all makes the addon measure nonsense. */
   function refit(): void {
+    // While the chat shows the pty keeps its size, even when the terminal
+    // drawer lays the live terminal over a card (agent-chat/drawer.ts).
+    if (element.dataset["view"] === "chat") return;
     if (live.clientWidth === 0 || live.clientHeight === 0) return;
     attempt(() => fit.fit());
     fitted = { cols: terminal.cols, rows: terminal.rows, size: terminalFontSize() };

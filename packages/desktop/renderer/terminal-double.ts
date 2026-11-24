@@ -267,7 +267,11 @@ export class FakeTerminal {
 }
 
 export class FakeFitAddon {
+  static instances: FakeFitAddon[] = [];
   fits = 0;
+  constructor() {
+    FakeFitAddon.instances.push(this);
+  }
   fit(): void {
     this.fits += 1;
   }

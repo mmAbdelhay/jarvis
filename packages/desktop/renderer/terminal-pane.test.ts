@@ -2426,6 +2426,24 @@ describe("a terminal pane's chat view", () => {
     expect(terminal?.disposed).toBe(false);
   });
 
+  it("does not refit the live terminal while the chat shows, even when the drawer gives it a box", () => {
+    const p = pane();
+    const fit = FakeFitAddon.instances[FakeFitAddon.instances.length - 1];
+    const width = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(800);
+    const height = vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(300);
+    try {
+      p.setChatView(true, vi.fn());
+      const before = fit?.fits ?? 0;
+      p.refit();
+      expect(fit?.fits).toBe(before);
+      p.setChatView(false);
+      expect(fit?.fits).toBe(before + 1);
+    } finally {
+      width.mockRestore();
+      height.mockRestore();
+    }
+  });
+
   it("sends focus to the chat while it shows, and back to the terminal after", () => {
     const p = pane();
     const terminal = FakeTerminal.instances[0];
