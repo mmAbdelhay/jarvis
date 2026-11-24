@@ -18,7 +18,7 @@ import {
   type LinkChip,
   type ReviewsDock,
 } from "./reviews-dock.js";
-import { isPopped } from "./popped.js";
+import { isPopped, isPoppedReady, takeInitialReturns } from "./popped.js";
 import { plainTerminalState, type PopoutTerminalState } from "../src/popout-state.js";
 import { createPane, type TerminalPane } from "./terminal-pane.js";
 import { createSplitTree, MIN_PANE_PX, type SplitTree } from "./terminal-splits.js";
@@ -844,6 +844,12 @@ export function renderWorkspaceTerminals(
   selectedProject: string,
 ): void {
   const host = $("workspace-terminal");
+  // Until the host has said which tabs are shown elsewhere nothing is drawn
+  // (a popped tab built here would size the pty a second time); the answer
+  // redraws. Then the staged returns of tabs that came back during a reload
+  // are taken, once, before the first draw.
+  if (!isPoppedReady()) return;
+  takeInitialReturns(tabs.filter((tab) => tab.kind === "terminal").map((tab) => tab.id));
   // A tab shown in another window is not drawn here: its panes are disposed
   // (no shell is killed, no size sent) and rebuilt from the backlog when it
   // comes back.

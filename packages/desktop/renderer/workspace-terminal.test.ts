@@ -2821,6 +2821,32 @@ describe("a terminal tab's layout and drafts across a pop-out", () => {
     expect(document.querySelectorAll(".workspace-terminal-pane")).toHaveLength(1);
   });
 
+  it("draws no terminal and sends no size until the host's list has answered, in either order", async () => {
+    const { renderWorkspaceTerminals, popped } = await loadWithEditor();
+    let answer: (ids: string[]) => void = () => {};
+    const started = popped.initPopped({
+      onPopoutChanged: () => () => {},
+      popoutList: () => new Promise<string[]>((resolve) => (answer = resolve)),
+    });
+    // The snapshot first: nothing is built, nothing sized.
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    await settle();
+    expect(FakeTerminal.instances).toHaveLength(0);
+    expect(calls.filter((c) => ["attachTerminal", "resizeTerminal"].includes(c.call))).toEqual([]);
+    // The list says it is popped: still nothing.
+    answer(["tab-1"]);
+    await started;
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    await settle();
+    expect(FakeTerminal.instances).toHaveLength(0);
+    popped.resetPopped();
+    // The list first: drawn once.
+    await popped.initPopped({ onPopoutChanged: () => () => {}, popoutList: async () => [] });
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    await settle();
+    expect(document.querySelectorAll(".workspace-terminal-pane")).toHaveLength(1);
+  });
+
   it("builds nothing for a popped tab even when it is the active one", async () => {
     const { renderWorkspaceTerminals, popped } = await loadWithEditor();
     popped.setPoppedTabs(["tab-1"]);

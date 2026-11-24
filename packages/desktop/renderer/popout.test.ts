@@ -175,6 +175,19 @@ describe("the pop-out page", () => {
     });
   });
 
+  it("leaves no timer and no listener behind once the page has gone", async () => {
+    const t = terminals();
+    const h = strictApi();
+    await startPopout(h.api, t);
+    expect(vi.getTimerCount()).toBe(1);
+    window.dispatchEvent(new Event("pagehide"));
+    expect(vi.getTimerCount()).toBe(0);
+    const before = h.allowed.popoutReportState.mock.calls.length;
+    t.set({ ...SPLIT, drafts: { t1: "later" } });
+    window.dispatchEvent(new Event("pagehide"));
+    expect(h.allowed.popoutReportState.mock.calls.length).toBe(before);
+  });
+
   it("focuses the pane the host names, and follows its tab's own updates", async () => {
     const t = terminals();
     const h = strictApi();

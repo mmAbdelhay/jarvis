@@ -115,8 +115,13 @@ export async function startPopout(
       // The page is going away.
     }
   };
-  setInterval(report, REPORT_MS);
-  window.addEventListener("pagehide", report);
+  const timer = setInterval(report, REPORT_MS);
+  const goodbye = (): void => {
+    report();
+    clearInterval(timer);
+    window.removeEventListener("pagehide", goodbye);
+  };
+  window.addEventListener("pagehide", goodbye);
 }
 
 // The page's own start: only in a window the host opened as a pop-out.

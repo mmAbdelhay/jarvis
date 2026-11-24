@@ -1,6 +1,15 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi } from "vitest";
-import { initPopped, isPopped, onPoppedChange, poppedTabs, setPoppedTabs } from "./popped.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  initPopped,
+  isPopped,
+  isPoppedReady,
+  onPoppedChange,
+  poppedTabs,
+  resetPopped,
+  setPoppedTabs,
+  takeInitialReturns,
+} from "./popped.js";
 
 describe("the popped tabs", () => {
   it("holds the ids it is given, ignoring anything that is not a string, and tells listeners only of a real change", () => {
@@ -83,5 +92,70 @@ describe("the popped tabs", () => {
       onPopoutChanged: vi.fn(() => () => {}),
     });
     expect([...poppedTabs()]).toEqual([]);
+  });
+});
+
+describe("waiting for the host's list before anything is drawn", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    resetPopped();
+  });
+
+  const quiet = { onPopoutChanged: vi.fn(() => () => {}) };
+
+  it("is not ready from the start of initPopped until the list answers, and tells listeners then", async () => {
+    let answer: (ids: string[]) => void = () => {};
+    const seen: boolean[] = [];
+    const stop = onPoppedChange(() => seen.push(isPoppedReady()));
+    expect(isPoppedReady()).toBe(true);
+    const started = initPopped({
+      ...quiet,
+      popoutList: () => new Promise<string[]>((resolve) => (answer = resolve)),
+    });
+    expect(isPoppedReady()).toBe(false);
+    answer(["t1"]);
+    await started;
+    expect(isPoppedReady()).toBe(true);
+    expect(seen.at(-1)).toBe(true);
+    expect(isPopped("t1")).toBe(true);
+    stop();
+  });
+
+  it("is ready after a second when the host never answers, and when the channel fails", async () => {
+    vi.useFakeTimers();
+    const started = initPopped({ ...quiet, popoutList: () => new Promise<string[]>(() => {}) });
+    expect(isPoppedReady()).toBe(false);
+    await vi.advanceTimersByTimeAsync(1000);
+    await started;
+    expect(isPoppedReady()).toBe(true);
+    resetPopped();
+    await initPopped({
+      ...quiet,
+      popoutList: async () => {
+        throw new Error("no channel");
+      },
+    });
+    expect(isPoppedReady()).toBe(true);
+  });
+
+  it("takes the staged return of every terminal on the first draw, counting each as popped until taken", async () => {
+    const taken: string[] = [];
+    let finish: () => void = () => {};
+    await initPopped(
+      { ...quiet, popoutList: async () => ["t1"] },
+      (id) =>
+        new Promise<void>((resolve) => {
+          taken.push(id);
+          finish = resolve;
+        }),
+    );
+    takeInitialReturns(["t1", "t2"]);
+    expect(taken).toEqual(["t2"]);
+    expect(isPopped("t2")).toBe(true);
+    takeInitialReturns(["t3"]);
+    expect(taken).toEqual(["t2"]);
+    finish();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(isPopped("t2")).toBe(false);
   });
 });

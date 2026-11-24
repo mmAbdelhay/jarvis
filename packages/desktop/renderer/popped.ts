@@ -14,15 +14,60 @@ const settling = new Set<string>();
 let effective: ReadonlySet<string> = new Set();
 const listeners = new Set<(ids: ReadonlySet<string>) => void>();
 let onReturn: ((tabId: string) => Promise<void>) | undefined;
+/** False from the start of initPopped until the host's list has answered (or
+ *  a second has passed, or the channel failed): until then nothing can say
+ *  which tabs this window must not draw. True when initPopped never ran. */
+let ready = true;
+let firstTaken = false;
+const LIST_WAIT_MS = 1000;
+
+export const isPoppedReady = (): boolean => ready;
+
+/** Back to a fresh module's state (tests). */
+export function resetPopped(): void {
+  popped = new Set();
+  settling.clear();
+  effective = new Set();
+  ready = true;
+  firstTaken = false;
+  onReturn = undefined;
+}
 
 export const poppedTabs = (): ReadonlySet<string> => effective;
 export const isPopped = (tabId: string): boolean => effective.has(tabId);
 
-function publish(): void {
+function recompute(): boolean {
   const next = new Set([...popped, ...settling]);
-  if (next.size === effective.size && [...next].every((id) => effective.has(id))) return;
+  if (next.size === effective.size && [...next].every((id) => effective.has(id))) return false;
   effective = next;
-  for (const listener of [...listeners]) listener(effective);
+  return true;
+}
+
+function publish(force = false): void {
+  if (recompute() || force) for (const listener of [...listeners]) listener(effective);
+}
+
+function settle(id: string): void {
+  if (onReturn === undefined || settling.has(id)) return;
+  settling.add(id);
+  onReturn(id)
+    .catch(() => undefined)
+    .finally(() => {
+      settling.delete(id);
+      publish();
+    });
+}
+
+/** On the first draw after the list answered: tabs that came back while this
+ *  window was reloading carry a staged return the list no longer shows, so it
+ *  is taken for every terminal tab, once. Each counts as popped until taken
+ *  (no draw in the meantime; the listeners redraw when it is). Never notifies
+ *  from inside the draw that calls it. */
+export function takeInitialReturns(tabIds: Iterable<string>): void {
+  if (!ready || firstTaken || onReturn === undefined) return;
+  firstTaken = true;
+  for (const id of tabIds) if (!popped.has(id)) settle(id);
+  recompute();
 }
 
 /** Replaces the set. True when what the window shows as popped changed. */
@@ -33,16 +78,7 @@ export function setPoppedTabs(ids: unknown): boolean {
   const before = effective;
   const left = [...popped].filter((id) => !next.has(id));
   popped = next;
-  for (const id of left) {
-    if (onReturn === undefined || settling.has(id)) continue;
-    settling.add(id);
-    onReturn(id)
-      .catch(() => undefined)
-      .finally(() => {
-        settling.delete(id);
-        publish();
-      });
-  }
+  for (const id of left) settle(id);
   publish();
   return effective !== before;
 }
@@ -60,14 +96,29 @@ export async function initPopped(
   returned?: (tabId: string) => Promise<void>,
 ): Promise<void> {
   onReturn = returned;
+  ready = false;
+  firstTaken = false;
   try {
     api.onPopoutChanged((ids) => setPoppedTabs(ids));
   } catch {
     // No channel.
   }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let list: unknown;
   try {
-    setPoppedTabs(await api.popoutList());
+    list = await Promise.race([
+      api.popoutList(),
+      new Promise<undefined>((resolve) => {
+        timer = setTimeout(() => resolve(undefined), LIST_WAIT_MS);
+      }),
+    ]);
   } catch {
     // None popped.
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
   }
+  // Ready first, so listeners told of the list can already draw; and told
+  // even when the list changed nothing, because the window held its drawing.
+  ready = true;
+  if (list === undefined || !setPoppedTabs(list)) publish(true);
 }
