@@ -11,6 +11,7 @@
 // text — only category tokens.
 
 import {
+  inputLineHasDraft,
   readAgentInputState,
   readAgentMenu,
   readClaudeScreen,
@@ -56,8 +57,12 @@ export type AgentView =
 export type AgentAnswerResult = ClaudeAnswerResult;
 
 /** `gone`: no agent session (or no pane) to send to; `prompt`: the agent is
- *  at a menu, where an Enter would answer it; `invalid`: the text. */
-export type AgentSendResult = { ok: true } | { ok: false; reason: "gone" | "prompt" | "invalid" };
+ *  at a menu, where an Enter would answer it; `draft`: the agent's own input
+ *  line already holds typed text the paste would be appended to; `invalid`:
+ *  the text. */
+export type AgentSendResult =
+  | { ok: true }
+  | { ok: false; reason: "gone" | "prompt" | "draft" | "invalid" };
 
 /** The most text one send carries. */
 export const AGENT_SEND_MAX_BYTES = 64 * 1024;
@@ -326,6 +331,9 @@ export function createAgentViewHandlers(deps: AgentViewDeps): {
         ) {
           return { ok: false, reason: "prompt" };
         }
+        // The pane screen drops a dim placeholder or suggestion, so text left
+        // in the input line is the user's own: the paste would join it.
+        if (inputLineHasDraft(tail, session.vendor)) return { ok: false, reason: "draft" };
         deps.write(paneKey, bracketedSubmit(text));
         return { ok: true };
       } catch {

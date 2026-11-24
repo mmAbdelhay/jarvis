@@ -403,6 +403,31 @@ describe("agentSend", () => {
     }
   });
 
+  it("refuses with draft when the agent's input line already holds typed text, writing nothing", async () => {
+    for (const [vendor, screen] of [
+      ["anthropic", ["done", "────────────────", "❯ fix the fla", "────────────────"].join("\n")],
+      ["openai", ["some output", "› half typed"].join("\n")],
+    ] as const) {
+      const deps = fakeDeps(vendor, screen);
+      expect(await createAgentViewHandlers(deps).send("t1", "go")).toEqual({
+        ok: false,
+        reason: "draft",
+      });
+      expect(deps.write).not.toHaveBeenCalled();
+    }
+  });
+
+  it("does not count an empty box or Codex's placeholder as a draft", async () => {
+    for (const [vendor, screen] of [
+      ["anthropic", CLAUDE_IDLE],
+      ["openai", CODEX_IDLE],
+      ["openai", ["x", "› Explain this codebase"].join("\n")],
+    ] as const) {
+      const deps = fakeDeps(vendor, screen);
+      expect(await createAgentViewHandlers(deps).send("t1", "go")).toEqual({ ok: true });
+    }
+  });
+
   it("refuses in a plain shell, even when the pane had an agent a moment ago", async () => {
     const deps = fakeDeps(undefined, "$ ");
     expect(await createAgentViewHandlers(deps).send("t1", "rm -rf /")).toEqual({
