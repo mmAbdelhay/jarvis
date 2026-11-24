@@ -71,6 +71,8 @@ function world(overrides: Partial<PaneAgentLookupDeps> = {}) {
   return { deps, dirs };
 }
 
+const MINE = processOf("codex");
+
 describe("parsers", () => {
   it("reads direct children from ps output", () => {
     const ps = ["  1     0", "500   400", "501   500", "502   500", "503   501"].join("\n");
@@ -176,7 +178,7 @@ describe("createPaneAgentLookup", () => {
     it("takes the single open rollout, asking lsof about the pid and its children", async () => {
       const openFiles = vi.fn(async () => [ROLLOUT, "/w/file.ts"]);
       const { deps } = world({ openFiles, childPids: vi.fn(async () => [501]) });
-      await expect(createPaneAgentLookup(deps).forProcess(processOf("codex"))).resolves.toEqual({
+      await expect(createPaneAgentLookup(deps).forProcess(MINE, [MINE])).resolves.toEqual({
         paneKey: "t1",
         pid: 500,
         vendor: "openai",
@@ -191,9 +193,9 @@ describe("createPaneAgentLookup", () => {
 
     it("ignores a rollout outside the agent's own sessions directory", async () => {
       const { deps } = world({ openFiles: async () => ["/elsewhere/rollout-x.jsonl"] });
-      await expect(
-        createPaneAgentLookup(deps).forProcess(processOf("codex")),
-      ).resolves.toMatchObject({ pending: true });
+      await expect(createPaneAgentLookup(deps).forProcess(MINE, [MINE])).resolves.toMatchObject({
+        pending: true,
+      });
     });
 
     it("does not take a rollout under a sibling directory that shares the prefix", async () => {
@@ -202,16 +204,14 @@ describe("createPaneAgentLookup", () => {
         openFiles: async () => [sibling],
         readHead: async () => meta("cccc", "/w"),
       });
-      await expect(
-        createPaneAgentLookup(deps).forProcess(processOf("codex")),
-      ).resolves.toMatchObject({ pending: true });
+      await expect(createPaneAgentLookup(deps).forProcess(MINE, [MINE])).resolves.toMatchObject({
+        pending: true,
+      });
     });
 
     it("is undefined when lsof shows two open rollouts", async () => {
       const { deps } = world({ openFiles: async () => [ROLLOUT, OTHER] });
-      await expect(
-        createPaneAgentLookup(deps).forProcess(processOf("codex")),
-      ).resolves.toBeUndefined();
+      await expect(createPaneAgentLookup(deps).forProcess(MINE, [MINE])).resolves.toBeUndefined();
     });
 
     it("falls back to the one rollout with the process's cwd, started after it", async () => {
@@ -221,31 +221,36 @@ describe("createPaneAgentLookup", () => {
           { path: OTHER, mtimeMs: -5000 }, // older than the process
         ],
       });
-      await expect(
-        createPaneAgentLookup(deps).forProcess(processOf("codex")),
-      ).resolves.toMatchObject({
+      await expect(createPaneAgentLookup(deps).forProcess(MINE, [MINE])).resolves.toMatchObject({
         sessionId: "aaaa",
         transcriptPath: ROLLOUT,
       });
     });
 
-    it("gives none when the fallback has two candidates", async () => {
+    it("gives a pending session, not a guess, when two rollouts are candidates and another codex is in the cwd", async () => {
       const { deps } = world({
         listRollouts: async () => [
           { path: ROLLOUT, mtimeMs: 2000 },
           { path: OTHER, mtimeMs: 3000 },
         ],
       });
+      const peer = processOf("codex", { pid: 600, startedAt: 900 });
       await expect(
-        createPaneAgentLookup(deps).forProcess(processOf("codex")),
-      ).resolves.toBeUndefined();
+        createPaneAgentLookup(deps).forProcess(MINE, [MINE, peer]),
+      ).resolves.toMatchObject({ pending: true });
     });
 
     it("gives none when the cwd is unknown, and a pending session when no rollout is in the cwd", async () => {
       const { deps } = world({ listRollouts: async () => [{ path: ROLLOUT, mtimeMs: 2000 }] });
       const lookup = createPaneAgentLookup(deps);
-      await expect(lookup.forProcess(processOf("codex", { cwd: null }))).resolves.toBeUndefined();
-      await expect(lookup.forProcess(processOf("codex", { cwd: "/else" }))).resolves.toMatchObject({
+      await expect(
+        lookup.forProcess(processOf("codex", { cwd: null }), []),
+      ).resolves.toBeUndefined();
+      await expect(
+        lookup.forProcess(processOf("codex", { cwd: "/else" }), [
+          processOf("codex", { cwd: "/else" }),
+        ]),
+      ).resolves.toMatchObject({
         pending: true,
         sessionId: "pending-500-1000",
         startedAt: 1000,
@@ -256,11 +261,11 @@ describe("createPaneAgentLookup", () => {
       let rollouts: { path: string; mtimeMs: number }[] = [];
       const { deps } = world({ listRollouts: async () => rollouts });
       const lookup = createPaneAgentLookup(deps);
-      const before = await lookup.forProcess(processOf("codex"));
+      const before = await lookup.forProcess(MINE, [MINE]);
       expect(before).toMatchObject({ pending: true });
       expect(before?.transcriptPath).toBeUndefined();
       rollouts = [{ path: ROLLOUT, mtimeMs: 2000 }];
-      const after = await lookup.forProcess(processOf("codex"));
+      const after = await lookup.forProcess(MINE, [MINE]);
       expect(after).toMatchObject({ sessionId: "aaaa", transcriptPath: ROLLOUT });
       expect(after?.pending).toBeUndefined();
       expect(sameAgentSession(before as PaneAgentSession, after as PaneAgentSession)).toBe(true);
@@ -282,9 +287,9 @@ describe("createPaneAgentLookup", () => {
         ],
         readHead: async (path) => (path === ROLLOUT ? fresh : old),
       });
-      await expect(
-        createPaneAgentLookup(deps).forProcess(processOf("codex")),
-      ).resolves.toMatchObject({ sessionId: "aaaa" });
+      await expect(createPaneAgentLookup(deps).forProcess(MINE, [MINE])).resolves.toMatchObject({
+        sessionId: "aaaa",
+      });
     });
 
     it("takes the newest of several rollouts only when no other codex shares the cwd", async () => {
@@ -302,16 +307,94 @@ describe("createPaneAgentLookup", () => {
       await expect(lookup.forProcess(mine, [mine])).resolves.toMatchObject({ sessionId: "bbbb" });
       const second = processOf("codex", { pid: 501 });
       const other = processOf("codex", { pid: 600, terminalPaneKey: "t2" });
-      await expect(lookup.forProcess(second, [second, other])).resolves.toBeUndefined();
+      await expect(lookup.forProcess(second, [second, other])).resolves.toMatchObject({
+        pending: true,
+      });
       const elsewhere = processOf("codex", { pid: 600, cwd: "/x" });
       await expect(lookup.forProcess(second, [second, elsewhere])).resolves.toMatchObject({
         sessionId: "bbbb",
       });
       // Not told about peers: never a guess.
-      await expect(lookup.forProcess(processOf("codex", { pid: 502 }))).resolves.toBeUndefined();
+      await expect(lookup.forProcess(processOf("codex", { pid: 502 }))).resolves.toMatchObject({
+        pending: true,
+      });
       // A process that was bound keeps its session when it later turns ambiguous.
       await expect(lookup.forProcess(mine, [mine, other])).resolves.toMatchObject({
         sessionId: "bbbb",
+      });
+    });
+
+    describe("several codex processes in one cwd, and resume", () => {
+      const stamp = (id: string, at: number, extra: object = {}): string =>
+        `${JSON.stringify({ type: "session_meta", payload: { id, cwd: "/w", timestamp: new Date(at).toISOString(), ...extra } })}\n`;
+      const one = (at: number, mtimeMs: number, extra: object = {}) =>
+        world({
+          listRollouts: async () => [{ path: ROLLOUT, mtimeMs }],
+          readHead: async () => stamp("aaaa", at, extra),
+        }).deps;
+
+      it("lets two TUIs in one cwd both stay pending when one rollout could be either's", async () => {
+        const deps = one(1500, 2000);
+        const lookup = createPaneAgentLookup(deps);
+        const a = processOf("codex", { pid: 500, startedAt: 1000 });
+        const b = processOf("codex", { pid: 501, startedAt: 1100 });
+        await expect(lookup.forProcess(a, [a, b])).resolves.toMatchObject({ pending: true });
+        await expect(lookup.forProcess(b, [a, b])).resolves.toMatchObject({ pending: true });
+      });
+
+      it("does not count a peer that started after the rollout began", async () => {
+        const lookup = createPaneAgentLookup(one(1500, 2000));
+        const a = processOf("codex", { pid: 500, startedAt: 1000 });
+        const late = processOf("codex", { pid: 501, startedAt: 9000 });
+        await expect(lookup.forProcess(a, [a, late])).resolves.toMatchObject({ sessionId: "aaaa" });
+      });
+
+      it("keeps a rollout bound to one live process away from another, but not a dead one's", async () => {
+        const lookup = createPaneAgentLookup(one(1500, 2000));
+        const x = processOf("codex", { pid: 500, startedAt: 1000 });
+        const y = processOf("codex", { pid: 501, startedAt: 1100, cwd: "/elsewhere" });
+        await expect(lookup.forProcess(x, [x, y])).resolves.toMatchObject({ sessionId: "aaaa" });
+        const y2 = processOf("codex", { pid: 501, startedAt: 1100 });
+        await expect(lookup.forProcess(y2, [x, y2])).resolves.toMatchObject({ pending: true });
+        // X is gone: nothing binds the rollout away from Y any more.
+        const peerGone = createPaneAgentLookup(one(1500, 2000));
+        await peerGone.forProcess(x, [x]);
+        await expect(peerGone.forProcess(y2, [y2])).resolves.toMatchObject({ sessionId: "aaaa" });
+      });
+
+      it("finds a resumed rollout that began before the process, when it is the one written since start-up", async () => {
+        const old = 1000 - 3_600_000;
+        await expect(
+          createPaneAgentLookup(one(old, 20_000)).forProcess(MINE, [MINE]),
+        ).resolves.toMatchObject({ sessionId: "aaaa", transcriptPath: ROLLOUT });
+        // A flush at start-up is not a write by the session.
+        await expect(
+          createPaneAgentLookup(one(old, 3000)).forProcess(MINE, [MINE]),
+        ).resolves.toMatchObject({ pending: true });
+        // Nor is a sub-agent's, or one with another codex in the cwd.
+        await expect(
+          createPaneAgentLookup(one(old, 20_000, { source: { subagent: {} } })).forProcess(MINE, [
+            MINE,
+          ]),
+        ).resolves.toMatchObject({ pending: true });
+        const peer = processOf("codex", { pid: 600 });
+        await expect(
+          createPaneAgentLookup(one(old, 20_000)).forProcess(MINE, [MINE, peer]),
+        ).resolves.toMatchObject({ pending: true });
+      });
+
+      it("stays pending when two older rollouts were both written since start-up", async () => {
+        const old = 1000 - 3_600_000;
+        const { deps } = world({
+          listRollouts: async () => [
+            { path: ROLLOUT, mtimeMs: 20_000 },
+            { path: OTHER, mtimeMs: 30_000 },
+          ],
+          readHead: async (path) => stamp(path === ROLLOUT ? "aaaa" : "bbbb", old),
+        });
+        await expect(createPaneAgentLookup(deps).forProcess(MINE, [MINE])).resolves.toMatchObject({
+          pending: true,
+        });
       });
     });
 
@@ -328,9 +411,9 @@ describe("createPaneAgentLookup", () => {
             ? line("aaaa", { source: "cli" })
             : line("bbbb", { source: { subagent: { thread_spawn: {} } } }),
       });
-      await expect(
-        createPaneAgentLookup(deps).forProcess(processOf("codex")),
-      ).resolves.toMatchObject({ sessionId: "aaaa" });
+      await expect(createPaneAgentLookup(deps).forProcess(MINE, [MINE])).resolves.toMatchObject({
+        sessionId: "aaaa",
+      });
     });
 
     it("compares real paths for a symlinked sessions dir and cwd", async () => {
@@ -346,7 +429,9 @@ describe("createPaneAgentLookup", () => {
         readHead: async () => meta("aaaa", "/private/tmp/w"),
       });
       await expect(
-        createPaneAgentLookup(deps).forProcess(processOf("codex", { cwd: "/tmp/w" })),
+        createPaneAgentLookup(deps).forProcess(processOf("codex", { cwd: "/tmp/w" }), [
+          processOf("codex", { cwd: "/tmp/w" }),
+        ]),
       ).resolves.toMatchObject({ sessionId: "aaaa", transcriptPath: real });
       const viaCwd = world({
         listRollouts: async () => [{ path: ROLLOUT, mtimeMs: 2000 }],
@@ -354,14 +439,18 @@ describe("createPaneAgentLookup", () => {
         readHead: async () => meta("aaaa", "/private/tmp/w"),
       });
       await expect(
-        createPaneAgentLookup(viaCwd.deps).forProcess(processOf("codex", { cwd: "/tmp/w" })),
+        createPaneAgentLookup(viaCwd.deps).forProcess(processOf("codex", { cwd: "/tmp/w" }), [
+          processOf("codex", { cwd: "/tmp/w" }),
+        ]),
       ).resolves.toMatchObject({ sessionId: "aaaa" });
     });
 
     it("uses the account's own config directory", async () => {
       const listRollouts = vi.fn(async () => []);
       const { deps } = world({ listRollouts });
-      await createPaneAgentLookup(deps).forProcess(processOf("codex-work"));
+      await createPaneAgentLookup(deps).forProcess(processOf("codex-work"), [
+        processOf("codex-work"),
+      ]);
       expect(listRollouts).toHaveBeenCalledWith(join("/h/.codex-work", "sessions"));
     });
 
@@ -375,7 +464,9 @@ describe("createPaneAgentLookup", () => {
         ],
         readHead: async () => meta("cccc", "/w"),
       });
-      const found = await createPaneAgentLookup(deps).forProcess(processOf("codex-work"));
+      const found = await createPaneAgentLookup(deps).forProcess(processOf("codex-work"), [
+        processOf("codex-work"),
+      ]);
       expect(found?.configDir).toBe("/h/.codex-work");
     });
 
@@ -386,7 +477,7 @@ describe("createPaneAgentLookup", () => {
         openFiles,
         listRollouts: async () => [{ path: OTHER, mtimeMs: 2000 }],
       });
-      const out = await createPaneAgentLookup(deps).forProcess(processOf("codex"));
+      const out = await createPaneAgentLookup(deps).forProcess(MINE, [MINE]);
       expect(openFiles).not.toHaveBeenCalled();
       expect(out?.sessionId).toBe("bbbb");
     });
@@ -397,9 +488,7 @@ describe("createPaneAgentLookup", () => {
         childPids: async () => Promise.reject(new Error("ps")),
         listRollouts: async () => Promise.reject(new Error("fs")),
       });
-      await expect(
-        createPaneAgentLookup(deps).forProcess(processOf("codex")),
-      ).resolves.toBeUndefined();
+      await expect(createPaneAgentLookup(deps).forProcess(MINE, [MINE])).resolves.toBeUndefined();
     });
   });
 });

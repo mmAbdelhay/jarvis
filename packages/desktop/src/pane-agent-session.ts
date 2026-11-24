@@ -99,6 +99,8 @@ function agentSessionsDir(agent: AgentConfig, deps: PaneAgentLookupDeps): string
 
 /** The clock slack between `ps` (1 s resolution) and a rollout's own timestamp. */
 const CLOCK_ALLOWANCE_MS = 2000;
+/** A rollout touched this long after start-up was written by the session, not flushed at launch. */
+const RESUME_SLACK_MS = 5000;
 
 type RolloutMeta = {
   id: string;
@@ -279,58 +281,92 @@ export function createPaneAgentLookup(deps: PaneAgentLookupDeps): PaneAgentLooku
     }
 
     // No open file to go by (a shared background app-server holds the
-    // rollout): the rollout begun in this process's cwd since it started.
+    // rollout): the rollout begun in this process's cwd since it started, or
+    // (a resumed session) the one older rollout it has been writing to.
     if (process.cwd === null) return undefined;
     const cwd = await real(process.cwd);
     const since = process.startedAt - CLOCK_ALLOWANCE_MS;
-    const found: { meta: RolloutMeta; path: string; mtimeMs: number }[] = [];
+    type Found = { meta: RolloutMeta; path: string; mtimeMs: number };
+    const fresh: Found[] = [];
+    const older: Found[] = [];
     for (const file of await deps.listRollouts(sessionsDir)) {
       if (file.mtimeMs < since) continue; // cheap prefilter
       const meta = await rolloutMeta(file.path, deps.readHead);
       if (meta === undefined || meta.cwd === undefined) continue;
-      // An older session of the same cwd that something touched later.
-      if (meta.startedMs === undefined || meta.startedMs < since) continue;
       if ((await real(meta.cwd)) !== cwd) continue;
-      found.push({ meta, path: file.path, mtimeMs: file.mtimeMs });
+      const entry = { meta, path: file.path, mtimeMs: file.mtimeMs };
+      // An older session of the same cwd that something touched later is not
+      // this process's, unless it is the one it resumed (below).
+      if (meta.startedMs !== undefined && meta.startedMs >= since) fresh.push(entry);
+      else if (meta.startedMs !== undefined) older.push(entry);
     }
-    const main = found.filter((entry) => !entry.meta.sub);
-    const pool = main.length > 0 ? main : found;
-    const [only] = pool;
-    if (only === undefined) return session(`pending-${process.pid}-${process.startedAt}`);
-    if (pool.length === 1) return session(only.meta.id, only.path);
 
-    // Several rollouts (`/new` in one TUI): the newest, but only when no other
-    // Codex process could own any of them.
-    const boundId = bound.get(bindKey);
-    const sharing = peers === undefined ? true : await sharesCwd(process, cwd, peers);
-    if (sharing) {
-      const keep = pool.find((entry) => entry.meta.id === boundId);
-      return keep === undefined ? undefined : session(keep.meta.id, keep.path);
-    }
-    const newest = [...pool].sort(
-      (a, b) => (b.meta.startedMs ?? 0) - (a.meta.startedMs ?? 0) || b.mtimeMs - a.mtimeMs,
-    )[0];
-    return newest === undefined ? undefined : session(newest.meta.id, newest.path);
-  }
-
-  /** Whether another live Codex process may be in `cwd` (real path). An
-   *  unknown cwd counts as sharing. */
-  async function sharesCwd(
-    process: ExternalAgentProcess,
-    cwd: string,
-    peers: readonly ExternalAgentProcess[],
-  ): Promise<boolean> {
+    // The other live Codex processes, and the rollouts a live one is bound to.
     const codexIds = new Set(
       deps
         .agents()
         .filter((candidate) => candidate.vendor === "openai")
         .map((candidate) => candidate.id),
     );
-    for (const peer of peers) {
-      if (peer.pid === process.pid || !codexIds.has(peer.agentId)) continue;
-      if (peer.cwd === null || (await real(peer.cwd)) === cwd) return true;
+    const others =
+      peers === undefined
+        ? undefined
+        : peers.filter((peer) => peer.pid !== process.pid && codexIds.has(peer.agentId));
+    const inCwd: ExternalAgentProcess[] = [];
+    for (const peer of others ?? []) {
+      if (peer.cwd === null || (await real(peer.cwd)) === cwd) inCwd.push(peer);
     }
-    return false;
+    const takenByOthers = new Set<string>();
+    for (const peer of others ?? []) {
+      const id = bound.get(`${peer.pid}:${peer.startedAt}`);
+      if (id !== undefined) takenByOthers.add(id);
+    }
+    const boundId = bound.get(bindKey);
+    const pending = (): PaneAgentSession => session(`pending-${process.pid}-${process.startedAt}`);
+    const keep = (pool: Found[]): PaneAgentSession | undefined => {
+      const kept = pool.find((entry) => entry.meta.id === boundId);
+      return kept === undefined ? undefined : session(kept.meta.id, kept.path);
+    };
+    // Sub-agent and exec threads never win over a main thread.
+    const mains = (pool: Found[]): Found[] => {
+      const main = pool.filter((entry) => !entry.meta.sub);
+      return main.length > 0 ? main : pool;
+    };
+
+    const pool = mains(fresh).filter((entry) => !takenByOthers.has(entry.meta.id));
+    if (pool.length > 0) {
+      // A candidate is this process's only if no other live Codex process in
+      // the cwd could own it: one that started after the rollout began could
+      // not have.
+      const contested =
+        others === undefined ||
+        pool.some((entry) =>
+          inCwd.some(
+            (peer) =>
+              entry.meta.startedMs === undefined ||
+              peer.startedAt <= entry.meta.startedMs + CLOCK_ALLOWANCE_MS,
+          ),
+        );
+      if (contested) return keep(pool) ?? pending();
+      const newest = [...pool].sort(
+        (a, b) => (b.meta.startedMs ?? 0) - (a.meta.startedMs ?? 0) || b.mtimeMs - a.mtimeMs,
+      )[0];
+      return newest === undefined ? pending() : session(newest.meta.id, newest.path);
+    }
+
+    // Resumed: the one older, main-thread rollout written to since start-up
+    // (a daemon's flush at start does not count), with no other Codex here.
+    const written = mains(older).filter(
+      (entry) =>
+        entry.mtimeMs > process.startedAt + RESUME_SLACK_MS &&
+        !entry.meta.sub &&
+        !takenByOthers.has(entry.meta.id),
+    );
+    const [only] = written;
+    if (written.length === 1 && only !== undefined && others !== undefined && inCwd.length === 0) {
+      return session(only.meta.id, only.path);
+    }
+    return keep(older) ?? pending();
   }
 
   return {

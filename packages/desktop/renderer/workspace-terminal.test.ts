@@ -2730,6 +2730,49 @@ describe("the agent chat switch", () => {
     expect(() => clear?.click()).not.toThrow();
   });
 
+  async function splitWithAgents(withAgent: string[]): Promise<HTMLElement | null> {
+    await started();
+    vi.useRealTimers();
+    FakeTerminal.instances.at(-1)?.pressKey({ key: "d", metaKey: true });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    for (const key of withAgent) views[key] = agent;
+    const leaves = document.querySelectorAll<HTMLElement>(".terminal-split-leaf");
+    expect(leaves).toHaveLength(2);
+    for (const leaf of leaves) {
+      leaf.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    return document.querySelector<HTMLElement>(".terminal-split");
+  }
+
+  it("hides the tab's toolbar strip in a split only while every pane has the agent header", async () => {
+    const split = await splitWithAgents(["tab-1", "tab-1:p1"]);
+    expect(document.querySelectorAll(".agent-bar:not([hidden])")).toHaveLength(2);
+    expect(split?.hasAttribute("data-chat-only")).toBe(true);
+    // Focus moving between the panes changes nothing.
+    document
+      .querySelectorAll<HTMLElement>(".terminal-split-leaf")[0]
+      ?.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(split?.hasAttribute("data-chat-only")).toBe(true);
+    // A new plain pane brings the strip back.
+    FakeTerminal.instances.at(-1)?.pressKey({ key: "d", metaKey: true });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(split?.hasAttribute("data-chat-only")).toBe(false);
+  });
+
+  it("keeps the tab's toolbar strip in a mixed split, whichever pane has the focus", async () => {
+    const split = await splitWithAgents(["tab-1"]);
+    expect(document.querySelectorAll(".agent-bar:not([hidden])")).toHaveLength(1);
+    expect(split?.hasAttribute("data-chat-only")).toBe(false);
+    document
+      .querySelectorAll<HTMLElement>(".terminal-split-leaf")[0]
+      ?.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(split?.hasAttribute("data-chat-only")).toBe(false);
+  });
+
   it("goes with its pane", async () => {
     const render = await started();
     vi.useRealTimers();

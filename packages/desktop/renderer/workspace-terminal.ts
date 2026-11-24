@@ -211,19 +211,18 @@ function clearIcon(): SVGSVGElement {
 
 // ------------------------------------------------------------- Chat header
 
-/** The tab's toolbar strip (files, clear, plan, Reviews) goes while the pane
- *  in front shows an agent's own header row (Chat or Term alike): that row
- *  carries the same actions, so there is one row, not two. The pane in front
- *  is the only pane, or the focused one; a mixed split keeps the strip when
- *  the focus is on a plain terminal. */
+/** The tab's toolbar strip (files, clear, plan, Reviews) goes while every
+ *  pane of the tab shows an agent's own header row (Chat or Term alike): that
+ *  row carries the same actions, so there is one row, not two. A mixed split
+ *  keeps the strip. It never follows focus, which would resize the panes
+ *  (and their ptys) on every click. */
 function syncChatOnly(split: HTMLElement | null): void {
   if (split === null) return;
   const panes = [...split.querySelectorAll<HTMLElement>(".terminal-pane")];
-  const front =
-    panes.length === 1
-      ? panes[0]
-      : (panes.find((pane) => pane.contains(document.activeElement)) ?? undefined);
-  split.toggleAttribute("data-chat-only", front?.dataset["agentHeader"] === "on");
+  split.toggleAttribute(
+    "data-chat-only",
+    panes.length > 0 && panes.every((pane) => pane.dataset["agentHeader"] === "on"),
+  );
 }
 
 /** Presses one of the tab toolbar's own buttons: the handler stays where it is. */
@@ -1201,9 +1200,6 @@ function ensurePane(
           }),
       onFocus: (paneKey) => {
         agentChats.get(paneKey)?.focused();
-        syncChatOnly(
-          tree?.element.closest<HTMLElement>(".terminal-split") ?? tree?.element ?? null,
-        );
         const path = lastCwd.get(paneKey);
         // A pane that has never said where it is — a shell with no
         // integration, or one that has not drawn its first prompt yet —
@@ -1595,6 +1591,8 @@ function makePane(
       toggleFiles: toggleExplorer,
     });
     agentChats.set(paneKey, chat);
+    // A new pane without an agent header brings the tab's strip back.
+    queueMicrotask(() => syncChatOnly(view.element.closest<HTMLElement>(".terminal-split")));
     const disposePane = view.dispose;
     view.dispose = () => {
       agentChats.delete(paneKey);
