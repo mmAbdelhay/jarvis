@@ -123,7 +123,7 @@ describe("the agent chat's layout", () => {
   it("hides the tab's toolbar strip, and its band, while every pane shows Chat", () => {
     expect(ruleBodyFor(".terminal-split[data-chat-only]")).toMatch(/padding-block-start\s*:\s*0/);
     expect(css).toMatch(
-      /\.terminal-split\[data-chat-only\] > \.reviews-toggle \{ display: none; \}/,
+      /\.terminal-split\[data-chat-only\] > :is\([^)]*\.reviews-toggle[^)]*\) \{\s*display: none;/,
     );
   });
 });
