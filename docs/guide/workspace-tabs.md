@@ -546,6 +546,14 @@ the phone's chat view is unchanged.
   works the button says **Queue** for an agent that queues messages (Claude
   Code). If the agent's own input line already holds typed text, nothing is sent
   and the chat says so.
+- **Dictation.** The microphone button after the **+** (or **⌘⇧M**, Ctrl+Shift+M)
+  records what you say, shows the time with **Done** and **Cancel**, and puts the
+  words in the box at the caret, replacing a selection, for you to edit before
+  you send. It never sends by itself: Enter while recording is Done, Escape
+  cancels, and Send waits until the text is in. It needs `ffmpeg` and a whisper
+  model (Settings → Tools), records on the laptop only, keeps the recording just
+  long enough to transcribe it, and stops by itself after 5 minutes. The voice
+  hotkey and dictation share the one microphone, so one waits for the other.
 - **Control.** **Stop** interrupts a working agent. Claude Code's **mode**
   (Ask first, Accept edits, Plan, Auto) and **model** can be switched from the
   box; Copilot and Codex open their own model menu. Controls a vendor does not

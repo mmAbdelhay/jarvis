@@ -18,6 +18,9 @@ version and the downloads. This file is the index.
   works, and has Stop plus Claude Code's mode and model. A question or plan shows as a card,
   and a menu only the terminal can answer opens the terminal inside the card. Desktop only; the
   phone is unchanged.
+- Terminal: dictate into the chat. A microphone button in the box (or ⌘⇧M, Ctrl+Shift+M) records,
+  transcribes on the laptop with the same whisper as the voice turn and puts the text at the
+  caret for you to edit; it never sends. Needs ffmpeg and whisper. Desktop only.
 - Terminal: the chat no longer sends text into an agent whose own input line already has typed
   text, and says why; a failed read keeps the last view instead of closing the chat.
 - Background service: files attached in the chat reach the service as binary, not JSON.
