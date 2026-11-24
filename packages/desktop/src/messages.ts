@@ -450,6 +450,10 @@ export const MESSAGES = {
     language === "ar" ? "نماذج أخرى…" : "More models\u2026",
   agentChatNoFiles: (language: "ar" | "en"): string =>
     language === "ar" ? "لا ملفات مطابقة." : "No files found",
+  agentChatModeLocked: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "الوكيل ينتظر إجابة، فلا يمكن تغيير الوضع الآن."
+      : "The agent is waiting for an answer, so the mode cannot change now.",
   agentChatQuestionWait: (language: "ar" | "en"): string =>
     language === "ar"
       ? "ظهر السؤال للتو. انتظر لحظة ثم اختر."

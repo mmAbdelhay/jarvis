@@ -155,6 +155,27 @@ describe("agentChat", () => {
     expect(t.deps.follow).toHaveBeenCalledWith("t1", { dir: "/t", file: "s.jsonl" });
   });
 
+  it("shows a mode only when the screen proves it, and keeps the last proven one while a menu hides the status row", async () => {
+    const RULE = "─".repeat(40);
+    const idle = (status: string) => ["done", RULE, "❯", RULE, status].join("\n");
+    const t = setup(userLine(1), { screen: idle("") });
+    expect(agent(await t.handlers.chat("t1")).mode).toBeUndefined();
+    t.state.screen = idle("  ⏸ plan mode on (shift+tab to cycle)");
+    expect(agent(await t.handlers.chat("t1")).mode).toBe("plan");
+    t.state.screen = [
+      "Bash command",
+      "  ls",
+      "Do you want to proceed?",
+      "❯ 1. Yes",
+      "  2. No",
+    ].join("\n");
+    expect(agent(await t.handlers.chat("t1")).mode).toBe("plan");
+    t.state.screen = idle("  ? for shortcuts");
+    expect(agent(await t.handlers.chat("t1")).mode).toBe("default");
+    const other = setup(userLine(1), { screen: "no status row" });
+    expect(agent(await other.handlers.chat("t1")).mode).toBeUndefined();
+  });
+
   it("states caps per vendor: mode and a model command only for Claude", async () => {
     const codex = agent(await setup("", { vendor: "openai" }).handlers.chat("t1"));
     expect(codex.caps).toMatchObject({ mode: false, model: "menu", stop: true });

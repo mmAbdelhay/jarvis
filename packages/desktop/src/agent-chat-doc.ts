@@ -13,7 +13,7 @@
 // name, or any transcript, screen or typed text — only category tokens, and
 // no keys ever leave this file.
 
-import { readAgentMenu } from "@jarvis/core";
+import { readAgentMenu, readClaudeMode } from "@jarvis/core";
 import {
   type ChatAgent,
   type ChatAsking,
@@ -234,6 +234,8 @@ export function createAgentChatHandlers(deps: AgentChatDeps): {
   const syncBytes = deps.limits?.syncBytes ?? 2 * MB;
   const chunk = deps.limits?.chunkBytes ?? MB;
   const entries = new Map<string, Entry>();
+  /** The last mode the screen proved, per session: a menu hides the status row. */
+  const lastMode = new Map<string, ClaudeMode>();
   type AgentView = Extract<AgentChatView, { kind: "agent" }>;
   /** The last good reply per pane, shown again when a read fails. */
   const lastGood = new Map<string, AgentView>();
@@ -550,6 +552,21 @@ export function createAgentChatHandlers(deps: AgentChatDeps): {
                 options: menu.options.map(({ label, highlighted }) => ({ label, highlighted })),
               }
             : undefined;
+        // Only a mode the screen proves; while a menu hides the row, the last one
+        // that was proven for this very session. Never a guess.
+        let mode: ClaudeMode | undefined;
+        if (session.vendor === "anthropic") {
+          mode = readClaudeMode(screen) ?? lastMode.get(session.sessionId);
+          if (mode !== undefined) {
+            lastMode.delete(session.sessionId);
+            lastMode.set(session.sessionId, mode);
+            while (lastMode.size > MAX_ENTRIES * 4) {
+              const oldest = lastMode.keys().next().value;
+              if (oldest === undefined) break;
+              lastMode.delete(oldest);
+            }
+          }
+        }
         const needsTerm = menu?.kind === "unreadable" || (menu === undefined && state.needsTerm);
         const view: AgentView = {
           kind: "agent",
@@ -557,7 +574,7 @@ export function createAgentChatHandlers(deps: AgentChatDeps): {
           sessionId: session.sessionId,
           ...(session.name === undefined ? {} : { title: session.name }),
           ...(doc.model === undefined ? {} : { model: doc.model }),
-          ...(state.mode === undefined ? {} : { mode: state.mode }),
+          ...(mode === undefined ? {} : { mode }),
           ...(state.working === undefined ? {} : { working: state.working }),
           ...(prompt === undefined ? {} : { prompt }),
           ...(needsTerm ? { needsTerm: true as const } : {}),

@@ -200,6 +200,23 @@ describe("queue, stop, mode and model", () => {
     expect(document.activeElement).toBe(button);
   });
 
+  it("keeps the mode button disabled, with its reason, while a question is up", async () => {
+    const s = await open(
+      agentView({
+        prompt: {
+          kind: "single",
+          question: "Proceed?",
+          options: [{ label: "Yes", highlighted: true }],
+        },
+      }),
+    );
+    const button = s.q<HTMLButtonElement>(".ac-modebutton");
+    expect(button.hidden).toBe(false);
+    expect(button.textContent).toBe("Plan");
+    expect(button.disabled).toBe(true);
+    expect(button.title).toBe(t("agentChatModeLocked"));
+  });
+
   it("hides the mode button when the screen does not prove a mode, and for vendors without one", async () => {
     const unknown = await open(agentView({ mode: undefined }));
     expect(unknown.q<HTMLElement>(".ac-modebutton").hidden).toBe(true);

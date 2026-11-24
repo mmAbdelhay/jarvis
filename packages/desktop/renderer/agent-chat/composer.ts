@@ -775,6 +775,10 @@ export function createComposer(options: ComposerOptions): Composer {
       locked = isLocked;
       const modeShown = next.caps.mode && next.mode !== undefined;
       modeButton.hidden = !modeShown;
+      // A question hides the agent's status row and takes its keys: the mode
+      // cannot be switched meanwhile, and the button says why.
+      modeButton.disabled = isLocked;
+      modeButton.title = isLocked ? t("agentChatModeLocked") : "";
       if (modeShown && next.mode !== undefined) modeButton.textContent = t(MODE_LABELS[next.mode]);
       const model = prettyModel(next.model, next.vendor);
       modelButton.hidden = model === undefined && next.caps.model !== "menu";
