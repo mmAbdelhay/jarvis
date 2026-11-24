@@ -2730,6 +2730,19 @@ describe("the agent chat switch", () => {
     expect(() => clear?.click()).not.toThrow();
   });
 
+  it("looks for an agent in a pane that holds the alternate screen, with no command mark seen", async () => {
+    // The reload check runs on the real clock, 1.5 s after the pane is built, then asks 1 s later.
+    const { renderWorkspaceTerminals } = await load();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    views["tab-1"] = agent;
+    dataListener?.("tab-1", "\u001b[?1049h");
+    await new Promise((resolve) => setTimeout(resolve, 2800));
+    expect(asked).toContain("tab-1");
+    expect(bar()?.hidden).toBe(false);
+  });
+
   async function splitWithAgents(withAgent: string[]): Promise<HTMLElement | null> {
     await started();
     vi.useRealTimers();

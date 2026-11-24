@@ -362,6 +362,12 @@ describe("createPaneAgentLookup", () => {
         await expect(peerGone.forProcess(y2, [y2])).resolves.toMatchObject({ sessionId: "aaaa" });
       });
 
+      it("is pending for an older rollout of the cwd that was only touched at start-up", async () => {
+        await expect(
+          createPaneAgentLookup(one(1000 - 60_000, 3000)).forProcess(MINE, [MINE]),
+        ).resolves.toMatchObject({ pending: true });
+      });
+
       it("finds a resumed rollout that began before the process, when it is the one written since start-up", async () => {
         const old = 1000 - 3_600_000;
         await expect(
