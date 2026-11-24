@@ -541,3 +541,296 @@ describe("attachments", () => {
     expect(s.q<HTMLElement>(".ac-attach").hidden).toBe(true);
   });
 });
+
+describe("command suggestions", () => {
+  type Cmd = {
+    name: string;
+    description?: string;
+    hint?: string;
+    aliases?: string[];
+    choices?: string[];
+    trigger?: "$";
+    source: "built-in" | "project" | "account" | "skill" | "plugin";
+  };
+  const cmd = (name: string, extra: Partial<Cmd> = {}): Cmd => ({
+    name,
+    source: "built-in",
+    ...extra,
+  });
+  const commandsOf = (s: Setup) =>
+    s.api.terminalAgentCommands as unknown as ReturnType<typeof vi.fn>;
+  const rows = (s: Setup) =>
+    [...s.host.querySelectorAll(".ac-menu--suggest [role='option']")] as HTMLElement[];
+  const labels = (s: Setup) =>
+    rows(s).map((row) => row.querySelector(".ac-menu__label")?.textContent);
+  const menuOpen = (s: Setup) => s.host.querySelector(".ac-menu--suggest:not([hidden])") !== null;
+  const withCommands = async (list: Cmd[], view = agentView()) => {
+    const s = await open(view);
+    commandsOf(s).mockResolvedValue({ commands: list });
+    return s;
+  };
+  const many = (n: number): Cmd[] =>
+    Array.from({ length: n }, (_, i) =>
+      cmd(`cmd${String(i).padStart(3, "0")}`, { description: `Does ${i}` }),
+    );
+
+  it("lists every match, not 30, and says how many", async () => {
+    const s = await withCommands(many(250));
+    typeInto(s, "/");
+    await settle();
+    expect(rows(s)).toHaveLength(250);
+    expect(s.q(".ac-suggest-count").textContent).toBe("250 commands");
+    typeInto(s, "/cmd001");
+    await settle();
+    expect(rows(s)).toHaveLength(1);
+    expect(s.q(".ac-suggest-count").textContent).toBe("1 command");
+  });
+
+  it("shows name, argument hint, description with the full text in a title, and the source", async () => {
+    const long = "x".repeat(150);
+    const s = await withCommands([
+      cmd("deploy", { description: long, hint: "[env]", source: "project" }),
+    ]);
+    typeInto(s, "/");
+    await settle();
+    const row = rows(s)[0] as HTMLElement;
+    expect(row.querySelector(".ac-menu__hint")?.textContent).toBe("[env]");
+    expect(row.querySelector(".ac-menu__note")?.textContent).toBe(long);
+    expect(row.querySelector<HTMLElement>(".ac-menu__note")?.title).toBe(long);
+    expect(row.querySelector(".ac-menu__source")?.textContent).toBe(t("agentChatSourceProject"));
+  });
+
+  it("marks the matched letters", async () => {
+    const s = await withCommands([cmd("security-review")]);
+    typeInto(s, "/rev");
+    await settle();
+    expect(
+      [...s.host.querySelectorAll(".ac-menu--suggest mark")]
+        .map((mark) => mark.textContent)
+        .join(""),
+    ).toBe("rev");
+  });
+
+  it("groups an empty query by source with group names", async () => {
+    const s = await withCommands([
+      cmd("b"),
+      cmd("p", { source: "project" }),
+      cmd("g", { source: "plugin" }),
+    ]);
+    typeInto(s, "/");
+    await settle();
+    expect(
+      [...s.host.querySelectorAll(".ac-menu--suggest .ac-menu__group")].map((n) => n.textContent),
+    ).toEqual([
+      t("agentChatSourceBuiltIn"),
+      t("agentChatSourceProject"),
+      t("agentChatSourcePlugin"),
+    ]);
+  });
+
+  it("narrows on every keystroke and grows on Backspace, by alias and description too", async () => {
+    const s = await withCommands([
+      cmd("clear", { aliases: ["reset"], description: "Start again" }),
+      cmd("compact", { description: "Shorten" }),
+      cmd("review"),
+    ]);
+    typeInto(s, "/c");
+    await settle();
+    expect(labels(s)).toEqual(["/clear", "/compact"]);
+    typeInto(s, "/cl");
+    expect(labels(s)).toEqual(["/clear"]);
+    typeInto(s, "/c");
+    expect(labels(s)).toEqual(["/clear", "/compact"]);
+    typeInto(s, "/reset");
+    expect(labels(s)).toEqual(["/clear"]);
+    typeInto(s, "/shor");
+    expect(labels(s)).toEqual(["/compact"]);
+  });
+
+  it("filters by the part before a caret moved into the name and replaces the whole name", async () => {
+    const s = await withCommands([cmd("review"), cmd("remember")]);
+    const box = typeInto(s, "/review now");
+    box.setSelectionRange(3, 3);
+    box.dispatchEvent(new Event("click", { bubbles: true }));
+    await settle();
+    expect(labels(s)).toEqual(["/review", "/remember"]);
+    press(box, "ArrowDown");
+    press(box, "Tab");
+    expect(box.value).toBe("/remember now");
+  });
+
+  it("inserts a partly typed name with a space on Enter or Tab, and sends an exact name on Enter", async () => {
+    const s = await withCommands([cmd("review"), cmd("revert")]);
+    typeInto(s, "/rev");
+    await settle();
+    press(input(s), "Enter");
+    expect(input(s).value).toBe("/review ");
+    expect(send(s)).not.toHaveBeenCalled();
+    typeInto(s, "/revert");
+    await settle();
+    press(input(s), "Enter");
+    await settle();
+    expect(send(s)).toHaveBeenCalledWith("t1", "/revert");
+  });
+
+  it("sends on Enter for an exact alias too", async () => {
+    const s = await withCommands([cmd("clear", { aliases: ["reset"] })]);
+    typeInto(s, "/reset");
+    await settle();
+    press(input(s), "Enter");
+    await settle();
+    expect(send(s)).toHaveBeenCalledWith("t1", "/reset");
+  });
+
+  it("closes on Escape, reopens on the next letter, and sends the text when nothing matches", async () => {
+    const s = await withCommands([cmd("review")]);
+    typeInto(s, "/re");
+    await settle();
+    press(input(s), "Escape");
+    expect(menuOpen(s)).toBe(false);
+    typeInto(s, "/rev");
+    expect(menuOpen(s)).toBe(true);
+    typeInto(s, "/zzz");
+    expect(menuOpen(s)).toBe(false);
+    press(input(s), "Enter");
+    await settle();
+    expect(send(s)).toHaveBeenCalledWith("t1", "/zzz");
+  });
+
+  it("never sends on a click, it only inserts", async () => {
+    const s = await withCommands([cmd("review")]);
+    typeInto(s, "/rev");
+    await settle();
+    (rows(s)[0] as HTMLElement).click();
+    expect(input(s).value).toBe("/review ");
+    expect(send(s)).not.toHaveBeenCalled();
+  });
+
+  it("suggests after whitespace inside a message, takes Enter only after a move or Tab, closes for paths", async () => {
+    const s = await withCommands([cmd("review"), cmd("revert")]);
+    typeInto(s, "please run /rev");
+    await settle();
+    expect(labels(s)).toEqual(["/review", "/revert"]);
+    press(input(s), "Enter");
+    await settle();
+    expect(send(s)).toHaveBeenCalledWith("t1", "please run /rev");
+    typeInto(s, "please run /rev");
+    await settle();
+    press(input(s), "ArrowDown");
+    press(input(s), "Enter");
+    expect(input(s).value).toBe("please run /revert ");
+    typeInto(s, "look in /usr/");
+    await settle();
+    expect(menuOpen(s)).toBe(false);
+    typeInto(s, "a //x");
+    expect(menuOpen(s)).toBe(false);
+  });
+
+  it("offers $ skills only for Codex, and keeps them in the / list", async () => {
+    const list = [cmd("model"), cmd("pdf", { trigger: "$", source: "skill" })];
+    const codex = await withCommands(list, agentView({ vendor: "openai" }));
+    typeInto(codex, "use $pd");
+    await settle();
+    expect(labels(codex)).toEqual(["$pdf"]);
+    press(input(codex), "Tab");
+    expect(input(codex).value).toBe("use $pdf ");
+    typeInto(codex, "$HOME");
+    expect(menuOpen(codex)).toBe(false);
+    typeInto(codex, "/");
+    await settle();
+    expect(labels(codex)).toEqual(["/model", "$pdf"]);
+    const claude = await withCommands(list);
+    typeInto(claude, "use $pd");
+    await settle();
+    expect(menuOpen(claude)).toBe(false);
+  });
+
+  it("lists documented argument choices after the name and a space, and a quiet hint otherwise", async () => {
+    const s = await withCommands([
+      cmd("model", { choices: ["opus", "sonnet"], hint: "<model>" }),
+      cmd("add-dir", { hint: "<path>" }),
+    ]);
+    typeInto(s, "/model ");
+    await settle();
+    expect(labels(s)).toEqual(["opus", "sonnet"]);
+    typeInto(s, "/model so");
+    expect(labels(s)).toEqual(["sonnet"]);
+    press(input(s), "Tab");
+    expect(input(s).value).toBe("/model sonnet");
+    typeInto(s, "/add-dir ");
+    await settle();
+    expect(menuOpen(s)).toBe(false);
+    expect(s.q(".ac-arghint").textContent).toBe("<path>");
+    expect(s.q<HTMLElement>(".ac-arghint").hidden).toBe(false);
+    typeInto(s, "/add-dir src");
+    expect(s.q<HTMLElement>(".ac-arghint").hidden).toBe(true);
+  });
+
+  it("never shows results for an older prefix after a slow first load", async () => {
+    let release: (value: { commands: Cmd[] }) => void = () => undefined;
+    const s = await open();
+    commandsOf(s).mockReturnValueOnce(new Promise((resolve) => (release = resolve)));
+    typeInto(s, "/c");
+    typeInto(s, "/rev");
+    release({ commands: [cmd("compact"), cmd("review")] });
+    await settle();
+    expect(labels(s)).toEqual(["/review"]);
+    typeInto(s, "/");
+    expect(labels(s)).toEqual(["/compact", "/review"]);
+    expect(commandsOf(s)).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the cached list first and refreshes when it is older than 10 seconds", async () => {
+    const s = await withCommands([cmd("review")]);
+    typeInto(s, "/");
+    await settle();
+    expect(commandsOf(s)).toHaveBeenCalledTimes(1);
+    s.timers.advance(5_000);
+    typeInto(s, "/r");
+    await settle();
+    expect(commandsOf(s)).toHaveBeenCalledTimes(1);
+    s.timers.advance(6_000);
+    commandsOf(s).mockResolvedValue({ commands: [cmd("review"), cmd("rewind")] });
+    typeInto(s, "/re");
+    expect(labels(s)).toEqual(["/review"]);
+    await settle();
+    expect(labels(s)).toEqual(["/review", "/rewind"]);
+  });
+
+  it("keeps working while the agent is busy", async () => {
+    const s = await withCommands([cmd("review")], agentView({ working: "Thinking" }));
+    typeInto(s, "/rev");
+    await settle();
+    expect(labels(s)).toEqual(["/review"]);
+  });
+
+  it("moves by page, to the ends, and the wheel or a still pointer does not move the choice", async () => {
+    const s = await withCommands(many(100));
+    typeInto(s, "/");
+    await settle();
+    const active = () => rows(s).findIndex((row) => row.dataset["active"] === "true");
+    press(input(s), "PageDown");
+    expect(active()).toBe(8);
+    press(input(s), "PageUp");
+    expect(active()).toBe(0);
+    press(input(s), "End");
+    expect(active()).toBe(99);
+    press(input(s), "Home");
+    expect(active()).toBe(0);
+    const row = rows(s)[5] as HTMLElement;
+    row.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX: 10, clientY: 10 }));
+    expect(active()).toBe(5);
+    (rows(s)[7] as HTMLElement).dispatchEvent(
+      new MouseEvent("mousemove", { bubbles: true, clientX: 10, clientY: 10 }),
+    );
+    expect(active()).toBe(5);
+  });
+
+  it("marks a long list for content-visibility and keeps the dictation button", async () => {
+    const s = await withCommands(many(300));
+    typeInto(s, "/");
+    await settle();
+    expect(s.q(".ac-menu--suggest").classList.contains("ac-menu--long")).toBe(true);
+    expect(s.host.querySelector(".ac-mic")).not.toBeNull();
+  });
+});

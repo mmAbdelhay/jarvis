@@ -13,14 +13,26 @@ export type MenuItem = {
   current?: boolean;
   /** Label in the code font (commands, file names). */
   mono?: boolean;
+  /** Quiet argument hint after the label. */
+  hint?: string;
+  /** Full text of a shortened note, for the hover title. */
+  title?: string;
+  /** Small tag at the end of the row (where a command comes from). */
+  tag?: string;
+  /** Heading shown above the first row of each group. */
+  group?: string;
+  /** Indexes of the label's letters to mark (the matched ones). */
+  marks?: readonly number[];
 };
 
 export type Menu = {
   element: HTMLElement;
   /** Shows the items; `pick` runs with the chosen one and the menu closes. */
   open(items: readonly MenuItem[], pick: (item: MenuItem) => void): void;
-  /** Replaces the items of an open menu (a filter changed). */
-  setItems(items: readonly MenuItem[]): void;
+  /** Replaces the items of an open menu (a filter changed); `reset` goes back to the first row. */
+  setItems(items: readonly MenuItem[], reset?: boolean): void;
+  /** True once the keys moved the choice (the pointer does not count). */
+  moved(): boolean;
   close(): void;
   isOpen(): boolean;
   /** For an owner that keeps the focus: true when the key was the menu's. */
@@ -51,30 +63,78 @@ export function createMenu(options: {
   let active = 0;
   let pick: ((item: MenuItem) => void) | undefined;
   let returnFocus: Element | null = null;
+  let touched = false;
+  let pointer: { x: number; y: number } | undefined;
+
+  function labelNode(item: MenuItem): HTMLElement {
+    const label = el("span", item.mono === true ? "ac-menu__label ac-mono" : "ac-menu__label");
+    label.dir = "auto";
+    const marked = new Set(item.marks ?? []);
+    if (marked.size === 0) {
+      label.textContent = item.label;
+      return label;
+    }
+    let run = "";
+    let inMark = false;
+    const flush = (): void => {
+      if (run === "") return;
+      label.append(inMark ? el("mark", "ac-menu__mark", run) : document.createTextNode(run));
+      run = "";
+    };
+    [...item.label].forEach((letter, index) => {
+      const is = marked.has(index);
+      if (is !== inMark) {
+        flush();
+        inMark = is;
+      }
+      run += letter;
+    });
+    flush();
+    return label;
+  }
 
   function paint(): void {
     element.replaceChildren();
+    element.classList.toggle("ac-menu--long", items.length > 200);
     if (items.length === 0 && emptyText !== undefined) {
       element.append(el("div", "ac-menu__empty", emptyText));
     }
+    let group: string | undefined;
     items.forEach((item, index) => {
+      if (item.group !== undefined && item.group !== group) {
+        group = item.group;
+        const heading = el("div", "ac-menu__group", item.group);
+        heading.setAttribute("role", "presentation");
+        element.append(heading);
+      }
       const row = el("div", "ac-menu__row");
       row.id = `${uid}-${index}`;
       row.setAttribute("role", "option");
       row.setAttribute("aria-selected", String(index === active));
       row.dataset["active"] = String(index === active);
-      const label = el(
-        "span",
-        item.mono === true ? "ac-menu__label ac-mono" : "ac-menu__label",
-        item.label,
-      );
-      label.dir = "auto";
-      row.append(label, el("span", "ac-spacer"));
-      if (item.note !== undefined && item.note !== "")
-        row.append(el("span", "ac-menu__note", item.note));
+      row.append(labelNode(item));
+      if (item.hint !== undefined && item.hint !== "") {
+        const hint = el("span", "ac-menu__hint", item.hint);
+        hint.dir = "auto";
+        row.append(hint);
+      }
+      row.append(el("span", "ac-spacer"));
+      if (item.note !== undefined && item.note !== "") {
+        const note = el("span", "ac-menu__note", item.note);
+        note.title = item.title ?? item.note;
+        row.append(note);
+      }
+      if (item.tag !== undefined && item.tag !== "") {
+        row.append(el("span", "ac-menu__source", item.tag));
+      }
       row.addEventListener("mousedown", (event) => event.preventDefault());
-      row.addEventListener("mousemove", () => {
-        if (active !== index) move(index);
+      row.addEventListener("mousemove", (event) => {
+        // A wheel scroll under a still pointer fires mousemove too: only a
+        // pointer that actually moved changes the choice.
+        const moved =
+          pointer === undefined || pointer.x !== event.clientX || pointer.y !== event.clientY;
+        pointer = { x: event.clientX, y: event.clientY };
+        if (moved && active !== index) move(index);
       });
       row.addEventListener("click", () => choose(index));
       element.append(row);
@@ -107,6 +167,8 @@ export function createMenu(options: {
     element.replaceChildren();
     items = [];
     pick = undefined;
+    touched = false;
+    pointer = undefined;
     if (wasOpen) {
       if (options.focusable === true && returnFocus instanceof HTMLElement) returnFocus.focus();
       returnFocus = null;
@@ -114,19 +176,40 @@ export function createMenu(options: {
     }
   }
 
+  /** Rows that fit the list now (8 where nothing is measured). */
+  function pageSize(): number {
+    const row = element.querySelector<HTMLElement>(".ac-menu__row");
+    const height = row?.offsetHeight ?? 0;
+    return height > 0 && element.clientHeight > 0
+      ? Math.max(1, Math.floor(element.clientHeight / height) - 1)
+      : 8;
+  }
+
   function handleKey(event: KeyboardEvent): boolean {
     if (element.hidden || event.isComposing || event.keyCode === 229) return false;
     switch (event.key) {
       case "ArrowDown":
+        touched = true;
         move(active + 1);
         break;
       case "ArrowUp":
+        touched = true;
         move(active - 1);
         break;
+      case "PageDown":
+        touched = true;
+        move(Math.min(items.length - 1, active + pageSize()));
+        break;
+      case "PageUp":
+        touched = true;
+        move(Math.max(0, active - pageSize()));
+        break;
       case "Home":
+        touched = true;
         move(0);
         break;
       case "End":
+        touched = true;
         move(items.length - 1);
         break;
       case "Enter":
@@ -170,11 +253,16 @@ export function createMenu(options: {
       paint();
       if (options.focusable === true) element.focus();
     },
-    setItems(next) {
+    setItems(next, reset = false) {
       items = next;
+      if (reset) {
+        active = 0;
+        touched = false;
+      }
       active = Math.min(active, Math.max(0, items.length - 1));
       paint();
     },
+    moved: () => touched,
     close,
     isOpen: () => !element.hidden,
     setEmpty(text) {

@@ -12,6 +12,7 @@ import type {
   AgentStopResult,
 } from "../../src/agent-controls.js";
 import type { AgentCommandInfo, AgentFileHit } from "../../src/agent-suggest.js";
+import { argumentChoices, rankCommands, readToken } from "./command-match.js";
 import type { AgentSendResult } from "../../src/agent-view.js";
 import type { MessageKey } from "../../src/messages.js";
 import type { AgentOf, StorageLike } from "./agent-types.js";
@@ -36,7 +37,7 @@ const MAX_FILE_BYTES = 25 * 1024 * 1024;
 const MAX_ATTACHMENTS = 10;
 const MAX_INPUT_PX = 220;
 const FILES_DEBOUNCE_MS = 120;
-const COMMANDS_TTL_MS = 60_000;
+const COMMANDS_TTL_MS = 10_000;
 /** What an older version kept on disk: removed whenever a composer is built. */
 const OLD_DRAFT_PREFIX = "jarvis.agentChatDraft.";
 /** Unsent text per pane, in memory only: it survives a tab switch and a pane rebuilt in
@@ -237,6 +238,11 @@ export function createComposer(options: ComposerOptions): Composer {
   });
   suggest.element.classList.add("ac-menu--suggest");
   suggest.element.id = `ac-suggest-${++suggestCounter}`;
+  const suggestCount = el("div", "ac-sr-only ac-suggest-count");
+  suggestCount.setAttribute("role", "status");
+  suggestCount.setAttribute("aria-live", "polite");
+  const argHint = el("div", "ac-arghint");
+  argHint.hidden = true;
   input.setAttribute("aria-controls", suggest.element.id);
   const modeMenu = createMenu({ label: t("agentChatModeMenu"), focusable: true });
   const modelMenu = createMenu({ label: t("agentChatModelMenu"), focusable: true });
@@ -309,7 +315,9 @@ export function createComposer(options: ComposerOptions): Composer {
     input,
     dictationBar,
     bar,
+    argHint,
     suggest.element,
+    suggestCount,
     modeMenu.element,
     modelMenu.element,
     fileInput,
@@ -325,6 +333,13 @@ export function createComposer(options: ComposerOptions): Composer {
   let pastedCount = 0;
   let historyAt: number | undefined;
   let commands: { at: number; session: string; list: AgentCommandInfo[] } | undefined;
+  let commandsLoad: Promise<AgentCommandInfo[]> | undefined;
+  /** What the open list is for: the keys read it (exact name sends, and so on). */
+  let suggestState:
+    | { kind: "name"; atStart: boolean; exact: boolean }
+    | { kind: "arg"; exact: boolean }
+    | undefined;
+  let suggestSignature = "";
   let token = 0;
   let cancelFiles: (() => void) | undefined;
   let mention: { start: number; end: number } | undefined;
@@ -660,6 +675,10 @@ export function createComposer(options: ComposerOptions): Composer {
     input.setAttribute("aria-expanded", "false");
     input.removeAttribute("aria-activedescendant");
     mention = undefined;
+    suggestState = undefined;
+    suggestSignature = "";
+    suggestCount.textContent = "";
+    argHint.hidden = true;
     token++;
     cancelFiles?.();
   }
@@ -668,70 +687,146 @@ export function createComposer(options: ComposerOptions): Composer {
     items: MenuItem[],
     replace: { start: number; end: number },
     pick: (item: MenuItem) => string,
+    reset = false,
   ): void {
     mention = replace;
     const choose = (item: MenuItem): void => {
-      const text = pick(item);
+      let text = pick(item);
       const at = mention ?? replace;
+      // A space already follows the name: step over it instead of doubling it.
+      const spaced = text.endsWith(" ") && input.value.charAt(at.end) === " ";
+      if (spaced) text = text.slice(0, -1);
       input.value = `${input.value.slice(0, at.start)}${text}${input.value.slice(at.end)}`;
-      const caret = at.start + text.length;
+      const caret = at.start + text.length + (spaced ? 1 : 0);
       input.setSelectionRange(caret, caret);
       closeSuggest();
       saveDraft();
       grow();
       input.focus();
     };
-    if (suggest.isOpen()) suggest.setItems(items);
+    if (suggest.isOpen()) suggest.setItems(items, reset);
     else suggest.open(items, choose);
     input.setAttribute("aria-expanded", "true");
     const active = suggest.activeId();
     if (active !== undefined) input.setAttribute("aria-activedescendant", active);
   }
 
-  async function loadCommands(): Promise<AgentCommandInfo[]> {
-    const session = view?.sessionId ?? "";
-    if (
-      commands !== undefined &&
-      commands.session === session &&
-      options.now() - commands.at < COMMANDS_TTL_MS
-    ) {
-      return commands.list;
-    }
-    const answer = await api.commands();
-    commands = { at: options.now(), session, list: answer.commands };
-    return answer.commands;
+  function loadCommands(): Promise<AgentCommandInfo[]> {
+    commandsLoad ??= api
+      .commands()
+      .then((answer) => {
+        commands = { at: options.now(), session: view?.sessionId ?? "", list: answer.commands };
+        return answer.commands;
+      })
+      .finally(() => {
+        commandsLoad = undefined;
+      });
+    return commandsLoad;
   }
 
-  async function suggestCommands(
-    prefix: string,
-    replace: { start: number; end: number },
-  ): Promise<void> {
-    const mine = ++token;
-    let list: AgentCommandInfo[];
-    try {
-      list = await loadCommands();
-    } catch {
+  const SOURCE_KEYS = {
+    "built-in": "agentChatSourceBuiltIn",
+    project: "agentChatSourceProject",
+    account: "agentChatSourceAccount",
+    skill: "agentChatSourceSkill",
+    plugin: "agentChatSourcePlugin",
+  } as const;
+
+  /** Draws the `/` or `$` list (or the argument choices) for the text and
+   *  caret as they are right now, from the cached commands. */
+  function renderCommands(): void {
+    if (gone) return;
+    const list = commands?.list;
+    const caret = input.selectionStart ?? input.value.length;
+    const found =
+      locked || input.selectionStart !== input.selectionEnd || list === undefined
+        ? undefined
+        : readToken(input.value, caret, view?.vendor === "openai");
+    if (found === undefined || view?.caps.commands !== true) {
+      if (list !== undefined) closeSuggest();
       return;
     }
-    if (mine !== token) return;
-    const lower = prefix.toLowerCase();
-    const starts = list.filter((command) => command.name.toLowerCase().startsWith(lower));
-    const rest = list.filter(
-      (command) =>
-        !command.name.toLowerCase().startsWith(lower) && command.name.toLowerCase().includes(lower),
-    );
-    suggest.setEmpty(t("agentChatNoSuggestions"));
-    const items = [...starts, ...rest].slice(0, 30).map<MenuItem>((command) => ({
-      id: command.name,
-      label: `/${command.name}`,
-      mono: true,
-      ...(command.description !== undefined ? { note: command.description } : {}),
-    }));
-    if (items.length === 0) {
+    token++;
+    cancelFiles?.();
+    if (found.kind === "arg") {
+      const choices = argumentChoices(list ?? [], found.name, found.query);
+      const known = (list ?? []).find(
+        (command) =>
+          command.trigger === undefined &&
+          (command.name === found.name || command.aliases?.includes(found.name) === true),
+      );
+      suggest.close();
+      input.setAttribute("aria-expanded", "false");
+      if (choices.length > 0) {
+        const signature = `arg|${found.name}|${found.query}`;
+        const items = choices.map<MenuItem>((choice) => ({
+          id: choice,
+          label: choice,
+          mono: true,
+        }));
+        suggestState = { kind: "arg", exact: choices.includes(found.query) };
+        showSuggest(
+          items,
+          { start: found.start, end: found.end },
+          (item) => item.label,
+          signature !== suggestSignature,
+        );
+        suggestSignature = signature;
+        suggestCount.textContent = "";
+        argHint.hidden = true;
+        return;
+      }
+      closeSuggest();
+      if (found.query === "" && known?.hint !== undefined) {
+        argHint.textContent = known.hint;
+        argHint.hidden = false;
+      }
+      return;
+    }
+    const hits = rankCommands(list ?? [], found.query, found.trigger);
+    if (hits.length === 0) {
       closeSuggest();
       return;
     }
-    showSuggest(items, replace, (item) => `${item.label} `);
+    const grouped = found.query === "";
+    const items = hits.map<MenuItem>(({ command, indexes }) => {
+      const sigil = command.trigger === "$" ? "$" : "/";
+      return {
+        id: `${sigil}${command.name}`,
+        label: `${sigil}${command.name}`,
+        mono: true,
+        marks: indexes.map((index) => index + 1),
+        ...(command.hint === undefined ? {} : { hint: command.hint }),
+        ...(command.description === undefined
+          ? {}
+          : { note: command.description, title: command.description }),
+        tag: t(SOURCE_KEYS[command.source]),
+        ...(grouped ? { group: t(SOURCE_KEYS[command.source]) } : {}),
+      };
+    });
+    const first = hits[0]?.command;
+    const typed = found.full.toLowerCase();
+    const exact =
+      first !== undefined &&
+      (first.name.toLowerCase() === typed ||
+        first.aliases?.some((alias) => alias.toLowerCase() === typed) === true);
+    suggestState = { kind: "name", atStart: found.atStart, exact };
+    // At most 45% of the pane's height, wherever the pane is (split, pop-out).
+    const paneHeight = element.closest<HTMLElement>(".agent-chat")?.clientHeight ?? 0;
+    suggest.element.style.maxHeight = paneHeight > 0 ? `${Math.floor(paneHeight * 0.45)}px` : "";
+    const signature = `name|${found.trigger}|${found.query}`;
+    suggest.setEmpty(t("agentChatNoSuggestions"));
+    showSuggest(
+      items,
+      { start: found.start, end: found.end },
+      (item) => `${item.label} `,
+      signature !== suggestSignature,
+    );
+    suggestSignature = signature;
+    suggestCount.textContent =
+      items.length === 1
+        ? t("agentChatCommandsOne")
+        : fmt(t("agentChatCommandsCount"), { n: items.length });
   }
 
   function suggestFiles(query: string, replace: { start: number; end: number }): void {
@@ -766,15 +861,30 @@ export function createComposer(options: ComposerOptions): Composer {
     }
     const caret = input.selectionStart ?? input.value.length;
     const before = input.value.slice(0, caret);
-    const command = /^\/([\w:.-]*)$/.exec(before);
-    if (command !== null && view?.caps.commands === true) {
-      void suggestCommands(command[1] ?? "", { start: 0, end: caret });
-      return;
-    }
     const file = /(?:^|\s)@([^\s@]*)$/.exec(before);
     if (file !== null && view?.caps.files === true) {
       const query = file[1] ?? "";
+      suggestState = undefined;
       suggestFiles(query, { start: caret - query.length - 1, end: caret });
+      return;
+    }
+    if (
+      view?.caps.commands === true &&
+      readToken(input.value, caret, view.vendor === "openai") !== undefined
+    ) {
+      // From the cache at once; a list older than 10 s (or none yet) is loaded
+      // and the list is drawn again for whatever is typed by then.
+      const session = view.sessionId ?? "";
+      renderCommands();
+      const fresh =
+        commands !== undefined &&
+        commands.session === session &&
+        options.now() - commands.at < COMMANDS_TTL_MS;
+      if (!fresh) {
+        void loadCommands()
+          .then(() => renderCommands())
+          .catch(() => undefined);
+      }
       return;
     }
     closeSuggest();
@@ -874,10 +984,38 @@ export function createComposer(options: ComposerOptions): Composer {
     else refreshSuggestions();
   });
   input.addEventListener("click", refreshSuggestions);
+  input.addEventListener("compositionend", () => {
+    if (!quiet) refreshSuggestions();
+  });
+  input.addEventListener("keyup", (event) => {
+    if (event.key === "ArrowLeft" || event.key === "ArrowRight") refreshSuggestions();
+  });
   input.addEventListener("blur", () => closeSuggest());
   input.addEventListener("keydown", (event) => {
     if (!options.chatKey(event)) return;
     if (event.isComposing || event.keyCode === 229) return;
+    if (
+      suggest.isOpen() &&
+      event.key === "Enter" &&
+      !event.shiftKey &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      suggestState !== undefined
+    ) {
+      const sends =
+        suggestState.kind === "arg"
+          ? suggestState.exact && !suggest.moved()
+          : suggestState.atStart
+            ? suggestState.exact && !suggest.moved()
+            : !suggest.moved();
+      if (sends) {
+        // A fully typed name, or ordinary text with a `/` in it: Enter sends.
+        event.preventDefault();
+        closeSuggest();
+        void submit();
+        return;
+      }
+    }
     if (suggest.isOpen() && suggest.handleKey(event)) {
       const active = suggest.activeId();
       if (active !== undefined) input.setAttribute("aria-activedescendant", active);

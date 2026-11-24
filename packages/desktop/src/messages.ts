@@ -280,6 +280,19 @@ export const MESSAGES = {
     language === "ar"
       ? "الوكيل يسأل سؤالاً. أجب عنه أعلاه."
       : "The agent is asking a question. Answer it above.",
+  agentChatCommandsCount: (language: "ar" | "en"): string =>
+    language === "ar" ? "{n} أمر" : "{n} commands",
+  agentChatCommandsOne: (language: "ar" | "en"): string =>
+    language === "ar" ? "أمر واحد" : "1 command",
+  agentChatSourceAccount: (language: "ar" | "en"): string =>
+    language === "ar" ? "الحساب" : "Account",
+  agentChatSourceBuiltIn: (language: "ar" | "en"): string =>
+    language === "ar" ? "مدمج" : "Built-in",
+  agentChatSourcePlugin: (language: "ar" | "en"): string =>
+    language === "ar" ? "إضافة" : "Plugin",
+  agentChatSourceProject: (language: "ar" | "en"): string =>
+    language === "ar" ? "المشروع" : "Project",
+  agentChatSourceSkill: (language: "ar" | "en"): string => (language === "ar" ? "مهارة" : "Skill"),
   agentChatContextLeft: (language: "ar" | "en"): string =>
     language === "ar" ? "السياق: متبقٍ {n}" : "Context {n} left",
   agentChatContextUsed: (language: "ar" | "en"): string =>

@@ -2735,6 +2735,15 @@
   .ac-menu__row[data-active="true"] { background: var(--accent-dim); }
   .ac-menu__note { color: var(--text-muted); font-size: 13px; }
   .ac-menu__empty { padding: var(--s3); color: var(--text-muted); }
+  .ac-menu--suggest { max-height: min(45vh, 520px); overscroll-behavior: contain; }
+  .ac-menu__group { padding: 8px 12px 2px; color: var(--text-muted); font-size: 12px; letter-spacing: 0.04em; }
+  .ac-menu__mark { background: transparent; color: var(--accent); font-weight: 600; }
+  .ac-menu__hint { color: var(--text-muted); font-size: 13px; white-space: nowrap; }
+  .ac-menu__row .ac-menu__note { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ac-menu__source { flex: none; padding: 1px 6px; border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text-muted); font-size: 11px; }
+  .ac-menu--long .ac-menu__row { content-visibility: auto; contain-intrinsic-size: auto 40px; }
+  .ac-arghint { padding: 4px 14px 0; color: var(--text-muted); font-size: 12px; font-family: var(--font-mono); }
   .ac-mono { font-family: var(--font-mono); }
   /* Classic (always-visible) scrollbars paint a light track unless told otherwise. */
   .agent-chat__feed, .ac-side, .ac-code, .ac-diff, .ac-output__text, .ac-menu, .ac-popover,
