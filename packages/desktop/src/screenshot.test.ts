@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { MESSAGES } from "./messages.js";
 import {
@@ -30,7 +31,7 @@ function fakeDeps(over: Partial<ScreenshotDeps> = {}) {
     execFile: vi.fn(async (_file: string, args: string[]) => {
       files.set(args[args.length - 1] as string, Buffer.from("AREA"));
     }),
-    makeTempDir: vi.fn(async () => "/tmp/jarvis-shot-abc"),
+    makeTempDir: vi.fn(async () => join("/tmp", "jarvis-shot-abc")),
     readFile: vi.fn(async (path: string) => {
       const found = files.get(path);
       if (found === undefined) throw Object.assign(new Error("nope"), { code: "ENOENT" });
@@ -54,7 +55,7 @@ function fakeDeps(over: Partial<ScreenshotDeps> = {}) {
       canceled: false,
       filePath: o.defaultPath,
     })),
-    defaultFolder: () => "/Users/me/Pictures",
+    defaultFolder: () => join("/Users", "me", "Pictures"),
     now: () => new Date(2026, 10, 25, 9, 5, 7),
     newId: () => "id-1",
     delay: vi.fn(async () => {}),
@@ -112,12 +113,12 @@ describe("area capture", () => {
     const out = await shots.capture("area");
     expect(deps.execFile).toHaveBeenCalledWith(
       "/usr/sbin/screencapture",
-      ["-i", "-x", "-t", "png", "/tmp/jarvis-shot-abc/capture.png"],
+      ["-i", "-x", "-t", "png", join("/tmp", "jarvis-shot-abc", "capture.png")],
       expect.anything(),
     );
     expect(deps.writeClipboardPng).toHaveBeenCalledWith(Buffer.from("PNGDATA"));
     expect(out).toMatchObject({ ok: true, id: "id-1", width: 1000, height: 500 });
-    expect(removed).toEqual(["/tmp/jarvis-shot-abc"]);
+    expect(removed).toEqual([join("/tmp", "jarvis-shot-abc")]);
   });
 
   it("returns a thumbnail data URL of at most 320px wide", async () => {
@@ -139,7 +140,7 @@ describe("area capture", () => {
       reason: "cancelled",
     });
     expect(deps.writeClipboardPng).not.toHaveBeenCalled();
-    expect(removed).toEqual(["/tmp/jarvis-shot-abc"]);
+    expect(removed).toEqual([join("/tmp", "jarvis-shot-abc")]);
   });
 
   it("is a silent cancel for an empty file", async () => {
@@ -170,7 +171,7 @@ describe("area capture", () => {
     });
     const out = await createScreenshots(spawn.deps).capture("area");
     expect(out).toMatchObject({ ok: false, reason: "failed" });
-    expect(spawn.removed).toEqual(["/tmp/jarvis-shot-abc"]);
+    expect(spawn.removed).toEqual([join("/tmp", "jarvis-shot-abc")]);
   });
 
   it("is refused off macOS", async () => {
@@ -353,12 +354,16 @@ describe("save", () => {
     const { deps, shots } = await held();
     deps.showSaveDialog = vi.fn(async () => ({
       canceled: false,
-      filePath: "/Users/me/Desktop/shot.png",
+      filePath: join("/Users", "me", "Desktop", "shot.png"),
     }));
     const out = await shots.save("id-1");
-    expect(out).toEqual({ ok: true, path: "/Users/me/Desktop/shot.png", name: "shot.png" });
+    expect(out).toEqual({
+      ok: true,
+      path: join("/Users", "me", "Desktop", "shot.png"),
+      name: "shot.png",
+    });
     expect(deps.writeFile).toHaveBeenCalledWith(
-      "/Users/me/Desktop/shot.png",
+      join("/Users", "me", "Desktop", "shot.png"),
       Buffer.from("PNGDATA"),
     );
     // next time the dialog opens in the last folder
@@ -368,7 +373,7 @@ describe("save", () => {
     }));
     await shots.save("id-1");
     expect(deps.showSaveDialog).toHaveBeenCalledWith({
-      defaultPath: "/Users/me/Desktop/Jarvis screenshot 2026-11-25 at 09.05.07.png",
+      defaultPath: join("/Users", "me", "Desktop", "Jarvis screenshot 2026-11-25 at 09.05.07.png"),
     });
   });
 
@@ -376,7 +381,7 @@ describe("save", () => {
     const { deps, shots } = await held();
     await shots.save("id-1");
     expect(deps.showSaveDialog).toHaveBeenCalledWith({
-      defaultPath: "/Users/me/Pictures/Jarvis screenshot 2026-11-25 at 09.05.07.png",
+      defaultPath: join("/Users", "me", "Pictures", "Jarvis screenshot 2026-11-25 at 09.05.07.png"),
     });
   });
 
