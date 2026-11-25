@@ -8,6 +8,15 @@ version and the downloads. This file is the index.
 
 ## Unreleased
 
+## [0.1.19] — 2026-11-25
+
+- Dictation and the voice hotkey find ffmpeg when Jarvis runs as a background service, and a
+  dictation error names what is missing.
+- Terminal: the Chat side panel keeps context and usage limits in view; its lists collapse, take
+  one line per row and shorten behind "Show all".
+- Terminal: a sub-agent that ends while the agent is busy no longer stays on "Running".
+- Terminal: font zoom keys work in a popped-out window.
+
 ## [0.1.18] — 2026-11-25
 
 - Terminal: the Chat view reads headings, tables, nested and task lists, quotes, italics and

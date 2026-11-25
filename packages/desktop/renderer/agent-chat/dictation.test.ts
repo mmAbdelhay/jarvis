@@ -408,8 +408,22 @@ describe("refusals", () => {
     expect(s.q<HTMLElement>(".agent-chat__note").hidden).toBe(true);
   });
 
+  it.each([
+    [{ ok: false, reason: "no-recorder" }, "agentChatDictateNoRecorder"],
+    [{ ok: false, reason: "no-whisper" }, "agentChatDictateNoWhisper"],
+  ] as const)("a finish answered %j names the missing tool", async (answer, key) => {
+    const s = await recording({ text: "mine" });
+    finish(s).mockResolvedValueOnce(answer);
+    button(s, "done").click();
+    await settle();
+    expect(s.q(".agent-chat__note").textContent).toBe(t(key));
+    expect(input(s).value).toBe("mine");
+  });
+
   it("mentions the real path to setup", () => {
-    expect(t("agentChatDictateFailed")).toContain("Settings > Tools");
+    expect(t("agentChatDictateNoRecorder")).toContain("Settings > Tools");
+    expect(t("agentChatDictateNoWhisper")).toContain("Settings > Tools");
+    expect(t("agentChatDictateFailed")).toContain("microphone");
   });
 });
 

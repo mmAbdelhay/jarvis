@@ -323,6 +323,7 @@ export function buildLimitBlock(limit: AgentLimit, t: Translate): HTMLElement {
   if (notes.length > 0) {
     const note = el("div", "ac-limit-full__note", notes.join(" · "));
     note.dir = "auto";
+    note.title = notes.join(" · ");
     block.append(note);
   }
   return block;

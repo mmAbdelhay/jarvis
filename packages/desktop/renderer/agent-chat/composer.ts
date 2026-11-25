@@ -420,6 +420,8 @@ export function createComposer(options: ComposerOptions): Composer {
     busy: "agentChatDictateBusy",
     silence: "agentChatDictateSilence",
     failed: "agentChatDictateFailed",
+    "no-recorder": "agentChatDictateNoRecorder",
+    "no-whisper": "agentChatDictateNoWhisper",
   } as const;
   const SAYS = {
     started: "agentChatDictateStarted",

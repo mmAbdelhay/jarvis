@@ -326,8 +326,16 @@ export const MESSAGES = {
       : "Nothing heard. Check the microphone and its permission.",
   agentChatDictateFailed: (language: "ar" | "en"): string =>
     language === "ar"
-      ? "يحتاج الإملاء إلى ffmpeg وwhisper. انظر الإعدادات > الأدوات."
-      : "Dictation needs ffmpeg and whisper. See Settings > Tools.",
+      ? "فشل الإملاء. تحقق من الميكروفون وإذنه ثم حاول مرة أخرى."
+      : "Dictation failed. Check the microphone and its permission, then try again.",
+  agentChatDictateNoRecorder: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "تعذّر على الإملاء العثور على ffmpeg. انظر الإعدادات > الأدوات."
+      : "Dictation could not find ffmpeg. See Settings > Tools.",
+  agentChatDictateNoWhisper: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "تعذّر على الإملاء العثور على whisper أو نموذجه. انظر الإعدادات > الأدوات."
+      : "Dictation could not find whisper or its model. See Settings > Tools.",
   agentChatCurrent: (language: "ar" | "en"): string => (language === "ar" ? "الحالي" : "Current"),
   agentChatDeriving: (language: "ar" | "en"): string =>
     language === "ar" ? "جارٍ قراءة الجلسة كاملة…" : "Reading the whole session…",
@@ -457,6 +465,18 @@ export const MESSAGES = {
   agentChatFieldBranch: (language: "ar" | "en"): string => (language === "ar" ? "الفرع" : "Branch"),
   agentChatFieldFolder: (language: "ar" | "en"): string =>
     language === "ar" ? "المجلد" : "Folder",
+  agentChatListShowAll: (language: "ar" | "en"): string =>
+    language === "ar" ? "عرض الكل ({n})" : "Show all {n}",
+  agentChatShowFewer: (language: "ar" | "en"): string =>
+    language === "ar" ? "عرض أقل" : "Show fewer",
+  agentChatShowDone: (language: "ar" | "en"): string =>
+    language === "ar" ? "عرض المنجزة ({n})" : "Show {n} done",
+  agentChatSummaryRunning: (language: "ar" | "en"): string =>
+    language === "ar" ? "{n} قيد التشغيل" : "{n} running",
+  agentChatSummaryDone: (language: "ar" | "en"): string =>
+    language === "ar" ? "{n} منتهية" : "{n} done",
+  agentChatSummaryFailed: (language: "ar" | "en"): string =>
+    language === "ar" ? "{n} فاشلة" : "{n} failed",
   agentChatPanelRaw: (language: "ar" | "en"): string =>
     language === "ar" ? "سطر الحالة" : "Status line",
   agentChatPanelSession: (language: "ar" | "en"): string =>

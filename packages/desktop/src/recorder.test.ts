@@ -189,7 +189,7 @@ describe("defaultRecorderDeps", () => {
     expect(spawnMock).toHaveBeenCalledWith(
       "ffmpeg",
       ["-f", "avfoundation", "-i", ":default", "-ar", "16000", "-ac", "1", "-y", "/tmp/out.wav"],
-      { stdio: "ignore" },
+      { stdio: "ignore", env: process.env },
     );
 
     recording.kill();
@@ -287,6 +287,94 @@ describe("defaultRecorderDeps", () => {
     await expect(
       createRecorderDeps("linux").deleteFile("/tmp/jarvis-recorder-test-does-not-exist.wav"),
     ).resolves.toBeUndefined();
+  });
+});
+
+describe("recorder environment and missing ffmpeg", () => {
+  function mockSpawn() {
+    const handlers: Record<string, (...args: unknown[]) => void>[] = [];
+    const spawnMock = vi.fn(() => {
+      const h: Record<string, (...args: unknown[]) => void> = {};
+      handlers.push(h);
+      return {
+        kill: vi.fn(),
+        stderr: { setEncoding: vi.fn(), on: vi.fn() },
+        stdin: { on: vi.fn(), write: vi.fn() },
+        on: (event: string, handler: (...args: unknown[]) => void) => {
+          h[event] = handler;
+        },
+      };
+    });
+    vi.doMock("node:child_process", () => ({ spawn: spawnMock }));
+    return { spawnMock, handlers };
+  }
+
+  it("reads the environment getter at every spawn", async () => {
+    vi.resetModules();
+    const { spawnMock } = mockSpawn();
+    const { createRecorderDeps } = await import("./recorder.js");
+    let env: NodeJS.ProcessEnv = { PATH: "/usr/bin" };
+    const deps = createRecorderDeps("linux", () => env);
+    deps.spawnRecorder("/tmp/a.wav");
+    env = { PATH: "/opt/homebrew/bin:/usr/bin" };
+    deps.spawnRecorder("/tmp/b.wav");
+    const calls = spawnMock.mock.calls as unknown as [
+      string,
+      string[],
+      { env: NodeJS.ProcessEnv },
+    ][];
+    expect(calls[0]?.[2].env.PATH).toBe("/usr/bin");
+    expect(calls[1]?.[2].env.PATH).toBe("/opt/homebrew/bin:/usr/bin");
+    vi.doUnmock("node:child_process");
+    vi.resetModules();
+  });
+
+  it("marks an ENOENT spawn failure as missing, and nothing else", async () => {
+    vi.resetModules();
+    const { handlers } = mockSpawn();
+    const { createRecorderDeps } = await import("./recorder.js");
+    const deps = createRecorderDeps("darwin");
+    const a = deps.spawnRecorder("/tmp/a.wav");
+    handlers[0]?.["error"]?.(Object.assign(new Error("spawn ffmpeg ENOENT"), { code: "ENOENT" }));
+    expect((await a.done).missing).toBe(true);
+    const b = deps.spawnRecorder("/tmp/b.wav");
+    handlers[1]?.["error"]?.(Object.assign(new Error("spawn ffmpeg EACCES"), { code: "EACCES" }));
+    const result = await b.done;
+    expect(result.error).toBeDefined();
+    expect(result.missing).toBeUndefined();
+    vi.doUnmock("node:child_process");
+    vi.resetModules();
+  });
+
+  it("does not remember a failed device listing on Windows", async () => {
+    vi.resetModules();
+    const { spawnMock, handlers } = mockSpawn();
+    const { createRecorderDeps } = await import("./recorder.js");
+    const deps = createRecorderDeps("win32");
+    const a = deps.spawnRecorder("C:/a.wav");
+    handlers[0]?.["error"]?.(Object.assign(new Error("x"), { code: "ENOENT" }));
+    expect((await a.done).missing).toBe(true);
+    await Promise.resolve();
+    deps.spawnRecorder("C:/b.wav");
+    expect(spawnMock).toHaveBeenCalledTimes(2);
+    vi.doUnmock("node:child_process");
+    vi.resetModules();
+  });
+
+  it("stop rejects with an error carrying the missing marker", async () => {
+    const recorder = new Recorder({
+      spawnRecorder: () => ({
+        kill: vi.fn(),
+        done: Promise.resolve({
+          error: "Could not start the microphone recorder: x",
+          missing: true,
+        }),
+      }),
+      deleteFile: vi.fn(async () => {}),
+      tmpDir: "/tmp/jarvis-test",
+    });
+    recorder.start();
+    await expect(recorder.stop()).rejects.toMatchObject({ missing: true });
   });
 });
 

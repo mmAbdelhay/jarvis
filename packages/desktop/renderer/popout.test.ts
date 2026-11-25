@@ -263,6 +263,10 @@ describe("what the pop-out page may import and call", () => {
     expect(seen.has("workspace-terminal")).toBe(true);
   });
 
+  it("takes the terminal font zoom chords itself: they are a window listener, and the main window's is not this one's", () => {
+    expect(read("popout.ts")).toMatch(/initFontKeys\(\)/);
+  });
+
   it("never names the calls that act on the main window's view or tab state", () => {
     const source = read("popout.ts");
     for (const call of [

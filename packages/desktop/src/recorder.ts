@@ -9,7 +9,24 @@ import { join } from "node:path";
 // Recorder.stop() rejects with this instead of silently returning a path
 // to a wav that was never written, which previously surfaced as an opaque
 // whisper-cli failure on the *next* step instead of naming the real cause.
-export type RecordingResult = { error?: string };
+// `missing` is the machine-readable marker for "ffmpeg could not be spawned
+// (ENOENT)", so callers never have to match on `error`'s text.
+export type RecordingResult = { error?: string; missing?: true };
+
+/** What Recorder.stop() rejects with; `missing` is true when ffmpeg was not found. */
+export class RecorderError extends Error {
+  readonly missing: boolean;
+  constructor(message: string, missing: boolean) {
+    super(message);
+    this.name = "RecorderError";
+    this.missing = missing;
+  }
+}
+
+/** True for a spawn failure that means the binary does not exist. */
+function isMissingBinary(error: unknown): boolean {
+  return (error as { code?: unknown } | null)?.code === "ENOENT";
+}
 
 export type RecorderDeps = {
   spawnRecorder(outputPath: string): {
@@ -85,13 +102,18 @@ const GRACEFUL_STOP_MS = 3000;
 
 /** The real recorder, for `platform`'s capture framework. A factory rather
  *  than a constant because it now needs to be told which one. */
-export function createRecorderDeps(platform: NodeJS.Platform): RecorderDeps {
+export function createRecorderDeps(
+  platform: NodeJS.Platform,
+  /** Read at every spawn, so a PATH that arrives later (the login shell's) is used. */
+  env?: () => NodeJS.ProcessEnv,
+): RecorderDeps {
+  const currentEnv = (): NodeJS.ProcessEnv => env?.() ?? process.env;
   return {
     tmpDir: tmpdir(),
     spawnRecorder(outputPath: string) {
-      if (platform === "win32") return spawnWindowsRecorder(outputPath);
+      if (platform === "win32") return spawnWindowsRecorder(outputPath, currentEnv);
       const { command, args } = recorderCommand(platform, outputPath);
-      const child = spawn(command, args, { stdio: "ignore" });
+      const child = spawn(command, args, { stdio: "ignore", env: currentEnv() });
 
       // A spawn that fails to start (missing binary, EAGAIN, bad argv) fires
       // an "error" event; without a listener Node throws it as an uncaught
@@ -118,6 +140,7 @@ export function createRecorderDeps(platform: NodeJS.Platform): RecorderDeps {
           const message = error instanceof Error ? error.message : String(error);
           settle({
             error: `Could not start the microphone recorder: ${message}`,
+            ...(isMissingBinary(error) ? { missing: true as const } : {}),
           });
         });
         child.on("close", () => settle({}));
@@ -136,32 +159,43 @@ export function createRecorderDeps(platform: NodeJS.Platform): RecorderDeps {
 /** Asks ffmpeg what capture devices exist; empty when it cannot be asked.
  *  Cached after the first answer — the microphone does not change between
  *  utterances, and the listing is a whole ffmpeg start. */
-let dshowDevices: Promise<string[]> | undefined;
-function listDshowDevices(): Promise<string[]> {
+type DshowListing = { devices: string[]; missing: boolean };
+let dshowDevices: Promise<DshowListing> | undefined;
+function listDshowDevices(env: () => NodeJS.ProcessEnv): Promise<DshowListing> {
   if (dshowDevices !== undefined) return dshowDevices;
-  dshowDevices = new Promise((resolve) => {
+  const listing = new Promise<DshowListing>((resolve) => {
     let stderr = "";
     let settled = false;
+    let missing = false;
     const settle = (): void => {
       if (settled) return;
       settled = true;
-      resolve(parseDshowAudioDevices(stderr));
+      resolve({ devices: parseDshowAudioDevices(stderr), missing });
     };
     try {
       const child = spawn(
         "ffmpeg",
         ["-hide_banner", "-list_devices", "true", "-f", "dshow", "-i", "dummy"],
-        { stdio: ["ignore", "ignore", "pipe"] },
+        { stdio: ["ignore", "ignore", "pipe"], env: env() },
       );
       child.stderr?.setEncoding("utf8");
       child.stderr?.on("data", (chunk: string) => (stderr += chunk));
-      child.on("error", settle);
+      child.on("error", (error) => {
+        missing = isMissingBinary(error);
+        settle();
+      });
       child.on("close", settle);
-    } catch {
+    } catch (error) {
+      missing = isMissingBinary(error);
       settle();
     }
   });
-  return dshowDevices;
+  dshowDevices = listing;
+  // An empty or failed answer is not remembered: the next recording asks again.
+  void listing.then((result) => {
+    if (result.devices.length === 0 && dshowDevices === listing) dshowDevices = undefined;
+  });
+  return listing;
 }
 
 /**
@@ -177,7 +211,10 @@ function listDshowDevices(): Promise<string[]> {
  * file exactly as SIGINT does elsewhere; the kill is only the fallback for an
  * ffmpeg that does not answer.
  */
-function spawnWindowsRecorder(outputPath: string): {
+function spawnWindowsRecorder(
+  outputPath: string,
+  env: () => NodeJS.ProcessEnv,
+): {
   kill(force?: boolean): void;
   done: Promise<RecordingResult>;
 } {
@@ -193,7 +230,7 @@ function spawnWindowsRecorder(outputPath: string): {
     };
   });
 
-  void listDshowDevices().then((devices) => {
+  void listDshowDevices(env).then(({ devices, missing }) => {
     if (stopped) {
       settle({ error: "Could not start the microphone recorder: stopped before ffmpeg started" });
       return;
@@ -203,13 +240,17 @@ function spawnWindowsRecorder(outputPath: string): {
       settle({
         error:
           "Could not start the microphone recorder: ffmpeg lists no DirectShow audio device (is ffmpeg installed, and a microphone connected?)",
+        ...(missing ? { missing: true as const } : {}),
       });
       return;
     }
     const { command, args } = recorderCommand("win32", outputPath, first);
-    child = spawn(command, args, { stdio: ["pipe", "ignore", "ignore"] });
+    child = spawn(command, args, { stdio: ["pipe", "ignore", "ignore"], env: env() });
     child.on("error", (error) =>
-      settle({ error: `Could not start the microphone recorder: ${error.message}` }),
+      settle({
+        error: `Could not start the microphone recorder: ${error.message}`,
+        ...(isMissingBinary(error) ? { missing: true as const } : {}),
+      }),
     );
     child.on("close", () => settle({}));
     // Writing `q` to an ffmpeg that has already gone raises EPIPE on stdin;
@@ -287,7 +328,7 @@ export class Recorder {
     );
     process.kill();
     const result = await process.done;
-    if (result.error !== undefined) throw new Error(result.error);
+    if (result.error !== undefined) throw new RecorderError(result.error, result.missing === true);
     return active.path;
   }
 

@@ -106,6 +106,7 @@ const RELOAD_CHECK_MS = 1500;
 export const NARROW_PX = 1000;
 const MODE_KEY = "jarvis.agentChatMode";
 const PANEL_KEY = "jarvis.agentChatPanel";
+const PANEL_SECTIONS_KEY = "jarvis.agentChatPanelSections";
 
 const VENDOR_NAMES = { anthropic: "Claude Code", github: "Copilot", openai: "Codex" } as const;
 
@@ -156,6 +157,27 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
   const setPanelHidden = (hidden: boolean): void => {
     try {
       storage()?.setItem(PANEL_KEY, hidden ? "hidden" : "shown");
+    } catch {
+      // Only a convenience.
+    }
+  };
+
+  const readSections = (): Record<string, unknown> => {
+    try {
+      const raw = storage()?.getItem(PANEL_SECTIONS_KEY);
+      const value: unknown = raw === null || raw === undefined ? {} : JSON.parse(raw);
+      return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
+    } catch {
+      return {};
+    }
+  };
+  const sectionOpen = (kind: string): boolean | undefined => {
+    const value = readSections()[kind];
+    return typeof value === "boolean" ? value : undefined;
+  };
+  const setSectionOpen = (kind: string, open: boolean): void => {
+    try {
+      storage()?.setItem(PANEL_SECTIONS_KEY, JSON.stringify({ ...readSections(), [kind]: open }));
     } catch {
       // Only a convenience.
     }
@@ -251,6 +273,8 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
     setHidden: (hidden) => {
       setPanelHidden(hidden);
     },
+    sectionOpen,
+    setSectionOpen,
   });
   const strip = createStatusStrip({
     t,

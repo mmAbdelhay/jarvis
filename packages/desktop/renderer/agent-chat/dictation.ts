@@ -40,7 +40,7 @@ export function createDictationControl(options: {
   deliver(text: string): void;
   changed(): void;
   announce(what: "started" | "writing" | "inserted" | "none"): void;
-  fail(reason: "busy" | "silence" | "failed"): void;
+  fail(reason: "busy" | "silence" | "failed" | "no-recorder" | "no-whisper"): void;
 }): DictationControl {
   const { api } = options;
   let state: DictationState = "idle";
@@ -86,7 +86,7 @@ export function createDictationControl(options: {
       id = undefined;
       options.announce("none");
       options.changed();
-      options.fail("failed");
+      options.fail(answer.reason === "no-recorder" ? "no-recorder" : "failed");
       return;
     }
     if (answer.capped === true) finish();

@@ -1,6 +1,7 @@
 import type { WorkspaceState, WorkspaceTab } from "@jarvis/core";
 import type { RendererApi } from "../src/ipc.js";
 import { plainTerminalState, type PopoutTerminalState } from "../src/popout-state.js";
+import { initFontKeys } from "./terminal-addons.js";
 import {
   focusTerminalLeaf,
   initWorkspaceTerminals,
@@ -35,7 +36,12 @@ export type PopoutTerminals = {
 };
 
 const REAL_TERMINALS: PopoutTerminals = {
-  init: initWorkspaceTerminals,
+  init: () => {
+    initWorkspaceTerminals();
+    // The zoom chords are a window listener: the main window's (app.ts)
+    // never sees a key pressed in this one.
+    initFontKeys();
+  },
   render: (tabs, activeTabId, project) => renderWorkspaceTerminals(tabs, activeTabId, project),
   carry: terminalCarry,
   stage: stageTerminalCarry,
