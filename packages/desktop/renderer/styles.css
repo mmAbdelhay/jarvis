@@ -2531,7 +2531,11 @@
     flex-direction: column; justify-content: flex-end; gap: var(--s4); }
   .agent-chat__empty { margin: auto; color: var(--text-muted); }
   .agent-chat__row { flex: 0 0 auto; min-width: 0; }
-  .ac-row { content-visibility: auto; contain-intrinsic-size: auto 72px; }
+  /* Every row is laid out and painted. Never content-visibility: auto here: it
+     skips rows until the main thread reaches them, and a fast scroll runs on
+     the compositor, so the messages went blank and their guessed heights made
+     the scrollbar jump. The same containment, without the skipping. */
+  .ac-row { contain: content; }
   .agent-chat__bubble { margin-inline-start: auto; max-width: 78%; width: fit-content;
     padding: 11px var(--s4); border-radius: 16px; border-end-end-radius: 4px;
     background: var(--user-bubble); color: var(--text); white-space: pre-wrap;

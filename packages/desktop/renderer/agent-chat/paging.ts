@@ -12,10 +12,14 @@ export function mergeLive(
 ): ChatItem[] {
   if (reset || previous.length === 0) return [...live];
   const liveIds = new Set(live.map((item) => item.id));
-  // What was loaded before the live page starts is everything up to the first
-  // item the live page also holds; with no overlap the live page moved on.
-  const overlap = previous.findIndex((item) => liveIds.has(item.id));
-  const kept = overlap === -1 ? previous : previous.slice(0, overlap);
+  // What was loaded before the live page starts is everything up to where its
+  // first known item last appears; with no overlap the live page moved on. An
+  // id that repeats further back (a resumed session writes records again) must
+  // not cut off the older pages: only that repeat goes, so each id shows once.
+  const at = new Map(previous.map((item, index) => [item.id, index]));
+  const start = live.find((item) => at.has(item.id));
+  const overlap = start === undefined ? previous.length : (at.get(start.id) ?? previous.length);
+  const kept = previous.slice(0, overlap).filter((item) => !liveIds.has(item.id));
   return [...kept, ...live];
 }
 
