@@ -164,8 +164,10 @@ describe.skipIf(process.platform === "win32")("linuxSwapScript run", () => {
 
   /** The launch runs in the background; wait briefly for its log line. */
   async function launched(log: string): Promise<string> {
-    for (let i = 0; i < 50 && !existsSync(log); i++) await new Promise((r) => setTimeout(r, 20));
-    return readFileSync(log, "utf8");
+    // The file exists, empty, before the line is written into it.
+    const read = () => (existsSync(log) ? readFileSync(log, "utf8") : "");
+    for (let i = 0; i < 50 && read() === ""; i++) await new Promise((r) => setTimeout(r, 20));
+    return read();
   }
 
   it("swaps in the new AppImage, starts it and removes the old one", async () => {
