@@ -499,10 +499,10 @@ describe("createDictationRecorder", () => {
     const d = deps();
     const rec = await createDictationRecorder(d.options);
     rec.start();
-    expect(d.calls[0]).toMatch(/^spawn \/tmp\/jarvis-dictation-x[\\/]jarvis-.*\.wav$/);
+    expect(d.calls[0]).toMatch(/^spawn [\\/]tmp[\\/]jarvis-dictation-x[\\/]jarvis-.*\.wav$/);
     const stopping = rec.stop();
     d.settle({});
-    expect(await stopping).toMatch(/^\/tmp\/jarvis-dictation-x/);
+    expect(await stopping).toMatch(/^[\\/]tmp[\\/]jarvis-dictation-x/);
     await rec.dispose();
     await rec.dispose();
     expect(d.calls.filter((c) => c === "rm-dir /tmp/jarvis-dictation-x")).toHaveLength(2);

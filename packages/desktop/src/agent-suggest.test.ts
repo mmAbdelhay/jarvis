@@ -1,10 +1,13 @@
-import { join, sep } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { type AgentSuggestDeps, createAgentSuggest } from "./agent-suggest.js";
 import type { PaneAgentSession } from "./pane-agent-session.js";
 
-const ROOT = join("/", "work", "app");
-const CONFIG = join("/", "home", "me", ".claude-acme");
+/** A POSIX-looking fixture path as the platform spells it (on Windows: with a drive letter). */
+const abs = (p: string): string => resolve(p);
+const ROOT_DIR = abs("/");
+const ROOT = join(ROOT_DIR, "work", "app");
+const CONFIG = join(ROOT_DIR, "home", "me", ".claude-acme");
 const SESSION = (vendor: PaneAgentSession["vendor"] = "anthropic"): PaneAgentSession => ({
   paneKey: "t1",
   pid: 1,
@@ -121,7 +124,7 @@ describe("agentCommands", () => {
     },
     [join(CONFIG, "commands")]: { kind: "dir" },
     [join(CONFIG, "commands", "mine.md")]: { kind: "file", text: "My own" },
-    [join(CONFIG, "commands", "evil.md")]: { kind: "link", to: join("/", "etc", "passwd") },
+    [join(CONFIG, "commands", "evil.md")]: { kind: "link", to: join(ROOT_DIR, "etc", "passwd") },
   };
 
   it("lists built-ins and names with the first description line from project and account", async () => {
@@ -209,7 +212,7 @@ describe("agentFiles", () => {
       [join(ROOT, ".git")]: { kind: "dir" },
       [join(ROOT, "lib")]: { kind: "dir" },
       [join(ROOT, "lib", "b.txt")]: { kind: "file", text: "" },
-      [join(ROOT, "link")]: { kind: "link", to: "/etc" },
+      [join(ROOT, "link")]: { kind: "link", to: abs("/etc") },
     };
     const t = setup(tree, { git: undefined });
     const out = await t.suggest.files("t1", "txt");
@@ -227,8 +230,8 @@ describe("agentOpenFile", () => {
     [ROOT]: { kind: "dir" },
     [join(ROOT, "src")]: { kind: "dir" },
     [join(ROOT, "src", "a.ts")]: { kind: "file", text: "" },
-    [join(ROOT, "src", "out")]: { kind: "link", to: join("/", "etc", "passwd") },
-    [join("/", "etc", "passwd")]: { kind: "file", text: "" },
+    [join(ROOT, "src", "out")]: { kind: "link", to: join(ROOT_DIR, "etc", "passwd") },
+    [join(ROOT_DIR, "etc", "passwd")]: { kind: "file", text: "" },
   };
 
   it("resolves a file inside the project after realpath, relative or absolute", async () => {
@@ -249,7 +252,7 @@ describe("agentOpenFile", () => {
       ok: false,
       reason: "outside",
     });
-    expect(await t.suggest.resolve("t1", join("/", "etc", "passwd"))).toEqual({
+    expect(await t.suggest.resolve("t1", join(ROOT_DIR, "etc", "passwd"))).toEqual({
       ok: false,
       reason: "outside",
     });
@@ -290,7 +293,7 @@ describe("a session whose cwd is unknown", () => {
   });
 });
 
-const HOME = join("/", "home", "me");
+const HOME = join(ROOT_DIR, "home", "me");
 const dir = (...parts: string[]): Record<string, Node> => ({ [join(...parts)]: { kind: "dir" } });
 const file = (path: string, text: string): Record<string, Node> => ({
   [path]: { kind: "file", text },
@@ -319,7 +322,7 @@ describe("built-in rows", () => {
 });
 
 describe("Claude discovery", () => {
-  const GIT_ROOT = join("/", "work", "mono");
+  const GIT_ROOT = join(ROOT_DIR, "work", "mono");
   const CWD = join(GIT_ROOT, "pkg", "web");
   const base: Record<string, Node> = {
     ...dir(GIT_ROOT),
@@ -337,8 +340,8 @@ describe("Claude discovery", () => {
         ...file(join(GIT_ROOT, ".claude", "commands", "root-cmd.md"), "Root command"),
         ...dir(CWD, ".claude", "commands"),
         ...file(join(CWD, ".claude", "commands", "near.md"), "Near command"),
-        ...dir("/work", ".claude", "commands"),
-        ...file(join("/work", ".claude", "commands", "above.md"), "Above the repo"),
+        ...dir(abs("/work"), ".claude", "commands"),
+        ...file(join(abs("/work"), ".claude", "commands", "above.md"), "Above the repo"),
       },
       { cwd: CWD },
     );
@@ -370,7 +373,7 @@ describe("Claude discovery", () => {
   });
 
   it("follows a symlinked skill directory in the account only", async () => {
-    const outside = join("/", "elsewhere", "shared-skill");
+    const outside = join(ROOT_DIR, "elsewhere", "shared-skill");
     const t = setup(
       {
         ...base,
@@ -415,7 +418,7 @@ describe("Claude discovery", () => {
               {
                 scope: "project",
                 installPath: join(P2, "..", "proj"),
-                projectPath: join("/", "other"),
+                projectPath: join(ROOT_DIR, "other"),
               },
             ],
             "old@acme": { installPath: P1, version: "0.1" },
@@ -516,10 +519,10 @@ describe("Claude discovery", () => {
 
 describe("Codex discovery", () => {
   const CODEX_HOME = join(HOME, ".codex");
-  const CWD = join("/", "work", "mono", "pkg");
+  const CWD = join(ROOT_DIR, "work", "mono", "pkg");
   const tree: Record<string, Node> = {
-    ...dir(join("/", "work", "mono")),
-    ...dir(join("/", "work", "mono", ".git")),
+    ...dir(join(ROOT_DIR, "work", "mono")),
+    ...dir(join(ROOT_DIR, "work", "mono", ".git")),
     ...dir(CWD),
     ...dir(CODEX_HOME, "prompts"),
     ...file(
@@ -530,8 +533,8 @@ describe("Codex discovery", () => {
     ...file(join(CODEX_HOME, "skills", "pdf", "SKILL.md"), "---\ndescription: Read PDFs\n---\n"),
     ...dir(HOME, ".agents", "skills", "shared"),
     ...file(join(HOME, ".agents", "skills", "shared", "SKILL.md"), "Shared skill"),
-    ...dir("/work/mono", ".agents", "skills", "local"),
-    ...file(join("/work/mono", ".agents", "skills", "local", "SKILL.md"), "Local skill"),
+    ...dir(abs("/work/mono"), ".agents", "skills", "local"),
+    ...file(join(abs("/work/mono"), ".agents", "skills", "local", "SKILL.md"), "Local skill"),
   };
 
   it("offers prompts as prompts:name and skills as $name", async () => {
@@ -558,7 +561,7 @@ describe("Codex discovery", () => {
   });
 
   it("takes CODEX_HOME from the environment", async () => {
-    const other = join("/", "srv", "codex");
+    const other = join(ROOT_DIR, "srv", "codex");
     const t = setup(
       { ...dir(other, "prompts"), ...file(join(other, "prompts", "p.md"), "P"), ...dir(CWD) },
       { vendor: "openai", cwd: CWD, home: HOME, env: { CODEX_HOME: other } },
@@ -576,7 +579,7 @@ describe("Codex discovery", () => {
 
 describe("Copilot discovery", () => {
   it("lists skills from the project folders and the home folders as /name", async () => {
-    const CWD = join("/", "work", "app");
+    const CWD = join(ROOT_DIR, "work", "app");
     const t = setup(
       {
         ...dir(CWD),
@@ -651,7 +654,7 @@ describe("limits and cache", () => {
 });
 
 describe("which account's folders are read", () => {
-  const CWD = join("/", "work", "app");
+  const CWD = join(ROOT_DIR, "work", "app");
   const MINE = join(HOME, ".claude-mine");
   const OTHER = join(HOME, ".claude");
   const tree: Record<string, Node> = {
@@ -706,7 +709,7 @@ describe("which account's folders are read", () => {
 });
 
 describe("skills synced from claude.ai", () => {
-  const CWD = join("/", "work", "app");
+  const CWD = join(ROOT_DIR, "work", "app");
   it("appear as /name from <config>/skills/synced/<id>/<name>", async () => {
     const t = setup(
       {
@@ -720,7 +723,10 @@ describe("skills synced from claude.ai", () => {
         ),
         ...dir(CONFIG, "skills", "synced", "def456", "notes"),
         ...file(join(CONFIG, "skills", "synced", "def456", "notes", "SKILL.md"), "Notes"),
-        [join(CONFIG, "skills", "synced", "link")]: { kind: "link", to: join("/", "elsewhere") },
+        [join(CONFIG, "skills", "synced", "link")]: {
+          kind: "link",
+          to: join(ROOT_DIR, "elsewhere"),
+        },
       },
       { cwd: CWD },
     );
@@ -733,7 +739,7 @@ describe("skills synced from claude.ai", () => {
 });
 
 describe("plugin skills by path, synced plugins, nested synced skills", () => {
-  const CWD = join("/", "work", "app");
+  const CWD = join(ROOT_DIR, "work", "app");
   const chain = (...parts: string[]): Record<string, Node> =>
     Object.assign({}, ...parts.map((_, at) => dir(...parts.slice(0, at + 1))));
   const PLUGIN = join(CONFIG, "plugins", "cache", "acme", "mattpack", "1.0.0");

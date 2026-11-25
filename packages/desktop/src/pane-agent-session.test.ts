@@ -122,7 +122,7 @@ describe("createPaneAgentLookup", () => {
       name: "n",
       transcriptPath: join("/h/.claude-main", "projects", "-w", "c1.jsonl"),
       cwd: "/w",
-      configDir: "/h/.claude-main",
+      configDir: join("/h", ".claude-main"),
     });
   });
 
@@ -136,7 +136,7 @@ describe("createPaneAgentLookup", () => {
     });
     const found = await createPaneAgentLookup(deps).forProcess(processOf("claude"));
     expect(found?.transcriptPath).toBeUndefined();
-    expect(found?.configDir).toBe("/h/.claude-main");
+    expect(found?.configDir).toBe(join("/h", ".claude-main"));
   });
 
   describe("github", () => {
@@ -478,7 +478,7 @@ describe("createPaneAgentLookup", () => {
       const found = await createPaneAgentLookup(deps).forProcess(processOf("codex-work"), [
         processOf("codex-work"),
       ]);
-      expect(found?.configDir).toBe("/h/.codex-work");
+      expect(found?.configDir).toBe(join("/h", ".codex-work"));
     });
 
     it("on Windows never runs lsof and resolves by the fallback only", async () => {
