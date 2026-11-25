@@ -8,6 +8,8 @@ version and the downloads. This file is the index.
 
 ## Unreleased
 
+## [0.1.18] — 2026-11-25
+
 - Terminal: the Chat view reads headings, tables, nested and task lists, quotes, italics and
   rules; wrapped list lines align under their text; file paths in a reply open on a click. Copy
   sits under the message with the time worked, mode and model look like the menus they are, and
