@@ -192,7 +192,7 @@ describe("the context in the status row", () => {
 });
 
 describe("the status sections of the panel", () => {
-  it("come after the work, in order: limits, context, session, then the raw rows", async () => {
+  it("pin context then limits above the work, then session and the raw rows", async () => {
     const s = await open({
       ...status(),
       context: { used: 38000, leftPercent: 62 },
@@ -202,7 +202,9 @@ describe("the status sections of the panel", () => {
     const kinds = [...side.querySelectorAll<HTMLElement>("section, details")].map(
       (n) => n.dataset["section"],
     );
-    expect(kinds).toEqual(["todo", "limits", "context", "session", "raw"]);
+    expect(kinds).toEqual(["context", "limits", "todo", "session", "raw"]);
+    const pinned = [...side.querySelectorAll<HTMLElement>(".ac-side__pin [data-section]")];
+    expect(pinned.map((n) => n.dataset["section"])).toEqual(["context", "limits"]);
     const limits = s.q<HTMLElement>('.ac-side [data-section="limits"]');
     expect(limits.querySelector(".ac-section__title")?.textContent).toBe(t("agentChatPanelLimits"));
     expect(limits.querySelectorAll("[role='progressbar']")).toHaveLength(4);
@@ -252,25 +254,27 @@ describe("the status sections of the panel", () => {
     );
   });
 
-  it("keeps the raw rows in a closed details, and its open state across a refresh", async () => {
+  it("keeps the raw rows in a closed section, and its open state across a refresh", async () => {
     const s = await open(status());
-    const raw = s.q<HTMLDetailsElement>('.ac-side details[data-section="raw"]');
-    expect(raw.open).toBe(false);
-    expect(raw.querySelector("summary")?.textContent).toBe(t("agentChatPanelRaw"));
-    expect(raw.querySelectorAll(".ac-raw__line")).toHaveLength(2);
-    raw.open = true;
-    raw.dispatchEvent(new Event("toggle"));
+    const toggle = () =>
+      s.q<HTMLButtonElement>('.ac-side [data-section="raw"] .ac-section__toggle');
+    expect(toggle().getAttribute("aria-expanded")).toBe("false");
+    expect(toggle().textContent).toContain(t("agentChatPanelRaw"));
+    expect(s.q('.ac-side [data-section="raw"]').querySelectorAll(".ac-raw__line")).toHaveLength(2);
+    expect(s.q<HTMLElement>('.ac-side [data-section="raw"] .ac-section__body').hidden).toBe(true);
+    toggle().click();
     s.current.view = status({ lines: ["changed"] });
     s.chat.refresh();
     await settle();
-    expect(s.q<HTMLDetailsElement>('.ac-side details[data-section="raw"]').open).toBe(true);
+    expect(toggle().getAttribute("aria-expanded")).toBe("true");
+    expect(s.q<HTMLElement>('.ac-side [data-section="raw"] .ac-section__body').hidden).toBe(false);
   });
 
   it("leaves out a section with no data, and shows no empty Usage limits", async () => {
     const s = await open(agentView({ status: { lines: ["raw only"], limits: [], details: {} } }));
-    const kinds = [
-      ...s.host.querySelectorAll<HTMLElement>(".ac-side section, .ac-side details"),
-    ].map((n) => n.dataset["section"]);
+    const kinds = [...s.host.querySelectorAll<HTMLElement>(".ac-side section")].map(
+      (n) => n.dataset["section"],
+    );
     expect(kinds).toEqual(["raw"]);
   });
 });

@@ -2811,31 +2811,76 @@
   .ac-arghint { padding: 4px 14px 0; color: var(--text-muted); font-size: 12px; font-family: var(--font-mono); }
   .ac-mono { font-family: var(--font-mono); }
   /* Classic (always-visible) scrollbars paint a light track unless told otherwise. */
-  .agent-chat__feed, .ac-side, .ac-code, .ac-diff, .ac-output__text, .ac-menu, .ac-popover,
+  .agent-chat__feed, .ac-side__scroll, .ac-side__pin, .ac-code, .ac-diff, .ac-output__text, .ac-menu, .ac-popover,
   .ac-question__plan, .ac-tablewrap, .terminal-pane[data-view="chat"] > .terminal-live {
     scrollbar-color: var(--text-faint) transparent; scrollbar-width: thin; }
 
   .ac-sidewrap { flex: 0 0 auto; display: flex; }
-  .ac-side { width: 320px; box-sizing: border-box; padding: var(--s5) 20px; display: flex;
-    flex-direction: column; gap: 28px; overflow-y: auto; border-inline-start: 1px solid var(--border);
+  .ac-side { width: 320px; box-sizing: border-box; padding: 0; display: flex; min-height: 0;
+    flex-direction: column; overflow: hidden; border-inline-start: 1px solid var(--border);
     background: var(--surface-dim); color: var(--text-secondary); font-size: 14px; }
-  .ac-section { display: flex; flex-direction: column; gap: 10px; }
+  /* Pinned: Context and Usage limits stay in view; the lists scroll below them. */
+  .ac-side__pin { flex: 0 0 auto; max-block-size: 50%; overflow-y: auto; box-sizing: border-box;
+    padding: 4px 16px 12px; display: flex; flex-direction: column; gap: 12px;
+    border-block-end: 1px solid var(--border); }
+  .ac-side__bar { display: flex; align-items: center; min-block-size: 28px; }
+  .ac-side__scroll { flex: 1 1 0; min-block-size: 0; overflow-y: auto; }
+  .ac-side__scroll > .ac-deriving { padding: 10px 16px; }
+  .ac-side__scroll > .ac-section + .ac-section, .ac-side__scroll > .ac-deriving + .ac-section {
+    border-block-start: 1px solid var(--border); }
+  .ac-section { display: flex; flex-direction: column; gap: 6px; }
+  .ac-section__body { display: flex; flex-direction: column; gap: 6px; }
+  .ac-section__body[hidden] { display: none; }
+  .ac-side__pin .ac-section { gap: 6px; }
+  .ac-side__scroll > .ac-section { gap: 0; }
+  .ac-side__scroll > .ac-section > .ac-section__body { padding: 0 16px 12px; gap: 4px; }
   .ac-section__title { margin: 0; color: var(--text); font-size: 14px; font-weight: 600; }
+  .ac-section__toggle { inline-size: 100%; box-sizing: border-box; min-block-size: 36px; padding: 6px 16px;
+    display: flex; align-items: center; gap: 8px; border: 0; background: transparent; color: var(--text);
+    font: inherit; font-weight: 600; text-align: start; cursor: pointer; }
+  .ac-section__toggle:hover { background: var(--surface); }
+  .ac-section__toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .ac-section__toggle svg { flex: none; color: var(--text-muted); }
+  .ac-section__toggle[aria-expanded="false"] svg:dir(rtl) { transform: scaleX(-1); }
+  .ac-section__name { flex: none; }
+  .ac-section__summary { flex: 1 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; text-align: end; color: var(--text-muted); font-size: 12px; font-weight: 400;
+    font-variant-numeric: tabular-nums; }
+  .ac-section__bad { color: var(--bad-text); }
   .ac-todo { display: flex; gap: 10px; color: var(--text-secondary); }
   .ac-todo svg { flex: none; margin-block-start: 3px; }
   .ac-todo--done { color: var(--text-muted); }
   .ac-todo--active { color: var(--accent-text); }
-  .ac-agent { display: flex; justify-content: space-between; gap: 10px; }
-  .ac-agent__state--running { color: var(--accent-text); }
-  .ac-agent__state--failed { color: var(--bad-text); }
-  .ac-file { min-height: 36px; padding: 0; display: flex; align-items: center; gap: 10px; border: 0;
-    background: transparent; color: var(--text-secondary); font: 13px/1.2 var(--font-mono); cursor: pointer; }
+  .ac-agent { display: flex; align-items: center; gap: 8px; min-block-size: 24px; }
+  .ac-agent__mark { flex: none; }
+  .ac-agent__name { flex: 1 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ac-agent__time { flex: none; white-space: nowrap; font-size: 12px; font-variant-numeric: tabular-nums;
+    color: var(--text-muted); }
+  .ac-agent__time--running, .ac-mark--running.ac-agent__mark { color: var(--accent-text); }
+  .ac-agent__time--failed { color: var(--bad-text); }
+  .ac-file { min-block-size: 28px; padding: 0; display: flex; align-items: center; gap: 8px; border: 0;
+    inline-size: 100%; background: transparent; color: var(--text-secondary); font: 13px/1.2 var(--font-mono);
+    text-align: start; cursor: pointer; }
   .ac-file:hover .ac-file__name { text-decoration: underline; }
+  .ac-file__name { flex: 0 1 auto; max-inline-size: 65%; min-inline-size: 0; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
+  .ac-file__dir { flex: 1 1 0; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; color: var(--text-faint); font-size: 12px; }
+  .ac-file__counts { flex: none; margin-inline-start: auto; display: flex; gap: 6px; min-inline-size: 64px;
+    justify-content: flex-end; font-variant-numeric: tabular-nums; }
+  .ac-more { align-self: flex-start; min-block-size: 28px; padding: 0 4px; border: 0; background: transparent;
+    color: var(--accent-text); font: 12px/1.2 var(--font-ui); cursor: pointer; }
+  .ac-more:hover { text-decoration: underline; }
+  .ac-more:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 4px; }
   .ac-meter { height: 6px; border-radius: 3px; background: var(--border); }
   .ac-meter__fill { height: 6px; border-radius: 3px; background: var(--accent); }
   .ac-deriving { margin: 0; color: var(--text-muted); font-size: 13px; }
-  .ac-hide-panel { min-height: 40px; border: 1px solid var(--border); border-radius: var(--r-control);
-    background: transparent; color: var(--text-secondary); }
+  .ac-hide-panel { inline-size: 28px; block-size: 28px; padding: 0; display: inline-flex; align-items: center;
+    justify-content: center; border: 0; border-radius: var(--r-control); background: transparent;
+    color: var(--text-muted); }
+  .ac-hide-panel:hover { color: var(--text); background: var(--surface); }
+  .ac-side__pin .ac-meter { height: 4px; }
+  .ac-side__pin .ac-meter__fill { height: 4px; }
   .ac-meter--mini { display: block; inline-size: 48px; height: 4px; }
   .ac-meter--mini .ac-meter__fill { display: block; height: 4px; }
   .ac-meter--wide { display: block; }
@@ -2868,16 +2913,14 @@
   /* A narrow pane gives up the left part first, then the meters; the percentages stay. */
   @container (max-width: 560px) { .ac-status__who { display: none; } .ac-limit__resets { display: none; } }
   @container (max-width: 300px) { .ac-limit__slot { display: none; } .ac-status__limits { gap: 10px; } }
-  .ac-limit-full { display: flex; flex-direction: column; gap: 4px; margin-block-end: var(--s3); }
+  .ac-limit-full { display: flex; flex-direction: column; gap: 3px; margin-block-end: 6px; }
   .ac-limit-full__head { display: flex; align-items: baseline; gap: 8px; color: var(--text); font-size: 13px; }
-  .ac-limit-full__note { color: var(--text-muted); font-size: 12px; }
+  .ac-limit-full__note { color: var(--text-muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ac-section__head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
   .ac-section__value { color: var(--text-secondary); font-size: 13px; font-variant-numeric: tabular-nums; }
   .ac-kv { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font-size: 13px; }
   .ac-kv__key { flex: none; color: var(--text-muted); }
   .ac-kv__value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); }
-  .ac-raw__summary { color: var(--text); font-size: 14px; font-weight: 600; cursor: pointer; }
-  .ac-raw[open] .ac-raw__summary { margin-block-end: 10px; }
   .ac-raw__line { color: var(--text-muted); font: 12px/1.5 var(--font-mono); overflow-wrap: anywhere; user-select: text; }
   .ac-chips { position: relative; display: flex; flex-wrap: wrap; gap: var(--s2); }
   .ac-chip { min-height: 32px; padding: 0 12px; border: 0; border-radius: var(--r-control);

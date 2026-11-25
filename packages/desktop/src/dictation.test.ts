@@ -8,6 +8,7 @@ import {
   DICTATION_LEASE_MS,
   DICTATION_STOP_MS,
   type DictationRecorder,
+  WhisperMissingError,
 } from "./dictation.js";
 
 type Fake = DictationRecorder & {
@@ -15,13 +16,13 @@ type Fake = DictationRecorder & {
   aborted: boolean;
   disposed: number;
   stopCalls: number;
-  die(error?: string): void;
+  die(error?: string, missing?: boolean): void;
   stopResult: { resolve(path: string): void; reject(error: Error): void };
 };
 
 function fakeRecorder(): Fake {
-  let settle: (result: { error?: string }) => void = () => undefined;
-  const ended = new Promise<{ error?: string }>((resolve) => {
+  let settle: (result: { error?: string; missing?: true }) => void = () => undefined;
+  const ended = new Promise<{ error?: string; missing?: true }>((resolve) => {
     settle = resolve;
   });
   let resolveStop: (path: string) => void = () => undefined;
@@ -48,8 +49,8 @@ function fakeRecorder(): Fake {
     async dispose() {
       fake.disposed += 1;
     },
-    die(error) {
-      settle(error === undefined ? {} : { error });
+    die(error, missing) {
+      settle(error === undefined ? {} : missing === true ? { error, missing: true } : { error });
     },
     stopResult: {
       resolve: (path) => resolveStop(path),
@@ -282,6 +283,43 @@ describe("finish", () => {
     expect(await s.dictation.finish(id)).toEqual({ ok: false, reason: "failed" });
     expect(s.dictation.active()).toBe(false);
     expect(s.recorders[0]?.disposed).toBeGreaterThanOrEqual(1);
+  });
+
+  it("names a missing ffmpeg when the recorder died at once, from finish and from keep", async () => {
+    const a = setup();
+    const idA = await begin(a);
+    a.recorders[0]?.die("spawn ffmpeg ENOENT", true);
+    await tick();
+    expect(await a.dictation.finish(idA)).toEqual({ ok: false, reason: "no-recorder" });
+    const b = setup();
+    const idB = await begin(b);
+    b.recorders[0]?.die("spawn ffmpeg ENOENT", true);
+    await tick();
+    expect(b.dictation.keep(idB)).toEqual({ ok: false, reason: "no-recorder" });
+  });
+
+  it("names a missing ffmpeg when the stop rejects with the marker", async () => {
+    const s = setup();
+    const id = await begin(s);
+    const finishing = s.dictation.finish(id);
+    await tick();
+    s.recorders[0]?.stopResult.reject(Object.assign(new Error("x"), { missing: true }));
+    expect(await finishing).toEqual({ ok: false, reason: "no-recorder" });
+  });
+
+  it("names a missing whisper, and nothing else as one", async () => {
+    const a = setup({ transcript: new WhisperMissingError() });
+    const idA = await begin(a);
+    const fa = a.dictation.finish(idA);
+    await tick();
+    a.recorders[0]?.stopResult.resolve("/w.wav");
+    expect(await fa).toEqual({ ok: false, reason: "no-whisper" });
+    const b = setup({ transcript: new Error("exited with code 1") });
+    const idB = await begin(b);
+    const fb = b.dictation.finish(idB);
+    await tick();
+    b.recorders[0]?.stopResult.resolve("/w.wav");
+    expect(await fb).toEqual({ ok: false, reason: "failed" });
   });
 
   it("a second finish while transcribing is gone", async () => {

@@ -267,7 +267,7 @@ import { createAgentViewHandlers } from "../agent-view.js";
 import { createOfficeActivity, createOfficeViewing } from "../office-activity.js";
 import { createOfficeScreen } from "../office-screen.js";
 import { createClaudeViewHandlers, createClaudeViewNotifier } from "../claude-view.js";
-import { createDictation, createDictationRecorder } from "../dictation.js";
+import { createDictation, createDictationRecorder, WhisperMissingError } from "../dictation.js";
 import { createMicGuard } from "../mic-guard.js";
 import { createRecorderDeps, Recorder } from "../recorder.js";
 import { capacityReport, startupReport } from "../startup.js";
@@ -2369,7 +2369,9 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     void preview?.speak(spoken, language).catch(() => undefined);
   }
 
-  const recorder = new Recorder(createRecorderDeps(platform));
+  // The env is a getter: agentEnv gains the login-shell PATH after startup, and
+  // a launchd daemon's own PATH has no ffmpeg on it.
+  const recorder = new Recorder(createRecorderDeps(platform, () => agentEnv));
 
   // The chat composer's dictation (dictation.ts). It shares the microphone
   // with the voice turn: each refuses while the other records.
@@ -2382,20 +2384,37 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     announce: (listening) => broadcast.send("voice:listening", listening),
   });
   const dictation = createDictation({
-    makeRecorder: () =>
-      createDictationRecorder({
-        recorder: createRecorderDeps(platform),
+    makeRecorder: async () => {
+      await agentEnvReady;
+      return createDictationRecorder({
+        recorder: createRecorderDeps(platform, () => agentEnv),
         makeDir: async () => {
           const dir = await mkdtemp(join(tmpdir(), "jarvis-dictation-"));
           await chmod(dir, 0o700);
           return dir;
         },
         removeDir: (dir) => rm(dir, { recursive: true, force: true }),
-      }),
-    transcribe: (wavPath) =>
-      transcribe(wavPath, config.whisper, (command, args) =>
-        limitedWhisperRunner(command, args, DICTATION_TRANSCRIBE_MS),
-      ),
+      });
+    },
+    transcribe: async (wavPath) => {
+      // Whisper or its model not being there is its own answer, not a failure.
+      const { binaryPath, modelPath } = config.whisper;
+      try {
+        if (isAbsolute(binaryPath)) await access(binaryPath);
+        await access(modelPath);
+      } catch {
+        throw new WhisperMissingError();
+      }
+      try {
+        return await transcribe(wavPath, config.whisper, (command, args) =>
+          limitedWhisperRunner(command, args, DICTATION_TRANSCRIBE_MS),
+        );
+      } catch (error) {
+        if ((error as { code?: unknown } | null)?.code === "ENOENT")
+          throw new WhisperMissingError();
+        throw error;
+      }
+    },
     schedule: (fn, ms) => {
       const timer = setTimeout(fn, ms);
       return () => clearTimeout(timer);
@@ -2968,10 +2987,12 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     args: string[],
     timeoutMs: number = TRANSCRIBE_TIMEOUT_MS,
   ): Promise<{ code: number; stdout: string; stderr: string }> {
-    const result = await runCommandWithLimits(command, args, {
-      timeoutMs,
-      maxOutputBytes: 1_048_576,
-    });
+    const result = await runCommandWithLimits(
+      command,
+      args,
+      { timeoutMs, maxOutputBytes: 1_048_576 },
+      agentEnv,
+    );
     const forceFailure = result.timedOut || result.truncated;
     return {
       code: forceFailure && result.code === 0 ? 1 : result.code,

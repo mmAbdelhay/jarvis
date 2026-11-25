@@ -761,7 +761,46 @@ export function createClaudeDocReader(options: ChatDocOptions = {}): ChatDocRead
     if (failed) files.undo(id);
   };
 
+  /**
+   * A notification the CLI wrote beside the conversation rather than as a
+   * user turn (it does that when the agent ends mid-turn): a queued_command
+   * attachment, or a queue-operation enqueue. Only the end of a background
+   * agent is taken from it; nothing becomes an item.
+   */
+  const queuedNotifications = (record: Record<string, unknown>, line: string): boolean => {
+    const type = record["type"];
+    let raw: string | undefined;
+    if (type === "attachment") {
+      const attachment = asRecord(record["attachment"]);
+      if (attachment?.["type"] !== "queued_command") return false;
+      const prompt = attachment["prompt"];
+      if (typeof prompt === "string") raw = prompt;
+      else if (Array.isArray(prompt)) {
+        raw = prompt
+          .map((part) => {
+            const text = asRecord(part)?.["text"];
+            return typeof text === "string" ? text : "";
+          })
+          .join("\n");
+      }
+    } else if (type === "queue-operation") {
+      if (record["operation"] !== "enqueue") return false;
+      if (typeof record["content"] === "string") raw = record["content"];
+    } else return false;
+    if (record["isSidechain"] === true) return true;
+    if (raw === undefined || !raw.includes("<task-notification>")) return true;
+    const at = timeOf(record["timestamp"]);
+    const uuid = str(record["uuid"]) ?? `h${hash(line)}`;
+    let index = 0;
+    for (const found of raw.matchAll(NOTIFICATION)) {
+      endAgent(found[0], `q${uuid}`, index, at);
+      index += 1;
+    }
+    return true;
+  };
+
   const handle = (record: Record<string, unknown>, line: string): void => {
+    if (queuedNotifications(record, line)) return;
     const found = claudeConversationRecord(record);
     if (found === undefined) return;
     const { role, fields, body } = found;

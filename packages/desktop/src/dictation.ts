@@ -46,10 +46,24 @@ export type DictationDeps = {
 };
 
 export type DictationStart = { ok: true; id: string } | { ok: false; reason: "busy" | "failed" };
-export type DictationKeep = { ok: true; capped?: true } | { ok: false; reason: "gone" | "failed" };
+export type DictationKeep =
+  | { ok: true; capped?: true }
+  | { ok: false; reason: "gone" | "failed" | "no-recorder" };
 export type DictationFinish =
   | { ok: true; text: string; language: string }
-  | { ok: false; reason: "silence" | "failed" | "gone" };
+  | { ok: false; reason: "silence" | "failed" | "gone" | "no-recorder" | "no-whisper" };
+
+/** What a transcribe dependency throws when whisper or its model is not there. */
+export class WhisperMissingError extends Error {
+  readonly missing = true;
+  constructor() {
+    super("whisper or its model is missing");
+    this.name = "WhisperMissingError";
+  }
+}
+
+const isMissing = (error: unknown): boolean =>
+  (error as { missing?: unknown } | null)?.missing === true;
 
 const NON_SPEECH =
   /[[(]\s*(?:blank[_ ]audio|silence|silent|music|noise|background noise|applause|laughter|laughs|laughing|inaudible|no speech|sound|sounds)\s*[\])]/gi;
@@ -90,6 +104,8 @@ type Session = {
   path?: string;
   stopping?: Promise<string>;
   stopTimedOut?: boolean;
+  /** Why the recording died on its own; kept for keep and finish to report. */
+  deathReason?: "no-recorder" | "failed";
   released?: boolean;
   cancelStop?: () => void;
   cancelLease?: () => void;
@@ -230,11 +246,12 @@ export function createDictation(deps: DictationDeps) {
         return { ok: false, reason: "failed" };
       }
       session.phase = "recording";
-      void recorder.ended.then(() => {
+      void recorder.ended.then((result) => {
         // Settling while still "recording" means nobody stopped it: it died.
         if (current === session && session.phase === "recording") {
           clearTimers(session);
           session.phase = "failed";
+          session.deathReason = result?.missing === true ? "no-recorder" : "failed";
           deps.log("died");
           armLease(session);
         }
@@ -248,8 +265,9 @@ export function createDictation(deps: DictationDeps) {
       const session = owned(id);
       if (session === undefined) return { ok: false, reason: "gone" };
       if (session.phase === "failed") {
+        const reason = session.deathReason ?? "failed";
         release(session);
-        return { ok: false, reason: "failed" };
+        return { ok: false, reason };
       }
       if (session.phase === "recording") armLease(session);
       if (session.phase === "stopped") return { ok: true, capped: true };
@@ -266,17 +284,19 @@ export function createDictation(deps: DictationDeps) {
         return { ok: false, reason: "gone" };
       }
       if (session.phase === "failed") {
+        const reason = session.deathReason ?? "failed";
         release(session);
-        return { ok: false, reason: "failed" };
+        return { ok: false, reason };
       }
       let path: string;
       try {
         path = await stopOnce(session);
-      } catch {
+      } catch (error) {
         deps.log("stop");
         const mine = current === session || session.stopTimedOut === true;
         release(session);
-        return { ok: false, reason: mine ? "failed" : "gone" };
+        if (!mine) return { ok: false, reason: "gone" };
+        return { ok: false, reason: isMissing(error) ? "no-recorder" : "failed" };
       }
       if (current !== session) return { ok: false, reason: "gone" };
       clearTimers(session);
@@ -284,11 +304,12 @@ export function createDictation(deps: DictationDeps) {
       let heard: { text: string; language: string };
       try {
         heard = await deps.transcribe(path);
-      } catch {
+      } catch (error) {
         deps.log("transcribe");
         const mine = current === session;
         release(session);
-        return { ok: false, reason: mine ? "failed" : "gone" };
+        if (!mine) return { ok: false, reason: "gone" };
+        return { ok: false, reason: isMissing(error) ? "no-whisper" : "failed" };
       }
       if (current !== session) return { ok: false, reason: "gone" };
       release(session);

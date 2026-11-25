@@ -429,6 +429,89 @@ describe("parseClaudeDoc: injected records, images, background agents, tasks", (
   });
 });
 
+describe("parseClaudeDoc: task notifications that arrive mid-turn", () => {
+  const note = (id: string, status = "completed"): string =>
+    `<task-notification><tool-use-id>${id}</tool-use-id><status>${status}</status></task-notification>`;
+  const launched = [
+    assistant("a", [toolUse("s1", "Task", { description: "bg" })]),
+    user("u1", [toolResult("s1", "x")], { toolUseResult: { status: "async_launched" } }),
+  ];
+  const attachment = (prompt: unknown, extra: Record<string, unknown> = {}): string =>
+    line({
+      type: "attachment",
+      attachment: { type: "queued_command", prompt, commandMode: "task-notification" },
+      uuid: "q1",
+      timestamp: T1,
+      ...extra,
+    });
+  const enqueue = (content: unknown): string =>
+    line({ type: "queue-operation", operation: "enqueue", content, timestamp: T1 });
+  const dividers = (doc: ReturnType<typeof parseClaudeDoc>) =>
+    doc.items.filter((i) => i.kind === "divider");
+
+  it("ends the agent from a queued_command attachment with a string prompt", () => {
+    const doc = parseClaudeDoc([...launched, attachment(note("s1"))].join("\n"));
+    expect(doc.agents[0]?.state).toBe("done");
+    expect(doc.agents[0]?.endedAt).toBe(Date.parse(T1));
+    expect(dividers(doc)).toHaveLength(1);
+    expect(doc.items.filter((i) => i.kind === "user")).toEqual([]);
+  });
+
+  it("reads an array prompt", () => {
+    const doc = parseClaudeDoc(
+      [...launched, attachment([{ type: "text", text: note("s1") }])].join("\n"),
+    );
+    expect(doc.agents[0]?.state).toBe("done");
+  });
+
+  it("ends the agent from a queue-operation enqueue, which has no uuid", () => {
+    const doc = parseClaudeDoc([...launched, enqueue(note("s1", "killed"))].join("\n"));
+    expect(doc.agents[0]?.state).toBe("failed");
+    expect(dividers(doc)).toHaveLength(1);
+  });
+
+  it("marks a failed notification as failed", () => {
+    const doc = parseClaudeDoc([...launched, attachment(note("s1", "failed"))].join("\n"));
+    expect(doc.agents[0]?.state).toBe("failed");
+  });
+
+  it("adds one divider when the same notification arrives again as a user record", () => {
+    const doc = parseClaudeDoc(
+      [...launched, enqueue(note("s1")), attachment(note("s1")), user("u3", note("s1"))].join("\n"),
+    );
+    expect(dividers(doc)).toHaveLength(1);
+    expect(doc.agents[0]?.state).toBe("done");
+  });
+
+  it("ignores notifications for unknown ids and ones that arrive before the launch", () => {
+    const doc = parseClaudeDoc([enqueue(note("zz")), ...launched].join("\n"));
+    expect(doc.agents[0]?.state).toBe("running");
+    expect(dividers(doc)).toEqual([]);
+  });
+
+  it("keeps a typed queued prompt out of the conversation and leaves sidechains alone", () => {
+    const doc = parseClaudeDoc(
+      [...launched, attachment("fix the bug"), attachment(note("s1"), { isSidechain: true })].join(
+        "\n",
+      ),
+    );
+    expect(doc.items.filter((i) => i.kind === "user")).toEqual([]);
+    expect(doc.agents[0]?.state).toBe("running");
+  });
+
+  it("does not throw on malformed records", () => {
+    const bad = [
+      line({ type: "attachment" }),
+      line({ type: "attachment", attachment: "x" }),
+      line({ type: "attachment", attachment: { type: "queued_command", prompt: [null, 3, {}] } }),
+      line({ type: "queue-operation", operation: "enqueue" }),
+      line({ type: "queue-operation", operation: "enqueue", content: 5 }),
+    ];
+    expect(() => parseClaudeDoc([...launched, ...bad].join("\n"))).not.toThrow();
+    expect(parseClaudeDoc([...launched, ...bad].join("\n")).agents[0]?.state).toBe("running");
+  });
+});
+
 describe("parseCodexDoc: older rollouts' function calls", () => {
   const resp = (payload: Record<string, unknown>): string =>
     line({ timestamp: T0, type: "response_item", payload });
