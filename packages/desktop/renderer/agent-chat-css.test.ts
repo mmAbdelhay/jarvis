@@ -20,6 +20,17 @@ function ruleBodyFor(selector: string): string {
 }
 
 describe("the agent chat's layout", () => {
+  it("draws every message row, so a fast scroll never outruns the messages", () => {
+    // content-visibility: auto leaves a row unpainted until the main thread
+    // reaches it, while the compositor keeps scrolling: the feed went empty.
+    const rows = [...css.matchAll(/[^{}]*\.ac-row\b[^{}]*\{([^}]*)\}/g)].map((m) => m[1] ?? "");
+    expect(rows.length).toBeGreaterThan(0);
+    const all = rows.join(";");
+    expect(all).not.toMatch(/content-visibility\s*:\s*auto/);
+    expect(all).not.toMatch(/contain-intrinsic-size/);
+    expect(ruleBodyFor(".ac-row")).toMatch(/contain\s*:\s*content/);
+  });
+
   it("keeps the switch in the pane's flow, so it overlaps no toggle in any split", () => {
     const body = ruleBodyFor(".agent-bar");
     expect(body).not.toMatch(/position\s*:\s*(absolute|fixed)/);
@@ -70,10 +81,6 @@ describe("the agent chat's layout", () => {
     expect(ruleBodyFor(".ac-column")).toMatch(/width\s*:\s*min\(820px,\s*100%\)/);
     expect(ruleBodyFor(".ac-lower")).toMatch(/width\s*:\s*min\(820px,\s*100%\)/);
     expect(ruleBodyFor(".ac-side")).toMatch(/width\s*:\s*320px/);
-  });
-
-  it("lets rows skip their layout while off screen, so thousands scroll smoothly", () => {
-    expect(ruleBodyFor(".ac-row")).toMatch(/content-visibility\s*:\s*auto/);
   });
 
   it("lays the live terminal over the card's slot for the drawer, anchored to its bottom rows", () => {

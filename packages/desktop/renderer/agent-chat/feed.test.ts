@@ -83,7 +83,7 @@ describe("the feed's order and rows", () => {
     expect(changed[2]?.textContent).toContain("Changed.");
   });
 
-  it("gives each row content-visibility through its class, and a stable id", async () => {
+  it("gives each row its containment class and a stable id", async () => {
     const s = await open();
     for (const row of rows(s.host)) expect(row.classList.contains("ac-row")).toBe(true);
     expect(rows(s.host).map((row) => row.dataset["itemId"])).toEqual(["u1", "t1", "a1"]);

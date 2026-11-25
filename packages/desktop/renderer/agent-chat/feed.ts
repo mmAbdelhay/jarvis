@@ -1,6 +1,6 @@
 // The conversation: items in their true order, drawn as keyed DOM so an
 // unchanged item keeps its node (and with it selection, scroll and what the
-// reader opened). Rows use content-visibility so thousands scroll smoothly.
+// reader opened). Every row stays painted (styles.css, .ac-row).
 // An update never moves a reader who scrolled up; loading older items keeps
 // what they were looking at where it was.
 import type { ChatDividerItem, ChatItem, ChatMessageItem, ChatToolItem } from "@jarvis/platform";
@@ -123,8 +123,8 @@ export function createFeed(options: FeedOptions): Feed {
 
   // Only the reader moves the feed off the bottom: a wheel, a touch, a key, a
   // press-and-drag (scrollbar or text selection), middle-click autoscroll, or
-  // keyboard focus moving to a row. A scroll the layout causes (rows measured
-  // under content-visibility, a card appearing) is not one, and must not unpin.
+  // keyboard focus moving to a row. A scroll the layout causes (a row
+  // growing, a card appearing) is not one, and must not unpin.
   let userAt = Number.NEGATIVE_INFINITY;
   let pointerAt = Number.NEGATIVE_INFINITY;
   let dragging = false;

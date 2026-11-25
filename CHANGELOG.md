@@ -8,6 +8,14 @@ version and the downloads. This file is the index.
 
 ## Unreleased
 
+## [0.1.17] — 2026-11-25
+
+- Terminal: messages in the Chat view stay on screen during a fast scroll, and the scrollbar no
+  longer jumps as rows come into view. Older messages stay when a session repeats a record.
+- Terminal: the Chat | Term switch appears in the Linux AppImage under zsh (#37).
+- Terminal: Copy path and Copy relative path in the file explorer's menu (#39).
+- Dashboard: Sessions and Conversation fill the full window height on tall screens (#38).
+
 ## [0.1.16] — 2026-11-25
 
 - Terminal: the Chat view shows a quiet one-row status under the composer for Claude Code,
