@@ -30,6 +30,11 @@ import {
   type SystemMetrics,
   type Turn,
 } from "@jarvis/core";
+import type { AgentAttachResult } from "./agent-attach.js";
+import type { AgentChatView } from "./agent-chat-doc.js";
+import type { AgentCommandResult, AgentModeResult, AgentStopResult } from "./agent-controls.js";
+import type { DictationFinish, DictationKeep, DictationStart } from "./dictation.js";
+import type { AgentCommandInfo, AgentFileHit, AgentOpenFileResult } from "./agent-suggest.js";
 import type { AgentAnswerResult, AgentSendResult, AgentView } from "./agent-view.js";
 import type { OfficeActivity } from "./office-activity.js";
 import type { OfficeScreen } from "./office-screen.js";
@@ -1030,6 +1035,35 @@ export type RendererApi = {
    *  Enter. Refused with `gone` when no agent runs there (never a plain
    *  shell), `prompt` at a menu, `invalid` for empty or over-long text. */
   terminalAgentSend(paneKey: string, text: string): Promise<AgentSendResult>;
+  /** The Chat view's document: the latest page of items (or the page before
+   *  `request.before`, an opaque cursor), the side panel's data, the prompt
+   *  labels (never keys) and which controls this vendor has. */
+  terminalAgentChat(paneKey: string, request?: { before?: string }): Promise<AgentChatView>;
+  /** One Esc, only when the agent is busy and no menu is up. */
+  terminalAgentStop(paneKey: string): Promise<AgentStopResult>;
+  /** Claude only: Shift+Tab until the screen shows `mode`, at most 5 presses. */
+  terminalAgentMode(paneKey: string, mode: string): Promise<AgentModeResult>;
+  /** An allow-listed slash command (`/model sonnet`), refused while busy. */
+  terminalAgentCommand(paneKey: string, command: string): Promise<AgentCommandResult>;
+  /** The `/` list: built-ins plus custom command and skill names. */
+  terminalAgentCommands(paneKey: string): Promise<{ commands: AgentCommandInfo[] }>;
+  /** The `@` list: at most 30 project files matching `query`. */
+  terminalAgentFiles(paneKey: string, query: string): Promise<{ files: AgentFileHit[] }>;
+  /** Stores pasted or dropped bytes privately and answers the path to send. */
+  terminalAgentAttach(
+    paneKey: string,
+    file: { name: string; bytes: Uint8Array },
+  ): Promise<AgentAttachResult>;
+  /** Opens an edited file in the editor, inside the pane's project only. */
+  terminalAgentOpenFile(paneKey: string, path: string): Promise<AgentOpenFileResult>;
+  /** Starts the microphone for the pane's chat composer. One at a time, and
+   *  never while the voice turn records. Answers the id every later call needs. */
+  terminalDictateStart(paneKey: string): Promise<DictationStart>;
+  /** Renews the lease (every 5 s); without it the recording stops after 15 s. */
+  terminalDictateKeep(id: string): Promise<DictationKeep>;
+  /** Stops and transcribes: the text, for the composer. Never sends it. */
+  terminalDictateFinish(id: string): Promise<DictationFinish>;
+  terminalDictateCancel(id: string): Promise<{ ok: boolean }>;
   onTerminalClaudeViewChanged(cb: (payload: { paneKey: string }) => void): void;
   /** What each agent pane and Jarvis session is doing, for the Office:
    *  state, question, what it is doing. Desktop only. */
@@ -1275,6 +1309,10 @@ export type RendererApi = {
   /** The tab id this window is the pop-out of, from its launch arguments;
    *  undefined in the main window. */
   popoutTabId: string | undefined;
+  /** The real path of a File the user picked or dropped, "" when it has none
+   *  (a pasted image). Synchronous: the Chat composer sends a path as it is
+   *  and uploads only what has no path. */
+  pathForFile(file: File): string;
   /** Opens a tab in a window of its own (the main window only). For a
    *  terminal it first asks this window for the tab's layout and drafts —
    *  see onPopoutHandover. */

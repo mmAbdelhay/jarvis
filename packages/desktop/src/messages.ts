@@ -85,9 +85,7 @@ export const MESSAGES = {
     language === "ar" ? "اكتب رسالة للوكيل…" : "Message the agent…",
   agentChatSend: (language: "ar" | "en"): string => (language === "ar" ? "إرسال" : "Send"),
   agentChatNeedsTerm: (language: "ar" | "en"): string =>
-    language === "ar"
-      ? "الوكيل يسأل شيئاً. أجب عنه في الطرفية."
-      : "The agent is asking something. Answer it in Term.",
+    language === "ar" ? "الوكيل يسأل شيئاً." : "The agent is asking something.",
   agentChatNeedsTermButton: (language: "ar" | "en"): string =>
     language === "ar" ? "افتح الطرفية" : "Switch to Term",
   // The Office (office-activity.ts): a desktop notification when an agent
@@ -221,6 +219,10 @@ export const MESSAGES = {
     language === "ar"
       ? "الوكيل ينتظر إجابة. أجب عنه أولاً."
       : "The agent is waiting for an answer. Answer it first.",
+  agentChatSendDraft: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "في صندوق الوكيل نص مكتوب بالفعل. امسحه في الطرفية أولاً."
+      : "The agent's own input line already has typed text. Clear it in Term first.",
   agentChatSendGone: (language: "ar" | "en"): string =>
     language === "ar"
       ? "لا يعمل أي وكيل في هذه اللوحة بعد الآن."
@@ -235,6 +237,295 @@ export const MESSAGES = {
     language === "ar"
       ? "تغيّر السؤال. اقرأه واختر مجدداً."
       : "The question changed. Read it and choose again.",
+  agentChatAgentDone: (language: "ar" | "en"): string => (language === "ar" ? "انتهى" : "Done"),
+  agentChatAgentDoneIn: (language: "ar" | "en"): string =>
+    language === "ar" ? "انتهى خلال {time}" : "Done in {time}",
+  agentChatAgentFailed: (language: "ar" | "en"): string => (language === "ar" ? "فشل" : "Failed"),
+  agentChatAgentRunning: (language: "ar" | "en"): string =>
+    language === "ar" ? "يعمل" : "Running",
+  agentChatAgentRunningFor: (language: "ar" | "en"): string =>
+    language === "ar" ? "يعمل منذ {time}" : "Running {time}",
+  agentChatAttach: (language: "ar" | "en"): string =>
+    language === "ar" ? "إرفاق ملفات" : "Attach files",
+  agentChatAttachFailed: (language: "ar" | "en"): string =>
+    language === "ar" ? "تعذر إرفاق الملف." : "The file could not be attached.",
+  agentChatAttachInvalid: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "لا يمكن إرفاق هذا النوع من الملفات."
+      : "That file type cannot be attached.",
+  agentChatAttachTooLarge: (language: "ar" | "en"): string =>
+    language === "ar" ? "هذا الملف أكبر من 25 ميغابايت." : "That file is over 25 MB.",
+  agentChatAttachTooMany: (language: "ar" | "en"): string =>
+    language === "ar" ? "يمكن إرفاق {n} ملفات كحد أقصى." : "At most {n} files can be attached.",
+  agentChatBusyNoQueue: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "لا يستقبل هذا الوكيل رسائل أثناء عمله. انتظره أو أوقفه."
+      : "This agent cannot take a message while it works. Wait for it or stop it.",
+  agentChatChipContext: (language: "ar" | "en"): string =>
+    language === "ar" ? "السياق" : "Context",
+  agentChatChipOf: (language: "ar" | "en"): string =>
+    language === "ar" ? "{done} من {total}" : "{done} of {total}",
+  agentChatChipTodo: (language: "ar" | "en"): string => (language === "ar" ? "المهام" : "To-do"),
+  agentChatCommandBusy: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "الوكيل يعمل. حاول مجدداً عندما يتوقف."
+      : "The agent is working. Try again when it stops.",
+  agentChatCommandInvalid: (language: "ar" | "en"): string =>
+    language === "ar" ? "لا يمكن إرسال هذا الأمر." : "That command cannot be sent.",
+  agentChatComposerLabel: (language: "ar" | "en"): string =>
+    language === "ar" ? "رسالة إلى الوكيل" : "Message to the agent",
+  agentChatComposerLocked: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "الوكيل يسأل سؤالاً. أجب عنه أعلاه."
+      : "The agent is asking a question. Answer it above.",
+  agentChatCommandsCount: (language: "ar" | "en"): string =>
+    language === "ar" ? "{n} أمر" : "{n} commands",
+  agentChatCommandsOne: (language: "ar" | "en"): string =>
+    language === "ar" ? "أمر واحد" : "1 command",
+  agentChatSourceAccount: (language: "ar" | "en"): string =>
+    language === "ar" ? "الحساب" : "Account",
+  agentChatSourceBuiltIn: (language: "ar" | "en"): string =>
+    language === "ar" ? "مدمج" : "Built-in",
+  agentChatSourcePlugin: (language: "ar" | "en"): string =>
+    language === "ar" ? "إضافة" : "Plugin",
+  agentChatSourceProject: (language: "ar" | "en"): string =>
+    language === "ar" ? "المشروع" : "Project",
+  agentChatSourceSkill: (language: "ar" | "en"): string => (language === "ar" ? "مهارة" : "Skill"),
+  agentChatContextLeft: (language: "ar" | "en"): string =>
+    language === "ar" ? "السياق: متبقٍ {n}" : "Context {n} left",
+  agentChatContextUsed: (language: "ar" | "en"): string =>
+    language === "ar" ? "السياق: استُخدم {n} رمزاً" : "Context {n} tokens used",
+  agentChatCopied: (language: "ar" | "en"): string => (language === "ar" ? "تم النسخ" : "Copied"),
+  agentChatCopy: (language: "ar" | "en"): string => (language === "ar" ? "نسخ" : "Copy"),
+  agentChatDictate: (language: "ar" | "en"): string =>
+    language === "ar" ? "إملاء بالصوت" : "Dictate",
+  agentChatDictateFinish: (language: "ar" | "en"): string =>
+    language === "ar" ? "إنهاء الإملاء" : "Finish dictation",
+  agentChatDictateTip: (language: "ar" | "en"): string =>
+    language === "ar" ? "{label}، {keys}" : "{label} ({keys})",
+  agentChatDictateRecording: (language: "ar" | "en"): string =>
+    language === "ar" ? "جارٍ التسجيل" : "Recording",
+  agentChatDictateDone: (language: "ar" | "en"): string => (language === "ar" ? "تم" : "Done"),
+  agentChatDictateCancel: (language: "ar" | "en"): string =>
+    language === "ar" ? "إلغاء" : "Cancel",
+  agentChatDictateWriting: (language: "ar" | "en"): string =>
+    language === "ar" ? "جارٍ الكتابة…" : "Writing it down…",
+  agentChatDictateStarted: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "بدأ التسجيل. اضغط تم عند الانتهاء."
+      : "Recording started. Choose Done when you finish.",
+  agentChatDictateInserted: (language: "ar" | "en"): string =>
+    language === "ar" ? "أُضيف النص إلى الرسالة." : "The text was added to your message.",
+  agentChatDictateBusy: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "الميكروفون مشغول الآن. حاول بعد قليل."
+      : "The microphone is busy. Try again in a moment.",
+  agentChatDictateSilence: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "لم يُسمع شيء. تحقق من الميكروفون وإذنه."
+      : "Nothing heard. Check the microphone and its permission.",
+  agentChatDictateFailed: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "يحتاج الإملاء إلى ffmpeg وwhisper. انظر الإعدادات > الأدوات."
+      : "Dictation needs ffmpeg and whisper. See Settings > Tools.",
+  agentChatCurrent: (language: "ar" | "en"): string => (language === "ar" ? "الحالي" : "Current"),
+  agentChatDeriving: (language: "ar" | "en"): string =>
+    language === "ar" ? "جارٍ قراءة الجلسة كاملة…" : "Reading the whole session…",
+  agentChatDetails: (language: "ar" | "en"): string => (language === "ar" ? "التفاصيل" : "Details"),
+  agentChatDiffLines: (language: "ar" | "en"): string =>
+    language === "ar" ? "التغييرات، {n} سطراً" : "Changes, {n} lines",
+  agentChatEventAgentDone: (language: "ar" | "en"): string =>
+    language === "ar" ? "أنهى وكيل فرعي عمله" : "A sub-agent finished",
+  agentChatEventAgentDoneNamed: (language: "ar" | "en"): string =>
+    language === "ar" ? "أنهى {label} عمله" : "{label} finished",
+  agentChatEventCompacted: (language: "ar" | "en"): string =>
+    language === "ar" ? "جرى تلخيص المحادثة" : "Conversation compacted",
+  agentChatEventInterrupted: (language: "ar" | "en"): string =>
+    language === "ar" ? "أُوقف" : "Interrupted",
+  agentChatGroupRead1: (language: "ar" | "en"): string =>
+    language === "ar" ? "قرأ ملفاً واحداً" : "Read 1 file",
+  agentChatGroupReadN: (language: "ar" | "en"): string =>
+    language === "ar" ? "قرأ {n} ملفات" : "Read {n} files",
+  agentChatGroupSearch1: (language: "ar" | "en"): string =>
+    language === "ar" ? "بحث مرة واحدة" : "searched once",
+  agentChatGroupSearchN: (language: "ar" | "en"): string =>
+    language === "ar" ? "بحث {n} مرات" : "searched {n} times",
+  agentChatHidePanel: (language: "ar" | "en"): string =>
+    language === "ar" ? "إخفاء اللوحة" : "Hide panel",
+  agentChatHideTerminal: (language: "ar" | "en"): string =>
+    language === "ar" ? "إخفاء الطرفية" : "Hide terminal",
+  agentChatImages: (language: "ar" | "en"): string =>
+    language === "ar" ? "{n} صورة مرفقة" : "{n} image(s) attached",
+  agentChatJumpLatest: (language: "ar" | "en"): string =>
+    language === "ar" ? "الانتقال إلى الأحدث" : "Jump to latest",
+  agentChatLoadOlder: (language: "ar" | "en"): string =>
+    language === "ar" ? "تحميل رسائل أقدم" : "Load older messages",
+  agentChatLoadingOlder: (language: "ar" | "en"): string =>
+    language === "ar" ? "جارٍ تحميل رسائل أقدم…" : "Loading older messages…",
+  agentChatModeDraft: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "امسح سطر إدخال الوكيل في الطرفية قبل تغيير الوضع."
+      : "Clear the agent's input line in Term before changing mode.",
+  agentChatModeMenu: (language: "ar" | "en"): string => (language === "ar" ? "الوضع" : "Mode"),
+  agentChatModeNoteAcceptEdits: (language: "ar" | "en"): string =>
+    language === "ar" ? "يعدّل دون سؤال" : "Edits without asking",
+  agentChatModeNoteAuto: (language: "ar" | "en"): string =>
+    language === "ar" ? "يقرر بنفسه" : "Decides for itself",
+  agentChatModeNoteDefault: (language: "ar" | "en"): string =>
+    language === "ar" ? "يسأل قبل كل تغيير" : "Asks before each change",
+  agentChatModeNotePlan: (language: "ar" | "en"): string =>
+    language === "ar" ? "قراءة فقط" : "Reads only",
+  agentChatModeStuck: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "لم يتغير الوضع. حاول مجدداً أو استخدم الطرفية."
+      : "The mode did not change. Try again or use Term.",
+  agentChatModeUnreadable: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "لا يمكن قراءة الوضع من الشاشة الآن."
+      : "The mode cannot be read from the screen right now.",
+  agentChatModeUnsupported: (language: "ar" | "en"): string =>
+    language === "ar" ? "لا يملك هذا الوكيل وضعاً للتبديل." : "This agent has no mode to switch.",
+  agentChatModel: (language: "ar" | "en"): string => (language === "ar" ? "النموذج" : "Model"),
+  agentChatModelMenu: (language: "ar" | "en"): string => (language === "ar" ? "النموذج" : "Model"),
+  agentChatNeedsAnswer: (language: "ar" | "en"): string =>
+    language === "ar" ? "يحتاج إجابتك" : "Needs your answer",
+  agentChatNoSuggestions: (language: "ar" | "en"): string =>
+    language === "ar" ? "لا شيء مطابق." : "Nothing matches.",
+  agentChatOpenFailed: (language: "ar" | "en"): string =>
+    language === "ar" ? "تعذر فتح هذا الملف." : "That file could not be opened.",
+  agentChatOpenFile: (language: "ar" | "en"): string => (language === "ar" ? "فتح" : "Open"),
+  agentChatOutput: (language: "ar" | "en"): string => (language === "ar" ? "الخرج" : "Output"),
+  agentChatOutputCut: (language: "ar" | "en"): string =>
+    language === "ar" ? "تم اختصار الخرج." : "The output was shortened.",
+  agentChatPanelAgents: (language: "ar" | "en"): string =>
+    language === "ar" ? "الوكلاء الفرعيون" : "Sub-agents",
+  agentChatPanelFiles: (language: "ar" | "en"): string =>
+    language === "ar" ? "الملفات المعدّلة" : "Changed files",
+  agentChatPanelLabel: (language: "ar" | "en"): string =>
+    language === "ar" ? "تفاصيل الجلسة" : "Session details",
+  agentChatPanelTodo: (language: "ar" | "en"): string =>
+    language === "ar" ? "المهام، {done} من {total}" : "To-do, {done} of {total}",
+  agentChatQuestionDetails: (language: "ar" | "en"): string =>
+    language === "ar" ? "ما سأله الوكيل" : "What the agent asked",
+  agentChatQuestionInTerm: (language: "ar" | "en"): string =>
+    language === "ar" ? "أجب عنه في الطرفية أدناه." : "Answer it in the terminal below.",
+  agentChatQuestionMulti: (language: "ar" | "en"): string =>
+    language === "ar" ? "عدة اختيارات" : "Several choices",
+  agentChatQueue: (language: "ar" | "en"): string =>
+    language === "ar" ? "إضافة للطابور" : "Queue",
+  agentChatReadFailed: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "تعذرت قراءة الوكيل الآن. يُعرض آخر عرض."
+      : "Could not read the agent just now. Showing the last view.",
+  agentChatRemoveAttachment: (language: "ar" | "en"): string =>
+    language === "ar" ? "إزالة {name}" : "Remove {name}",
+  agentChatSearchClose: (language: "ar" | "en"): string =>
+    language === "ar" ? "إغلاق البحث" : "Close search",
+  agentChatSearchCount: (language: "ar" | "en"): string =>
+    language === "ar" ? "{n} من {total}" : "{n} of {total}",
+  agentChatSearchLabel: (language: "ar" | "en"): string =>
+    language === "ar" ? "البحث في هذه المحادثة" : "Search this chat",
+  agentChatSearchLoading: (language: "ar" | "en"): string =>
+    language === "ar" ? "جارٍ تحميل رسائل أقدم للبحث…" : "Loading older messages to search…",
+  agentChatSearchNext: (language: "ar" | "en"): string =>
+    language === "ar" ? "النتيجة التالية" : "Next match",
+  agentChatSearchNone: (language: "ar" | "en"): string =>
+    language === "ar" ? "لا نتائج" : "No matches",
+  agentChatSearchOpen: (language: "ar" | "en"): string =>
+    language === "ar" ? "البحث في هذه المحادثة" : "Search this chat",
+  agentChatSearchPlaceholder: (language: "ar" | "en"): string =>
+    language === "ar" ? "بحث" : "Search",
+  agentChatSearchPrevious: (language: "ar" | "en"): string =>
+    language === "ar" ? "النتيجة السابقة" : "Previous match",
+  agentChatSearchStop: (language: "ar" | "en"): string => (language === "ar" ? "إيقاف" : "Stop"),
+  agentChatSearchStopped: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "توقف قبل بداية المحادثة."
+      : "Stopped before the start of the conversation.",
+  agentChatShowAll: (language: "ar" | "en"): string =>
+    language === "ar" ? "عرض كل {n} سطراً" : "Show all {n} lines",
+  agentChatShowLess: (language: "ar" | "en"): string =>
+    language === "ar" ? "عرض أقل" : "Show less",
+  agentChatShowPanel: (language: "ar" | "en"): string =>
+    language === "ar" ? "إظهار اللوحة" : "Show panel",
+  agentChatShowTerminal: (language: "ar" | "en"): string =>
+    language === "ar" ? "إظهار الطرفية" : "Show terminal",
+  agentChatContextPercent: (language: "ar" | "en"): string =>
+    language === "ar" ? "السياق: استُخدم {n}" : "Context {n} used",
+  agentChatFieldAccount: (language: "ar" | "en"): string =>
+    language === "ar" ? "الحساب" : "Account",
+  agentChatFieldBranch: (language: "ar" | "en"): string => (language === "ar" ? "الفرع" : "Branch"),
+  agentChatFieldFolder: (language: "ar" | "en"): string =>
+    language === "ar" ? "المجلد" : "Folder",
+  agentChatPanelRaw: (language: "ar" | "en"): string =>
+    language === "ar" ? "سطر الحالة" : "Status line",
+  agentChatPanelSession: (language: "ar" | "en"): string =>
+    language === "ar" ? "الجلسة" : "Session",
+  agentChatValueLeft: (language: "ar" | "en"): string =>
+    language === "ar" ? "متبقٍ {n}" : "{n} left",
+  agentChatValueTokens: (language: "ar" | "en"): string =>
+    language === "ar" ? "استُخدم {n} رمزاً" : "{n} tokens used",
+  agentChatValueUsed: (language: "ar" | "en"): string =>
+    language === "ar" ? "استُخدم {n}" : "{n} used",
+  agentChatLimitAlmostOut: (language: "ar" | "en"): string =>
+    language === "ar" ? "أوشك على النفاد" : "Almost out",
+  agentChatLimitHigh: (language: "ar" | "en"): string => (language === "ar" ? "مرتفع" : "High"),
+  agentChatLimitResets: (language: "ar" | "en"): string =>
+    language === "ar" ? "يتجدد {when}" : "resets {when}",
+  agentChatLimitUsed: (language: "ar" | "en"): string =>
+    language === "ar" ? "استُخدم {n}%" : "{n}% used",
+  agentChatPanelLimits: (language: "ar" | "en"): string =>
+    language === "ar" ? "حدود الاستخدام" : "Usage limits",
+  agentChatStatusLabel: (language: "ar" | "en"): string =>
+    language === "ar" ? "حالة الوكيل" : "Agent status",
+  agentChatStop: (language: "ar" | "en"): string => (language === "ar" ? "إيقاف" : "Stop"),
+  agentChatStopDraft: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "في سطر إدخال الوكيل نص، فلا يمكن معرفة إن كان يعمل. امسحه في الطرفية."
+      : "The agent's input line has text, so it cannot be told whether it is working. Clear it in Term.",
+  agentChatStopFailed: (language: "ar" | "en"): string =>
+    language === "ar" ? "تعذر إيقاف الوكيل." : "Could not stop the agent.",
+  agentChatStopIdle: (language: "ar" | "en"): string =>
+    language === "ar" ? "الوكيل لا يعمل." : "The agent is not working.",
+  agentChatStopUnsupported: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "لا يمكن إيقاف هذا الوكيل من هنا."
+      : "This agent cannot be stopped from here.",
+  agentChatSuggestions: (language: "ar" | "en"): string =>
+    language === "ar" ? "اقتراحات" : "Suggestions",
+  agentChatTodoActive: (language: "ar" | "en"): string =>
+    language === "ar" ? "قيد التنفيذ" : "in progress",
+  agentChatTodoDone: (language: "ar" | "en"): string => (language === "ar" ? "منتهية" : "done"),
+  agentChatTodoOpen: (language: "ar" | "en"): string =>
+    language === "ar" ? "لم تبدأ" : "not started",
+  agentChatToolFailed: (language: "ar" | "en"): string => (language === "ar" ? "فشلت" : "Failed"),
+  agentChatToolOk: (language: "ar" | "en"): string => (language === "ar" ? "انتهت" : "Finished"),
+  agentChatToolRunning: (language: "ar" | "en"): string => (language === "ar" ? "تعمل" : "Running"),
+  agentChatUploadFailed: (language: "ar" | "en"): string => (language === "ar" ? "فشل" : "Failed"),
+  agentChatUploading: (language: "ar" | "en"): string =>
+    language === "ar" ? "جارٍ الرفع…" : "Uploading…",
+  agentChatWaitUpload: (language: "ar" | "en"): string =>
+    language === "ar" ? "انتظر حتى ينتهي رفع الملفات." : "Wait for the files to finish uploading.",
+  agentChatWorkedFor: (language: "ar" | "en"): string =>
+    language === "ar" ? "عمل لمدة {time}" : "Worked for {time}",
+  agentChatComposerHint: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "اكتب رسالة للوكيل، / للأوامر، @ للملفات"
+      : "Message the agent, / for commands, @ for files",
+  agentChatModelMore: (language: "ar" | "en"): string =>
+    language === "ar" ? "نماذج أخرى…" : "More models\u2026",
+  agentChatNoFiles: (language: "ar" | "en"): string =>
+    language === "ar" ? "لا ملفات مطابقة." : "No files found",
+  agentChatModeLocked: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "الوكيل ينتظر إجابة، فلا يمكن تغيير الوضع الآن."
+      : "The agent is waiting for an answer, so the mode cannot change now.",
+  agentChatQuestionWait: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "ظهر السؤال للتو. انتظر لحظة ثم اختر."
+      : "The question just appeared. Wait a moment, then choose.",
+  agentChatAnswerInTerminal: (language: "ar" | "en"): string =>
+    language === "ar" ? "الإجابة في الطرفية" : "Answer in terminal",
   planPanelToggle: (language: "ar" | "en"): string =>
     language === "ar" ? "تبديل لوحة الخطة" : "Toggle plan panel",
   // ---- Reviews (Task 12): the Terminal tab's dock, its PR link chip and

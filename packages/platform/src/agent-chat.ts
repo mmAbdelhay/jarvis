@@ -12,7 +12,7 @@ import { type ChatTool, type ChatTurn, MAX_CHAT_TURNS, toolTarget } from "./sess
  */
 export type AgentChat = { turns: ChatTurn[]; model?: string };
 
-function asRecord(value: unknown): Record<string, unknown> | undefined {
+export function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined;
@@ -50,7 +50,7 @@ function finish(entries: ChatTurn[], maxTurns: number, model: string | undefined
 }
 
 /** A tool's target from its arguments: toolTarget's fields, then `path`. */
-function argumentsTarget(args: unknown): string | undefined {
+export function argumentsTarget(args: unknown): string | undefined {
   let fields = asRecord(args);
   if (fields === undefined && typeof args === "string") {
     try {
@@ -107,7 +107,7 @@ export function parseCopilotChat(text: string, maxTurns = MAX_CHAT_TURNS): Agent
 }
 
 /** Text the CLI injects as a user message; nobody typed it. */
-const INJECTED_PREFIXES = [
+export const INJECTED_PREFIXES = [
   "<environment_context>",
   "<user_instructions>",
   "<skills_instructions>",
@@ -115,7 +115,7 @@ const INJECTED_PREFIXES = [
 ];
 
 /** The words of a message's content parts (or a plain string). */
-function partsText(content: unknown): string {
+export function partsText(content: unknown): string {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
   let out = "";
@@ -132,7 +132,7 @@ function firstLine(value: string): string | undefined {
   return first.length > 80 ? `${first.slice(0, 80)}…` : first;
 }
 
-function commandTarget(command: unknown): string | undefined {
+export function commandTarget(command: unknown): string | undefined {
   if (typeof command === "string") return firstLine(command);
   if (Array.isArray(command)) {
     return firstLine(command.filter((part) => typeof part === "string").join(" "));

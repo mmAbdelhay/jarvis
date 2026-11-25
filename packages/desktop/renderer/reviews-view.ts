@@ -1,6 +1,7 @@
 import type { DeliveryWait, LinkResult, QueuedComment } from "@jarvis/core";
 import type { RendererApi } from "../src/ipc.js";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
+import { fileIcon } from "./file-icons.js";
 import type { ReviewListItem, ReviewStatus, ReviewThread } from "../src/review-service.js";
 import { detectLanguage, formatAgo } from "./format.js";
 
@@ -564,6 +565,16 @@ export function initReviews(deps: ReviewsViewDeps): ReviewsView {
         : comment.kind === "review-body"
           ? MESSAGES.reviewsKindReview(L)
           : MESSAGES.reviewsKindIssue(L);
+    if (comment.kind === "review-inline" && comment.path !== undefined) {
+      const parts = comment.path.split("/");
+      const folder = parts.length > 1 ? parts[parts.length - 2] : undefined;
+      head.append(
+        fileIcon(
+          parts[parts.length - 1] ?? comment.path,
+          folder === undefined ? {} : { parent: folder },
+        ),
+      );
+    }
     head.append(
       el(
         "span",

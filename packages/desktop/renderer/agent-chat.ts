@@ -1,38 +1,56 @@
 // The Chat | Term switch of a Terminal pane running a coding agent (Claude
 // Code, Copilot or Codex), and the chat it turns the pane into.
 //
-// Main does the reading (terminal:agentView joins the agent's transcript with
-// what its screen shows); this file only draws it. Everything an agent or a
-// person wrote reaches the DOM through textContent and text nodes — never
-// innerHTML — and a link opens only if it is https, through the existing
-// safe external path. The terminal under the chat is hidden, never detached
-// (terminal-pane.ts's setChatView), so the pty never changes size for it and
-// nothing typed in the chat reaches the pty except through agentSend and
-// agentAnswer, which main re-checks against the screen.
-
-import type { AgentAnswerResult, AgentSendResult, AgentView } from "../src/agent-view.js";
+// Main does the reading (terminal:agentChat joins the agent's transcript with
+// what its screen shows); this file puts the parts together — header, feed,
+// question card, composer, side panel, search — and draws what main says.
+// Everything an agent or a person wrote reaches the DOM through textContent
+// and text nodes, never innerHTML, and a link opens only if it is https,
+// through the existing safe external path. The terminal under the chat is
+// hidden, never detached (terminal-pane.ts's setChatView), so the pty never
+// changes size for it and nothing typed in the chat reaches the pty except
+// through the agent* calls, which main re-checks against the screen.
+import type { ChatItem } from "@jarvis/platform";
+import type { AgentAnswerResult, AgentSendResult } from "../src/agent-view.js";
+import type { RendererApi } from "../src/ipc.js";
 import type { MessageKey } from "../src/messages.js";
-import {
-  type ChatBlock,
-  type ChatInline,
-  isHttpsUrl,
-  linkParts,
-  parseChatText,
-} from "./agent-chat-text.js";
-
-type AgentOf = Extract<AgentView, { kind: "agent" }>;
-type Mode = "chat" | "term";
+import type { AgentChatView, AgentOf, StorageLike } from "./agent-chat/agent-types.js";
+import type { CodeContext } from "./agent-chat/code.js";
+import { createComposer } from "./agent-chat/composer.js";
+import { createDrawer } from "./agent-chat/drawer.js";
+import { el } from "./agent-chat/dom.js";
+import { createFeed } from "./agent-chat/feed.js";
+import { mergeLive, prependOlder } from "./agent-chat/paging.js";
+import { createPanel } from "./agent-chat/panel.js";
+import { type ContextInfo, contextOf, createStatusStrip } from "./agent-chat/status.js";
+import { createQuestion } from "./agent-chat/question.js";
+import { createSearch } from "./agent-chat/search.js";
+import { createShell, type Mode } from "./agent-chat/shell.js";
 
 export type AgentChatOptions = {
   paneKey: string;
   /** The pane's own element: the switch and the chat are drawn inside it. */
   host: HTMLElement;
-  api: {
-    terminalAgentView(paneKey: string): Promise<AgentView>;
-    terminalAgentAnswer(paneKey: string, index: number, label: string): Promise<AgentAnswerResult>;
-    terminalAgentSend(paneKey: string, text: string): Promise<AgentSendResult>;
+  api: Pick<
+    RendererApi,
+    | "terminalAgentChat"
+    | "terminalAgentAnswer"
+    | "terminalAgentSend"
+    | "terminalAgentStop"
+    | "terminalAgentMode"
+    | "terminalAgentCommand"
+    | "terminalAgentCommands"
+    | "terminalAgentFiles"
+    | "terminalAgentAttach"
+    | "terminalAgentOpenFile"
+    | "terminalDictateStart"
+    | "terminalDictateKeep"
+    | "terminalDictateFinish"
+    | "terminalDictateCancel"
+  > & {
     /** The existing safe external-open path (main allows http, https, mailto only). */
     plansOpenLink(url: string): unknown;
+    pathForFile?(file: File): string;
   };
   t(key: MessageKey): string;
   /** The pane's own switch between its terminal and this chat. */
@@ -45,14 +63,27 @@ export type AgentChatOptions = {
   isRunning?(): boolean;
   /** One-shot timer; returns its cancel. */
   schedule?(fn: () => void, ms: number): () => void;
-  storage?: Pick<Storage, "getItem" | "setItem">;
+  storage?: StorageLike;
   /** Whether the pane is on screen; pushes for one that is not are skipped. */
   isShown?(): boolean;
+  /** The tab's file sidebar toggle, shown in the header. */
+  toggleFiles?: () => void;
+  /** The tab's other toolbar actions, which the header carries while the chat
+   *  shows (the tab's own strip is hidden then): Reviews and the menu. */
+  toolbar?: { reviews(): void; menu(): void; clear?(): void };
+  /** The header row appeared or went (the tab's own toolbar gives way to it). */
+  onHeader?(shown: boolean): void;
+  /** The pane's live terminal rows, for the drawer's window onto them. */
+  liveScreen?: () => { rows: number; anchor: number } | undefined;
+  now?: () => number;
+  copy?: (text: string) => void;
 };
 
 export type AgentChat = {
   /** A command began in the pane: look for an agent at 1s, 3s and 8s. */
   commandStarted(): void;
+  /** The command in the pane ended: an agent that ran in it is gone. */
+  commandEnded(): void;
   /** The pane regained focus: look now. */
   focused(): void;
   /** main said the view changed (terminal:claudeViewChanged). */
@@ -65,93 +96,22 @@ export const DETECT_AT_MS: readonly number[] = [1000, 3000, 8000];
 /** After those, how often to keep looking while the command still runs: a
  *  Codex or Copilot session file may only exist after the first message. */
 export const KEEP_LOOKING_MS = 10000;
+/** How often a pane that shows an agent checks it is still there. */
+export const WATCH_MS = 10000;
 /** How long to wait before asking again after the agent seemed to vanish. */
 const RE_ASK_MS = 2000;
 /** How long after the pane is built to look for a command already running. */
 const RELOAD_CHECK_MS = 1500;
+/** Pane width under which the side panel becomes chips above the composer. */
+export const NARROW_PX = 1000;
 const MODE_KEY = "jarvis.agentChatMode";
-/** How close to the bottom still counts as "at the bottom", in px. */
-const BOTTOM_SLACK_PX = 24;
+const PANEL_KEY = "jarvis.agentChatPanel";
 
 const VENDOR_NAMES = { anthropic: "Claude Code", github: "Copilot", openai: "Codex" } as const;
-const MODE_MESSAGES = {
-  default: "agentChatModeDefault",
-  auto: "agentChatModeAuto",
-  plan: "agentChatModePlan",
-  acceptEdits: "agentChatModeAcceptEdits",
-} as const;
-const SEND_REFUSALS = {
-  prompt: "agentChatSendPrompt",
-  gone: "agentChatSendGone",
-  invalid: "agentChatSendInvalid",
-} as const;
 
-function el<K extends keyof HTMLElementTagNameMap>(
-  tag: K,
-  className?: string,
-  text?: string,
-): HTMLElementTagNameMap[K] {
-  const node = document.createElement(tag);
-  if (className !== undefined) node.className = className;
-  if (text !== undefined) node.textContent = text;
-  return node;
+function defaultCopy(text: string): void {
+  void navigator.clipboard?.writeText(text).catch(() => undefined);
 }
-
-function renderInlines(
-  inlines: readonly ChatInline[],
-  openLink: (url: string) => void,
-): DocumentFragment {
-  const fragment = document.createDocumentFragment();
-  for (const inline of inlines) {
-    if (inline.kind === "text") fragment.append(document.createTextNode(inline.text));
-    else if (inline.kind === "bold") fragment.append(el("strong", undefined, inline.text));
-    else if (inline.kind === "code") fragment.append(el("code", undefined, inline.text));
-    else if (!isHttpsUrl(inline.url)) fragment.append(document.createTextNode(inline.text));
-    else {
-      const parts = linkParts(inline.text, inline.url);
-      const link = el("a", "agent-chat__link", parts.text);
-      link.href = inline.url;
-      link.rel = "noopener noreferrer";
-      link.addEventListener("click", (event) => {
-        event.preventDefault();
-        openLink(inline.url);
-      });
-      fragment.append(link);
-      // The real host beside any label that does not plainly start with it.
-      if (parts.host !== undefined) {
-        fragment.append(el("span", "agent-chat__host", ` (${parts.host})`));
-      }
-    }
-  }
-  return fragment;
-}
-
-function renderBlock(block: ChatBlock, openLink: (url: string) => void): HTMLElement {
-  if (block.kind === "codeBlock") {
-    const pre = el("pre", "agent-chat__codeblock");
-    pre.append(el("code", undefined, block.text));
-    return pre;
-  }
-  if (block.kind === "list") {
-    const list = el("div", "agent-chat__list");
-    list.setAttribute("role", "list");
-    for (const item of block.items) {
-      const row = el("div", "agent-chat__item");
-      row.setAttribute("role", "listitem");
-      row.dir = "auto";
-      row.append(el("span", "agent-chat__marker", item.marker), " ");
-      row.append(renderInlines(item.inlines, openLink));
-      list.append(row);
-    }
-    return list;
-  }
-  const paragraph = el("p", "agent-chat__para");
-  paragraph.dir = "auto";
-  paragraph.append(renderInlines(block.inlines, openLink));
-  return paragraph;
-}
-
-type Row = { sig: string; element: HTMLElement };
 
 export function createAgentChat(options: AgentChatOptions): AgentChat {
   const { paneKey, host, api, t } = options;
@@ -161,11 +121,19 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
       const timer = setTimeout(fn, ms);
       return () => clearTimeout(timer);
     });
+  const now = options.now ?? (() => Date.now());
   const isShown = options.isShown ?? (() => host.isConnected && host.closest("[hidden]") === null);
+  const storage = (): StorageLike | undefined => {
+    try {
+      return options.storage ?? window.localStorage;
+    } catch {
+      return undefined;
+    }
+  };
 
   function remembered(): Mode | undefined {
     try {
-      const value = (options.storage ?? window.localStorage).getItem(MODE_KEY);
+      const value = storage()?.getItem(MODE_KEY);
       return value === "chat" || value === "term" ? value : undefined;
     } catch {
       return undefined;
@@ -173,123 +141,216 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
   }
   function remember(mode: Mode): void {
     try {
-      (options.storage ?? window.localStorage).setItem(MODE_KEY, mode);
+      storage()?.setItem(MODE_KEY, mode);
     } catch {
       // Only a convenience.
     }
   }
-
-  // ---- the switch -------------------------------------------------------
-  const bar = el("div", "agent-bar");
-  bar.hidden = true;
-  const tablist = el("div", "agent-switch");
-  tablist.setAttribute("role", "tablist");
-  tablist.setAttribute("aria-label", t("agentSwitchLabel"));
-  const tabs = {
-    chat: el("button", "agent-switch__tab", t("agentChatTab")),
-    term: el("button", "agent-switch__tab", t("agentTermTab")),
+  const panelHidden = (): boolean => {
+    try {
+      return storage()?.getItem(PANEL_KEY) === "hidden";
+    } catch {
+      return false;
+    }
   };
-  for (const mode of ["chat", "term"] as const) {
-    const tab = tabs[mode];
-    tab.type = "button";
-    tab.dataset["mode"] = mode;
-    tab.setAttribute("role", "tab");
-    tab.addEventListener("click", () => setMode(mode, true));
-  }
-  tablist.append(tabs.chat, tabs.term);
-  tablist.addEventListener("keydown", (event) => {
-    const keys = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"];
-    if (!keys.includes(event.key)) return;
-    event.preventDefault();
-    const next: Mode =
-      event.key === "Home"
-        ? "chat"
-        : event.key === "End"
-          ? "term"
-          : mode === "chat"
-            ? "term"
-            : "chat";
-    setMode(next, true);
-    tabs[next].focus();
-  });
-  bar.append(tablist);
-
-  // ---- the chat ---------------------------------------------------------
-  const panel = el("section", "agent-chat");
-  panel.hidden = true;
-  panel.setAttribute("aria-label", t("agentChatFeedLabel"));
-  const head = el("div", "agent-chat__head");
-  const nameField = el("span", "agent-chat__name");
-  const titleField = el("span", "agent-chat__title");
-  titleField.dir = "auto";
-  const modelField = el("span", "agent-chat__model");
-  const modeField = el("span", "agent-chat__mode");
-  nameField.dataset["field"] = "name";
-  titleField.dataset["field"] = "title";
-  modelField.dataset["field"] = "model";
-  modeField.dataset["field"] = "mode";
-  head.append(nameField, titleField, modelField, modeField);
-  const feed = el("div", "agent-chat__feed");
-  feed.setAttribute("role", "log");
-  feed.setAttribute("aria-live", "polite");
-  feed.setAttribute("aria-label", t("agentChatFeedLabel"));
-  feed.tabIndex = 0;
-  const card = el("div", "agent-chat__prompt");
-  card.hidden = true;
-  card.setAttribute("role", "group");
-  card.setAttribute("aria-label", t("agentChatQuestionLabel"));
-  const form = el("form", "agent-chat__composer");
-  const input = el("textarea", "agent-chat__input");
-  input.rows = 2;
-  input.dir = "auto";
-  input.spellcheck = false;
-  input.placeholder = t("agentChatComposer");
-  input.setAttribute("aria-label", t("agentChatComposer"));
-  const sendButton = el("button", "agent-chat__send", t("agentChatSend"));
-  sendButton.type = "submit";
-  form.append(input, sendButton);
-  const note = el("p", "agent-chat__note");
-  note.setAttribute("role", "status");
-  note.hidden = true;
-  panel.append(head, feed, card, note, form);
-  host.prepend(bar);
-  host.append(panel);
+  const setPanelHidden = (hidden: boolean): void => {
+    try {
+      storage()?.setItem(PANEL_KEY, hidden ? "hidden" : "shown");
+    } catch {
+      // Only a convenience.
+    }
+  };
 
   // ---- state ------------------------------------------------------------
   let mode: Mode = "term";
   let agent: AgentOf | undefined;
+  let items: ChatItem[] = [];
+  let older: string | undefined;
+  let loadingOlder = false;
   let disposed = false;
   let loading = false;
   let loadAgain = false;
-  let sending = false;
   let answering = false;
   let cancelDetect: (() => void)[] = [];
-  const rows = new Map<string, Row>();
-  let cardSig = "";
+  let cancelTick: (() => void) | undefined;
+  let prependNext = false;
+  /** The note on screen is the read-failed one, which a good read clears. */
+  let readFailedNote = false;
 
+  // ---- parts ------------------------------------------------------------
+  const shell = createShell({
+    t,
+    toggleFiles: options.toggleFiles,
+    toolbar: options.toolbar,
+    onTab: (next, byUser) => setMode(next, byUser),
+    currentMode: () => mode,
+  });
+  const { bar, panel } = shell;
+
+  const copy = options.copy ?? defaultCopy;
+  const openLink = (url: string): void => {
+    try {
+      void Promise.resolve(api.plansOpenLink(url)).catch(() => undefined);
+    } catch {
+      // A preload without the channel: the link just does nothing.
+    }
+  };
+  const note = el("p", "agent-chat__note");
+  note.setAttribute("role", "status");
+  note.hidden = true;
   function showNote(message: string | undefined): void {
     note.textContent = message ?? "";
-    note.hidden = message === undefined;
+    note.hidden = message === undefined || message === "";
   }
+  function openFile(path: string): void {
+    void (async () => {
+      try {
+        const result = await api.terminalAgentOpenFile(paneKey, path);
+        if (!result.ok) showNote(t("agentChatOpenFailed"));
+      } catch {
+        showNote(t("agentChatOpenFailed"));
+      }
+    })();
+  }
+  const code: CodeContext = { t, openLink, copy };
 
+  const feed = createFeed({
+    t,
+    openLink,
+    openFile,
+    copy,
+    loadOlder: () => void loadOlder(),
+    rendered: () => search.refresh(),
+  });
+  const search = createSearch({
+    t,
+    root: feed.column,
+    reveal: (node) => feed.reveal(node),
+    hasOlder: () => older !== undefined,
+    loadOlder,
+    onClose: () => composer.focus(),
+  });
+  const drawer = createDrawer(
+    host,
+    options.liveScreen === undefined ? {} : { screen: options.liveScreen },
+  );
+  const question = createQuestion({
+    t,
+    code,
+    drawer,
+    answer,
+    focusComposer: () => composer.focus(),
+    toTerm: () => setMode("term", true),
+    now,
+    schedule,
+  });
+  const side = createPanel({
+    t,
+    openFile,
+    hidden: panelHidden,
+    setHidden: (hidden) => {
+      setPanelHidden(hidden);
+    },
+  });
+  const strip = createStatusStrip({
+    t,
+    open: () => side.reveal("limits"),
+    close: () => side.closePopover(),
+  });
+  const composer = createComposer({
+    t,
+    paneKey,
+    api: {
+      send: (text) => api.terminalAgentSend(paneKey, text),
+      stop: () => api.terminalAgentStop(paneKey),
+      mode: (next) => api.terminalAgentMode(paneKey, next),
+      command: (command) => api.terminalAgentCommand(paneKey, command),
+      commands: () => api.terminalAgentCommands(paneKey),
+      files: (query) => api.terminalAgentFiles(paneKey, query),
+      attach: (file) => api.terminalAgentAttach(paneKey, file),
+      ...(typeof api.terminalDictateStart !== "function"
+        ? {}
+        : {
+            dictate: {
+              start: () => api.terminalDictateStart(paneKey),
+              keep: (id: string) => api.terminalDictateKeep(id),
+              finish: (id: string) => api.terminalDictateFinish(id),
+              cancel: (id: string) => api.terminalDictateCancel(id),
+            },
+          }),
+      ...(api.pathForFile === undefined
+        ? {}
+        : { pathForFile: (file: File) => api.pathForFile?.(file) ?? "" }),
+    },
+    ...(options.storage === undefined ? {} : { storage: options.storage }),
+    schedule,
+    now,
+    chatKey: (event) => options.chatKey(event),
+    history: () => {
+      const texts: string[] = [];
+      for (const item of items) {
+        if (
+          item.kind === "user" &&
+          item.text.trim() !== "" &&
+          texts[texts.length - 1] !== item.text
+        ) {
+          texts.push(item.text);
+        }
+      }
+      return texts;
+    },
+    note: showNote,
+    changed: () => void load(),
+    sent: () => feed.scrollToBottom(),
+    // An action that answers "gone" proves the agent left: look again and,
+    // if it is still not there, leave Chat at once.
+    gone: () => {
+      lostOnce = true;
+      void load();
+    },
+    dropTarget: panel,
+    visible: isShown,
+  });
+
+  shell.actions.append(search.toggle, side.toggle);
+  shell.top.append(search.element);
+  shell.main.insertBefore(feed.element, shell.lower);
+  shell.lower.append(question.element, side.chips, note, composer.element, strip.element);
+  shell.side.append(side.aside);
+  host.prepend(bar);
+  host.append(panel);
+
+  panel.addEventListener("keydown", (event) => {
+    if (
+      (event.metaKey || event.ctrlKey) &&
+      !event.shiftKey &&
+      !event.altKey &&
+      event.key.toLowerCase() === "f"
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+      search.open();
+    }
+  });
+
+  // ---- the switch -------------------------------------------------------
   function focusComposer(): void {
-    if (!input.disabled) input.focus();
+    composer.focus();
   }
 
   function setMode(next: Mode, byUser: boolean): void {
     const hadFocus = byUser || host.contains(document.activeElement);
     mode = next;
-    for (const which of ["chat", "term"] as const) {
-      const selected = which === next;
-      tabs[which].setAttribute("aria-selected", String(selected));
-      tabs[which].tabIndex = selected ? 0 : -1;
-    }
+    shell.setSelected(next);
     panel.hidden = next !== "chat";
     if (next === "chat") {
       options.setChatView(true, focusComposer);
       if (agent !== undefined) render(agent);
       if (hadFocus) focusComposer();
     } else {
+      // The chat leaves the screen: a recording ends, its words go to the draft.
+      composer.paneHidden();
+      drawer.close();
       options.setChatView(false, undefined);
       if (hadFocus) options.focusTerm();
     }
@@ -299,181 +360,93 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
   setMode("term", false);
 
   // ---- drawing ----------------------------------------------------------
-  const openLink = (url: string): void => {
-    try {
-      void Promise.resolve(api.plansOpenLink(url)).catch(() => undefined);
-    } catch {
-      // A preload without the channel: the link just does nothing.
-    }
-  };
-
-  function userRow(text: string): HTMLElement {
-    const row = el("div", "agent-chat__row agent-chat__row--user");
-    const bubble = el("div", "agent-chat__bubble", text);
-    bubble.dir = "auto";
-    row.append(bubble);
-    return row;
-  }
-  function textRow(text: string): HTMLElement {
-    const row = el("div", "agent-chat__row agent-chat__row--text");
-    for (const block of parseChatText(text)) row.append(renderBlock(block, openLink));
-    return row;
-  }
-  function toolRow(tool: AgentOf["turns"][number]["tools"][number]): HTMLElement {
-    const row = el("div", "agent-chat__row agent-chat__row--tool");
-    row.append(el("span", "agent-chat__tool-name", tool.name));
-    if (tool.target !== undefined && tool.target !== "") {
-      const target = el("span", "agent-chat__tool-target", tool.target);
-      target.dir = "auto";
-      row.append(target);
-    }
-    if (tool.added !== undefined) row.append(el("span", "agent-chat__add", `+${tool.added}`));
-    if (tool.removed !== undefined) row.append(el("span", "agent-chat__del", `−${tool.removed}`));
-    return row;
-  }
-  function workingRow(view: AgentOf): HTMLElement {
-    // Claude's own spinner text is shown as written; the other agents give a
-    // generic busy flag, worded here so it follows the app's language.
-    const label =
-      view.vendor === "anthropic" && view.working !== undefined && view.working.trim() !== ""
-        ? view.working
-        : t("agentChatWorking");
-    return el("div", "agent-chat__row agent-chat__row--working", label);
+  function paneWidth(): number {
+    return host.clientWidth;
   }
 
-  type Item = { key: string; sig: string; build(): HTMLElement };
+  function layout(view: AgentOf): void {
+    const width = paneWidth();
+    const narrow = width > 0 && width < NARROW_PX;
+    panel.dataset["narrow"] = String(narrow);
+    strip.update(view.status);
+    side.update(
+      {
+        ...(view.todos === undefined ? {} : { todos: view.todos }),
+        agents: view.agents,
+        files: view.files,
+        ...(contextOf(view) === undefined ? {} : { context: contextOf(view) as ContextInfo }),
+        ...(view.status === undefined ? {} : { status: view.status }),
+        ...(view.deriving === true ? { deriving: true } : {}),
+        now: now(),
+      },
+      narrow,
+    );
+  }
 
-  function itemsOf(view: AgentOf): Item[] {
-    const items: Item[] = [];
-    view.turns.forEach((turn, index) => {
-      if (turn.role === "user") {
-        if (turn.text.trim() === "") return;
-        items.push({ key: `${index}u`, sig: `u${turn.text}`, build: () => userRow(turn.text) });
-        return;
-      }
-      turn.tools.forEach((tool, at) => {
-        items.push({
-          key: `${index}t${at}`,
-          sig: `t${JSON.stringify([tool.name, tool.target, tool.added, tool.removed])}`,
-          build: () => toolRow(tool),
-        });
-      });
-      if (turn.text.trim() !== "") {
-        items.push({ key: `${index}a`, sig: `a${turn.text}`, build: () => textRow(turn.text) });
-      }
-    });
-    if (view.working !== undefined) {
-      const label = view.vendor === "anthropic" ? view.working : "";
-      items.push({ key: "working", sig: `w${label}`, build: () => workingRow(view) });
+  function workingSince(): number | undefined {
+    for (let at = items.length - 1; at >= 0; at--) {
+      const item = items[at];
+      if (item?.kind === "user") return item.at;
     }
-    return items;
+    return undefined;
   }
 
   function renderFeed(view: AgentOf): void {
-    const atBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight <= BOTTOM_SLACK_PX;
-    const items = itemsOf(view);
-    const wanted = new Set(items.map((item) => item.key));
-    for (const [key, row] of rows) {
-      if (!wanted.has(key)) {
-        row.element.remove();
-        rows.delete(key);
-      }
-    }
-    let cursor: ChildNode | null = feed.firstChild;
-    for (const item of items) {
-      let row = rows.get(item.key);
-      if (row === undefined || row.sig !== item.sig) {
-        // The row being replaced may be where the walk stands.
-        if (row !== undefined && row.element === cursor) cursor = cursor.nextSibling;
-        row?.element.remove();
-        row = { sig: item.sig, element: item.build() };
-        rows.set(item.key, row);
-      }
-      if (row.element === cursor) cursor = cursor.nextSibling;
-      else feed.insertBefore(row.element, cursor);
-    }
-    if (items.length === 0 && feed.querySelector(".agent-chat__empty") === null) {
-      feed.append(el("p", "agent-chat__empty", t("agentChatEmpty")));
-    } else if (items.length > 0) {
-      feed.querySelector(".agent-chat__empty")?.remove();
-    }
-    if (atBottom) feed.scrollTop = feed.scrollHeight;
-  }
-
-  function renderNeedsTerm(): void {
-    card.hidden = false;
-    if (cardSig === "needsTerm") return;
-    cardSig = "needsTerm";
-    card.replaceChildren();
-    const question = el("p", "agent-chat__question", t("agentChatNeedsTerm"));
-    question.dir = "auto";
-    const button = el("button", "agent-chat__option", t("agentChatNeedsTermButton"));
-    button.type = "button";
-    button.addEventListener("click", () => setMode("term", true));
-    const choices = el("div", "agent-chat__options");
-    choices.append(button);
-    card.append(question, choices);
-  }
-
-  function renderCard(view: AgentOf): void {
-    const prompt = view.prompt;
-    if (prompt === undefined && view.needsTerm === true) {
-      renderNeedsTerm();
-      return;
-    }
-    if (prompt === undefined) {
-      card.hidden = true;
-      card.replaceChildren();
-      cardSig = "";
-      return;
-    }
-    card.hidden = false;
-    const sig = JSON.stringify([prompt.question, prompt.options.map((option) => option.label)]);
-    if (sig === cardSig) return;
-    cardSig = sig;
-    card.replaceChildren();
-    const question = el("p", "agent-chat__question", prompt.question);
-    question.dir = "auto";
-    card.append(question);
-    const choices = el("div", "agent-chat__options");
-    prompt.options.forEach((option, index) => {
-      const button = el("button", "agent-chat__option", option.label);
-      button.type = "button";
-      button.dir = "auto";
-      button.disabled = answering;
-      button.addEventListener("click", () => void answer(index, option.label));
-      choices.append(button);
+    const prepended = prependNext;
+    prependNext = false;
+    feed.setItems(items, {
+      ...(view.working === undefined ? {} : { working: view.working }),
+      ...(view.working === undefined || workingSince() === undefined
+        ? {}
+        : { workingSince: workingSince() as number }),
+      now: now(),
+      older: loadingOlder ? "loading" : older !== undefined ? "more" : "none",
+      ...(prepended ? { prepended: true } : {}),
     });
-    card.append(choices);
-  }
-
-  function renderHead(view: AgentOf): void {
-    nameField.textContent = VENDOR_NAMES[view.vendor];
-    titleField.textContent = view.title ?? "";
-    titleField.hidden = view.title === undefined || view.title === "";
-    modelField.textContent = view.model ?? "";
-    modelField.hidden = view.model === undefined || view.model === "";
-    modeField.textContent = view.mode === undefined ? "" : t(MODE_MESSAGES[view.mode]);
-    modeField.hidden = view.mode === undefined;
-  }
-
-  function updateComposer(): void {
-    const locked = sending || agent?.prompt !== undefined || agent?.needsTerm === true;
-    input.disabled = locked;
-    sendButton.disabled = locked;
-    for (const button of card.querySelectorAll("button")) {
-      button.disabled = agent?.needsTerm === true ? false : answering;
+    cancelTick?.();
+    cancelTick = undefined;
+    if (view.working !== undefined || view.agents.some((a) => a.state === "running")) {
+      cancelTick = schedule(() => {
+        cancelTick = undefined;
+        if (disposed || mode !== "chat" || agent === undefined) return;
+        renderFeed(agent);
+        layout(agent);
+      }, 1000);
     }
   }
 
   function render(view: AgentOf): void {
-    renderHead(view);
+    shell.setIdentity(VENDOR_NAMES[view.vendor], view.title);
     renderFeed(view);
-    renderCard(view);
-    updateComposer();
+    layout(view);
+    // The composer first: closing the drawer hands the keys to it.
+    const typing = composer.hasFocus();
+    composer.update(
+      view,
+      view.prompt !== undefined || view.needsTerm === true,
+      panel.dataset["narrow"] === "true",
+    );
+    question.update(view, answering);
+    // A composer that locked under the typist must not leave the keys where an
+    // Enter would reach anything: they land on the card, which acts on nothing.
+    if (typing && question.shown()) question.element.focus();
+    if (view.readFailed === true) {
+      showNote(t("agentChatReadFailed"));
+      readFailedNote = true;
+    }
   }
 
   // ---- reading ----------------------------------------------------------
+  function markHeader(shown: boolean): void {
+    if (shown) host.dataset["agentHeader"] = "on";
+    else delete host.dataset["agentHeader"];
+    try {
+      options.onHeader?.(shown);
+    } catch {
+      // Only a layout hint.
+    }
+  }
+
   function stopDetecting(): void {
     for (const cancel of cancelDetect) cancel();
     cancelDetect = [];
@@ -502,15 +475,21 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
     lostOnce = false;
     cancelReAsk?.();
     cancelReAsk = undefined;
+    cancelTick?.();
+    cancelTick = undefined;
+    cancelWatch?.();
+    cancelWatch = undefined;
     if (agent === undefined) return;
+    // Nothing to write into: a dictation in progress ends with the agent.
+    composer.cancelDictation();
     const hadFocus = host.contains(document.activeElement);
     agent = undefined;
+    items = [];
+    older = undefined;
     bar.hidden = true;
-    rows.clear();
-    feed.replaceChildren();
-    card.replaceChildren();
-    card.hidden = true;
-    cardSig = "";
+    markHeader(false);
+    drawer.close();
+    feed.setItems([], { now: now(), older: "none" });
     showNote(undefined);
     if (mode === "chat") {
       options.setChatView(false, undefined);
@@ -518,11 +497,7 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
       panel.hidden = true;
       if (hadFocus) options.focusTerm();
     }
-    for (const which of ["chat", "term"] as const) {
-      tabs[which].setAttribute("aria-selected", String(which === "term"));
-      tabs[which].tabIndex = which === "term" ? 0 : -1;
-    }
-    updateComposer();
+    shell.setSelected("term");
     // A command still running may start (or show) an agent again.
     if (options.isRunning?.() === true) {
       stopDetecting();
@@ -530,7 +505,23 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
     }
   }
 
-  function apply(view: AgentView): void {
+  // A pane that shows an agent still asks now and then: a push or a command end
+  // lost on the way (a pane rebuilt after a pop-out) must not leave a chat for
+  // an agent that has gone.
+  let cancelWatch: (() => void) | undefined;
+  function watchAgent(): void {
+    cancelWatch?.();
+    cancelWatch = undefined;
+    if (disposed || agent === undefined) return;
+    cancelWatch = schedule(() => {
+      cancelWatch = undefined;
+      if (disposed || agent === undefined) return;
+      if (isShown() && document.visibilityState === "visible") void load();
+      watchAgent();
+    }, WATCH_MS);
+  }
+
+  function apply(view: AgentChatView): void {
     if (view.kind !== "agent") {
       agentMissing();
       return;
@@ -539,11 +530,31 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
     cancelReAsk?.();
     cancelReAsk = undefined;
     const first = agent === undefined;
-    agent = view;
+    const sameSession = agent?.sessionId === view.sessionId;
+    if (view.readFailed === true && sameSession) {
+      // A read that failed keeps what is shown and says so.
+      agent = { ...view, page: { items: [] } };
+    } else {
+      if (!sameSession) {
+        items = [];
+        older = undefined;
+      }
+      const hadOlderLoaded = items.length > view.page.items.length;
+      items = mergeLive(items, view.page.items, view.reset === true || !sameSession);
+      if (!hadOlderLoaded || view.reset === true || !sameSession) older = view.page.older;
+      agent = view;
+    }
     stopDetecting();
+    watchAgent();
     bar.hidden = false;
+    markHeader(true);
     if (first && remembered() === "chat") setMode("chat", false);
-    else if (mode === "chat") render(view);
+    else if (mode === "chat")
+      render(view.readFailed === true && sameSession ? (agent as AgentOf) : view);
+    if (view.readFailed !== true && readFailedNote) {
+      readFailedNote = false;
+      showNote(undefined);
+    }
   }
 
   async function load(): Promise<void> {
@@ -554,7 +565,7 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
     }
     loading = true;
     try {
-      const view = await api.terminalAgentView(paneKey);
+      const view = await api.terminalAgentChat(paneKey);
       if (!disposed) apply(view);
     } catch {
       // The view stays as it was; the next ask tries again. An agent already
@@ -569,42 +580,43 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
     }
   }
 
-  // ---- sending and answering -------------------------------------------
-  async function submit(): Promise<void> {
-    if (sending || agent?.prompt !== undefined || agent?.needsTerm === true) return;
-    const text = input.value;
-    if (text.trim() === "") return;
-    sending = true;
-    showNote(undefined);
-    updateComposer();
-    let outcome: AgentSendResult;
+  /** One older page; true when it brought items. */
+  async function loadOlder(): Promise<boolean> {
+    const cursor = older;
+    if (cursor === undefined || loadingOlder || disposed || agent === undefined) return false;
+    loadingOlder = true;
+    if (mode === "chat") renderFeed(agent);
+    let got = false;
     try {
-      outcome = await api.terminalAgentSend(paneKey, text);
+      const view = await api.terminalAgentChat(paneKey, { before: cursor });
+      if (!disposed && view.kind === "agent" && view.sessionId === agent?.sessionId) {
+        if (view.reset === true) {
+          items = [...view.page.items];
+        } else {
+          const before = items.length;
+          items = prependOlder(items, view.page.items);
+          got = items.length > before;
+          prependNext = got;
+        }
+        older = view.page.older;
+      } else older = undefined;
     } catch {
-      outcome = { ok: false, reason: "gone" };
-      showNote(t("agentChatSendFailed"));
+      // Try again on the next scroll.
+    } finally {
+      loadingOlder = false;
+      if (!disposed && agent !== undefined && mode === "chat") renderFeed(agent);
     }
-    sending = false;
-    if (outcome.ok) {
-      input.value = "";
-      showNote(undefined);
-    } else if (note.hidden) {
-      showNote(t(SEND_REFUSALS[outcome.reason]));
-    }
-    updateComposer();
-    if (!disposed) {
-      focusComposer();
-      void load();
-    }
+    return got || older !== undefined;
   }
 
+  // ---- answering --------------------------------------------------------
   async function answer(index: number, label: string): Promise<void> {
     if (answering) return;
     answering = true;
     showNote(undefined);
-    updateComposer();
+    if (agent !== undefined) question.update(agent, answering);
     try {
-      const result = await api.terminalAgentAnswer(paneKey, index, label);
+      const result: AgentAnswerResult = await api.terminalAgentAnswer(paneKey, index, label);
       if (!result.ok) {
         showNote(t(result.reason === "changed" ? "agentChatAnswerChanged" : "agentChatAnswerGone"));
       }
@@ -612,22 +624,9 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
       showNote(t("agentChatAnswerGone"));
     }
     answering = false;
-    updateComposer();
+    if (agent !== undefined) question.update(agent, answering);
     if (!disposed) void load();
   }
-
-  form.addEventListener("submit", (event) => {
-    event.preventDefault();
-    void submit();
-  });
-  input.addEventListener("keydown", (event) => {
-    // The pane's palette and split chords first: a claimed key is not ours.
-    if (!options.chatKey(event)) return;
-    if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
-      event.preventDefault();
-      void submit();
-    }
-  });
 
   // A reload while a command was running: nothing told this pane a command
   // started, so look once the pane has had a moment to replay its screen.
@@ -656,8 +655,33 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
     cancelDetect = [schedule(keepLooking, KEEP_LOOKING_MS)];
   }
 
+  // Coming back to the window asks again where an agent may have started
+  // unseen (a late-found one, or the polling paused while hidden): once per
+  // event, only for a pane that still runs something.
+  const onWindowBack = (): void => {
+    if (disposed || agent !== undefined || options.isRunning?.() !== true) return;
+    if (isShown() && document.visibilityState === "visible") void load();
+  };
+  window.addEventListener("focus", onWindowBack);
+  document.addEventListener("visibilitychange", onWindowBack);
+
+  // The pane's width decides the side panel; watch it where the browser can.
+  let sizeObserver: ResizeObserver | undefined;
+  if (typeof ResizeObserver !== "undefined") {
+    sizeObserver = new ResizeObserver(() => {
+      if (!disposed && agent !== undefined && mode === "chat") {
+        layout(agent);
+        drawer.place();
+      }
+    });
+    sizeObserver.observe(host);
+  }
+
   return {
     commandStarted,
+    commandEnded() {
+      if (!disposed && agent !== undefined) void load();
+    },
     focused() {
       if (!disposed && isShown()) void load();
     },
@@ -668,11 +692,23 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
     },
     dispose() {
       disposed = true;
+      window.removeEventListener("focus", onWindowBack);
+      document.removeEventListener("visibilitychange", onWindowBack);
       cancelReload();
       cancelReAsk?.();
+      cancelTick?.();
+      cancelWatch?.();
       stopDetecting();
+      sizeObserver?.disconnect();
+      feed.dispose();
+      composer.dispose();
+      drawer.close();
       bar.remove();
       panel.remove();
+      delete host.dataset["agentHeader"];
     },
   };
 }
+
+export { forgetAgentDraft } from "./agent-chat/composer.js";
+export type { AgentSendResult, AgentChatView };

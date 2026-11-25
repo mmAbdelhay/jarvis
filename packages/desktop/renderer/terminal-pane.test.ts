@@ -47,6 +47,7 @@ function pane(
     onCwd?: (path: string) => void;
     chips?: (path: string) => Promise<import("../src/ipc.js").TerminalChips | undefined>;
     onCommandStart?: () => void;
+    onCommandEnd?: () => void;
     resize?: (cols: number, rows: number) => void;
     splitKeys?: import("./terminal-addons.js").SplitKeys;
   } = {},
@@ -194,10 +195,10 @@ describe("a terminal pane", () => {
     p.write(`${A}$ ${B}top\r\n${C("top")}\u001b[?1049h`);
     expect(p.element.dataset["state"]).toBe("alt");
     p.write("\u001b[?1049l");
-    // The exit sequence on its own, before the D that ends the command: with
-    // the two in one chunk, block-done would put the state back to "blocks"
-    // and this would pass even if the alt-screen branch did nothing at all.
-    expect(p.element.dataset["state"]).toBe("blocks");
+    // The exit sequence on its own, before the D that ends the command: the
+    // command still runs (an agent TUI leaves and re-enters the alternate
+    // screen), so the pane must not report an idle shell.
+    expect(p.element.dataset["state"]).toBe("running");
     p.write(D(0));
     expect(p.blocks()).toHaveLength(1);
   });
@@ -2404,6 +2405,15 @@ describe("a terminal pane's chat view", () => {
     expect(onCommandStart).toHaveBeenCalledTimes(1);
   });
 
+  it("tells the caller when a command ends, so a chat can look again", () => {
+    const onCommandEnd = vi.fn();
+    const p = pane(undefined, { onCommandEnd });
+    p.write(`${A}$ ${B}claude\r\n${C("claude")}bye\r\n`);
+    expect(onCommandEnd).not.toHaveBeenCalled();
+    p.write(D(0));
+    expect(onCommandEnd).toHaveBeenCalledTimes(1);
+  });
+
   it("hides the terminal without detaching it or resizing the pty", () => {
     const resize = vi.fn();
     const p = pane(undefined, { resize });
@@ -2424,6 +2434,39 @@ describe("a terminal pane's chat view", () => {
     expect(p.element.isConnected).toBe(true);
     expect(resize).not.toHaveBeenCalled();
     expect(terminal?.disposed).toBe(false);
+  });
+
+  it("does not refit the live terminal while the chat shows, even when the drawer gives it a box", () => {
+    const p = pane();
+    const fit = FakeFitAddon.instances[FakeFitAddon.instances.length - 1];
+    const width = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(800);
+    const height = vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(300);
+    try {
+      p.setChatView(true, vi.fn());
+      const before = fit?.fits ?? 0;
+      p.refit();
+      expect(fit?.fits).toBe(before);
+      p.setChatView(false);
+      expect(fit?.fits).toBe(before + 1);
+    } finally {
+      width.mockRestore();
+      height.mockRestore();
+    }
+  });
+
+  it("reports the rows to keep in view: the last with content or the cursor's, whichever is lower", () => {
+    const p = pane();
+    const terminal = FakeTerminal.instances[FakeTerminal.instances.length - 1];
+    if (terminal === undefined) throw new Error("no terminal");
+    terminal.rows = 40;
+    terminal.lines = ["agent screen", "", "❯ 1. Yes", "  2. No"];
+    terminal.cursor = { x: 0, y: 0 };
+    expect(p.liveScreen()).toEqual({ rows: 40, anchor: 3 });
+    terminal.cursor = { x: 0, y: 12 };
+    expect(p.liveScreen()).toEqual({ rows: 40, anchor: 12 });
+    terminal.lines = [];
+    terminal.cursor = { x: 0, y: 0 };
+    expect(p.liveScreen()).toEqual({ rows: 40, anchor: 0 });
   });
 
   it("sends focus to the chat while it shows, and back to the terminal after", () => {

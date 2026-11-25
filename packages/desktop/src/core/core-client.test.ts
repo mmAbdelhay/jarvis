@@ -443,6 +443,8 @@ describe("inProcessCoreClient: round-trip mode", () => {
     fake.answers.set("settings:read", async () => ({ ok: true, value: { projects: { a: "/a" } } }));
     await client.invoke("settings:read", ["x", 1, true, null, { nested: ["y"] }]);
     note("invoke");
+    await client.attachAgentFile("t1", "a.png", new Uint8Array([1, 2, 3]));
+    note("attachAgentFile");
     fake.tabs.onChange((state) => fake.core.broadcast.send("workspace:update", state));
     client.broadcast("turn:new", { role: "assistant", text: "hi", language: "en", at: 1 });
     note("broadcast");
@@ -531,6 +533,19 @@ describe("inProcessCoreClient: round-trip mode", () => {
       "destroyViews",
     ]);
     expect(fake.stored[0]?.[2]).toEqual(new Uint8Array([1, 2]));
+  });
+
+  it("hands attachment bytes to the table as bytes, the way the daemon's binary lane does", async () => {
+    const fake = fakeCore();
+    fake.answers.set("terminal:agentAttach", () => ({ ok: true }));
+    const client = inProcessCoreClient(fake.core, { roundTrip: true });
+    await expect(client.attachAgentFile("t1", "a.png", new Uint8Array([1, 2, 3]))).resolves.toEqual(
+      { ok: true },
+    );
+    const call = fake.calls.at(-1);
+    expect(call?.channel).toBe("terminal:agentAttach");
+    expect(call?.origin).toBe(DESKTOP_ORIGIN);
+    expect(call?.args).toEqual(["t1", { name: "a.png", bytes: new Uint8Array([1, 2, 3]) }]);
   });
 
   it("refuses a Uint8Array anywhere it would cross, as a socket frame would", async () => {

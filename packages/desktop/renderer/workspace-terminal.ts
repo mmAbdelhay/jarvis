@@ -1,7 +1,7 @@
 import type { WorkspaceTab } from "@jarvis/core";
 import { LOGIN_TERMINAL_DETAIL } from "../src/login-terminal.js";
 import { MESSAGES, PRIMARY_LANGUAGE, type MessageKey } from "../src/messages.js";
-import { type AgentChat, createAgentChat } from "./agent-chat.js";
+import { type AgentChat, createAgentChat, forgetAgentDraft } from "./agent-chat.js";
 import { enhanceTerminal, handleSplitKey, type SplitKeys } from "./terminal-addons.js";
 import { openTerminalLink } from "./terminal-links.js";
 import { attachCompletion, type Completion } from "./terminal-completion.js";
@@ -207,6 +207,27 @@ function clearIcon(): SVGSVGElement {
   edge.setAttribute("d", "m5 11 9 9");
   svg.append(body, base, edge);
   return svg;
+}
+
+// ------------------------------------------------------------- Chat header
+
+/** The tab's toolbar strip (files, clear, plan, Reviews) goes while every
+ *  pane of the tab shows an agent's own header row (Chat or Term alike): that
+ *  row carries the same actions, so there is one row, not two. A mixed split
+ *  keeps the strip. It never follows focus, which would resize the panes
+ *  (and their ptys) on every click. */
+function syncChatOnly(split: HTMLElement | null): void {
+  if (split === null) return;
+  const panes = [...split.querySelectorAll<HTMLElement>(".terminal-pane")];
+  split.toggleAttribute(
+    "data-chat-only",
+    panes.length > 0 && panes.every((pane) => pane.dataset["agentHeader"] === "on"),
+  );
+}
+
+/** Presses one of the tab toolbar's own buttons: the handler stays where it is. */
+function tabToggle(from: HTMLElement, selector: string): void {
+  from.closest(".terminal-split")?.querySelector<HTMLElement>(`:scope > ${selector}`)?.click();
 }
 
 // ------------------------------------------------------------- Plan panel
@@ -717,6 +738,7 @@ export function initWorkspaceTerminals(): void {
   }
 
   window.jarvis.onTerminalExit((paneKey, code) => {
+    forgetAgentDraft(paneKey);
     // The tab stays open: its scrollback is usually the reason you were
     // there. The shell is gone, and saying so beats a terminal that has
     // silently stopped responding. It goes straight to the live terminal:
@@ -1422,6 +1444,7 @@ function makePane(
     // A command began: the moment an agent typed at the prompt may have
     // started, so the Chat switch looks for one (agent-chat.ts).
     onCommandStart: () => agentChats.get(paneKey)?.commandStarted(),
+    onCommandEnd: () => agentChats.get(paneKey)?.commandEnded(),
     // Every keystroke verbatim, control bytes included — that is what makes
     // Ctrl-C, arrows and Escape work rather than only plain text.
     sendInput: (data) => void window.jarvis.sendTerminalInput(paneKey, data),
@@ -1546,17 +1569,35 @@ function makePane(
       host: view.element,
       api: window.jarvis,
       t: planPanelT,
-      setChatView: (active, focusChat) => view.setChatView(active, focusChat),
+      setChatView: (active, focusChat) => {
+        view.setChatView(active, focusChat);
+        syncChatOnly(view.element.closest<HTMLElement>(".terminal-split"));
+      },
+      onHeader: () => syncChatOnly(view.element.closest<HTMLElement>(".terminal-split")),
+      toolbar: {
+        reviews: () => tabToggle(view.element, ".reviews-toggle"),
+        menu: () => tabToggle(view.element, ".plan-toggle"),
+        clear: () => {
+          view.clearAll();
+          view.focus();
+        },
+      },
+      liveScreen: () => view.liveScreen(),
       focusTerm: () => view.focus(),
       chatKey: (event) => view.chatKey(event),
-      isRunning: () => view.element.dataset["state"] === "running",
+      // A TUI holding the alternate screen is running too, whatever the
+      // shell's own marks said.
+      isRunning: () => ["running", "alt"].includes(view.element.dataset["state"] ?? ""),
+      toggleFiles: toggleExplorer,
     });
     agentChats.set(paneKey, chat);
     const disposePane = view.dispose;
     view.dispose = () => {
       agentChats.delete(paneKey);
+      const split = view.element.closest<HTMLElement>(".terminal-split");
       chat.dispose();
       disposePane();
+      syncChatOnly(split);
     };
   } catch {
     // No chat switch. The terminal is untouched.

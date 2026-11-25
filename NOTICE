@@ -11,3 +11,12 @@ third-party components that a packaged build embeds — in particular Google's
 Widevine Content Decryption Module, which ships inside the Electron fork
 Jarvis is built on and is distributed under Google's own terms. See
 docs/develop/architecture.md, "Electron for Content Security, and Widevine".
+
+Third-party material that is vendored in this repository and shipped in the
+app, under its own licence:
+
+- Material Icon Theme 5.40.0 (https://github.com/material-extensions/vscode-material-icon-theme),
+  MIT, Copyright (c) 2025 Material Extensions. The file and folder pictures and the
+  name tables in packages/desktop/renderer/vendor/material-icons, with the
+  licence text beside them in LICENSE. Regenerate with
+  packages/desktop/scripts/vendor-material-icons.mjs.

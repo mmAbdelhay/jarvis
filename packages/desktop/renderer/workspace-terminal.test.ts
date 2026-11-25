@@ -2620,7 +2620,7 @@ describe("the agent chat switch", () => {
     jarvis["onTerminalClaudeViewChanged"] = (cb: typeof viewListener) => {
       viewListener = cb;
     };
-    jarvis["terminalAgentView"] = (paneKey: string) => {
+    jarvis["terminalAgentChat"] = (paneKey: string) => {
       asked.push(paneKey);
       return Promise.resolve(views[paneKey] ?? { kind: "none" });
     };
@@ -2629,7 +2629,23 @@ describe("the agent chat switch", () => {
   });
   afterEach(() => vi.useRealTimers());
 
-  const agent = { kind: "agent", vendor: "openai", sessionId: "s", turns: [] };
+  const agent = {
+    kind: "agent",
+    vendor: "openai",
+    sessionId: "s",
+    page: { items: [] },
+    agents: [],
+    files: [],
+    caps: {
+      stop: true,
+      mode: false,
+      model: "menu",
+      commands: true,
+      files: true,
+      attach: true,
+      queue: false,
+    },
+  };
   const bar = (index = 0) => document.querySelectorAll<HTMLElement>(".agent-bar")[index];
 
   async function started() {
@@ -2650,8 +2666,9 @@ describe("the agent chat switch", () => {
     expect(asked).toEqual(["tab-1"]);
     expect(bar()?.hidden).toBe(false);
     expect(bar()?.parentElement?.className).toBe("terminal-pane");
+    // Detection stops; the shown agent's own 10 s check is the one more look.
     await vi.advanceTimersByTimeAsync(10000);
-    expect(asked).toEqual(["tab-1"]);
+    expect(asked).toEqual(["tab-1", "tab-1"]);
   });
 
   it("keeps asking at 3s and 8s for a plain command, and never shows a switch", async () => {
@@ -2689,6 +2706,88 @@ describe("the agent chat switch", () => {
     expect(asked).toEqual(["tab-1"]);
   });
 
+  it("hides the tab's own toolbar strip while its only pane has the agent header, in Chat and in Term", async () => {
+    await started();
+    views["tab-1"] = agent;
+    dataListener?.("tab-1", COMMAND);
+    await vi.advanceTimersByTimeAsync(1000);
+    const split = document.querySelector<HTMLElement>(".terminal-split");
+    expect(split?.hasAttribute("data-chat-only")).toBe(true);
+    document.querySelector<HTMLButtonElement>('.agent-switch__tab[data-mode="chat"]')?.click();
+    expect(split?.hasAttribute("data-chat-only")).toBe(true);
+    // The header carries Reviews and the menu, wired to the tab's own buttons.
+    const reviews = split?.querySelector<HTMLButtonElement>(":scope > .reviews-toggle");
+    const pressed = vi.fn();
+    reviews?.addEventListener("click", pressed);
+    document.querySelector<HTMLButtonElement>(".ac-bar__reviews")?.click();
+    expect(pressed).toHaveBeenCalledTimes(1);
+    expect(document.querySelector<HTMLElement>(".ac-bar__clear")?.hidden).toBe(true);
+    document.querySelector<HTMLButtonElement>('.agent-switch__tab[data-mode="term"]')?.click();
+    expect(split?.hasAttribute("data-chat-only")).toBe(true);
+    // Clear is in the header row in Term, and clears the pane.
+    const clear = document.querySelector<HTMLButtonElement>(".ac-bar__clear");
+    expect(clear?.hidden).toBe(false);
+    const clearedBefore = FakeTerminal.instances[0]?.cleared ?? 0;
+    clear?.click();
+    expect(FakeTerminal.instances[0]?.cleared).toBe(clearedBefore + 1);
+  });
+
+  it("looks for an agent in a pane that holds the alternate screen, with no command mark seen", async () => {
+    // The reload check runs on the real clock, 1.5 s after the pane is built, then asks 1 s later.
+    const { renderWorkspaceTerminals } = await load();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    renderWorkspaceTerminals([tab()], "tab-1", "acme");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    views["tab-1"] = agent;
+    dataListener?.("tab-1", "\u001b[?1049h");
+    await new Promise((resolve) => setTimeout(resolve, 2800));
+    expect(asked).toContain("tab-1");
+    expect(bar()?.hidden).toBe(false);
+  });
+
+  async function splitWithAgents(withAgent: string[]): Promise<HTMLElement | null> {
+    await started();
+    vi.useRealTimers();
+    FakeTerminal.instances.at(-1)?.pressKey({ key: "d", metaKey: true });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    for (const key of withAgent) views[key] = agent;
+    const leaves = document.querySelectorAll<HTMLElement>(".terminal-split-leaf");
+    expect(leaves).toHaveLength(2);
+    for (const leaf of leaves) {
+      leaf.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    return document.querySelector<HTMLElement>(".terminal-split");
+  }
+
+  it("hides the tab's toolbar strip in a split only while every pane has the agent header", async () => {
+    const split = await splitWithAgents(["tab-1", "tab-1:p1"]);
+    expect(document.querySelectorAll(".agent-bar:not([hidden])")).toHaveLength(2);
+    expect(split?.hasAttribute("data-chat-only")).toBe(true);
+    // Focus moving between the panes changes nothing.
+    document
+      .querySelectorAll<HTMLElement>(".terminal-split-leaf")[0]
+      ?.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(split?.hasAttribute("data-chat-only")).toBe(true);
+    // A new plain pane brings the strip back.
+    FakeTerminal.instances.at(-1)?.pressKey({ key: "d", metaKey: true });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(split?.hasAttribute("data-chat-only")).toBe(false);
+  });
+
+  it("keeps the tab's toolbar strip in a mixed split, whichever pane has the focus", async () => {
+    const split = await splitWithAgents(["tab-1"]);
+    expect(document.querySelectorAll(".agent-bar:not([hidden])")).toHaveLength(1);
+    expect(split?.hasAttribute("data-chat-only")).toBe(false);
+    document
+      .querySelectorAll<HTMLElement>(".terminal-split-leaf")[0]
+      ?.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(split?.hasAttribute("data-chat-only")).toBe(false);
+  });
+
   it("goes with its pane", async () => {
     const render = await started();
     vi.useRealTimers();
@@ -2701,7 +2800,7 @@ describe("the agent chat switch", () => {
   it("is harmless in a preload without the channels", async () => {
     const jarvis = (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
     jarvis["onTerminalClaudeViewChanged"] = undefined;
-    jarvis["terminalAgentView"] = undefined;
+    jarvis["terminalAgentChat"] = undefined;
     await started();
     dataListener?.("tab-1", COMMAND);
     await vi.advanceTimersByTimeAsync(9000);

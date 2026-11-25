@@ -41,8 +41,11 @@ describe("parseChatText", () => {
   });
   it("fenced code block kept raw", () => {
     expect(parseChatText("```ts\nconst x = `**`;\n```")).toEqual([
-      { kind: "codeBlock", text: "const x = `**`;" },
+      { kind: "codeBlock", text: "const x = `**`;", lang: "ts" },
     ]);
+  });
+  it("a fence with no language has no lang", () => {
+    expect(parseChatText("```\nplain\n```")).toEqual([{ kind: "codeBlock", text: "plain" }]);
   });
   it("bare https link trims trailing punctuation", () => {
     expect(parseChatText("see https://claude.ai/x.")).toEqual([

@@ -57,6 +57,7 @@ const SESSION: PaneClaudeSession = {
   // What claudeSessionPaths() really returns: the projects root, one level
   // above the project folder that holds the transcript.
   transcriptsDir: "/home/.claude/projects",
+  configDir: "/home/.claude",
 };
 
 function fakeDeps(overrides: Partial<ClaudeViewDeps> = {}): ClaudeViewDeps {
@@ -504,6 +505,17 @@ describe("createClaudeViewNotifier", () => {
     h.output("t1");
     h.flush();
     expect(h.deps.emit).toHaveBeenCalledTimes(2);
+  });
+
+  it("pokes one more push for a pane that is noticed, and ignores any other", () => {
+    const h = harness();
+    h.notifier.poke("t1");
+    expect(h.timers).toHaveLength(0);
+    h.notifier.notice("t1");
+    h.notifier.poke("t1");
+    expect(h.timers).toHaveLength(1);
+    h.flush();
+    expect(h.deps.emit).toHaveBeenCalledWith("t1");
   });
 
   it("ignores output from a pane no remote looks at and no Claude session runs in", () => {

@@ -18,6 +18,10 @@ function fakeClient(name: string, state: WorkspaceState) {
       calls.push(`${channel}(${JSON.stringify(args)})`);
       return name;
     },
+    attachAgentFile: async (paneKey, fileName) => {
+      calls.push(`attachAgentFile(${paneKey},${fileName})`);
+      return name;
+    },
     onPush(listener) {
       pushes.add(listener);
       return () => pushes.delete(listener);
@@ -85,6 +89,7 @@ describe("switchable CoreClient", () => {
     expect(states).toEqual([stateB]);
     expect(client.workspace.state()).toBe(stateB);
     expect(await client.invoke("settings:read", [])).toBe("b");
+    expect(await client.attachAgentFile("t1", "a.png", new Uint8Array(1))).toBe("b");
     expect(client.hostConfig().allowPopups).toBe(false);
     // firstRun is the launch's: the window was built with it.
     expect(client.firstRun).toBe(true);

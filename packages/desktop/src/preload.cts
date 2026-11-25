@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type { INVOKE_CHANNELS, PUSH_ADAPTERS, PUSH_CHANNELS, PushKey } from "./channels.js";
 import type { RendererApi } from "./ipc.js";
 
@@ -130,6 +130,17 @@ const api: Record<string, unknown> = {
   // Set only for a pop-out window (popout.ts): the tab it draws. A tab id is
   // "tab-<n>", so anything else on the flag is no tab id at all.
   popoutTabId: popoutTabId(),
+};
+
+// The real path of a File the user picked or dropped (the Chat composer sends
+// it as a path instead of uploading its bytes). A pasted image or any File
+// with no path on disk answers "".
+api["pathForFile"] = (file: unknown): string => {
+  try {
+    return typeof file === "object" && file !== null ? webUtils.getPathForFile(file as File) : "";
+  } catch {
+    return "";
+  }
 };
 
 for (const [method, channel] of Object.entries(invokeChannels)) {

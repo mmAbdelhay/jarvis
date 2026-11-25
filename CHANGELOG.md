@@ -8,6 +8,46 @@ version and the downloads. This file is the index.
 
 ## Unreleased
 
+## [0.1.16] — 2026-11-25
+
+- Terminal: the Chat view shows a quiet one-row status under the composer for Claude Code,
+  Codex and Copilot: the account and branch on the left, each usage limit as a small meter and
+  percent on the right (amber with its reset time from 80%, red from 95%, with words for screen
+  readers). A limit opens the side panel, which has Usage limits, Context, Session (account,
+  folder, branch, model) and a closed Status line with the raw rows. Read from the pane's screen
+  and Codex's transcript, never guessed.
+- Terminal: the Chat view finds more agents. A Codex session shows up even when a background
+  Codex process holds its log, and appears empty before its first message (so does Copilot's);
+  an agent found late still gets its Chat tab; the `/` list includes plugin skills named by
+  path, plugins synced from claude.ai and nested synced skills, with descriptions left-aligned.
+  An agent pane has one header row in Chat and Term (Clear is in it), the context bar matches
+  its "left" label, and a menu only the terminal can answer opens a taller terminal.
+- Terminal: the Chat view of a pane running Claude Code, Copilot or Codex is redesigned so a
+  session never needs Term. A single header row (files toggle, title, search, Chat | Term), a
+  centred conversation with edit and command cards (diffs, output, Copy), grouped read and
+  search tools, time per tool and per turn, older history on scroll, search in the chat, and a
+  side panel with the to-do list, sub-agents, changed files and context left (chips above the
+  box in a narrow pane). The box takes attachments (picker, paste, drop), `/` commands, `@`
+  files, history on Up and Down and a draft per pane; it queues a message while Claude Code
+  works, and has Stop plus Claude Code's mode and model. A question or plan shows as a card,
+  and a menu only the terminal can answer opens the terminal inside the card. Desktop only; the
+  phone is unchanged.
+- Terminal: dictate into the chat. A microphone button in the box (or ⌘⇧M, Ctrl+Shift+M) records,
+  transcribes on the laptop with the same whisper as the voice turn and puts the text at the
+  caret for you to edit; it never sends. Needs ffmpeg and whisper. Desktop only.
+- Terminal: typing `/` in the chat lists every command the agent offers (Claude Code, Copilot and
+  Codex, read from the installed CLI versions) with its description, your own commands and
+  skills and the commands of enabled plugins, ranked as you type with the matched letters
+  marked, with documented argument choices after the name; Codex skills also after `$`. A
+  recording that is left running is finished when you leave the chat, and a stuck recorder no
+  longer keeps the microphone.
+- Files and folders now wear Material icons (the set VS Code uses) in the Terminal tab's file
+  sidebar, the chat's `@` list, changed files and attachments, and the Changes and Reviews pages.
+  Always on, bundled with the app (about 1.3 MB).
+- Terminal: the chat no longer sends text into an agent whose own input line already has typed
+  text, and says why; a failed read keeps the last view instead of closing the chat.
+- Background service: files attached in the chat reach the service as binary, not JSON.
+
 ## [0.1.15] — 2026-11-24
 
 - File sidebar: right-clicking a folder (or the empty area) in the Terminal tab now

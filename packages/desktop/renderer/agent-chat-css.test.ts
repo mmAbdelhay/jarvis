@@ -65,4 +65,95 @@ describe("the agent chat's layout", () => {
     expect(ruleBodyFor(".agent-chat__input:disabled")).toMatch(/opacity/);
     expect(ruleBodyFor(".agent-chat__send:disabled")).toMatch(/opacity/);
   });
+
+  it("centres a 820px column and gives the side panel 320px", () => {
+    expect(ruleBodyFor(".ac-column")).toMatch(/width\s*:\s*min\(820px,\s*100%\)/);
+    expect(ruleBodyFor(".ac-lower")).toMatch(/width\s*:\s*min\(820px,\s*100%\)/);
+    expect(ruleBodyFor(".ac-side")).toMatch(/width\s*:\s*320px/);
+  });
+
+  it("lets rows skip their layout while off screen, so thousands scroll smoothly", () => {
+    expect(ruleBodyFor(".ac-row")).toMatch(/content-visibility\s*:\s*auto/);
+  });
+
+  it("lays the live terminal over the card's slot for the drawer, anchored to its bottom rows", () => {
+    const drawer = ruleBodyFor(
+      '.terminal-pane[data-view="chat"][data-drawer="on"] > .terminal-live',
+    );
+    expect(drawer).toMatch(/display\s*:\s*block/);
+    expect(drawer).toMatch(/position\s*:\s*absolute/);
+    const xterm = ruleBodyFor(
+      '.terminal-pane[data-view="chat"][data-drawer="on"] > .terminal-live .xterm',
+    );
+    expect(xterm).toMatch(/transform\s*:\s*translateY\(var\(--drawer-shift/);
+    // Wide agent screens scroll sideways instead of being cut.
+    expect(drawer).toMatch(/overflow-x\s*:\s*auto/);
+  });
+
+  it("stops its animations for people who ask for reduced motion", () => {
+    expect(css).toMatch(
+      /prefers-reduced-motion: reduce\)\s*\{[^}]*ac-working svg[^}]*animation\s*:\s*none/,
+    );
+  });
+
+  it("uses logical properties for what sits at the start or end, so Arabic mirrors", () => {
+    expect(ruleBodyFor(".ac-side")).toMatch(/border-inline-start/);
+    expect(ruleBodyFor(".agent-chat__bubble")).toMatch(/margin-inline-start\s*:\s*auto/);
+    expect(ruleBodyFor(".ac-msg__actions")).toMatch(/inset-inline-end/);
+  });
+
+  it("gives the new controls a visible keyboard focus", () => {
+    for (const selector of [
+      ".ac-jump:focus-visible",
+      ".ac-file:focus-visible",
+      ".ac-menu:focus-visible",
+    ]) {
+      expect(css).toContain(selector);
+    }
+  });
+
+  it("draws one focus ring, on the composer's box, not on the field inside it", () => {
+    expect(ruleBodyFor(".agent-chat__input:focus-visible")).toMatch(/outline\s*:\s*none/);
+    expect(ruleBodyFor(".agent-chat__composer:focus-within")).toMatch(/outline\s*:\s*2px solid/);
+  });
+
+  it("keeps code, commands and diffs left aligned whatever the interface language", () => {
+    expect(ruleBodyFor(".ac-code, .ac-cmd, .ac-diff, .ac-output__text")).toMatch(
+      /text-align\s*:\s*left/,
+    );
+  });
+
+  it("hides the tab's toolbar strip, and its band, while every pane shows Chat", () => {
+    expect(ruleBodyFor(".terminal-split[data-chat-only]")).toMatch(/padding-block-start\s*:\s*0/);
+    expect(css).toMatch(
+      /\.terminal-split\[data-chat-only\] > :is\([^)]*\.reviews-toggle[^)]*\) \{\s*display: none;/,
+    );
+  });
+
+  it("left-aligns command descriptions in the space after the name", () => {
+    expect(ruleBodyFor(".ac-menu__row .ac-menu__note")).toMatch(/text-align\s*:\s*start/);
+  });
+
+  it("pads the header row at its sides, the same in Chat and Term", () => {
+    expect(ruleBodyFor(".agent-bar")).toMatch(/padding-inline\s*:\s*var\(--s3\)/);
+  });
+
+  it("gives every chat scroller a themed thumb on a transparent track (classic scrollbars show a white track otherwise)", () => {
+    const selectors = [
+      ".agent-chat__feed",
+      ".ac-side",
+      ".ac-code",
+      ".ac-diff",
+      ".ac-output__text",
+      ".ac-menu",
+      ".ac-popover",
+      ".ac-question__plan",
+      '.terminal-pane[data-view="chat"] > .terminal-live',
+    ];
+    const rule =
+      /(?:^|\n)\s*([^{}\n]*scrollbar-color[^{}\n]*|[^{}]*)\{[^}]*scrollbar-color\s*:\s*var\(--text-faint\)\s+transparent[^}]*\}/g;
+    const heads = [...css.matchAll(rule)].map((m) => m[0]);
+    const block = heads.join("\n");
+    for (const selector of selectors) expect(block).toContain(selector);
+  });
 });

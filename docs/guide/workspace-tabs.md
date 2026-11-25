@@ -518,6 +518,83 @@ browses the same files from a terminal's **Files** button — folders open in
 place, and a file's path can be typed into the terminal — but cannot change
 them.
 
+### Chat view for an agent
+
+A Terminal pane that runs Claude Code, Copilot or Codex gets a **Chat | Term**
+switch in a header row (file sidebar toggle, the session's title, search, the
+switch). Term is the terminal as always; Chat is the same session as a
+conversation, so you should not need Term to work with an agent. Desktop only:
+the phone's chat view is unchanged.
+
+- **Reading.** Messages and tool calls in the order they happened. Edits and
+  shell commands are cards: a diff opens by itself when it is short, command
+  output shows its last six lines with *Show all*, and a note says when the
+  output was cut. Runs of reading and searching tools are one collapsed row
+  ("Read 2 files, searched once"). Tools show a neutral done or failed mark and
+  how long they took where the transcript has times; a tool with no recorded
+  result shows no mark. Code is highlighted and every code block, command and
+  message has **Copy**. Older history loads as you scroll up, and a reader who
+  has scrolled up is never moved; *Jump to latest* brings you back. **⌘F**
+  (Ctrl+F) searches the chat, loading older pages as it goes, with a Stop.
+- **Writing.** The box grows as you type; Enter sends, Shift+Enter is a new
+  line. Attach files with the **+** button, paste an image, or drop files on
+  the chat: a file with a path on disk is sent as that path, anything else
+  (a pasted image) is stored privately (25 MB at most, kept 7 days) and sent as
+  a path. Type `/` for every command the agent offers, with its description
+  (built-ins, your own commands and skills, and plugins; Codex skills also
+  after `$`), narrowing as you type; Enter or Tab on a part of a name fills it in,
+  Enter on a whole name sends it. A `/` after a space inside a message suggests
+  too. Type `@` for project files. Up and Down in an empty box walk through
+  earlier messages, and an unsent draft is kept for the pane. While the agent
+  works the button says **Queue** for an agent that queues messages (Claude
+  Code). If the agent's own input line already holds typed text, nothing is sent
+  and the chat says so.
+- **Limits and status line.** One quiet row under the box: on the left the
+  account and the git branch (the folder when there is no branch), on the right
+  each usage limit (Claude Code's session and weekly windows, Codex's 5-hour and
+  weekly windows, Copilot's plan) as a small meter and the percent used. From
+  80% used a limit turns amber and adds when it resets (screen readers hear
+  *High*), from 95% red (*Almost out*); every limit has the used percent and
+  reset time as its tooltip. Clicking a limit opens the side panel (a popover in
+  a narrow pane); in a narrow pane the account and branch go first, then the
+  meters, and the percents stay. The side panel, after To-do, Sub-agents and
+  Changed files, has **Usage limits**, **Context**, **Session** (account, folder,
+  branch, model) and a closed **Status line** with the agent's own rows as they
+  were drawn. Everything is read from what the pane shows and from Codex's
+  transcript, never guessed: what cannot be read is only in the raw rows, a
+  section with nothing to show is left out, and while a menu hides the screen
+  the last values stay, dimmed. The context reads the same everywhere (the
+  composer and the panel): the used percent from your Claude status line when it
+  shows one, else what is left until auto-compact, else the tokens used. Desktop
+  only.
+- **File icons.** Files and folders in the Terminal tab's file sidebar, the
+  chat's `@` list, changed files and attachments, and the Changes and Reviews
+  pages wear the Material icon of their name (the set VS Code uses), always on.
+- **Dictation.** The microphone button after the **+** (or **⌘⇧M**, Ctrl+Shift+M)
+  records what you say, shows the time with **Done** and **Cancel**, and puts the
+  words in the box at the caret, replacing a selection, for you to edit before
+  you send. It never sends by itself: Enter while recording is Done, Escape
+  cancels, and Send waits until the text is in. It needs `ffmpeg` and a whisper
+  model (Settings → Tools), records on the laptop only, keeps the recording just
+  long enough to transcribe it, and stops by itself after 5 minutes. The voice
+  hotkey and dictation share the one microphone, so one waits for the other.
+  A recording ends, and its words go to the box, when the chat is switched to
+  Term or the tab is left.
+- **Control.** **Stop** interrupts a working agent. Claude Code's **mode**
+  (Ask first, Accept edits, Plan, Auto) and **model** can be switched from the
+  box; Copilot and Codex open their own model menu. Controls a vendor does not
+  have are not shown.
+- **Questions.** A permission prompt or a numbered question the screen proves is
+  a card with one button per option. The question or plan the agent recorded is
+  shown beside it, read-only. A menu that can only be answered in the terminal,
+  or one with several choices, opens the terminal inside the card (*Hide
+  terminal* closes it); Escape and every key you type there go to the agent,
+  and Jarvis never types for you. The card closes when the menu is gone.
+- **Side panel.** To-do, sub-agents, changed files (click to open one in the
+  editor) and context left or used, for a pane at least 1000px wide. It can be
+  hidden, and that is remembered. In a narrower pane (a split) the same
+  sections are chips above the box that open in a popover.
+
 ### The plan panel
 
 A plan, rendered and editable beside the terminal, with comments you can hand

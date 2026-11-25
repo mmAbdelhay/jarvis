@@ -1,4 +1,5 @@
 import type { DirEntry, EntryKind } from "../src/ipc.js";
+import { fileIcon, folderIcon, setFolderIcon } from "./file-icons.js";
 
 /** What a right-click landed on: a row, or the empty space below the rows
  *  (`undefined`), which means "the root". */
@@ -149,6 +150,18 @@ export function createFileTree(hooks: FileTreeHooks): FileTree {
       row.append(spacer);
     }
 
+    // The theme's picture for this name, between the chevron column and the
+    // name, so every name still starts in the same column.
+    const parentName = parentPath
+      .split("/")
+      .filter((part) => part !== "")
+      .pop();
+    const iconOptions = parentName === undefined ? {} : { parent: parentName };
+    const icon = entry.directory
+      ? folderIcon(entry.name, iconOptions)
+      : fileIcon(entry.name, iconOptions);
+    row.append(icon);
+
     const name = document.createElement("span");
     name.className = "file-tree-name";
     name.textContent = entry.name;
@@ -200,6 +213,7 @@ export function createFileTree(hooks: FileTreeHooks): FileTree {
     const setOpen = (open: boolean): void => {
       children.hidden = !open;
       if (chevron !== undefined) chevron.textContent = open ? "▾" : "▸";
+      setFolderIcon(icon, entry.name, open, iconOptions);
     };
 
     const node: FolderNode = {
@@ -432,8 +446,9 @@ export function createFileTree(hooks: FileTreeHooks): FileTree {
           const icon = document.createElement("span");
           icon.className = request.entry === "directory" ? "file-tree-chevron" : "file-tree-spacer";
           icon.textContent = request.entry === "directory" ? "▸" : "";
+          const entryIcon = request.entry === "directory" ? folderIcon("") : fileIcon("");
           const { input, cancel } = nameField("", settle);
-          row.append(icon, input);
+          row.append(icon, entryIcon, input);
           container.prepend(row);
           close.push(() => row.remove());
           cancelEdit = cancel;

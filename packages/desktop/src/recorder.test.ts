@@ -342,3 +342,58 @@ describe("recorderCommand", () => {
     }
   });
 });
+
+describe("Recorder force kill", () => {
+  function hung() {
+    const kill = vi.fn();
+    const timers: { fn: () => void; ms: number; cancelled: boolean }[] = [];
+    let settle: (result: { error?: string }) => void = () => undefined;
+    const done = new Promise<{ error?: string }>((resolve) => {
+      settle = resolve;
+    });
+    const recorder = new Recorder({
+      tmpDir: "/tmp/jarvis-test",
+      deleteFile: async () => undefined,
+      spawnRecorder: () => ({ kill, done }),
+      schedule: (fn, ms) => {
+        const timer = { fn, ms, cancelled: false };
+        timers.push(timer);
+        return () => {
+          timer.cancelled = true;
+        };
+      },
+    });
+    return { kill, timers, settle, recorder };
+  }
+
+  it("abort after stop() kills the process that ignored the first signal, with force", () => {
+    const h = hung();
+    h.recorder.start();
+    void h.recorder.stop().catch(() => undefined);
+    h.recorder.abort();
+    expect(h.kill).toHaveBeenNthCalledWith(1);
+    expect(h.kill).toHaveBeenLastCalledWith(true);
+  });
+
+  it("abort forces the kill when the process has not ended after 3 seconds", () => {
+    const h = hung();
+    h.recorder.start();
+    h.recorder.abort();
+    expect(h.kill).toHaveBeenCalledTimes(1);
+    const timer = h.timers.find((t) => t.ms === 3000 && !t.cancelled);
+    expect(timer).toBeDefined();
+    timer?.fn();
+    expect(h.kill).toHaveBeenLastCalledWith(true);
+  });
+
+  it("does not force a process that ended in time", async () => {
+    const h = hung();
+    h.recorder.start();
+    h.recorder.abort();
+    h.settle({});
+    await Promise.resolve();
+    await Promise.resolve();
+    h.timers.find((t) => t.ms === 3000)?.fn();
+    expect(h.kill).toHaveBeenCalledTimes(1);
+  });
+});

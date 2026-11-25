@@ -1,0 +1,853 @@
+// @vitest-environment jsdom
+//
+// The composer: sending, queueing, stopping, the mode and model menus, the `/`
+// and `@` listboxes, history, drafts and attachments.
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { MessageKey } from "../../src/messages.js";
+import {
+  agentView,
+  memoryStorage,
+  open,
+  press,
+  settle,
+  t,
+  typeInto,
+  type Setup,
+} from "./fixture.js";
+import { fileIconFor } from "../file-icons.js";
+import { forgetAgentDraft, prettyModel } from "./composer.js";
+
+beforeEach(() => {
+  forgetAgentDraft("t1");
+  document.body.replaceChildren();
+});
+
+const input = (s: Setup) => s.q<HTMLTextAreaElement>(".agent-chat__input");
+const send = (s: Setup) => s.api.terminalAgentSend as unknown as ReturnType<typeof vi.fn>;
+const file = (name: string, type = "image/png", bytes = [1, 2, 3]) =>
+  new File([new Uint8Array(bytes)], name, { type });
+
+describe("sending", () => {
+  it("sends on Enter, clears the box and looks again", async () => {
+    const s = await open();
+    typeInto(s, "run the tests");
+    const event = press(input(s), "Enter");
+    expect(event.defaultPrevented).toBe(true);
+    await settle();
+    expect(send(s)).toHaveBeenCalledWith("t1", "run the tests");
+    expect(input(s).value).toBe("");
+  });
+
+  it("leaves Shift+Enter and IME composition alone, and never sends an empty message", async () => {
+    const s = await open();
+    typeInto(s, "line one");
+    expect(press(input(s), "Enter", { shiftKey: true }).defaultPrevented).toBe(false);
+    press(input(s), "Enter", { isComposing: true });
+    typeInto(s, "   ");
+    press(input(s), "Enter");
+    await settle();
+    expect(send(s)).not.toHaveBeenCalled();
+  });
+
+  it("keeps the text and says why when a send is refused, the agent's own draft included", async () => {
+    const s = await open();
+    for (const [reason, key] of [
+      ["prompt", "agentChatSendPrompt"],
+      ["draft", "agentChatSendDraft"],
+      ["gone", "agentChatSendGone"],
+      ["invalid", "agentChatSendInvalid"],
+    ] as const) {
+      send(s).mockResolvedValueOnce({ ok: false, reason });
+      typeInto(s, "keep me");
+      press(input(s), "Enter");
+      await settle();
+      expect(input(s).value).toBe("keep me");
+      expect(s.q(".agent-chat__note").textContent).toBe(t(key as MessageKey));
+    }
+    send(s).mockRejectedValueOnce(new Error("ipc"));
+    press(input(s), "Enter");
+    await settle();
+    expect(input(s).value).toBe("keep me");
+    expect(s.q(".agent-chat__note").textContent).toBe(t("agentChatSendFailed"));
+  });
+
+  it("sends once while a send is in flight", async () => {
+    const s = await open();
+    let release: (value: { ok: true }) => void = () => {};
+    send(s).mockImplementationOnce(() => new Promise((resolve) => (release = resolve)));
+    typeInto(s, "once");
+    press(input(s), "Enter");
+    expect(s.q<HTMLButtonElement>(".agent-chat__send").disabled).toBe(true);
+    press(input(s), "Enter");
+    release({ ok: true });
+    await settle();
+    expect(send(s)).toHaveBeenCalledTimes(1);
+    expect(s.q<HTMLButtonElement>(".agent-chat__send").disabled).toBe(false);
+  });
+
+  it("hands keys to the pane first, so the palette and splits keep working", async () => {
+    const chatKey = vi.fn((event: KeyboardEvent) => event.key !== "p");
+    const s = await open(agentView(), { chatKey });
+    const claimed = press(input(s), "p", { metaKey: true });
+    expect(chatKey).toHaveBeenCalled();
+    expect(claimed.defaultPrevented).toBe(false);
+    typeInto(s, "x");
+    press(input(s), "Enter");
+    await settle();
+    expect(send(s)).toHaveBeenCalledTimes(1);
+  });
+
+  it("is locked only while a question is up, and says so", async () => {
+    const s = await open(
+      agentView({
+        prompt: {
+          kind: "single",
+          question: "Proceed?",
+          options: [{ label: "Yes", highlighted: true }],
+        },
+      }),
+    );
+    expect(input(s).disabled).toBe(true);
+    expect(s.q<HTMLButtonElement>(".agent-chat__send").disabled).toBe(true);
+    expect(input(s).placeholder).toBe(t("agentChatComposerLocked"));
+    s.current.view = agentView();
+    s.chat.refresh();
+    await settle();
+    expect(input(s).disabled).toBe(false);
+  });
+
+  it("grows with its text (up to a limit) and sets its height from the content", async () => {
+    const s = await open();
+    Object.defineProperty(input(s), "scrollHeight", { configurable: true, get: () => 90 });
+    typeInto(s, "a\nb\nc");
+    expect(input(s).style.height).toBe("90px");
+    Object.defineProperty(input(s), "scrollHeight", { configurable: true, get: () => 900 });
+    typeInto(s, "x");
+    expect(input(s).style.height).toBe("220px");
+  });
+});
+
+describe("queue, stop, mode and model", () => {
+  it("says Queue while the agent works and can queue, and refuses to send to one that cannot", async () => {
+    const busy = await open(agentView({ working: "Working…" }));
+    expect(busy.q(".agent-chat__send").textContent).toBe(t("agentChatQueue"));
+    typeInto(busy, "later");
+    press(input(busy), "Enter");
+    await settle();
+    expect(send(busy)).toHaveBeenCalledWith("t1", "later");
+
+    const noQueue = await open(
+      agentView({ working: "Working…", caps: { ...agentView().caps, queue: false } }),
+    );
+    expect(noQueue.q(".agent-chat__send").textContent).toBe(t("agentChatSend"));
+    typeInto(noQueue, "now");
+    press(input(noQueue), "Enter");
+    await settle();
+    expect(send(noQueue)).not.toHaveBeenCalled();
+    expect(noQueue.q(".agent-chat__note").textContent).toBe(t("agentChatBusyNoQueue"));
+  });
+
+  it("shows Stop only while working and only where the vendor has it, and says why a stop failed", async () => {
+    const idle = await open();
+    expect(idle.q<HTMLElement>(".ac-stop").hidden).toBe(true);
+    const copilot = await open(
+      agentView({ working: "Working…", caps: { ...agentView().caps, stop: false } }),
+    );
+    expect(copilot.q<HTMLElement>(".ac-stop").hidden).toBe(true);
+    const s = await open(agentView({ working: "Crunching…" }));
+    s.q<HTMLButtonElement>(".ac-stop").click();
+    await settle();
+    expect(s.api.terminalAgentStop).toHaveBeenCalledWith("t1");
+    s.api.terminalAgentStop.mockResolvedValueOnce({ ok: false, reason: "draft" } as never);
+    s.q<HTMLButtonElement>(".ac-stop").click();
+    await settle();
+    expect(s.q(".agent-chat__note").textContent).toBe(t("agentChatStopDraft"));
+  });
+
+  it("switches mode from a listbox and reports a refusal", async () => {
+    const s = await open();
+    const button = s.q<HTMLButtonElement>(".ac-modebutton");
+    expect(button.textContent).toBe("Plan");
+    button.click();
+    const menu = s.q<HTMLElement>(".ac-menu:not(.ac-menu--suggest)[role='listbox']:not([hidden])");
+    const rows = [...menu.querySelectorAll<HTMLElement>("[role='option']")];
+    expect(rows.map((row) => row.querySelector(".ac-menu__label")?.textContent)).toEqual([
+      "Default",
+      "Accept edits",
+      "Plan",
+      "Auto",
+    ]);
+    expect(rows[2]?.getAttribute("aria-selected")).toBe("true");
+    press(menu, "ArrowDown");
+    press(menu, "Enter");
+    await settle();
+    expect(s.api.terminalAgentMode).toHaveBeenCalledWith("t1", "auto");
+    s.api.terminalAgentMode.mockResolvedValueOnce({ ok: false, reason: "unreadable" } as never);
+    button.click();
+    press(s.q(".ac-menu:not([hidden])"), "Home");
+    press(s.q(".ac-menu:not([hidden])"), "Enter");
+    await settle();
+    expect(s.q(".agent-chat__note").textContent).toBe(t("agentChatModeUnreadable"));
+  });
+
+  it("closes a picker on Escape and gives the focus back", async () => {
+    const s = await open();
+    const button = s.q<HTMLButtonElement>(".ac-modebutton");
+    button.focus();
+    button.click();
+    const menu = s.q<HTMLElement>(".ac-menu:not([hidden])");
+    press(menu, "Escape");
+    expect(menu.hidden).toBe(true);
+    expect(document.activeElement).toBe(button);
+  });
+
+  it("keeps the mode button disabled, with its reason, while a question is up", async () => {
+    const s = await open(
+      agentView({
+        prompt: {
+          kind: "single",
+          question: "Proceed?",
+          options: [{ label: "Yes", highlighted: true }],
+        },
+      }),
+    );
+    const button = s.q<HTMLButtonElement>(".ac-modebutton");
+    expect(button.hidden).toBe(false);
+    expect(button.textContent).toBe("Plan");
+    expect(button.disabled).toBe(true);
+    expect(button.title).toBe(t("agentChatModeLocked"));
+  });
+
+  it("hides the mode button when the screen does not prove a mode, and for vendors without one", async () => {
+    const unknown = await open(agentView({ mode: undefined }));
+    expect(unknown.q<HTMLElement>(".ac-modebutton").hidden).toBe(true);
+  });
+
+  it("sets Claude's model with a command, and opens another agent's own menu with /model", async () => {
+    const s = await open();
+    s.q<HTMLButtonElement>(".ac-modelbutton").click();
+    const menu = s.q<HTMLElement>(".ac-menu:not([hidden])");
+    expect([...menu.querySelectorAll(".ac-menu__label")].map((n) => n.textContent)).toEqual([
+      "Opus",
+      "Sonnet",
+      "Haiku",
+      "More models\u2026",
+    ]);
+    expect(menu.querySelector("[aria-selected='true']")?.textContent).toContain("Opus");
+    press(menu, "ArrowDown");
+    press(menu, "Enter");
+    await settle();
+    expect(s.api.terminalAgentCommand).toHaveBeenCalledWith("t1", "/model sonnet");
+    s.api.terminalAgentCommand.mockResolvedValueOnce({ ok: false, reason: "busy" } as never);
+    s.q<HTMLButtonElement>(".ac-modelbutton").click();
+    press(s.q(".ac-menu:not([hidden])"), "End");
+    press(s.q(".ac-menu:not([hidden])"), "Enter");
+    await settle();
+    expect(s.api.terminalAgentCommand).toHaveBeenLastCalledWith("t1", "/model");
+    expect(s.q(".agent-chat__note").textContent).toBe(t("agentChatCommandBusy"));
+
+    const codex = await open(
+      agentView({ vendor: "openai", model: "gpt-x", caps: { ...agentView().caps, model: "menu" } }),
+    );
+    expect(codex.q(".ac-modelbutton").textContent).toBe("gpt-x");
+    codex.q<HTMLButtonElement>(".ac-modelbutton").click();
+    await settle();
+    expect(codex.api.terminalAgentCommand).toHaveBeenCalledWith("t1", "/model");
+  });
+
+  it("has the design's placeholder, shorter in a narrow pane", async () => {
+    const s = await open();
+    expect(input(s).placeholder).toBe("Message the agent, / for commands, @ for files");
+    Object.defineProperty(s.host, "clientWidth", { configurable: true, get: () => 600 });
+    s.chat.refresh();
+    await settle();
+    expect(input(s).placeholder).toBe(t("agentChatComposer"));
+  });
+
+  it("isolates the percent in a bdi so right-to-left words cannot turn 62% into %62", async () => {
+    const s = await open(agentView({ context: { used: 38000, leftPercent: 62 } }));
+    expect(s.q(".ac-context bdi").textContent).toBe("62%");
+  });
+
+  it("names the model and the context left, or used", async () => {
+    const left = await open(agentView({ context: { used: 38000, leftPercent: 62 } }));
+    expect(left.q(".ac-context").textContent).toBe("Context 62% left");
+    const used = await open(agentView({ context: { used: 38000 } }));
+    expect(used.q(".ac-context").textContent).toBe("Context 38k tokens used");
+    expect(prettyModel("claude-opus-4-5-20251101", "anthropic")).toBe("Opus 4.5");
+    expect(prettyModel("gpt-5.1-codex", "openai")).toBe("gpt-5.1-codex");
+    expect(prettyModel(undefined, "anthropic")).toBeUndefined();
+  });
+});
+
+describe("suggestions", () => {
+  const optionsOf = (s: Setup) =>
+    [...s.host.querySelectorAll(".ac-menu--suggest [role='option'] .ac-menu__label")].map(
+      (n) => n.textContent,
+    );
+
+  it("lists commands after /, filters, moves with arrows and inserts with Enter or Tab", async () => {
+    const s = await open();
+    typeInto(s, "/");
+    await settle();
+    expect(optionsOf(s)).toEqual(["/compact", "/clear", "/review"]);
+    expect(input(s).getAttribute("aria-expanded")).toBe("true");
+    typeInto(s, "/cl");
+    await settle();
+    expect(optionsOf(s)).toEqual(["/clear"]);
+    typeInto(s, "/");
+    await settle();
+    press(input(s), "ArrowDown");
+    const enter = press(input(s), "Enter");
+    expect(enter.defaultPrevented).toBe(true);
+    expect(input(s).value).toBe("/clear ");
+    expect(send(s)).not.toHaveBeenCalled();
+    expect(s.host.querySelector(".ac-menu--suggest:not([hidden])")).toBeNull();
+    typeInto(s, "/rev");
+    await settle();
+    press(input(s), "Tab");
+    expect(input(s).value).toBe("/review ");
+  });
+
+  it("closes on Escape without clearing the text, and lists nothing when the vendor has no commands", async () => {
+    const s = await open();
+    typeInto(s, "/c");
+    await settle();
+    const escaped = press(input(s), "Escape");
+    expect(escaped.defaultPrevented).toBe(true);
+    expect(input(s).value).toBe("/c");
+    expect(s.host.querySelector(".ac-menu--suggest:not([hidden])")).toBeNull();
+    const none = await open(agentView({ caps: { ...agentView().caps, commands: false } }));
+    typeInto(none, "/");
+    await settle();
+    expect(none.api.terminalAgentCommands).not.toHaveBeenCalled();
+  });
+
+  it("lists files after @ (debounced) and inserts the chosen path", async () => {
+    const s = await open();
+    typeInto(s, "look at @tot");
+    expect(s.api.terminalAgentFiles).not.toHaveBeenCalled();
+    s.timers.advance(120);
+    await settle();
+    expect(s.api.terminalAgentFiles).toHaveBeenCalledWith("t1", "tot");
+    expect(optionsOf(s)).toEqual(["total.js", "total.test.js"]);
+    press(input(s), "ArrowDown");
+    press(input(s), "Enter");
+    expect(input(s).value).toBe("look at @src/cart/total.test.js ");
+  });
+
+  it("shows each file's icon in the @ list", async () => {
+    const s = await open();
+    typeInto(s, "look at @tot");
+    s.timers.advance(120);
+    await settle();
+    const icons = [...s.host.querySelectorAll(".ac-menu--suggest [role='option'] .file-icon")];
+    expect(icons.map((icon) => icon.getAttribute("src"))).toEqual([
+      `vendor/material-icons/icons/${fileIconFor("total.js")}`,
+      `vendor/material-icons/icons/${fileIconFor("total.test.js")}`,
+    ]);
+    expect(icons[0]?.getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("says No files found for an empty list, and the Enter that meets it does not send @REA", async () => {
+    const s = await open();
+    s.api.terminalAgentFiles.mockResolvedValueOnce({ files: [] });
+    typeInto(s, "@REA");
+    s.timers.advance(120);
+    await settle();
+    expect(s.q(".ac-menu--suggest .ac-menu__empty").textContent).toBe("No files found");
+    const enter = press(input(s), "Enter");
+    expect(enter.defaultPrevented).toBe(true);
+    await settle();
+    expect(send(s)).not.toHaveBeenCalled();
+    expect(input(s).value).toBe("@REA");
+    press(input(s), "Enter");
+    await settle();
+    expect(send(s)).toHaveBeenCalledWith("t1", "@REA");
+  });
+
+  it("ignores an answer for a query that has moved on", async () => {
+    const s = await open();
+    let release: (value: { files: { path: string; name: string }[] }) => void = () => {};
+    s.api.terminalAgentFiles.mockImplementationOnce(
+      () => new Promise((resolve) => (release = resolve)),
+    );
+    typeInto(s, "@a");
+    s.timers.advance(120);
+    typeInto(s, "no mention");
+    release({ files: [{ path: "a.ts", name: "a.ts" }] });
+    await settle();
+    expect(optionsOf(s)).toEqual([]);
+  });
+});
+
+describe("history and drafts", () => {
+  it("recalls earlier messages with Up and Down on an empty box, and back to empty", async () => {
+    const s = await open(
+      agentView({
+        page: {
+          items: [
+            { id: "u1", kind: "user", text: "first" },
+            { id: "u2", kind: "user", text: "second" },
+          ],
+        },
+      }),
+    );
+    const up = press(input(s), "ArrowUp");
+    expect(up.defaultPrevented).toBe(true);
+    expect(input(s).value).toBe("second");
+    press(input(s), "ArrowUp");
+    expect(input(s).value).toBe("first");
+    press(input(s), "ArrowDown");
+    expect(input(s).value).toBe("second");
+    press(input(s), "ArrowDown");
+    expect(input(s).value).toBe("");
+    // With text typed, the arrows stay the box's own.
+    typeInto(s, "typing");
+    expect(press(input(s), "ArrowUp").defaultPrevented).toBe(false);
+  });
+
+  it("keeps the draft in memory per pane, never on disk, and a rebuilt pane gets it back", async () => {
+    const first = await open();
+    typeInto(first, "half a thought");
+    expect([...first.storage.store.keys()].some((k) => k.includes("Draft"))).toBe(false);
+    first.chat.dispose();
+    const second = await open(agentView());
+    expect(input(second).value).toBe("half a thought");
+    press(input(second), "Enter");
+    await settle();
+    const third = await open(agentView());
+    expect(input(third).value).toBe("");
+  });
+
+  it("drops a pane's draft when its shell is gone", async () => {
+    const first = await open();
+    typeInto(first, "stale");
+    forgetAgentDraft("t1");
+    const second = await open(agentView());
+    expect(input(second).value).toBe("");
+  });
+
+  it("removes drafts an older version left in storage", async () => {
+    const storage = memoryStorage({
+      "jarvis.agentChatDraft.t1": "old",
+      "jarvis.agentChatMode": "chat",
+    });
+    const s = await open(agentView(), { storage });
+    expect(input(s).value).toBe("");
+    expect(storage.store.has("jarvis.agentChatDraft.t1")).toBe(false);
+    expect(storage.store.get("jarvis.agentChatMode")).toBe("chat");
+  });
+
+  it("clears only what was sent: text and files added while the send is in flight stay", async () => {
+    const s = await open();
+    let release: (value: { ok: true }) => void = () => {};
+    send(s).mockImplementationOnce(() => new Promise((resolve) => (release = resolve)));
+    s.api.pathForFile.mockImplementation((f: File) => `/p/${f.name}`);
+    const picker = s.q<HTMLInputElement>('input[type="file"]');
+    const pick = async (name: string) => {
+      Object.defineProperty(picker, "files", {
+        configurable: true,
+        value: [file(name, "text/plain")],
+      });
+      picker.dispatchEvent(new Event("change"));
+      await settle();
+    };
+    await pick("one.txt");
+    typeInto(s, "first");
+    press(input(s), "Enter");
+    await settle();
+    typeInto(s, "first and more");
+    await pick("two.txt");
+    release({ ok: true });
+    await settle();
+    expect(input(s).value).toBe(" and more");
+    expect([...s.host.querySelectorAll(".ac-attachment__name")].map((n) => n.textContent)).toEqual([
+      "two.txt",
+    ]);
+  });
+});
+
+describe("attachments", () => {
+  it("attaches a picked file by its real path, shows a chip, and appends the path to the message", async () => {
+    const s = await open();
+    s.api.pathForFile.mockImplementation((f: File) => `/Users/me/My Docs/${f.name}`);
+    const picker = s.q<HTMLInputElement>('input[type="file"]');
+    Object.defineProperty(picker, "files", {
+      configurable: true,
+      value: [file("a b.txt", "text/plain")],
+    });
+    picker.dispatchEvent(new Event("change"));
+    await settle();
+    expect(s.api.terminalAgentAttach).not.toHaveBeenCalled();
+    const chip = s.q(".ac-attachment");
+    expect(chip.textContent).toContain("a b.txt");
+    expect(chip.querySelector(".file-icon")?.getAttribute("src")).toBe(
+      `vendor/material-icons/icons/${fileIconFor("a b.txt")}`,
+    );
+    typeInto(s, "read this");
+    press(input(s), "Enter");
+    await settle();
+    expect(send(s)).toHaveBeenCalledWith("t1", 'read this\n\n"/Users/me/My Docs/a b.txt"');
+    expect(s.host.querySelector(".ac-attachment")).toBeNull();
+  });
+
+  it("uploads a pasted image, names it, and sends nothing while it uploads", async () => {
+    const s = await open();
+    let release: () => void = () => {};
+    s.api.terminalAgentAttach.mockImplementationOnce(
+      (_pane, f) =>
+        new Promise((resolve) => {
+          release = () =>
+            resolve({ ok: true, path: "/p/x.png", name: "x.png", kind: "image", ref: "/p/x.png" });
+          expect(f.name).toBe("pasted-1.png");
+          expect(f.bytes).toBeInstanceOf(Uint8Array);
+        }),
+    );
+    const paste = new Event("paste", { bubbles: true, cancelable: true }) as ClipboardEvent;
+    Object.defineProperty(paste, "clipboardData", { value: { files: [file("", "image/png")] } });
+    input(s).dispatchEvent(paste);
+    expect(paste.defaultPrevented).toBe(true);
+    await settle();
+    expect(s.q(".ac-attachment").getAttribute("data-state")).toBe("uploading");
+    typeInto(s, "see");
+    press(input(s), "Enter");
+    await settle();
+    expect(send(s)).not.toHaveBeenCalled();
+    expect(s.q(".agent-chat__note").textContent).toBe(t("agentChatWaitUpload"));
+    release();
+    await settle();
+    expect(s.q(".ac-attachment").getAttribute("data-state")).toBe("ready");
+    press(input(s), "Enter");
+    await settle();
+    expect(send(s)).toHaveBeenCalledWith("t1", "see\n\n/p/x.png");
+  });
+
+  it("takes a dropped file, shows a failed upload with its reason, and removes a chip", async () => {
+    const s = await open();
+    s.api.terminalAgentAttach.mockResolvedValueOnce({ ok: false, reason: "invalid" } as never);
+    const drop = new Event("drop", { bubbles: true, cancelable: true }) as DragEvent;
+    Object.defineProperty(drop, "dataTransfer", {
+      value: { files: [file("a.exe", "application/x")] },
+    });
+    s.q(".agent-chat").dispatchEvent(drop);
+    expect(drop.defaultPrevented).toBe(true);
+    await settle();
+    expect(s.q(".ac-attachment").getAttribute("data-state")).toBe("failed");
+    expect(s.q(".agent-chat__note").textContent).toBe(t("agentChatAttachInvalid"));
+    s.q<HTMLButtonElement>(".ac-attachment__remove").click();
+    expect(s.host.querySelector(".ac-attachment")).toBeNull();
+    expect(s.q(".ac-attachment__remove, .ac-attachments").hasAttribute("hidden")).toBe(true);
+  });
+
+  it("labels each remove button and refuses a file over 25 MB without uploading it", async () => {
+    const s = await open();
+    const big = file("big.png");
+    Object.defineProperty(big, "size", { value: 25 * 1024 * 1024 + 1 });
+    await s.chat.focused();
+    const picker = s.q<HTMLInputElement>('input[type="file"]');
+    Object.defineProperty(picker, "files", { configurable: true, value: [big, file("ok.png")] });
+    picker.dispatchEvent(new Event("change"));
+    await settle();
+    expect(s.api.terminalAgentAttach).toHaveBeenCalledTimes(1);
+    expect(s.q(".ac-attachment__remove").getAttribute("aria-label")).toBe("Remove ok.png");
+  });
+
+  it("hides the attach button for a vendor that cannot take files", async () => {
+    const s = await open(agentView({ caps: { ...agentView().caps, attach: false } }));
+    expect(s.q<HTMLElement>(".ac-attach").hidden).toBe(true);
+  });
+});
+
+describe("command suggestions", () => {
+  type Cmd = {
+    name: string;
+    description?: string;
+    hint?: string;
+    aliases?: string[];
+    choices?: string[];
+    trigger?: "$";
+    source: "built-in" | "project" | "account" | "skill" | "plugin";
+  };
+  const cmd = (name: string, extra: Partial<Cmd> = {}): Cmd => ({
+    name,
+    source: "built-in",
+    ...extra,
+  });
+  const commandsOf = (s: Setup) =>
+    s.api.terminalAgentCommands as unknown as ReturnType<typeof vi.fn>;
+  const rows = (s: Setup) =>
+    [...s.host.querySelectorAll(".ac-menu--suggest [role='option']")] as HTMLElement[];
+  const labels = (s: Setup) =>
+    rows(s).map((row) => row.querySelector(".ac-menu__label")?.textContent);
+  const menuOpen = (s: Setup) => s.host.querySelector(".ac-menu--suggest:not([hidden])") !== null;
+  const withCommands = async (list: Cmd[], view = agentView()) => {
+    const s = await open(view);
+    commandsOf(s).mockResolvedValue({ commands: list });
+    return s;
+  };
+  const many = (n: number): Cmd[] =>
+    Array.from({ length: n }, (_, i) =>
+      cmd(`cmd${String(i).padStart(3, "0")}`, { description: `Does ${i}` }),
+    );
+
+  it("lists every match, not 30, and says how many", async () => {
+    const s = await withCommands(many(250));
+    typeInto(s, "/");
+    await settle();
+    expect(rows(s)).toHaveLength(250);
+    expect(s.q(".ac-suggest-count").textContent).toBe("250 commands");
+    typeInto(s, "/cmd001");
+    await settle();
+    expect(rows(s)).toHaveLength(1);
+    expect(s.q(".ac-suggest-count").textContent).toBe("1 command");
+  });
+
+  it("shows name, argument hint, description with the full text in a title, and the source", async () => {
+    const long = "x".repeat(150);
+    const s = await withCommands([
+      cmd("deploy", { description: long, hint: "[env]", source: "project" }),
+    ]);
+    typeInto(s, "/");
+    await settle();
+    const row = rows(s)[0] as HTMLElement;
+    expect(row.querySelector(".ac-menu__hint")?.textContent).toBe("[env]");
+    expect(row.querySelector(".ac-menu__note")?.textContent).toBe(long);
+    expect(row.querySelector<HTMLElement>(".ac-menu__note")?.title).toBe(long);
+    expect(row.querySelector(".ac-menu__source")?.textContent).toBe(t("agentChatSourceProject"));
+  });
+
+  it("marks the matched letters", async () => {
+    const s = await withCommands([cmd("security-review")]);
+    typeInto(s, "/rev");
+    await settle();
+    expect(
+      [...s.host.querySelectorAll(".ac-menu--suggest mark")]
+        .map((mark) => mark.textContent)
+        .join(""),
+    ).toBe("rev");
+  });
+
+  it("groups an empty query by source with group names", async () => {
+    const s = await withCommands([
+      cmd("b"),
+      cmd("p", { source: "project" }),
+      cmd("g", { source: "plugin" }),
+    ]);
+    typeInto(s, "/");
+    await settle();
+    expect(
+      [...s.host.querySelectorAll(".ac-menu--suggest .ac-menu__group")].map((n) => n.textContent),
+    ).toEqual([
+      t("agentChatSourceBuiltIn"),
+      t("agentChatSourceProject"),
+      t("agentChatSourcePlugin"),
+    ]);
+  });
+
+  it("narrows on every keystroke and grows on Backspace, by alias and description too", async () => {
+    const s = await withCommands([
+      cmd("clear", { aliases: ["reset"], description: "Start again" }),
+      cmd("compact", { description: "Shorten" }),
+      cmd("review"),
+    ]);
+    typeInto(s, "/c");
+    await settle();
+    expect(labels(s)).toEqual(["/clear", "/compact"]);
+    typeInto(s, "/cl");
+    expect(labels(s)).toEqual(["/clear"]);
+    typeInto(s, "/c");
+    expect(labels(s)).toEqual(["/clear", "/compact"]);
+    typeInto(s, "/reset");
+    expect(labels(s)).toEqual(["/clear"]);
+    typeInto(s, "/shor");
+    expect(labels(s)).toEqual(["/compact"]);
+  });
+
+  it("filters by the part before a caret moved into the name and replaces the whole name", async () => {
+    const s = await withCommands([cmd("review"), cmd("remember")]);
+    const box = typeInto(s, "/review now");
+    box.setSelectionRange(3, 3);
+    box.dispatchEvent(new Event("click", { bubbles: true }));
+    await settle();
+    expect(labels(s)).toEqual(["/review", "/remember"]);
+    press(box, "ArrowDown");
+    press(box, "Tab");
+    expect(box.value).toBe("/remember now");
+  });
+
+  it("inserts a partly typed name with a space on Enter or Tab, and sends an exact name on Enter", async () => {
+    const s = await withCommands([cmd("review"), cmd("revert")]);
+    typeInto(s, "/rev");
+    await settle();
+    press(input(s), "Enter");
+    expect(input(s).value).toBe("/review ");
+    expect(send(s)).not.toHaveBeenCalled();
+    typeInto(s, "/revert");
+    await settle();
+    press(input(s), "Enter");
+    await settle();
+    expect(send(s)).toHaveBeenCalledWith("t1", "/revert");
+  });
+
+  it("sends on Enter for an exact alias too", async () => {
+    const s = await withCommands([cmd("clear", { aliases: ["reset"] })]);
+    typeInto(s, "/reset");
+    await settle();
+    press(input(s), "Enter");
+    await settle();
+    expect(send(s)).toHaveBeenCalledWith("t1", "/reset");
+  });
+
+  it("closes on Escape, reopens on the next letter, and sends the text when nothing matches", async () => {
+    const s = await withCommands([cmd("review")]);
+    typeInto(s, "/re");
+    await settle();
+    press(input(s), "Escape");
+    expect(menuOpen(s)).toBe(false);
+    typeInto(s, "/rev");
+    expect(menuOpen(s)).toBe(true);
+    typeInto(s, "/zzz");
+    expect(menuOpen(s)).toBe(false);
+    press(input(s), "Enter");
+    await settle();
+    expect(send(s)).toHaveBeenCalledWith("t1", "/zzz");
+  });
+
+  it("never sends on a click, it only inserts", async () => {
+    const s = await withCommands([cmd("review")]);
+    typeInto(s, "/rev");
+    await settle();
+    (rows(s)[0] as HTMLElement).click();
+    expect(input(s).value).toBe("/review ");
+    expect(send(s)).not.toHaveBeenCalled();
+  });
+
+  it("suggests after whitespace inside a message, takes Enter only after a move or Tab, closes for paths", async () => {
+    const s = await withCommands([cmd("review"), cmd("revert")]);
+    typeInto(s, "please run /rev");
+    await settle();
+    expect(labels(s)).toEqual(["/review", "/revert"]);
+    press(input(s), "Enter");
+    await settle();
+    expect(send(s)).toHaveBeenCalledWith("t1", "please run /rev");
+    typeInto(s, "please run /rev");
+    await settle();
+    press(input(s), "ArrowDown");
+    press(input(s), "Enter");
+    expect(input(s).value).toBe("please run /revert ");
+    typeInto(s, "look in /usr/");
+    await settle();
+    expect(menuOpen(s)).toBe(false);
+    typeInto(s, "a //x");
+    expect(menuOpen(s)).toBe(false);
+  });
+
+  it("offers $ skills only for Codex, and keeps them in the / list", async () => {
+    const list = [cmd("model"), cmd("pdf", { trigger: "$", source: "skill" })];
+    const codex = await withCommands(list, agentView({ vendor: "openai" }));
+    typeInto(codex, "use $pd");
+    await settle();
+    expect(labels(codex)).toEqual(["$pdf"]);
+    press(input(codex), "Tab");
+    expect(input(codex).value).toBe("use $pdf ");
+    typeInto(codex, "$HOME");
+    expect(menuOpen(codex)).toBe(false);
+    typeInto(codex, "/");
+    await settle();
+    expect(labels(codex)).toEqual(["/model", "$pdf"]);
+    const claude = await withCommands(list);
+    typeInto(claude, "use $pd");
+    await settle();
+    expect(menuOpen(claude)).toBe(false);
+  });
+
+  it("lists documented argument choices after the name and a space, and a quiet hint otherwise", async () => {
+    const s = await withCommands([
+      cmd("model", { choices: ["opus", "sonnet"], hint: "<model>" }),
+      cmd("add-dir", { hint: "<path>" }),
+    ]);
+    typeInto(s, "/model ");
+    await settle();
+    expect(labels(s)).toEqual(["opus", "sonnet"]);
+    typeInto(s, "/model so");
+    expect(labels(s)).toEqual(["sonnet"]);
+    press(input(s), "Tab");
+    expect(input(s).value).toBe("/model sonnet");
+    typeInto(s, "/add-dir ");
+    await settle();
+    expect(menuOpen(s)).toBe(false);
+    expect(s.q(".ac-arghint").textContent).toBe("<path>");
+    expect(s.q<HTMLElement>(".ac-arghint").hidden).toBe(false);
+    typeInto(s, "/add-dir src");
+    expect(s.q<HTMLElement>(".ac-arghint").hidden).toBe(true);
+  });
+
+  it("never shows results for an older prefix after a slow first load", async () => {
+    let release: (value: { commands: Cmd[] }) => void = () => undefined;
+    const s = await open();
+    commandsOf(s).mockReturnValueOnce(new Promise((resolve) => (release = resolve)));
+    typeInto(s, "/c");
+    typeInto(s, "/rev");
+    release({ commands: [cmd("compact"), cmd("review")] });
+    await settle();
+    expect(labels(s)).toEqual(["/review"]);
+    typeInto(s, "/");
+    expect(labels(s)).toEqual(["/compact", "/review"]);
+    expect(commandsOf(s)).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the cached list first and refreshes when it is older than 10 seconds", async () => {
+    const s = await withCommands([cmd("review")]);
+    typeInto(s, "/");
+    await settle();
+    expect(commandsOf(s)).toHaveBeenCalledTimes(1);
+    s.timers.advance(5_000);
+    typeInto(s, "/r");
+    await settle();
+    expect(commandsOf(s)).toHaveBeenCalledTimes(1);
+    s.timers.advance(6_000);
+    commandsOf(s).mockResolvedValue({ commands: [cmd("review"), cmd("rewind")] });
+    typeInto(s, "/re");
+    expect(labels(s)).toEqual(["/review"]);
+    await settle();
+    expect(labels(s)).toEqual(["/review", "/rewind"]);
+  });
+
+  it("keeps working while the agent is busy", async () => {
+    const s = await withCommands([cmd("review")], agentView({ working: "Thinking" }));
+    typeInto(s, "/rev");
+    await settle();
+    expect(labels(s)).toEqual(["/review"]);
+  });
+
+  it("moves by page, to the ends, and the wheel or a still pointer does not move the choice", async () => {
+    const s = await withCommands(many(100));
+    typeInto(s, "/");
+    await settle();
+    const active = () => rows(s).findIndex((row) => row.dataset["active"] === "true");
+    press(input(s), "PageDown");
+    expect(active()).toBe(8);
+    press(input(s), "PageUp");
+    expect(active()).toBe(0);
+    press(input(s), "End");
+    expect(active()).toBe(99);
+    press(input(s), "Home");
+    expect(active()).toBe(0);
+    const row = rows(s)[5] as HTMLElement;
+    row.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX: 10, clientY: 10 }));
+    expect(active()).toBe(5);
+    (rows(s)[7] as HTMLElement).dispatchEvent(
+      new MouseEvent("mousemove", { bubbles: true, clientX: 10, clientY: 10 }),
+    );
+    expect(active()).toBe(5);
+  });
+
+  it("marks a long list for content-visibility and keeps the dictation button", async () => {
+    const s = await withCommands(many(300));
+    typeInto(s, "/");
+    await settle();
+    expect(s.q(".ac-menu--suggest").classList.contains("ac-menu--long")).toBe(true);
+    expect(s.host.querySelector(".ac-mic")).not.toBeNull();
+  });
+});

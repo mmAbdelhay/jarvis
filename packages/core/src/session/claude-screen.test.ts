@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readClaudeScreen } from "./claude-screen.js";
+import { readClaudeMode, readClaudeScreen } from "./claude-screen.js";
 
 const IDLE = "────────────\n❯\n────────────";
 const MENU = [
@@ -122,5 +122,22 @@ describe("readClaudeScreen", () => {
       "\n",
     );
     expect(readClaudeScreen(screen).working).toBe("Writing the range query… 12s");
+  });
+});
+
+describe("readClaudeMode", () => {
+  it.each([
+    ["⏵⏵ auto mode on (shift+tab to cycle)", "auto"],
+    ["⏸ plan mode on", "plan"],
+    ["⏵⏵ accept edits on", "acceptEdits"],
+    ["  ? for shortcuts", "default"],
+  ])("reads %s as %s", (row, mode) => {
+    expect(readClaudeMode(`${IDLE}\n${row}`)).toBe(mode);
+  });
+
+  it("is undefined when the screen shows no mode row and no default hint", () => {
+    expect(readClaudeMode(IDLE)).toBeUndefined();
+    expect(readClaudeMode("plan mode on\n? for shortcuts at the shell")).toBe("default");
+    expect(readClaudeMode("")).toBeUndefined();
   });
 });

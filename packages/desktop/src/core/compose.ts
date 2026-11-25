@@ -32,6 +32,7 @@ import {
   mkdir,
   mkdtemp,
   lstat,
+  open,
   readdir,
   readFile,
   realpath,
@@ -258,10 +259,16 @@ import {
   parseLsofFileNames,
 } from "../pane-agent-session.js";
 import { createPaneAttach, createPaneAttachCwd } from "../pane-attach.js";
+import { createAgentAttach } from "../agent-attach.js";
+import { createAgentChatHandlers } from "../agent-chat-doc.js";
+import { createAgentControls } from "../agent-controls.js";
+import { createAgentSuggest } from "../agent-suggest.js";
 import { createAgentViewHandlers } from "../agent-view.js";
 import { createOfficeActivity, createOfficeViewing } from "../office-activity.js";
 import { createOfficeScreen } from "../office-screen.js";
 import { createClaudeViewHandlers, createClaudeViewNotifier } from "../claude-view.js";
+import { createDictation, createDictationRecorder } from "../dictation.js";
+import { createMicGuard } from "../mic-guard.js";
 import { createRecorderDeps, Recorder } from "../recorder.js";
 import { capacityReport, startupReport } from "../startup.js";
 import { createTerminalFitOverrides } from "../terminal-fit-overrides.js";
@@ -2204,6 +2211,8 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     // A recording started but never stopped holds ffmpeg — and the
     // microphone — open indefinitely.
     safely("recorder", () => recorder.abort());
+    // Dictation's own recording, and its private temp directory.
+    safely("dictation", () => dictation.dispose());
     // Sessions still "starting"/"running"/"waiting" never reach
     // SessionManager#update's endedAt-setting branch on their own once
     // the window is gone, so their history() rows would stay wrong
@@ -2362,9 +2371,49 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
 
   const recorder = new Recorder(createRecorderDeps(platform));
 
+  // The chat composer's dictation (dictation.ts). It shares the microphone
+  // with the voice turn: each refuses while the other records.
+  const DICTATION_TRANSCRIBE_MS = 180_000;
+  // One microphone: whichever of voice and dictation holds it, the other waits.
+  const micGuard = createMicGuard({
+    dictationActive: () => dictation.active(),
+    voiceRecording: () => recorder.isRecording(),
+    startRecording: () => recorder.start(),
+    announce: (listening) => broadcast.send("voice:listening", listening),
+  });
+  const dictation = createDictation({
+    makeRecorder: () =>
+      createDictationRecorder({
+        recorder: createRecorderDeps(platform),
+        makeDir: async () => {
+          const dir = await mkdtemp(join(tmpdir(), "jarvis-dictation-"));
+          await chmod(dir, 0o700);
+          return dir;
+        },
+        removeDir: (dir) => rm(dir, { recursive: true, force: true }),
+      }),
+    transcribe: (wavPath) =>
+      transcribe(wavPath, config.whisper, (command, args) =>
+        limitedWhisperRunner(command, args, DICTATION_TRANSCRIBE_MS),
+      ),
+    schedule: (fn, ms) => {
+      const timer = setTimeout(fn, ms);
+      return () => clearTimeout(timer);
+    },
+    busy: () => micGuard.voiceHoldsMicrophone(),
+    hostsAgent: async (paneKey) => {
+      try {
+        if (!agentSessions.live(paneKey)) return false;
+        return (await agentSessions.session(paneKey, true)) !== undefined;
+      } catch {
+        return false;
+      }
+    },
+    log: (token) => console.warn(`[dictation] ${token}`),
+  });
+
   function startVoice(): void {
-    recorder.start();
-    broadcast.send("voice:listening", true);
+    micGuard.startVoice();
   }
 
   // Alt+Space / Alt+Shift+Space is a press-to-start / press-to-stop-and-send
@@ -2469,6 +2518,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
       shells.onShellExit(({ paneKey }) => {
         claudeView.forgetPane(paneKey);
         agentView.forgetPane(paneKey);
+        agentChatDoc.forgetPane(paneKey);
         cb(paneKey);
       }),
     watch: (dir, cb, onError) => {
@@ -2537,6 +2587,7 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
           mtimeMs: async (path) => (await stat(path)).mtimeMs,
         }),
       readHead: (path) => importFs.readHead(path),
+      realPath: (path) => realpath(path),
     }),
     readTail: (path) => readFileTail(path, CHAT_TAIL_BYTES),
     statFile: async (path) => {
@@ -2551,6 +2602,146 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     follow: (paneKey, transcript) => claudeViewNotifier.follow(paneKey, transcript),
     forget: (paneKey) => claudeViewNotifier.forget(paneKey),
   });
+  // The chat redesign (agent-chat-doc.ts and its controls): the incremental
+  // document, stop/mode/command, the `/` and `@` lists, attachments and the
+  // file opener. They share agentView's scan cache and never touch the phone.
+  const agentSessions = {
+    session: (paneKey: string, fresh?: boolean) => agentView.session(paneKey, fresh),
+    live: (paneKey: unknown) => agentView.live(paneKey),
+  };
+  const readRange = async (path: string, start: number, length: number): Promise<Buffer> => {
+    const handle = await open(path, "r");
+    try {
+      const buffer = Buffer.alloc(length);
+      const { bytesRead } = await handle.read(buffer, 0, length, start);
+      return buffer.subarray(0, bytesRead);
+    } finally {
+      await handle.close();
+    }
+  };
+  const agentChatDoc = createAgentChatHandlers({
+    sessions: agentSessions,
+    statFile: async (path) => {
+      const { size, mtimeMs, ino } = await stat(path);
+      return { size, mtimeMs, ino };
+    },
+    readRange,
+    screenText: (paneKey) => paneScreens.screenText(paneKey),
+    notice: (paneKey) => claudeViewNotifier.notice(paneKey),
+    follow: (paneKey, transcript) => claudeViewNotifier.follow(paneKey, transcript),
+    forget: (paneKey) => claudeViewNotifier.forget(paneKey),
+    changed: (paneKey) => claudeViewNotifier.poke(paneKey),
+    log: (token) => console.warn(token),
+  });
+  const agentSuggest = createAgentSuggest({
+    sessions: agentSessions,
+    home: homedir(),
+    env: { CODEX_HOME: process.env["CODEX_HOME"] },
+    fs: {
+      readdir: async (path) =>
+        (await readdir(path, { withFileTypes: true })).map((entry) => ({
+          name: entry.name,
+          isDirectory: entry.isDirectory(),
+          isFile: entry.isFile(),
+          isSymlink: entry.isSymbolicLink(),
+        })),
+      readHead: async (path, bytes) => (await readRange(path, 0, bytes)).toString("utf8"),
+      realpath: (path) => realpath(path),
+      isFile: async (path) => (await stat(path)).isFile(),
+    },
+    git: async (cwd, args) => {
+      try {
+        const out = await runCommandWithLimits(
+          "git",
+          ["-C", cwd, ...args],
+          { timeoutMs: 5_000, maxOutputBytes: 16 * 1024 * 1024 },
+          agentEnv,
+        );
+        return out.code === 0 && !out.truncated && !out.timedOut ? out.stdout : undefined;
+      } catch {
+        return undefined;
+      }
+    },
+    // A session whose process cwd could not be read: the cwd the transcript's
+    // own records name, then the pane's project path.
+    fallbackCwd: async (session) => {
+      if (session.transcriptPath !== undefined) {
+        try {
+          const head = (await readRange(session.transcriptPath, 0, 128 * 1024)).toString("utf8");
+          const found = /"cwd":("(?:[^"\\]|\\.)*")/.exec(head)?.[1];
+          if (found !== undefined) {
+            const value: unknown = JSON.parse(found);
+            if (typeof value === "string" && /^(\/|[A-Za-z]:[\\/])/.test(value)) return value;
+          }
+        } catch {
+          // No cwd in the transcript.
+        }
+      }
+      const tabId = session.paneKey.split(":")[0];
+      const tab = workspace.state().tabs.find((candidate) => candidate.id === tabId);
+      return tab === undefined ? undefined : config.projects[tab.project];
+    },
+    now: () => Date.now(),
+    log: (token) => console.warn(token),
+  });
+  const agentControls = createAgentControls({
+    sessions: agentSessions,
+    screenText: (paneKey) => paneScreens.screenText(paneKey),
+    write: (paneKey, data) => shells.write(paneKey, data),
+    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    log: (token) => console.warn(token),
+    commandNames: (session) => agentSuggest.names(session),
+  });
+  const agentAttachRoot = join(homedir(), ".config/jarvis/agent-attach");
+  const agentAttach = createAgentAttach({
+    baseDir: agentAttachRoot,
+    sessions: agentSessions,
+    fs: {
+      mkdir: async (path, mode) => {
+        await mkdir(path, { recursive: true, mode });
+        await chmod(path, mode);
+      },
+      writeFile: (path, bytes, mode) => writeFile(path, bytes, { mode, flag: "wx" }),
+      list: async (path) => {
+        const names = await readdir(path, { withFileTypes: true });
+        const out: { name: string; isDirectory: boolean; mtimeMs: number }[] = [];
+        for (const entry of names) {
+          if (entry.isSymbolicLink()) continue;
+          try {
+            out.push({
+              name: entry.name,
+              isDirectory: entry.isDirectory(),
+              mtimeMs: (await stat(join(path, entry.name))).mtimeMs,
+            });
+          } catch {
+            // Gone while listing.
+          }
+        }
+        return out;
+      },
+      remove: (path) => rm(path, { force: true }),
+    },
+    now: () => Date.now(),
+    random: () => randomBytes(3).toString("hex"),
+    log: (token) => console.warn(token),
+  });
+  const agentChatApi = {
+    chat: (paneKey: unknown, request?: unknown) => agentChatDoc.chat(paneKey, request),
+    stop: (paneKey: unknown) => agentControls.stop(paneKey),
+    mode: (paneKey: unknown, mode: unknown) => agentControls.mode(paneKey, mode),
+    command: (paneKey: unknown, command: unknown) => agentControls.command(paneKey, command),
+    commands: (paneKey: unknown) => agentSuggest.commands(paneKey),
+    files: (paneKey: unknown, query: unknown) => agentSuggest.files(paneKey, query),
+    attach: (paneKey: unknown, file: unknown) => agentAttach.attach(paneKey, file),
+    // Resolved inside the pane's project here, then handed to the terminal's
+    // own openFile, which applies its project-root guard once more.
+    openFile: async (paneKey: unknown, path: unknown) => {
+      const resolved = await agentSuggest.resolve(paneKey, path);
+      if (!resolved.ok) return resolved;
+      const opened = await terminal.openFile(paneKey as string, resolved.path);
+      return opened.ok ? ({ ok: true } as const) : ({ ok: false, reason: "failed" } as const);
+    },
+  };
   // The Office (office-activity.ts): one shared watcher over every agent
   // pane and Jarvis session. Quiet until something prints; its changes go to
   // this window only (never a phone), and a raised hand is a desktop
@@ -2709,6 +2900,13 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
     tailnetPeers,
     claudeView,
     agentView,
+    agentChat: agentChatApi,
+    dictation: {
+      start: (paneKey) => dictation.start(paneKey),
+      keep: (id) => dictation.keep(id),
+      finish: (id) => dictation.finish(id),
+      cancel: (id) => dictation.cancel(id),
+    },
     office: {
       read: () => officeWatcher.read(),
       setViewing: (keys) => officeViewing.set(keys),
@@ -2768,9 +2966,10 @@ export async function createCore(deps: CoreDeps): Promise<Core> {
   async function limitedWhisperRunner(
     command: string,
     args: string[],
+    timeoutMs: number = TRANSCRIBE_TIMEOUT_MS,
   ): Promise<{ code: number; stdout: string; stderr: string }> {
     const result = await runCommandWithLimits(command, args, {
-      timeoutMs: TRANSCRIBE_TIMEOUT_MS,
+      timeoutMs,
       maxOutputBytes: 1_048_576,
     });
     const forceFailure = result.timedOut || result.truncated;

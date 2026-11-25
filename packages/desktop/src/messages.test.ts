@@ -1051,3 +1051,13 @@ it("explains plan send refusals in both languages", () => {
     expect(MESSAGES[key]("ar")).not.toBe(MESSAGES[key]("en"));
   }
 });
+
+describe("the unreadable-menu card text", () => {
+  it("does not send the user to Term twice", () => {
+    for (const language of ["en", "ar"] as const) {
+      const note = MESSAGES.agentChatNeedsTerm(language);
+      expect(note).not.toMatch(/Term|الطرفية/);
+    }
+    expect(MESSAGES.agentChatNeedsTerm("en")).toBe("The agent is asking something.");
+  });
+});

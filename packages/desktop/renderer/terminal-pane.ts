@@ -78,6 +78,9 @@ export type PaneHooks = {
    *  agent typed at the prompt may have started. The Chat view uses it to
    *  look for one. Absent for a pane that never shows a chat. */
   onCommandStart?: (() => void) | undefined;
+  /** A command ended (the shell is back at its prompt): an agent that ran
+   *  in it is gone. The Chat view uses it to look again. */
+  onCommandEnd?: (() => void) | undefined;
   /** The most recent commands from Jarvis's own command log, newest first —
    *  what ↑/↓ in the command editor walk. Absent (or failing) means the
    *  arrows find nothing, which is a line that simply does not change. */
@@ -238,6 +241,10 @@ export type TerminalPane = {
    * back with focus().
    */
   setChatView(active: boolean, focusChat?: () => void): void;
+  /** The live terminal's rows and the one to keep in view: the last with
+   *  content, or the cursor's if lower. Read from xterm's buffer; the pty is
+   *  never resized for it. Undefined when the buffer cannot be read. */
+  liveScreen(): { rows: number; anchor: number } | undefined;
   /** A keydown in the chat's composer: ⌘P opens this pane's palette and the
    *  split chords act, as in the terminal. False when claimed. */
   chatKey(event: KeyboardEvent): boolean;
@@ -607,6 +614,9 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
    *  idle prompt (the editor is the prompt line there), and fitting a box
    *  with no layout at all makes the addon measure nonsense. */
   function refit(): void {
+    // While the chat shows the pty keeps its size, even when the terminal
+    // drawer lays the live terminal over a card (agent-chat/drawer.ts).
+    if (element.dataset["view"] === "chat") return;
     if (live.clientWidth === 0 || live.clientHeight === 0) return;
     attempt(() => fit.fit());
     fitted = { cols: terminal.cols, rows: terminal.rows, size: terminalFontSize() };
@@ -1189,7 +1199,12 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
       return;
     }
     if (event.type === "alt-screen") {
-      attempt(() => applyState(event.active ? "alt" : "blocks"));
+      // Leaving the alternate screen mid-command (an agent TUI that
+      // draws inline between full-screen views) leaves the command running:
+      // "blocks" would tell the chat the shell is idle.
+      attempt(() =>
+        applyState(event.active ? "alt" : splitter.active() !== undefined ? "running" : "blocks"),
+      );
       return;
     }
     if (event.type === "command-start") {
@@ -1223,6 +1238,7 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
       // is never gated on whether the laptop's own pane is being watched.
       attempt(() => reportCommandFinished(event.block));
       attempt(() => notifyIfUnwatched(event.block));
+      attempt(() => hooks.onCommandEnd?.());
       // The frozen block now holds what the live terminal was drawing — so
       // the live terminal is cleared. Ordered *behind* xterm's write buffer,
       // never called straight from here: Terminal.write() always defers its
@@ -1414,6 +1430,22 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
       // are the caller's to hand back (focus()), so a chat that ends in a
       // background pane never takes them from where the user is.
       if (!active) attempt(() => refit());
+    },
+    liveScreen: () => {
+      try {
+        const buffer = terminal.buffer.active;
+        let last = -1;
+        for (let row = terminal.rows - 1; row >= 0; row--) {
+          const line = buffer.getLine(buffer.baseY + row);
+          if (line !== undefined && line.translateToString(true).trim() !== "") {
+            last = row;
+            break;
+          }
+        }
+        return { rows: terminal.rows, anchor: Math.max(last, buffer.cursorY) };
+      } catch {
+        return undefined;
+      }
     },
     chatKey: (event) => {
       if (event.type !== "keydown") return true;

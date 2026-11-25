@@ -313,6 +313,28 @@ export function fakeDeps(overrides: Partial<DispatchDeps> = {}): DispatchDeps {
       answer: vi.fn(() => ({ ok: true as const })),
       send: vi.fn(async () => ({ ok: true as const })),
     },
+    agentChat: {
+      chat: vi.fn(async () => ({ kind: "none" as const })),
+      stop: vi.fn(async () => ({ ok: true as const })),
+      mode: vi.fn(async () => ({ ok: true as const, mode: "plan" as const })),
+      command: vi.fn(async () => ({ ok: true as const })),
+      commands: vi.fn(async () => ({ commands: [] })),
+      files: vi.fn(async () => ({ files: [] })),
+      attach: vi.fn(async () => ({
+        ok: true as const,
+        path: "/p/x.png",
+        name: "x.png",
+        kind: "image" as const,
+        ref: "/p/x.png",
+      })),
+      openFile: vi.fn(async () => ({ ok: true as const })),
+    },
+    dictation: {
+      start: vi.fn(async () => ({ ok: true as const, id: "d1" })),
+      keep: vi.fn(() => ({ ok: true as const })),
+      finish: vi.fn(async () => ({ ok: true as const, text: "hi", language: "en" })),
+      cancel: vi.fn(() => ({ ok: true })),
+    },
     office: {
       read: vi.fn(async () => ({ panes: {}, sessions: {} })),
       setViewing: vi.fn(),
@@ -1339,6 +1361,47 @@ describe("dispatch table: api, dialog, voices", () => {
     expect(await call(table, "office:screen", { type: "tab", id: "t1" })).toEqual({ kind: "none" });
     expect(deps.office.screen).toHaveBeenCalledWith({ type: "tab", id: "t1" });
     expect("office:pageShot" in table).toBe(false);
+  });
+
+  it("the chat redesign's channels pass their arguments through", async () => {
+    const deps = fakeDeps();
+    const table = createDispatchTable(deps);
+    expect(await call(table, "terminal:agentChat", "t1", { before: "c" })).toEqual({
+      kind: "none",
+    });
+    expect(deps.agentChat.chat).toHaveBeenCalledWith("t1", { before: "c" });
+    await call(table, "terminal:agentStop", "t1");
+    expect(deps.agentChat.stop).toHaveBeenCalledWith("t1");
+    await call(table, "terminal:agentMode", "t1", "plan");
+    expect(deps.agentChat.mode).toHaveBeenCalledWith("t1", "plan");
+    await call(table, "terminal:agentCommand", "t1", "/compact");
+    expect(deps.agentChat.command).toHaveBeenCalledWith("t1", "/compact");
+    await call(table, "terminal:agentCommands", "t1");
+    expect(deps.agentChat.commands).toHaveBeenCalledWith("t1");
+    await call(table, "terminal:agentFiles", "t1", "ap");
+    expect(deps.agentChat.files).toHaveBeenCalledWith("t1", "ap");
+    const file = { name: "a.png", bytes: new Uint8Array(1) };
+    await call(table, "terminal:agentAttach", "t1", file);
+    expect(deps.agentChat.attach).toHaveBeenCalledWith("t1", file);
+    await call(table, "terminal:agentOpenFile", "t1", "src/a.ts");
+    expect(deps.agentChat.openFile).toHaveBeenCalledWith("t1", "src/a.ts");
+  });
+
+  it("terminal:dictate* pass their arguments through", async () => {
+    const deps = fakeDeps();
+    const table = createDispatchTable(deps);
+    expect(await call(table, "terminal:dictateStart", "t1")).toEqual({ ok: true, id: "d1" });
+    expect(deps.dictation.start).toHaveBeenCalledWith("t1");
+    expect(await call(table, "terminal:dictateKeep", "d1")).toEqual({ ok: true });
+    expect(deps.dictation.keep).toHaveBeenCalledWith("d1");
+    expect(await call(table, "terminal:dictateFinish", "d1")).toEqual({
+      ok: true,
+      text: "hi",
+      language: "en",
+    });
+    expect(deps.dictation.finish).toHaveBeenCalledWith("d1");
+    expect(await call(table, "terminal:dictateCancel", "d1")).toEqual({ ok: true });
+    expect(deps.dictation.cancel).toHaveBeenCalledWith("d1");
   });
 
   it("terminal:agentView, agentAnswer and agentSend pass their arguments through", async () => {

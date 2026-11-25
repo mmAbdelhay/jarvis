@@ -67,6 +67,11 @@ export type CoreClient = {
   /** One request, answered by the core's dispatch table. The origin is
    *  always the desktop's: this door is the desktop app's own. */
   invoke(channel: CoreChannel, args: readonly unknown[]): Promise<unknown>;
+  /** The Chat composer's pasted or dropped file (terminal:agentAttach). JSON
+   *  cannot carry its bytes, so over a socket they cross on the control
+   *  connection's binary lane (25 MB at most, at least one byte); in-process
+   *  they reach the table as they are. */
+  attachAgentFile(paneKey: string, name: string, bytes: Uint8Array): Promise<unknown>;
   /** Every push for this app's renderer, in order — what the core sends to
    *  every client and what it sends to this one alone. */
   onPush(listener: PushSink): () => void;
@@ -187,6 +192,22 @@ export function inProcessCoreClient(core: Core, options: InProcessOptions = {}):
         return settle(
           Promise.resolve(core.dispatch[channel](sent, DESKTOP_ORIGIN)),
           `${channel} result`,
+        );
+      } catch (error) {
+        return Promise.reject(error);
+      }
+    },
+    attachAgentFile(paneKey, name, bytes) {
+      try {
+        const sent = wire([paneKey, name], "terminal:agentAttach args");
+        return settle(
+          Promise.resolve(
+            core.dispatch["terminal:agentAttach"](
+              [sent[0], { name: sent[1], bytes }],
+              DESKTOP_ORIGIN,
+            ),
+          ),
+          "terminal:agentAttach result",
         );
       } catch (error) {
         return Promise.reject(error);
