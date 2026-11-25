@@ -548,6 +548,35 @@ describe("shellEnv", () => {
     expect(env["TERM"]).toBe("xterm-256color");
     expect(env["COLORTERM"]).toBe("truecolor");
   });
+
+  // The AppImage runtime exports ARGV0 (and APPIMAGE, APPDIR, OWD) for its
+  // own mount. zsh uses an exported ARGV0 as argv[0] of every command it
+  // runs, so `claude` typed into a pane showed in `ps` as the .AppImage path
+  // — the process scan never matched it and the Chat | Term switch stayed
+  // hidden on Linux.
+  it("drops the AppImage runtime's variables", () => {
+    const image = "/home/me/Applications/Jarvis.AppImage";
+    const env = shellEnv(
+      {
+        HOME: "/home/me",
+        APPIMAGE: image,
+        APPDIR: "/tmp/.mount_JarvisAbc",
+        ARGV0: image,
+        OWD: "/home/me",
+      },
+      {},
+    );
+
+    expect(env["ARGV0"]).toBeUndefined();
+    expect(env["APPIMAGE"]).toBeUndefined();
+    expect(env["APPDIR"]).toBeUndefined();
+    expect(env["OWD"]).toBeUndefined();
+    expect(env["HOME"]).toBe("/home/me");
+  });
+
+  it("keeps an ARGV0 the user set when not running as an AppImage", () => {
+    expect(shellEnv({ HOME: "/home/me", ARGV0: "emacs" }, {})["ARGV0"]).toBe("emacs");
+  });
 });
 
 describe("shellCommand", () => {
