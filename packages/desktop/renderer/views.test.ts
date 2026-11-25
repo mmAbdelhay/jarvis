@@ -4,6 +4,7 @@ import {
   currentView,
   onViewChange,
   setMachineShown,
+  setScreenshotToastOpen,
   setWorkspaceMenuOpen,
   showView,
 } from "./views.js";
@@ -121,6 +122,16 @@ describe("showView", () => {
     setWorkspaceMenuOpen(false);
 
     expect(calls).toEqual([true, false, false, true]);
+  });
+
+  it("hides the hosted view while the screenshot popover is showing, and brings it back after", () => {
+    const calls = stubBridge();
+    showView("workspace");
+
+    setScreenshotToastOpen(true);
+    setScreenshotToastOpen(false);
+
+    expect(calls).toEqual([true, false, true]);
   });
 
   it("tells listeners about each route change, and survives one that throws", () => {

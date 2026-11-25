@@ -175,6 +175,7 @@ function ensurePane(): TerminalPane | undefined {
   // sendSessionInput/resizeSession, rather than a shell through the
   // terminal channels.
   const view = createPane(host, {
+    openLink: (url) => openTerminalLink(currentProject, url),
     // Every keystroke, verbatim — control bytes included, which is what
     // makes Ctrl-C, arrow keys, Escape and shift+tab work rather than only
     // plain text.
@@ -231,10 +232,7 @@ function ensurePane(): TerminalPane | undefined {
     // A link clicked in an agent's output opens as a Workspace tab in that
     // agent's own project, or in the system browser —
     // `browser.openTerminalLinksInternally` decides (terminal-links.ts).
-    openLink: (url) => {
-      if (currentProject === undefined) return;
-      openTerminalLink(currentProject, url);
-    },
+    openLink: (url) => openTerminalLink(currentProject, url),
     // Undefined with blocks switched off, which leaves ⌘↑/⌘↓/⌘⇧F behaving
     // exactly as they do today rather than claiming a key and doing
     // nothing with it.

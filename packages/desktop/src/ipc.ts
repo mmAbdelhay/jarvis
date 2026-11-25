@@ -38,6 +38,7 @@ import type { AgentCommandInfo, AgentFileHit, AgentOpenFileResult } from "./agen
 import type { AgentAnswerResult, AgentSendResult, AgentView } from "./agent-view.js";
 import type { OfficeActivity } from "./office-activity.js";
 import type { OfficeScreen } from "./office-screen.js";
+import type { ScreenshotOutcome, ScreenshotSaveResult } from "./screenshot.js";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { Brain, ReviewComment, WorkspaceState, WorkspaceTab } from "@jarvis/core";
 import type { BindChoice, OwnerStatus, RemoteStatus, SetOwnerPasswordResult } from "@jarvis/remote";
@@ -1076,6 +1077,13 @@ export type RendererApi = {
   officeScreen(target: { type: "tab" | "pane" | "session"; id: string }): Promise<OfficeScreen>;
   /** A JPEG data URL still of a hosted page, or undefined. Main window only. */
   officePageShot(tabId: string): Promise<string | undefined>;
+  /** Pops the native screenshot menu at x,y (CSS pixels); the outcome of
+   *  the chosen capture arrives on onScreenshotResult. Desktop only. */
+  showScreenshotMenu(x: number, y: number): Promise<void>;
+  /** Saves the held screenshot named by `id` (never a path or bytes) through
+   *  the native save dialog. Desktop only. */
+  saveScreenshot(id: string): Promise<ScreenshotSaveResult>;
+  onScreenshotResult(cb: (outcome: ScreenshotOutcome) => void): void;
   onOfficeChanged(cb: () => void): void;
   /** Starts a second shell in the same tab and the same directory, for a
    *  pane the renderer has just split off. */
@@ -1323,6 +1331,9 @@ export type RendererApi = {
   popoutFocus(tabId: string, paneKey?: string): Promise<boolean>;
   /** The tab ids shown in pop-outs now. */
   popoutList(): Promise<string[]>;
+  /** From a pop-out only: brings the main window forward, after a link there
+   *  opened a tab that only the main window shows. */
+  popoutShowMain(): Promise<void>;
   /** Pops the native "Open in new window" / "Return to main window" menu for
    *  an Office employee, at (x, y). */
   popoutEmployeeMenu(tabId: string, x: number, y: number): Promise<void>;

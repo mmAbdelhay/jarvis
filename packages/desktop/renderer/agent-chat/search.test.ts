@@ -148,4 +148,18 @@ describe("search in the chat", () => {
     expect(event.defaultPrevented).toBe(true);
     expect(s.q<HTMLElement>(".ac-search").hidden).toBe(false);
   });
+
+  it("finds text in tables, lists and headings and in a file path's label, never a Copy label", async () => {
+    const s = await ready([
+      user("u1", "go"),
+      reply(
+        "a1",
+        "# Zebra plan\n\n- [x] zebra task\n\n| a | b |\n|---|---|\n| zebra | `src/zebra.ts` |",
+      ),
+    ]);
+    search(s, "zebra");
+    expect(s.host.querySelectorAll("mark.ac-hit")).toHaveLength(4);
+    search(s, "copy");
+    expect(s.host.querySelectorAll("mark.ac-hit")).toHaveLength(0);
+  });
 });

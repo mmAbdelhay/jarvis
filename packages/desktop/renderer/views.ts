@@ -110,11 +110,23 @@ export function setWorkspaceMenuOpen(open: boolean): void {
   syncHostedView();
 }
 
+/** Set while the screenshot result popover is showing, for the same reason. */
+let screenshotToastOpen = false;
+
+export function setScreenshotToastOpen(open: boolean): void {
+  screenshotToastOpen = open;
+  syncHostedView();
+}
+
 export function syncHostedView(): void {
   // Optional-chained: several renderer test harnesses run with no bridge at
   // all, and a route change must not throw there.
   const historyOpen = document.getElementById("history-overlay")?.hasAttribute("hidden") === false;
   void window.jarvis?.setWorkspaceVisible?.(
-    view === "workspace" && !historyOpen && !machineShown && !workspaceMenuOpen,
+    view === "workspace" &&
+      !historyOpen &&
+      !machineShown &&
+      !workspaceMenuOpen &&
+      !screenshotToastOpen,
   );
 }

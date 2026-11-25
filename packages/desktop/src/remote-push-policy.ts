@@ -106,6 +106,7 @@ export const REMOTE_PUSH_POLICY: {
   "popout:changed": "desktop-only",
   "popout:handover": "desktop-only",
   "popout:focusPane": "desktop-only",
+  "screenshot:result": "desktop-only",
   // Each names a local child process a phone never started.
   "setup:output": "desktop-only",
   "voice:hotkeys": "desktop-only",

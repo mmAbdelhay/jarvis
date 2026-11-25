@@ -47,7 +47,13 @@ export type FeedState = {
   prepended?: boolean;
 };
 
-type Entry = { key: string; sig: string; build(): HTMLElement };
+type Entry = {
+  key: string;
+  sig: string;
+  build(): HTMLElement;
+  /** The reply this entry draws: a finished turn's "Worked for" joins its footer. */
+  reply?: ChatMessageItem;
+};
 
 export type Feed = {
   /** The wrapper: the scroller and the jump button. */
@@ -198,7 +204,7 @@ export function createFeed(options: FeedOptions): Feed {
     scroller.focus({ preventScroll: true });
   });
 
-  function messageRow(item: ChatMessageItem): HTMLElement {
+  function messageRow(item: ChatMessageItem, worked?: string): HTMLElement {
     const user = item.kind === "user";
     const row = el(
       "div",
@@ -218,9 +224,12 @@ export function createFeed(options: FeedOptions): Feed {
     } else {
       for (const block of renderMarkdown(item.text, codeContext)) row.append(block);
     }
-    const actions = el("div", "ac-msg__actions");
-    actions.append(copyButton(codeContext, () => item.text, "ac-copy ac-copy--message"));
-    row.append(actions);
+    // The footer is in the row's flow and its height is always reserved, so
+    // Copy appearing on hover moves nothing and never covers the words.
+    const foot = el("div", "ac-msg__foot");
+    if (worked !== undefined) foot.append(el("span", "ac-turn", worked));
+    foot.append(copyButton(codeContext, () => item.text, "ac-copy ac-copy--message"));
+    row.append(foot);
     return row;
   }
 
@@ -266,6 +275,14 @@ export function createFeed(options: FeedOptions): Feed {
       if (!finished || turnLast - turnStart.at < MIN_TURN_MS) return;
       const id = `turn:${turnStart.id}`;
       const text = fmt(t("agentChatWorkedFor"), { time: duration(turnLast - turnStart.at) });
+      const last = entries[entries.length - 1];
+      const reply = last?.reply;
+      if (last !== undefined && reply?.kind === "text") {
+        // Same footer line as the Copy of the turn's last reply.
+        last.sig = `${last.sig}|${text}`;
+        last.build = () => messageRow(reply, text);
+        return;
+      }
       entries.push({ key: id, sig: text, build: () => turnRow(id, text) });
     };
     for (let at = 0; at < items.length; at++) {
@@ -284,6 +301,7 @@ export function createFeed(options: FeedOptions): Feed {
           key: item.id,
           sig: `${item.kind}:${item.text}:${item.images ?? 0}`,
           build: () => messageRow(item),
+          reply: item,
         });
         continue;
       }

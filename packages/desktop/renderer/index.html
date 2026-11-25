@@ -102,6 +102,12 @@
     </div>
     <!-- Keep awake (Task 18, keep-awake.ts): lit while Jarvis holds the
          screen and machine awake; a click turns it off, or back on. -->
+    <!-- Screenshot (screenshot-button.ts). Its menu is native, and its result
+         popover (#screenshot-toast) sits outside the topbar, which clips
+         overflow. Hidden when the bridge has no screenshot api. -->
+    <button id="screenshot-button" class="icon-btn screenshot-btn" type="button" aria-haspopup="menu" aria-label="Screenshot" title="Screenshot">
+      <svg aria-hidden="true" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l1.6-2.4h6.8L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1Z"></path><circle cx="12" cy="13.5" r="3.5"></circle></svg>
+    </button>
     <button id="awake-button" class="icon-btn awake-btn" type="button" aria-label="Keep awake" aria-pressed="false">
       <svg aria-hidden="true" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M17 8h1a4 4 0 1 1 0 8h-1"></path><path d="M3 8h14v9a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4Z"></path><line x1="6" y1="2" x2="6" y2="4"></line><line x1="10" y1="2" x2="10" y2="4"></line><line x1="14" y1="2" x2="14" y2="4"></line></svg>
     </button>
@@ -116,6 +122,15 @@
   <!-- The switcher's menu lives outside the topbar, which clips anything that
        overflows it; machine-switcher.ts places it under the button. -->
   <div id="machine-menu" class="machine-menu" role="menu" hidden></div>
+  <!-- The screenshot result: thumbnail, what happened, Save as and Dismiss. -->
+  <div id="screenshot-toast" class="shot-toast" role="status" aria-live="polite" hidden>
+    <img id="screenshot-thumb" class="shot-toast-thumb" alt="" hidden />
+    <div class="shot-toast-body">
+      <span id="screenshot-text" class="shot-toast-text"></span>
+      <button id="screenshot-save" class="shot-toast-save" type="button">Save as…</button>
+    </div>
+    <button id="screenshot-dismiss" class="shot-toast-close" type="button" aria-label="Dismiss" title="Dismiss">&times;</button>
+  </div>
   <div id="nav-workspace-menu" class="nav-menu" role="menu" aria-label="Workspace views" hidden>
     <button id="nav-menu-tabs" class="nav-menu-item" type="button" role="menuitem" tabindex="-1">Tabs</button>
     <button id="nav-menu-office" class="nav-menu-item" type="button" role="menuitem" tabindex="-1">Office<span id="nav-office-count" class="nav-count mono" hidden></span></button>

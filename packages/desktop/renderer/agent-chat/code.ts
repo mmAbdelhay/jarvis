@@ -1,15 +1,18 @@
-// Code and light markdown: the in-house tokenizer (comment, string, number,
+// Code and markdown: the in-house tokenizer (comment, string, number,
 // keyword — no dependency), a code block with its Copy button, and the
-// replies' markdown blocks. Text reaches the DOM through textContent only;
-// a link opens only if it is https.
+// replies' markdown blocks. Text reaches the DOM through textContent and text
+// nodes only (never innerHTML); a link opens only if it is https; a file path
+// asks the host to open it, and the host (main) decides whether it may.
 import {
   type ChatBlock,
   type ChatInline,
   isHttpsUrl,
   linkParts,
+  type ChatListItem,
+  pathLabel,
   parseChatText,
 } from "../agent-chat-text.js";
-import { el, type Translate } from "./dom.js";
+import { el, fmt, type Translate } from "./dom.js";
 
 export type TokenKind = "plain" | "comment" | "string" | "number" | "keyword";
 export type Token = { kind: TokenKind; text: string };
@@ -104,6 +107,8 @@ export type CodeContext = {
   t: Translate;
   openLink(url: string): void;
   copy(text: string): void;
+  /** Opens a file named in a reply. Absent: a path is drawn as plain text. */
+  openFile?(path: string): void;
 };
 
 /** A Copy button that says Copied for a moment. */
@@ -161,9 +166,28 @@ function renderInlines(inlines: readonly ChatInline[], ctx: CodeContext): Docume
   const fragment = document.createDocumentFragment();
   for (const inline of inlines) {
     if (inline.kind === "text") fragment.append(document.createTextNode(inline.text));
-    else if (inline.kind === "bold") fragment.append(el("strong", undefined, inline.text));
-    else if (inline.kind === "code") fragment.append(el("code", "ac-inline", inline.text));
-    else if (!isHttpsUrl(inline.url)) fragment.append(document.createTextNode(inline.text));
+    else if (inline.kind === "bold" || inline.kind === "italic" || inline.kind === "strike") {
+      const tag = inline.kind === "bold" ? "strong" : inline.kind === "italic" ? "em" : "del";
+      fragment.append(wrap(el(tag), renderInlines(inline.children, ctx)));
+    } else if (inline.kind === "code") fragment.append(el("code", "ac-inline", inline.text));
+    else if (inline.kind === "path") {
+      const open = ctx.openFile;
+      if (open === undefined) {
+        fragment.append(
+          inline.code ? el("code", "ac-inline", inline.text) : document.createTextNode(inline.text),
+        );
+      } else {
+        // A button whose short label names the file; the whole path is its name.
+        const label = pathLabel(inline.path) + (inline.line === undefined ? "" : `:${inline.line}`);
+        const button = el("button", inline.code ? "ac-path ac-inline" : "ac-path", label);
+        button.type = "button";
+        button.dir = "ltr";
+        button.title = inline.text;
+        button.setAttribute("aria-label", fmt(ctx.t("agentChatOpenPath"), { path: inline.text }));
+        button.addEventListener("click", () => open(inline.path));
+        fragment.append(button);
+      }
+    } else if (!isHttpsUrl(inline.url)) fragment.append(document.createTextNode(inline.text));
     else {
       const parts = linkParts(inline.text, inline.url);
       const link = el("a", "agent-chat__link", parts.text);
@@ -181,20 +205,93 @@ function renderInlines(inlines: readonly ChatInline[], ctx: CodeContext): Docume
   return fragment;
 }
 
+function wrap<T extends HTMLElement>(node: T, content: DocumentFragment): T {
+  node.append(content);
+  return node;
+}
+
+function renderItem(item: ChatListItem, ctx: CodeContext): HTMLElement {
+  const row = el("div", "agent-chat__item");
+  row.setAttribute("role", "listitem");
+  row.dir = "auto";
+  // The marker reads left to right whatever the item's language: "1." must not become ".1".
+  const marker = el("span", "agent-chat__marker", item.marker);
+  marker.dir = "ltr";
+  if (item.checked !== undefined) {
+    marker.textContent = item.checked ? "\u2611" : "\u2610";
+    marker.setAttribute("role", "img");
+    marker.setAttribute(
+      "aria-label",
+      ctx.t(item.checked ? "agentChatTaskDone" : "agentChatTaskOpen"),
+    );
+    row.dataset["checked"] = String(item.checked);
+  }
+  const body = el("div", "agent-chat__itembody");
+  body.append(renderInlines(item.inlines, ctx));
+  for (const child of item.children ?? []) body.append(renderBlock(child, ctx));
+  row.append(marker, body);
+  return row;
+}
+
 function renderBlock(block: ChatBlock, ctx: CodeContext): HTMLElement {
   if (block.kind === "codeBlock") return codeBlock(ctx, block.text, block.lang);
   if (block.kind === "list") {
     const list = el("div", "agent-chat__list");
     list.setAttribute("role", "list");
-    for (const item of block.items) {
-      const row = el("div", "agent-chat__item");
-      row.setAttribute("role", "listitem");
-      row.dir = "auto";
-      row.append(el("span", "agent-chat__marker", item.marker), " ");
-      row.append(renderInlines(item.inlines, ctx));
-      list.append(row);
-    }
+    // The marker column is as wide as the widest marker of this list ("10." fits).
+    const widest = Math.max(
+      2,
+      ...block.items.map((item) => (item.checked === undefined ? item.marker.length : 1)),
+    );
+    list.style.setProperty("--ac-mk", `${widest + 0.5}ch`);
+    for (const item of block.items) list.append(renderItem(item, ctx));
     return list;
+  }
+  if (block.kind === "heading") {
+    const level = Math.min(6, Math.max(1, block.level));
+    const heading = el("div", `ac-h ac-h--${level}`);
+    heading.setAttribute("role", "heading");
+    heading.setAttribute("aria-level", String(level));
+    heading.dir = "auto";
+    heading.append(renderInlines(block.inlines, ctx));
+    return heading;
+  }
+  if (block.kind === "quote") {
+    const quote = el("blockquote", "ac-quote");
+    for (const inner of block.blocks) quote.append(renderBlock(inner, ctx));
+    return quote;
+  }
+  if (block.kind === "rule") return el("hr", "ac-rule");
+  if (block.kind === "table") {
+    const box = el("div", "ac-tablewrap");
+    // Wide tables scroll inside this box; it takes the keyboard so they can be scrolled.
+    box.tabIndex = 0;
+    box.setAttribute("role", "region");
+    box.setAttribute("aria-label", ctx.t("agentChatTableLabel"));
+    const table = el("table", "ac-table");
+    const cell = (tag: "th" | "td", inlines: ChatInline[], column: number): HTMLElement => {
+      const node = el(tag);
+      node.dir = "auto";
+      const align = block.align[column];
+      if (align !== undefined) node.dataset["align"] = align;
+      if (tag === "th") node.setAttribute("scope", "col");
+      node.append(renderInlines(inlines, ctx));
+      return node;
+    };
+    const head = el("tr");
+    for (const [column, inlines] of block.head.entries()) head.append(cell("th", inlines, column));
+    const thead = el("thead");
+    thead.append(head);
+    table.append(thead);
+    const body = el("tbody");
+    for (const row of block.rows) {
+      const line = el("tr");
+      for (const [column, inlines] of row.entries()) line.append(cell("td", inlines, column));
+      body.append(line);
+    }
+    table.append(body);
+    box.append(table);
+    return box;
   }
   const paragraph = el("p", "agent-chat__para");
   paragraph.dir = "auto";

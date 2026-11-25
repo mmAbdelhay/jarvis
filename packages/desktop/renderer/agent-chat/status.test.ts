@@ -139,6 +139,58 @@ describe("the status row", () => {
   });
 });
 
+describe("the context in the status row", () => {
+  const ctx = (extra: object = {}) => agentView(extra);
+  it("shows alone, with nothing else known, and not when nothing is", async () => {
+    const s = await open(ctx({ context: { used: 38000, leftPercent: 62 } }));
+    expect(s.q<HTMLElement>(".ac-status").hidden).toBe(false);
+    expect(s.q<HTMLElement>(".ac-status__who").hidden).toBe(true);
+    expect(s.q<HTMLElement>(".ac-status .ac-context").hidden).toBe(false);
+    s.current.view = agentView();
+    s.chat.refresh();
+    await settle();
+    expect(s.q<HTMLElement>(".ac-status").hidden).toBe(true);
+  });
+  it("sits first beside the limits in the same chip style, with a level and its words", async () => {
+    const s = await open({
+      ...status({ details: { account: "a", context: { usedPercent: 83 } } }),
+    });
+    const chip = s.q<HTMLElement>(".ac-status__limits .ac-context");
+    expect(chip.parentElement?.firstElementChild).toBe(chip);
+    expect(chip.dataset["level"]).toBe("warn");
+    expect(chip.textContent).toContain(t("agentChatLimitHigh"));
+    expect(chip.querySelector("[role='progressbar']")?.getAttribute("aria-valuenow")).toBe("83");
+    expect(chip.querySelector(".ac-meter")).not.toBeNull();
+  });
+  it("keeps its node when the number changes, so the row never jumps", async () => {
+    const s = await open(ctx({ context: { used: 1, leftPercent: 90 } }));
+    const chip = s.q<HTMLElement>(".ac-context");
+    s.current.view = ctx({ context: { used: 2, leftPercent: 40 } });
+    s.chat.refresh();
+    await settle();
+    expect(s.q(".ac-context")).toBe(chip);
+    expect(chip.textContent).toContain("40% left");
+  });
+  it("opens the panel's Context section", async () => {
+    const s = await open(ctx({ context: { used: 38000, leftPercent: 62 } }));
+    s.q<HTMLButtonElement>(".ac-hide-panel").click();
+    s.q<HTMLButtonElement>(".ac-context").click();
+    expect(s.q<HTMLElement>(".ac-side").hidden).toBe(false);
+  });
+  it("opens the Context popover in a narrow pane", async () => {
+    const s = await open(agentView());
+    width(s.host, 700);
+    s.current.view = ctx({ context: { used: 38000, leftPercent: 62 } });
+    s.chat.refresh();
+    await settle();
+    s.q<HTMLButtonElement>(".ac-context").click();
+    expect(s.q<HTMLElement>(".ac-popover").hidden).toBe(false);
+    expect(
+      s.q<HTMLElement>(".ac-popover").dataset["section"] ?? s.q(".ac-popover").innerHTML,
+    ).toBeTruthy();
+  });
+});
+
 describe("the status sections of the panel", () => {
   it("come after the work, in order: limits, context, session, then the raw rows", async () => {
     const s = await open({
@@ -163,7 +215,9 @@ describe("the status sections of the panel", () => {
     expect(section.querySelector(".ac-section__title")?.textContent).toBe("Context");
     expect(section.querySelector(".ac-section__value")?.textContent).toBe("6% used");
     expect(section.querySelector("[role='progressbar']")?.getAttribute("aria-valuenow")).toBe("6");
-    expect(s.q(".ac-context").textContent).toBe("Context 6% used");
+    const chip = s.q<HTMLElement>(".ac-context");
+    expect(chip.getAttribute("aria-label")).toBe("Context 6% used");
+    expect(chip.textContent).toBe("Context6%");
   });
 
   it("keeps the left wording when the screen gives no statusline context", async () => {
@@ -171,7 +225,12 @@ describe("the status sections of the panel", () => {
       ...status({ details: { account: "a" } }),
       context: { used: 38000, leftPercent: 62 },
     });
-    expect(s.q(".ac-context").textContent).toBe("Context 62% left");
+    const chip = s.q<HTMLElement>(".ac-context");
+    expect(chip.getAttribute("aria-label")).toBe("Context 62% left");
+    expect(chip.textContent).toBe("Context62% left");
+    // A figure that says "left" is not a used percent: no meter, no warning colour.
+    expect(chip.dataset["level"]).toBe("ok");
+    expect(chip.querySelector("[role='progressbar']")).toBeNull();
     const section = s.q<HTMLElement>('.ac-side [data-section="context"]');
     expect(section.querySelector(".ac-section__value")?.textContent).toBe("62% left");
     expect(section.querySelector("[role='progressbar']")?.getAttribute("aria-valuenow")).toBe("62");

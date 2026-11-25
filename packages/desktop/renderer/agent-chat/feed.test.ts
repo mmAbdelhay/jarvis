@@ -322,6 +322,48 @@ describe("tool rows", () => {
     expect(slow.q(".ac-turn").textContent).toBe("Worked for 10s");
   });
 
+  it("puts the turn's time and Copy on one footer line under the last reply", async () => {
+    const s = await open(
+      agentView({
+        page: { items: [user("u1", "go", 0), reply("a1", "ok", 10000), user("u2", "n", 19000)] },
+      }),
+    );
+    const foot = s.q<HTMLElement>(".agent-chat__row--text .ac-msg__foot");
+    expect([...foot.children].map((child) => child.className)).toEqual([
+      "ac-turn",
+      "ac-copy ac-copy--message",
+    ]);
+    expect(foot.children[0]?.textContent).toBe("Worked for 10s");
+    // No second, standalone line for the same time.
+    expect(s.host.querySelectorAll(".ac-column > .ac-turn")).toHaveLength(0);
+  });
+
+  it("keeps a standalone line when the turn's last item is not a reply", async () => {
+    const s = await open(
+      agentView({
+        page: {
+          items: [
+            user("u1", "go", 0),
+            reply("a1", "on it", 1000),
+            tool("t1", "Bash", { command: "x", at: 2000, endAt: 62000 }),
+            user("u2", "next", 70000),
+          ],
+        },
+      }),
+    );
+    expect(s.host.querySelectorAll(".ac-column > .ac-turn")).toHaveLength(1);
+    expect(s.host.querySelector(".agent-chat__row--text .ac-turn")).toBeNull();
+  });
+
+  it("keeps Copy in the row's own footer, so it never floats over the words", async () => {
+    const s = await open();
+    for (const row of s.host.querySelectorAll(".ac-msg")) {
+      expect(row.querySelector(".ac-msg__actions")).toBeNull();
+      expect(row.lastElementChild?.className).toBe("ac-msg__foot");
+      expect(row.lastElementChild?.querySelector(".ac-copy--message")).not.toBeNull();
+    }
+  });
+
   it("copies a command and a code block", async () => {
     const s = await open(
       agentView({

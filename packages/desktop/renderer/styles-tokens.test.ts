@@ -36,7 +36,9 @@ describe("design tokens", () => {
     // writes --terminal-font-size on the root (its uses carry a fallback).
     // office-view.ts writes --office-inv (one over the zoom, so signs keep a
     // constant screen size) and each employee's --ow-shirt/skin/hair.
+    // code.ts writes --ac-mk on each reply list (its marker column's width).
     const setAtRuntime = new Set([
+      "--ac-mk",
       "--tab-color",
       "--terminal-font-size",
       "--office-inv",

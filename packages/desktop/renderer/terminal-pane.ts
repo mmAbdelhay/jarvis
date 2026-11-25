@@ -21,6 +21,7 @@ import type { Workflow } from "@jarvis/platform";
 import type { TerminalChips } from "../src/ipc.js";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 import { createBlockNav, type BlockNav } from "./block-nav.js";
+import { attachBlockLinks } from "./block-render.js";
 import { createBlockView, type BlockView } from "./block-view.js";
 import { hostPlatform, matchChord } from "./keys.js";
 import {
@@ -39,6 +40,8 @@ import { FitAddon } from "./vendor/addon-fit.mjs";
 import { Terminal } from "./vendor/xterm.mjs";
 
 export type PaneHooks = {
+  /** Opens a URL clicked in a finished block. Absent: blocks show no links. */
+  openLink?: ((url: string) => void) | undefined;
   sendInput: (data: string) => void;
   resize: (cols: number, rows: number) => void;
   /**
@@ -328,6 +331,7 @@ export function createPane(host: HTMLElement, hooks: PaneHooks): TerminalPane {
   sticky.hidden = true;
   const list = document.createElement("div");
   list.className = "terminal-blocks";
+  if (hooks.openLink !== undefined) attachBlockLinks(list, hooks.openLink);
   const live = document.createElement("div");
   live.className = "terminal-live";
   element.append(sticky, list, live);

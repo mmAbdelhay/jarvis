@@ -255,13 +255,17 @@ export type ElectronBoundChannel =
   | "popout:return"
   | "popout:focus"
   | "popout:list"
+  | "popout:showMain"
   | "popout:employeeMenu"
   | "popout:ready"
   | "popout:state"
   | "popout:handedOver"
   | "popout:take"
   // The Office's still of a hosted page (view-reconciler.ts's capture).
-  | "office:pageShot";
+  | "office:pageShot"
+  // The topbar screenshot button (screenshot.ts).
+  | "screenshot:menu"
+  | "screenshot:save";
 
 export type TableChannel = Exclude<InvokeChannel, ElectronBoundChannel>;
 

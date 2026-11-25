@@ -1361,6 +1361,8 @@ describe("dispatch table: api, dialog, voices", () => {
     expect(await call(table, "office:screen", { type: "tab", id: "t1" })).toEqual({ kind: "none" });
     expect(deps.office.screen).toHaveBeenCalledWith({ type: "tab", id: "t1" });
     expect("office:pageShot" in table).toBe(false);
+    expect("screenshot:menu" in table).toBe(false);
+    expect("screenshot:save" in table).toBe(false);
   });
 
   it("the chat redesign's channels pass their arguments through", async () => {

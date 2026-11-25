@@ -8,6 +8,15 @@ version and the downloads. This file is the index.
 
 ## Unreleased
 
+- Terminal: the Chat view reads headings, tables, nested and task lists, quotes, italics and
+  rules; wrapped list lines align under their text; file paths in a reply open on a click. Copy
+  sits under the message with the time worked, mode and model look like the menus they are, and
+  context joins the limits in the status row.
+- Terminal: a link opens. OK in the warning for a link whose text hides its address now opens it,
+  and web addresses in finished command output are clickable.
+- A screenshot button in the top bar: an area (macOS), this window or the whole screen, copied at
+  once, with Save as for a file. macOS asks for Screen Recording permission.
+
 ## [0.1.17] — 2026-11-25
 
 - Terminal: messages in the Chat view stay on screen during a fast scroll, and the scrollbar no

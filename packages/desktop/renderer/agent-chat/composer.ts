@@ -1,7 +1,7 @@
 // The composer: an auto-growing box with attachments (picker, paste, drop),
 // `/` commands and `@` files as listboxes, message history on Up and Down,
-// Queue or Send by what the agent can do, Stop, the mode and model menus and
-// the context left. A failed send keeps what was typed and says why. Nothing
+// Queue or Send by what the agent can do, Stop and the mode and model menus
+// (the context left sits in the status row, status.ts). A failed send keeps what was typed and says why. Nothing
 // is submitted while a file is still uploading, and the draft survives a
 // switch of tab.
 import type { ClaudeMode } from "@jarvis/wire";
@@ -16,22 +16,11 @@ import { argumentChoices, rankCommands, readToken } from "./command-match.js";
 import type { AgentSendResult } from "../../src/agent-view.js";
 import type { MessageKey } from "../../src/messages.js";
 import type { AgentOf, StorageLike } from "./agent-types.js";
-import {
-  basename,
-  dirname,
-  el,
-  fmt,
-  fmtNode,
-  ICONS,
-  icon,
-  quotePath,
-  type Translate,
-} from "./dom.js";
+import { basename, dirname, el, fmt, ICONS, icon, quotePath, type Translate } from "./dom.js";
 import { hostPlatform } from "../keys.js";
 import { clockText, createDictationControl, type DictationApi } from "./dictation.js";
 import { fileIcon } from "../file-icons.js";
 import { createMenu, type MenuItem } from "./menus.js";
-import { contextOf, contextValue } from "./status.js";
 
 /** The most one send carries, as agentSend counts it. */
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
@@ -276,28 +265,23 @@ export function createComposer(options: ComposerOptions): Composer {
   mic.hidden = api.dictate === undefined;
   mic.setAttribute("aria-pressed", "false");
   mic.append(icon(ICONS.mic, 14));
+  // Both open a menu, so both say so: a border, a label and a chevron.
   const modeButton = el("button", "ac-textbutton ac-modebutton");
   modeButton.type = "button";
   modeButton.setAttribute("aria-haspopup", "listbox");
+  const modeLabel = el("span", "ac-textbutton__label");
+  modeButton.append(modeLabel, icon(ICONS.chevronDown, 12));
   const modelButton = el("button", "ac-textbutton ac-modelbutton");
   modelButton.type = "button";
   modelButton.setAttribute("aria-haspopup", "listbox");
-  const context = el("span", "ac-context");
+  const modelLabel = el("span", "ac-textbutton__label");
+  modelButton.append(modelLabel, icon(ICONS.chevronDown, 12));
   const stopButton = el("button", "ac-stop", t("agentChatStop"));
   stopButton.type = "button";
   stopButton.hidden = true;
   const sendButton = el("button", "agent-chat__send ac-send", t("agentChatSend"));
   sendButton.type = "submit";
-  bar.append(
-    attach,
-    mic,
-    modeButton,
-    modelButton,
-    el("span", "ac-spacer"),
-    context,
-    stopButton,
-    sendButton,
-  );
+  bar.append(attach, mic, modeButton, modelButton, el("span", "ac-spacer"), stopButton, sendButton);
   // The recording strip: words as well as the red dot, so colour is not alone.
   const dictationBar = el("div", "ac-dictation");
   dictationBar.hidden = true;
@@ -1154,19 +1138,6 @@ export function createComposer(options: ComposerOptions): Composer {
     );
   });
 
-  function contextNode(next: AgentOf): DocumentFragment | undefined {
-    const info = contextOf(next);
-    if (info === undefined) return undefined;
-    const value = contextValue(info, t);
-    const key =
-      info.usedPercent !== undefined
-        ? "agentChatContextPercent"
-        : info.leftPercent !== undefined
-          ? "agentChatContextLeft"
-          : "agentChatContextUsed";
-    return fmtNode(t(key), { n: value.n });
-  }
-
   grow();
   paintChips();
   paintButtons();
@@ -1204,15 +1175,11 @@ export function createComposer(options: ComposerOptions): Composer {
       // cannot be switched meanwhile, and the button says why.
       modeButton.disabled = isLocked;
       modeButton.title = isLocked ? t("agentChatModeLocked") : "";
-      if (modeShown && next.mode !== undefined) modeButton.textContent = t(MODE_LABELS[next.mode]);
+      if (modeShown && next.mode !== undefined) modeLabel.textContent = t(MODE_LABELS[next.mode]);
       const model = prettyModel(next.model, next.vendor);
       modelButton.hidden = model === undefined && next.caps.model !== "menu";
-      modelButton.textContent = model ?? t("agentChatModel");
+      modelLabel.textContent = model ?? t("agentChatModel");
       modelButton.setAttribute("aria-label", `${t("agentChatModelMenu")}: ${model ?? ""}`.trim());
-      const node = contextNode(next);
-      if (node === undefined) context.replaceChildren();
-      else context.replaceChildren(node);
-      context.hidden = node === undefined;
       input.placeholder = locked
         ? t("agentChatComposerLocked")
         : narrow

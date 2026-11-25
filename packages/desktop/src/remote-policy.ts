@@ -161,6 +161,9 @@ export const CHANNEL_POLICY = {
   // What a tab shows right now, for the hover card: never leaves the laptop.
   "office:screen": "desktop-only",
   "office:pageShot": "desktop-only",
+  // The screenshot button: the laptop's own screen, clipboard and save dialog.
+  "screenshot:menu": "desktop-only",
+  "screenshot:save": "desktop-only",
   // The file sidebar's writes. Owner decision 2026-10-03: rename and trash
   // are remote — the phone's file list drives them. Both stay inside a
   // configured project root (ipc.ts's resolveWithin/entryWithin, the same
@@ -371,6 +374,7 @@ export const CHANNEL_POLICY = {
   "popout:return": "desktop-only",
   "popout:focus": "desktop-only",
   "popout:list": "desktop-only",
+  "popout:showMain": "desktop-only",
   "popout:employeeMenu": "desktop-only",
   "popout:ready": "desktop-only",
   "popout:state": "desktop-only",

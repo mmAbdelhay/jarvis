@@ -3,6 +3,7 @@ import type { DevToolsDock } from "./browser-host.js";
 import type { IpcChannels, RendererApi } from "./ipc.js";
 import type { AwakeStatus } from "./keep-awake.js";
 import type { MachineViewState } from "./machine-views.js";
+import type { ScreenshotOutcome } from "./screenshot.js";
 
 import type { UpdateState } from "./updater.js";
 
@@ -72,6 +73,8 @@ export type PushChannels = IpcChannels & {
   "popout:changed": string[];
   "popout:handover": string;
   "popout:focusPane": string;
+  // The screenshot button: how a capture ended, to this window only.
+  "screenshot:result": ScreenshotOutcome;
 };
 
 /**
@@ -224,6 +227,10 @@ export const INVOKE_CHANNELS = {
   officeScreen: "office:screen",
   // Electron-bound (the page's view): a still of a hosted page.
   officePageShot: "office:pageShot",
+  // Electron-bound and desktop-only: the topbar screenshot button. The menu
+  // is native; the PNG stays in main and is saved by its opaque id.
+  showScreenshotMenu: "screenshot:menu",
+  saveScreenshot: "screenshot:save",
   terminalAttachUpload: "terminal:attachUpload",
   sendTerminalInput: "terminal:input",
   resizeTerminal: "terminal:resize",
@@ -362,6 +369,7 @@ export const INVOKE_CHANNELS = {
   popoutReturn: "popout:return",
   popoutFocus: "popout:focus",
   popoutList: "popout:list",
+  popoutShowMain: "popout:showMain",
   popoutEmployeeMenu: "popout:employeeMenu",
   popoutReady: "popout:ready",
   popoutReportState: "popout:state",
@@ -412,6 +420,7 @@ export const PUSH_CHANNELS = {
   onPopoutChanged: "popout:changed",
   onPopoutHandover: "popout:handover",
   onPopoutFocusPane: "popout:focusPane",
+  onScreenshotResult: "screenshot:result",
 } as const satisfies Record<PushKey, string>;
 
 /**
