@@ -3943,13 +3943,14 @@
   grid-template-columns: 250px minmax(0, 1fr) 330px;
   gap: var(--s4);
   padding: 14px 20px 24px;
+  /* One height for System, the core stage and Providers. 340px (up from the
+     artboard's 258) is the floor, so Providers still shows five accounts
+     without scrolling; on a tall monitor the row grows with the viewport,
+     up to 520px, instead of leaving that height to empty space. */
+  --dash-row1-h: clamp(340px, 32vh, 520px);
 }
-/* 340px, up from the artboard's 258: the user's screen is tall and the
-   Sessions/Conversation row below was mostly empty, so the core stage,
-   System and Providers take the room instead (Providers shows five
-   accounts without scrolling). The orb below scales with it. */
 .dash-row1 .system-panel,
-.dash-row1 .providers-panel { height: 340px; overflow: hidden; }
+.dash-row1 .providers-panel { height: var(--dash-row1-h); overflow: hidden; }
 /* The panel is a column whose body takes the leftover height and scrolls —
    without min-height: 0 the body would grow with its rows and the fifth
    account would simply be cut off below the panel's clipped edge. */
@@ -3964,7 +3965,7 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  height: 340px;
+  height: var(--dash-row1-h);
 }
 
 .core-stage__head {
@@ -4727,8 +4728,10 @@
 .battery-chip[data-battery-state="critical"] { color: var(--bad); }
 #history-button { margin-inline-start: 4px; width: 32px; height: 32px; border: 0; background: transparent; }
 
-/* The dashboard is one column of four rows now (SYSTEM/core stage/PROVIDERS,
-   the projects grid, SESSIONS/CONVERSATION) rather than three side
+/* The dashboard is one column of three rows now (SYSTEM/core stage/PROVIDERS,
+   the projects grid, SESSIONS/CONVERSATION; .dash-links and .field are
+   absolutely positioned and take no track, so the 1fr must be the third —
+   a fourth track would take the leftover height and leave it empty) rather than three side
    columns — .dash-row1/.dash-row3 (styles.css's own core-stage section) are
    the nested grids that give each row back its own columns. `.main` itself
    stays `display: grid` (view-display-css.test.ts pins that to the
@@ -4737,7 +4740,7 @@
    SESSIONS/CONVERSATION out of `.main`'s clipped overflow. */
 .main {
   grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: auto auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   gap: 0;
   padding: 0;
 }
