@@ -461,7 +461,14 @@ function fakeDesktopDeps(): DesktopOnlyDeps {
     },
     popouts: fakePopouts(),
     mainContentsId: () => 1,
+    focusMain: vi.fn(),
     language: "en" as const,
+    platform: "darwin" as const,
+    screenshots: {
+      capture: vi.fn(async () => ({ ok: false as const, reason: "cancelled" as const })),
+      save: vi.fn(async () => ({ ok: false as const, reason: "cancelled" as const })),
+    },
+    screenshotDone: vi.fn(),
   };
 }
 
@@ -502,6 +509,7 @@ describe("pop-out channels", () => {
       "popout:return",
       "popout:focus",
       "popout:list",
+      "popout:showMain",
       "popout:employeeMenu",
       "popout:ready",
       "popout:state",
@@ -511,6 +519,15 @@ describe("pop-out channels", () => {
       expect(ELECTRON_BOUND_CHANNELS).toContain(channel);
       expect(CHANNEL_POLICY[channel]).toBe("desktop-only");
     }
+  });
+
+  it("raises the main window only for a live pop-out's own webContents", () => {
+    const deps = fakeDesktopDeps();
+    const listener = listeners(deps);
+    for (const event of [MAIN, STRANGER, {}, null]) listener("popout:showMain")(event);
+    expect(deps.focusMain).not.toHaveBeenCalled();
+    listener("popout:showMain")(POPOUT);
+    expect(deps.focusMain).toHaveBeenCalledTimes(1);
   });
 
   it("lets only the main window open, focus, list, take and ask for the employee menu", async () => {
@@ -655,5 +672,114 @@ describe("office:pageShot", () => {
     expect(await handler(deps)(MAIN, "w1")).toBeUndefined();
     vi.mocked(deps.views.capture).mockRejectedValueOnce(new Error("gone"));
     expect(await handler(deps)(MAIN, "w1")).toBeUndefined();
+  });
+});
+
+describe("the screenshot channels", () => {
+  const MAIN = { sender: { id: 1 } };
+  const POPOUT = { sender: { id: 7 } };
+  const handler = (deps: DesktopOnlyDeps, channel: string) => {
+    const handle = vi.fn();
+    registerDesktopOnly({ ...deps, handle });
+    return handle.mock.calls.find(([c]) => c === channel)![1] as (
+      event: unknown,
+      ...args: unknown[]
+    ) => Promise<unknown>;
+  };
+
+  it("are Electron-bound and desktop-only", () => {
+    for (const channel of ["screenshot:menu", "screenshot:save"] as const) {
+      expect(ELECTRON_BOUND_CHANNELS).toContain(channel);
+      expect(CHANNEL_POLICY[channel]).toBe("desktop-only");
+    }
+  });
+
+  it("menu pops a native menu at the point for the main window, with the platform's items", async () => {
+    for (const [platform, labels] of [
+      ["darwin", ["Select an area", "This window", "Whole screen"]],
+      ["win32", ["This window", "Whole screen"]],
+    ] as const) {
+      const popup = vi.fn();
+      let template: MenuItemConstructorOptions[] = [];
+      const deps = {
+        ...fakeDesktopDeps(),
+        platform,
+        buildMenu: vi.fn((built: MenuItemConstructorOptions[]) => {
+          template = built;
+          return { popup };
+        }),
+      };
+      await handler(deps, "screenshot:menu")(MAIN, 10.4, 20.6);
+      expect(template.map((item) => item.label)).toEqual(labels);
+      expect(popup).toHaveBeenCalledWith({ window: deps.window, x: 10, y: 21 });
+    }
+  });
+
+  it("menu ignores a pop-out, a stranger and bad coordinates", async () => {
+    const buildMenu = vi.fn(() => ({ popup: vi.fn() }));
+    const deps = { ...fakeDesktopDeps(), buildMenu };
+    const listener = handler(deps, "screenshot:menu");
+    for (const event of [POPOUT, { sender: { id: 99 } }, {}, null]) await listener(event, 1, 2);
+    await listener(MAIN, "1", 2);
+    await listener(MAIN, 1, Number.NaN);
+    await listener(MAIN, Infinity, 2);
+    expect(buildMenu).not.toHaveBeenCalled();
+  });
+
+  it("choosing an item captures that mode and pushes the outcome", async () => {
+    let template: MenuItemConstructorOptions[] = [];
+    const outcome = {
+      ok: true as const,
+      id: "a",
+      thumbnail: "data:image/png;base64,",
+      width: 1,
+      height: 1,
+    };
+    const deps = {
+      ...fakeDesktopDeps(),
+      buildMenu: (built: MenuItemConstructorOptions[]) => {
+        template = built;
+        return { popup: vi.fn() };
+      },
+    };
+    vi.mocked(deps.screenshots.capture).mockResolvedValue(outcome);
+    await handler(deps, "screenshot:menu")(MAIN, 1, 2);
+    (template[1]?.click as (() => void) | undefined)?.();
+    await vi.waitFor(() => expect(deps.screenshotDone).toHaveBeenCalledWith(outcome));
+    expect(deps.screenshots.capture).toHaveBeenCalledWith("window");
+  });
+
+  it("a cancelled capture is pushed too, so the renderer can stay quiet", async () => {
+    let template: MenuItemConstructorOptions[] = [];
+    const deps = {
+      ...fakeDesktopDeps(),
+      buildMenu: (built: MenuItemConstructorOptions[]) => {
+        template = built;
+        return { popup: vi.fn() };
+      },
+    };
+    await handler(deps, "screenshot:menu")(MAIN, 1, 2);
+    (template[0]?.click as (() => void) | undefined)?.();
+    await vi.waitFor(() =>
+      expect(deps.screenshotDone).toHaveBeenCalledWith({ ok: false, reason: "cancelled" }),
+    );
+    expect(deps.screenshots.capture).toHaveBeenCalledWith("area");
+  });
+
+  it("save passes only the id, for the main window only", async () => {
+    const deps = fakeDesktopDeps();
+    const listener = handler(deps, "screenshot:save");
+    await listener(MAIN, "abc", "/etc/passwd", Buffer.from("x"));
+    expect(deps.screenshots.save).toHaveBeenCalledTimes(1);
+    expect(deps.screenshots.save).toHaveBeenCalledWith("abc");
+  });
+
+  it("save refuses a pop-out, a stranger and a bad sender without saving", async () => {
+    const deps = fakeDesktopDeps();
+    const listener = handler(deps, "screenshot:save");
+    for (const event of [POPOUT, { sender: { id: 99 } }, {}, null]) {
+      expect(await listener(event, "abc")).toMatchObject({ ok: false, reason: "invalid" });
+    }
+    expect(deps.screenshots.save).not.toHaveBeenCalled();
   });
 });

@@ -266,14 +266,21 @@ describe("queue, stop, mode and model", () => {
 
   it("isolates the percent in a bdi so right-to-left words cannot turn 62% into %62", async () => {
     const s = await open(agentView({ context: { used: 38000, leftPercent: 62 } }));
-    expect(s.q(".ac-context bdi").textContent).toBe("62%");
+    expect(s.q(".ac-context bdi").textContent).toBe("62% left");
   });
 
-  it("names the model and the context left, or used", async () => {
-    const left = await open(agentView({ context: { used: 38000, leftPercent: 62 } }));
-    expect(left.q(".ac-context").textContent).toBe("Context 62% left");
-    const used = await open(agentView({ context: { used: 38000 } }));
-    expect(used.q(".ac-context").textContent).toBe("Context 38k tokens used");
+  it("keeps the context out of the composer row: it sits in the status row", async () => {
+    const s = await open(agentView({ context: { used: 38000, leftPercent: 62 } }));
+    expect(s.q(".ac-toolbar").querySelector(".ac-context")).toBeNull();
+    expect(s.q(".ac-status").querySelector(".ac-context")).not.toBeNull();
+  });
+
+  it("names the model; both menu buttons carry a chevron", async () => {
+    const s = await open();
+    for (const selector of [".ac-modebutton", ".ac-modelbutton"]) {
+      expect(s.q(selector).querySelector("svg")).not.toBeNull();
+      expect(s.q(selector).getAttribute("aria-haspopup")).toBe("listbox");
+    }
     expect(prettyModel("claude-opus-4-5-20251101", "anthropic")).toBe("Opus 4.5");
     expect(prettyModel("gpt-5.1-codex", "openai")).toBe("gpt-5.1-codex");
     expect(prettyModel(undefined, "anthropic")).toBeUndefined();

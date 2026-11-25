@@ -106,7 +106,8 @@ describe("the agent chat's layout", () => {
   it("uses logical properties for what sits at the start or end, so Arabic mirrors", () => {
     expect(ruleBodyFor(".ac-side")).toMatch(/border-inline-start/);
     expect(ruleBodyFor(".agent-chat__bubble")).toMatch(/margin-inline-start\s*:\s*auto/);
-    expect(ruleBodyFor(".ac-msg__actions")).toMatch(/inset-inline-end/);
+    expect(ruleBodyFor(".ac-quote")).toMatch(/border-inline-start/);
+    expect(ruleBodyFor(".agent-chat__row--user .ac-msg__foot")).toMatch(/justify-content/);
   });
 
   it("gives the new controls a visible keyboard focus", () => {
@@ -162,5 +163,29 @@ describe("the agent chat's layout", () => {
     const heads = [...css.matchAll(rule)].map((m) => m[0]);
     const block = heads.join("\n");
     for (const selector of selectors) expect(block).toContain(selector);
+  });
+
+  it("keeps a message's Copy in its footer's flow: reserved height, only the opacity changes", () => {
+    const foot = ruleBodyFor(".ac-msg__foot");
+    expect(foot).not.toMatch(/position\s*:\s*(absolute|fixed)/);
+    expect(foot).toMatch(/min-height\s*:\s*\d+px/);
+    expect(ruleBodyFor(".ac-msg__foot .ac-copy")).toMatch(/opacity\s*:\s*0/);
+    expect(css).toMatch(/\.ac-msg:focus-within \.ac-msg__foot \.ac-copy\s*\{\s*opacity\s*:\s*1/);
+    expect(css).not.toContain("ac-msg__actions");
+    // The row is still contained and never skipped.
+    expect(ruleBodyFor(".ac-row")).toMatch(/contain\s*:\s*content/);
+  });
+
+  it("hangs list text in its own column and keeps a wide table inside its own box", () => {
+    const item = ruleBodyFor(".agent-chat__item");
+    expect(item).toMatch(/display\s*:\s*grid/);
+    expect(item).toMatch(/grid-template-columns\s*:\s*var\(--ac-mk/);
+    expect(ruleBodyFor(".ac-tablewrap")).toMatch(/overflow-x\s*:\s*auto/);
+    expect(ruleBodyFor(".agent-chat__row--text")).toMatch(/line-height\s*:\s*1\.6/);
+  });
+
+  it("draws the mode and model buttons as bordered buttons with a disabled state", () => {
+    expect(ruleBodyFor(".ac-textbutton")).toMatch(/border\s*:\s*1px solid/);
+    expect(ruleBodyFor(".ac-textbutton:disabled")).toMatch(/opacity/);
   });
 });

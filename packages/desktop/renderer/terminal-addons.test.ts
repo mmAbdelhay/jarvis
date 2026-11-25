@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   enhanceTerminal,
   handlePaletteKey,
@@ -369,5 +369,48 @@ describe("enhanceTerminal — the clear-screen chord", () => {
 
     expect(claimed).toBe(false);
     expect(terminal.cleared).toBe(1);
+  });
+});
+
+describe("enhanceTerminal — OSC 8 hyperlinks", () => {
+  function setup(): { activate: (uri: string) => void; opened: string[] } {
+    const terminal = new FakeTerminal();
+    const opened: string[] = [];
+    enhanceTerminal(terminal as never, document.createElement("div"), {
+      sendInput: () => {},
+      openLink: (url) => opened.push(url),
+    });
+    const handler = terminal.options.linkHandler as {
+      activate: (e: MouseEvent, text: string, range: unknown) => void;
+    };
+    return { activate: (uri) => handler.activate({} as MouseEvent, uri, {}), opened };
+  }
+
+  it("installs a link handler that confirms with the real URL, then opens it", () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const { activate, opened } = setup();
+    activate("https://example.com/a?b=1");
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(String(confirm.mock.calls[0]?.[0])).toContain("https://example.com/a?b=1");
+    expect(opened).toEqual(["https://example.com/a?b=1"]);
+    confirm.mockRestore();
+  });
+
+  it("does not open when the user cancels", () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const { activate, opened } = setup();
+    activate("https://example.com/");
+    expect(opened).toEqual([]);
+    confirm.mockRestore();
+  });
+
+  it("never opens or even asks about non-http schemes", () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const { activate, opened } = setup();
+    for (const uri of ["javascript:alert(1)", "file:///etc/passwd", "vbscript:x", "not a url", ""])
+      activate(uri);
+    expect(opened).toEqual([]);
+    expect(confirm).not.toHaveBeenCalled();
+    confirm.mockRestore();
   });
 });

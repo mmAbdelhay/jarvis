@@ -212,7 +212,7 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
       }
     })();
   }
-  const code: CodeContext = { t, openLink, copy };
+  const code: CodeContext = { t, openLink, copy, openFile };
 
   const feed = createFeed({
     t,
@@ -254,7 +254,7 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
   });
   const strip = createStatusStrip({
     t,
-    open: () => side.reveal("limits"),
+    open: (section) => side.reveal(section),
     close: () => side.closePopover(),
   });
   const composer = createComposer({
@@ -368,7 +368,7 @@ export function createAgentChat(options: AgentChatOptions): AgentChat {
     const width = paneWidth();
     const narrow = width > 0 && width < NARROW_PX;
     panel.dataset["narrow"] = String(narrow);
-    strip.update(view.status);
+    strip.update(view.status, contextOf(view));
     side.update(
       {
         ...(view.todos === undefined ? {} : { todos: view.todos }),

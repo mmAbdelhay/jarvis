@@ -506,6 +506,12 @@ export const MESSAGES = {
     language === "ar" ? "جارٍ الرفع…" : "Uploading…",
   agentChatWaitUpload: (language: "ar" | "en"): string =>
     language === "ar" ? "انتظر حتى ينتهي رفع الملفات." : "Wait for the files to finish uploading.",
+  agentChatOpenPath: (language: "ar" | "en"): string =>
+    language === "ar" ? "فتح الملف {path}" : "Open file {path}",
+  agentChatTableLabel: (language: "ar" | "en"): string => (language === "ar" ? "جدول" : "Table"),
+  agentChatTaskDone: (language: "ar" | "en"): string => (language === "ar" ? "منجز" : "Done"),
+  agentChatTaskOpen: (language: "ar" | "en"): string =>
+    language === "ar" ? "غير منجز" : "Not done",
   agentChatWorkedFor: (language: "ar" | "en"): string =>
     language === "ar" ? "عمل لمدة {time}" : "Worked for {time}",
   agentChatComposerHint: (language: "ar" | "en"): string =>
@@ -1449,6 +1455,8 @@ export const MESSAGES = {
   dockerNoSelection: (language: "ar" | "en"): string =>
     language === "ar" ? "لم تُحدَّد حاوية" : "No container selected",
   dockerHeading: (language: "ar" | "en"): string => (language === "ar" ? "الحاويات" : "Containers"),
+  terminalLinkConfirm: (url: string, language: "ar" | "en"): string =>
+    language === "ar" ? `فتح هذا الرابط؟\n\n${url}` : `Open this link?\n\n${url}`,
   dockerConfirmStop: (name: string, language: "ar" | "en"): string =>
     language === "ar" ? `إيقاف ${name}؟` : `Stop ${name}?`,
   dockerConfirmRestart: (name: string, language: "ar" | "en"): string =>
@@ -1880,6 +1888,38 @@ export const MESSAGES = {
     language === "ar" ? "فتح في نافذة جديدة" : "Open in new window",
   tabMenuPopIn: (language: "ar" | "en"): string =>
     language === "ar" ? "العودة إلى النافذة الرئيسية" : "Return to main window",
+  // The topbar screenshot button, its native menu and its result popover.
+  screenshotButtonLabel: (language: "ar" | "en"): string =>
+    language === "ar" ? "لقطة شاشة" : "Screenshot",
+  screenshotMenuArea: (language: "ar" | "en"): string =>
+    language === "ar" ? "تحديد منطقة" : "Select an area",
+  screenshotMenuWindow: (language: "ar" | "en"): string =>
+    language === "ar" ? "هذه النافذة" : "This window",
+  screenshotMenuScreen: (language: "ar" | "en"): string =>
+    language === "ar" ? "الشاشة كاملة" : "Whole screen",
+  screenshotCopied: (language: "ar" | "en"): string =>
+    language === "ar" ? "نُسخت إلى الحافظة" : "Copied to clipboard",
+  screenshotSaveAs: (language: "ar" | "en"): string =>
+    language === "ar" ? "حفظ باسم…" : "Save as…",
+  screenshotDismiss: (language: "ar" | "en"): string => (language === "ar" ? "إغلاق" : "Dismiss"),
+  screenshotPreviewAlt: (language: "ar" | "en"): string =>
+    language === "ar" ? "معاينة لقطة الشاشة" : "Screenshot preview",
+  screenshotSaved: (name: string, language: "ar" | "en"): string =>
+    language === "ar" ? `تم الحفظ: ${name}` : `Saved ${name}`,
+  screenshotPermission: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "اسمح لجارفيس بتسجيل الشاشة من إعدادات النظام ‏> الخصوصية والأمان ‏> تسجيل الشاشة، ثم أعد المحاولة."
+      : "Allow Jarvis to record the screen in System Settings > Privacy & Security > Screen Recording, then try again.",
+  screenshotBusy: (language: "ar" | "en"): string =>
+    language === "ar" ? "لقطة أخرى قيد التنفيذ." : "Another screenshot is in progress.",
+  screenshotFailed: (detail: string, language: "ar" | "en"): string =>
+    language === "ar"
+      ? `تعذّر التقاط الشاشة: ${detail}`
+      : `Could not take the screenshot: ${detail}`,
+  screenshotSaveFailed: (detail: string, language: "ar" | "en"): string =>
+    language === "ar" ? `تعذّر حفظ اللقطة: ${detail}` : `Could not save the screenshot: ${detail}`,
+  screenshotGone: (language: "ar" | "en"): string =>
+    language === "ar" ? "لم تعد هذه اللقطة متاحة." : "That screenshot is no longer available.",
   popoutPlaceholderTitle: (language: "ar" | "en"): string =>
     language === "ar" ? "مفتوح في نافذة أخرى" : "Open in another window",
   popoutShowWindow: (language: "ar" | "en"): string =>

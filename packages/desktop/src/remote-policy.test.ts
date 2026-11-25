@@ -84,6 +84,8 @@ describe("remote policy", () => {
     "office:viewing",
     "office:screen",
     "office:pageShot",
+    "screenshot:menu",
+    "screenshot:save",
   ])("denies %s remotely", (channel) => {
     expect(CHANNEL_POLICY[channel as keyof typeof CHANNEL_POLICY]).toBe("desktop-only");
     expect(isRemoteAllowed(channel)).toBe(false);

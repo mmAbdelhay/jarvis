@@ -671,6 +671,7 @@ describe("popoutPushAllowed", () => {
       "popout:changed",
       "popout:handover",
       "popout:focusPane",
+      "screenshot:result",
       "daemon:restarting",
       "",
     ]) {

@@ -42,6 +42,7 @@ import {
 } from "./prayer.js";
 import { initRemoteStatus } from "./remote-status.js";
 import { initKeepAwake } from "./keep-awake.js";
+import { initScreenshotButton } from "./screenshot-button.js";
 import { initMachineSwitcher } from "./machine-switcher.js";
 import { initBattery, topbarDate } from "./topbar-status.js";
 import { initTopbarFit } from "./topbar-fit.js";
@@ -628,6 +629,8 @@ function wireNav(): void {
   // Keep awake (Task 18): the topbar button. Absent markup is a no-op, and
   // a failed first read only waits for the first awake:changed push.
   void initKeepAwake(window.jarvis).catch(() => undefined);
+  // Screenshot button: hides itself when the bridge has no screenshot api.
+  initScreenshotButton(window.jarvis);
   // Tailnet machines: the switcher beside the brand. Absent markup is a
   // no-op. The workspace pages stay off screen while another machine is up.
   void initMachineSwitcher({

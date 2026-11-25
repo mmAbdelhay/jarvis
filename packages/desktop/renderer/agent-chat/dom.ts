@@ -40,6 +40,7 @@ export function icon(paths: readonly string[], size = 16): SVGSVGElement {
 
 export const ICONS = {
   chevron: ["M6 3l5 5-5 5"],
+  chevronDown: ["M3 6l5 5 5-5"],
   plus: ["M8 2v12M2 8h12"],
   mic: [
     "M8 1.8a2 2 0 0 0-2 2v4a2 2 0 0 0 4 0v-4a2 2 0 0 0-2-2z",

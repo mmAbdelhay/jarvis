@@ -57,6 +57,7 @@ describe("the channel table", () => {
       "providers:update",
       "remote:update",
       "reviews:changed",
+      "screenshot:result",
       "session:output",
       "sessions:update",
       "setup:output",

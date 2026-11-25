@@ -1441,6 +1441,7 @@ function makePane(
   // the cell grid and the shell's buffered prologue are all its business;
   // what stays here is everything that needs to know which shell this is.
   const view = createPane(element, {
+    openLink: (url) => openTerminalLink(project, url),
     // A command began: the moment an agent typed at the prompt may have
     // started, so the Chat switch looks for one (agent-chat.ts).
     onCommandStart: () => agentChats.get(paneKey)?.commandStarted(),

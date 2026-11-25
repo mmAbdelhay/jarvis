@@ -23,6 +23,7 @@ const DESKTOP_ONLY = new Set([
   "popout:changed",
   "popout:handover",
   "popout:focusPane",
+  "screenshot:result",
 ]);
 
 describe("REMOTE_PUSH_POLICY", () => {

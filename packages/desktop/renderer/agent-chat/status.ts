@@ -115,8 +115,8 @@ type Chip = {
   resets: HTMLElement;
 };
 
-function buildChip(): Chip {
-  const root = el("button", "ac-limit");
+function buildChip(className = "ac-limit"): Chip {
+  const root = el("button", className);
   root.type = "button";
   const label = el("span", "ac-limit__label");
   label.dir = "auto";
@@ -134,6 +134,46 @@ function setText(node: HTMLElement, text: string): void {
   node.hidden = text === "";
 }
 
+/** The chip's small meter, built once and then changed in place; none without a percent. */
+function paintMeter(chip: Chip, percent: number | undefined, t: Translate): void {
+  chip.slot.hidden = percent === undefined;
+  if (percent === undefined) return;
+  const next = meter(percent, t, false);
+  const old = chip.slot.firstElementChild;
+  if (old === null) chip.slot.append(next);
+  else {
+    old.setAttribute("aria-valuenow", next.getAttribute("aria-valuenow") ?? "0");
+    old.setAttribute("aria-label", next.getAttribute("aria-label") ?? "");
+    const fill = old.firstElementChild as HTMLElement | null;
+    if (fill !== null) fill.style.inlineSize = `${shown(percent)}%`;
+  }
+}
+
+/** The context chip: "Context [meter] 6%" when used is known, "Context 62% left" or
+ *  "Context 38k tokens used" when it is not. Only a used percent has a level: a
+ *  "left" figure is never coloured as if it were used. */
+function paintContext(chip: Chip, info: ContextInfo, t: Translate): void {
+  const value = contextValue(info, t);
+  const percent = info.usedPercent;
+  const level = levelOf(percent);
+  const key =
+    percent !== undefined
+      ? "agentChatContextPercent"
+      : info.leftPercent !== undefined
+        ? "agentChatContextLeft"
+        : "agentChatContextUsed";
+  const summary = fmt(t(key), { n: value.n });
+  chip.root.dataset["level"] = level;
+  chip.root.title = summary;
+  chip.root.setAttribute("aria-label", summary);
+  const label = t("agentChatChipContext");
+  if (chip.label.textContent !== label) chip.label.textContent = label;
+  paintMeter(chip, percent, t);
+  setText(chip.pct, percent !== undefined ? `${shown(percent)}%` : value.text);
+  setText(chip.word, levelWord(level, t));
+  setText(chip.resets, "");
+}
+
 /** A limit's reset time is shown only once it matters: from 80% used. */
 function paintChip(chip: Chip, limit: AgentLimit, t: Translate): void {
   const level = levelOf(limit.usedPercent);
@@ -143,21 +183,8 @@ function paintChip(chip: Chip, limit: AgentLimit, t: Translate): void {
   chip.root.setAttribute("aria-label", summary);
   if (chip.label.textContent !== limit.label) chip.label.textContent = limit.label;
   const percent = limit.usedPercent;
-  chip.slot.hidden = percent === undefined;
-  if (percent === undefined) {
-    setText(chip.pct, limit.detail ?? "");
-  } else {
-    const next = meter(percent, t, false);
-    const old = chip.slot.firstElementChild;
-    if (old === null) chip.slot.append(next);
-    else {
-      old.setAttribute("aria-valuenow", next.getAttribute("aria-valuenow") ?? "0");
-      old.setAttribute("aria-label", next.getAttribute("aria-label") ?? "");
-      const fill = old.firstElementChild as HTMLElement | null;
-      if (fill !== null) fill.style.inlineSize = `${shown(percent)}%`;
-    }
-    setText(chip.pct, `${shown(percent)}%`);
-  }
+  paintMeter(chip, percent, t);
+  setText(chip.pct, percent === undefined ? (limit.detail ?? "") : `${shown(percent)}%`);
   setText(chip.word, levelWord(level, t));
   setText(
     chip.resets,
@@ -187,14 +214,15 @@ export function whoOf(details: AgentStatusDetails | undefined): { text: string; 
 
 export type StatusStrip = {
   element: HTMLElement;
-  update(status: StatusData | undefined): void;
+  update(status: StatusData | undefined, context?: ContextInfo): void;
 };
 
 /** One row: who on the left, the limits on the right. A limit opens the panel. */
 export function createStatusStrip(options: {
   t: Translate;
-  /** A limit was clicked or entered: show the panel's Usage limits. */
-  open(): void;
+  /** A limit was clicked or entered: show the panel's Usage limits; the
+   *  context chip asks for the Context section. */
+  open(section: "limits" | "context"): void;
   /** Escape on a limit: close what it opened. */
   close(): void;
 }): StatusStrip {
@@ -206,9 +234,15 @@ export function createStatusStrip(options: {
   const who = el("span", "ac-status__who");
   who.dir = "auto";
   const limitsRow = el("span", "ac-status__limits");
+  // The context chip is the row's first, and keeps its node (hidden, not removed).
+  const contextChip = buildChip("ac-context");
+  contextChip.root.hidden = true;
+  limitsRow.append(contextChip.root);
   element.append(who, limitsRow);
   element.addEventListener("click", (event) => {
-    if ((event.target as Element | null)?.closest(".ac-limit") !== null) options.open();
+    const target = event.target as Element | null;
+    if (target?.closest(".ac-context") != null) options.open("context");
+    else if (target?.closest(".ac-limit") != null) options.open("limits");
   });
   element.addEventListener("keydown", (event) => {
     if (event.key === "Escape") options.close();
@@ -218,15 +252,20 @@ export function createStatusStrip(options: {
 
   return {
     element,
-    update(status) {
+    update(status, context) {
       const limits = status?.limits ?? [];
       const left = whoOf(status?.details);
       setText(who, left.text);
       who.title = left.title;
       if (status?.stale === true) element.dataset["stale"] = "true";
       else delete element.dataset["stale"];
+      if (context === undefined) contextChip.root.hidden = true;
+      else {
+        paintContext(contextChip, context, t);
+        contextChip.root.hidden = false;
+      }
       const wanted = new Set<string>();
-      let previous: Element | null = null;
+      let previous: Element | null = contextChip.root;
       for (const limit of limits) {
         const key = limit.label.toLowerCase();
         if (wanted.has(key)) continue;
@@ -249,8 +288,8 @@ export function createStatusStrip(options: {
           chips.delete(key);
         }
       }
-      limitsRow.hidden = wanted.size === 0;
-      element.hidden = wanted.size === 0 && left.text === "";
+      limitsRow.hidden = wanted.size === 0 && context === undefined;
+      element.hidden = limitsRow.hidden && left.text === "";
     },
   };
 }

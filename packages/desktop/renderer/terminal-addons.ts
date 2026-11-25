@@ -1,3 +1,4 @@
+import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 import { hostPlatform, matchChord, type ChordAction } from "./keys.js";
 import type { BlockNav } from "./block-nav.js";
 import { resetTerminalFontZoom, zoomTerminalFont } from "./terminal-font.js";
@@ -234,7 +235,7 @@ function loadAddons(terminal: Terminal, hooks: TerminalHooks): void {
   // Clickable URLs. The handler is the caller's: a link opens as a Workspace
   // tab, so it goes through normalizeInput and the app's navigation rules
   // rather than handing an arbitrary string to the OS.
-  attempt(() => terminal.loadAddon(new WebLinksAddon((_event, uri) => hooks.openLink(uri))));
+  attempt(() => loadLinks(terminal, hooks.openLink));
 
   // OSC 52: lets a program running in the terminal put something on the
   // clipboard — how `tmux save-buffer` and friends are meant to work.
@@ -254,6 +255,23 @@ function loadAddons(terminal: Terminal, hooks: TerminalHooks): void {
     webgl.onContextLoss(() => webgl.dispose());
     terminal.loadAddon(webgl);
   });
+}
+
+/**
+ * Clickable links, plain-text and OSC 8. xterm's default OSC 8 handler shows
+ * a confirm and then calls window.open, which main denies — so OK did
+ * nothing. Ours confirms with the real target (an OSC 8 label can hide it)
+ * and opens through the caller. Only http(s) is ever offered.
+ */
+export function loadLinks(terminal: Terminal, openLink: (url: string) => void): void {
+  attempt(() => terminal.loadAddon(new WebLinksAddon((_event, uri) => openLink(uri))));
+  terminal.options.linkHandler = {
+    activate: (_event, uri) => {
+      if (!/^https?:\/\//i.test(uri)) return;
+      if (!window.confirm(MESSAGES.terminalLinkConfirm(uri, PRIMARY_LANGUAGE))) return;
+      openLink(uri);
+    },
+  };
 }
 
 /** Every addon here is an enhancement, never a requirement: one that cannot

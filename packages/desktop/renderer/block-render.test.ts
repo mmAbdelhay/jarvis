@@ -20,7 +20,7 @@ vi.mock("./vendor/xterm.mjs", async () => {
   };
 });
 
-const { renderOutput } = await import("./block-render.js");
+const { renderOutput, attachBlockLinks } = await import("./block-render.js");
 
 describe("freezing a block's output", () => {
   it("returns the element before it is populated, and fills it in after a tick", async () => {
@@ -147,6 +147,76 @@ function hexToRgb(hex: string): string {
 }
 
 /** Waits out the macrotask xterm's write() defers its parsing into. */
+describe("clickable URLs in a finished block", () => {
+  const links = (element: HTMLElement): string[] =>
+    [...element.querySelectorAll<HTMLElement>(".block-link")].map((l) => l.dataset["url"] ?? "");
+
+  it("links a URL, keeping the text and colour exactly", async () => {
+    const element = renderOutput("see \u001b[31mhttps://example.com/a?b=1\u001b[0m now\r\n", 80);
+    await flush();
+    expect(links(element)).toEqual(["https://example.com/a?b=1"]);
+    expect(element.textContent).toBe("see https://example.com/a?b=1 now");
+    const link = element.querySelector<HTMLElement>(".block-link");
+    expect(link?.textContent).toBe("https://example.com/a?b=1");
+    expect(link?.style.color).toBe(hexToRgb(TERMINAL_THEME.red));
+  });
+
+  it("trims trailing punctuation and unbalanced closing brackets only", async () => {
+    const element = renderOutput(
+      "(https://a.com/x). https://b.com/y, https://c.com/w_(v) https://d.com/z)\r\n",
+      120,
+    );
+    await flush();
+    expect(links(element)).toEqual([
+      "https://a.com/x",
+      "https://b.com/y",
+      "https://c.com/w_(v)",
+      "https://d.com/z",
+    ]);
+  });
+
+  it("joins a soft-wrapped URL into one link", async () => {
+    const url = `https://example.com/${"a".repeat(40)}`;
+    const element = renderOutput(`${url}\r\n`, 30);
+    await flush();
+    expect(links(element)).toEqual([url, url]);
+    expect(element.textContent?.replace(/\s/g, "")).toBe(url);
+  });
+
+  it("never links other schemes and leaves plain output alone", async () => {
+    const element = renderOutput(
+      "javascript:alert(1) file:///etc/passwd http:// ftp://x.com\r\n",
+      80,
+    );
+    await flush();
+    expect(links(element)).toEqual([]);
+  });
+
+  it("opens on a plain click, not after a drag-selection, and not on other text", async () => {
+    const element = renderOutput("go https://example.com/ ok\r\n", 80);
+    await flush();
+    const list = document.createElement("div");
+    list.append(element);
+    document.body.append(list);
+    const opened: string[] = [];
+    attachBlockLinks(list, (url) => opened.push(url));
+    const link = element.querySelector<HTMLElement>(".block-link") as HTMLElement;
+    link.click();
+    expect(opened).toEqual(["https://example.com/"]);
+    element.querySelector<HTMLElement>("span")?.click();
+    expect(opened).toHaveLength(1);
+    const range = document.createRange();
+    range.selectNodeContents(link);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    link.click();
+    expect(opened).toHaveLength(1);
+    selection?.removeAllRanges();
+    list.remove();
+  });
+});
+
 function flush(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }

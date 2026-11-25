@@ -40,6 +40,7 @@ import { nodeDaemonModeDeps } from "./daemon/mode-node.js";
 import { answerDbGateChallenge } from "./dbgate-login.js";
 import { ELECTRON_BOUND_CHANNELS, registerDesktopOnly } from "./desktop-only.js";
 import { createPowerBlocker } from "./keep-awake.js";
+import { createElectronScreenshots } from "./electron-screenshot.js";
 import {
   countRunning,
   createUpdater,
@@ -771,6 +772,10 @@ app.whenReady().then(async () => {
       machines,
       popouts,
       mainContentsId: () => mainContentsId,
+      focusMain: () => focusAppWindow(),
+      platform: process.platform,
+      screenshots: createElectronScreenshots(window, PRIMARY_LANGUAGE, process.platform),
+      screenshotDone: (outcome) => local("screenshot:result", outcome),
       chooseDock: (dock) => local("workspace:devtoolsDockChosen", dock),
       // Bug 2: the tab menu's Reload is workspace:reload's own view call,
       // and Close runs the dispatch table's workspace:close (terminal

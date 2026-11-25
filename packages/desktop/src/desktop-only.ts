@@ -14,6 +14,7 @@ import { errorMessage, MESSAGES } from "./messages.js";
 import type { DesktopOnlyChannel } from "./remote-policy.js";
 import { tabMenuTemplate } from "./tab-menu.js";
 import type { Popouts } from "./popout.js";
+import { screenshotMenuTemplate, type ScreenshotOutcome, type Screenshots } from "./screenshot.js";
 import type { Updater } from "./updater.js";
 import { toDeviceIndependent } from "./view-bounds.js";
 import type { ViewReconciler } from "./view-reconciler.js";
@@ -56,12 +57,15 @@ export const ELECTRON_BOUND_CHANNELS: readonly (ElectronBoundChannel & DesktopOn
   "popout:return",
   "popout:focus",
   "popout:list",
+  "popout:showMain",
   "popout:employeeMenu",
   "popout:ready",
   "popout:state",
   "popout:handedOver",
   "popout:take",
   "office:pageShot",
+  "screenshot:menu",
+  "screenshot:save",
 ];
 
 /** plans:openLink's own gate (Task 8, controller ruling). main's own
@@ -164,6 +168,14 @@ export type DesktopOnlyDeps = {
   >;
   /** The main window's webContents id: which calls are the main renderer's. */
   mainContentsId: () => number;
+  /** Brings the main window to the front (a pop-out asked: its link opened a
+   *  tab that only the main window can show). */
+  focusMain: () => void;
+  /** The topbar screenshot button (screenshot.ts). */
+  screenshots: Screenshots;
+  /** broadcast.local("screenshot:result", outcome) */
+  screenshotDone: (outcome: ScreenshotOutcome) => void;
+  platform: NodeJS.Platform;
 };
 
 /** The webContents id of whoever made an IPC call, or undefined. */
@@ -359,6 +371,10 @@ export function registerDesktopOnly(deps: DesktopOnlyDeps): void {
   deps.handle("popout:focus", (event, tabId, paneKey) =>
     fromMain(event) ? deps.popouts.focus(tabId, paneKey) : false,
   );
+  deps.handle("popout:showMain", (event) => {
+    const id = senderId(event);
+    if (id !== undefined && deps.popouts.tabOf(id) !== undefined) deps.focusMain();
+  });
   deps.handle("popout:list", (event) => (fromMain(event) ? deps.popouts.list() : []));
   deps.handle("popout:take", (event, tabId) =>
     fromMain(event) && typeof tabId === "string" ? deps.popouts.takeReturned(tabId) : undefined,
@@ -388,6 +404,23 @@ export function registerDesktopOnly(deps: DesktopOnlyDeps): void {
       return undefined;
     }
   });
+  // The screenshot button. The menu is native, so a hosted page's view can
+  // never paint over it; the capture runs here and only its outcome (a small
+  // thumbnail and an opaque id) goes back. Save takes the id and nothing else.
+  deps.handle("screenshot:menu", (event, x, y) => {
+    if (!fromMain(event)) return;
+    if (typeof x !== "number" || !Number.isFinite(x)) return;
+    if (typeof y !== "number" || !Number.isFinite(y)) return;
+    const template = screenshotMenuTemplate(deps.platform, deps.language, (mode) => {
+      void deps.screenshots.capture(mode).then(deps.screenshotDone);
+    });
+    deps.buildMenu(template).popup({ window: deps.window, x: Math.round(x), y: Math.round(y) });
+  });
+  deps.handle("screenshot:save", (event, id) =>
+    fromMain(event)
+      ? deps.screenshots.save(id)
+      : { ok: false, reason: "invalid", message: MESSAGES.screenshotGone(deps.language) },
+  );
   deps.handle("popout:ready", (event) => {
     const id = senderId(event);
     return id === undefined ? undefined : deps.popouts.ready(id);

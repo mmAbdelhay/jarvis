@@ -17,11 +17,36 @@ export function setTerminalLinksInternal(value: boolean): void {
  * normalizeInput and the app's navigation rules. Off: the system browser,
  * via plans:openLink, whose main-side gate allows http, https and mailto only
  * and drops anything else rather than handing it to the OS.
+ *
+ * A click must never silently do nothing: no project to open a tab in, or an
+ * openTab that throws or rejects, falls back to the system browser.
  */
-export function openTerminalLink(project: string, url: string): void {
-  if (openInternally) {
-    void window.jarvis.openTab(project, url);
+export function openTerminalLink(project: string | undefined, url: string): void {
+  const external = (): void => {
+    try {
+      void window.jarvis.plansOpenLink(url).catch(() => {});
+    } catch {
+      // Nothing further to fall back to.
+    }
+  };
+  if (!openInternally || project === undefined || project === "") {
+    external();
     return;
   }
-  void window.jarvis.plansOpenLink(url);
+  try {
+    void window.jarvis.openTab(project, url).then(showMainFromPopout).catch(external);
+  } catch {
+    external();
+  }
+}
+
+/** A pop-out shows only its own tab, so the tab a link opened is in the main
+ *  window, out of sight. Main ignores this from any window but a pop-out, so
+ *  it is called unconditionally and never steals focus from the main window. */
+function showMainFromPopout(): void {
+  try {
+    void window.jarvis.popoutShowMain?.()?.catch(() => {});
+  } catch {
+    // Best effort: the tab is open either way.
+  }
 }

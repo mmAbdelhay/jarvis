@@ -1,6 +1,8 @@
 // Search in the chat: its own field, a count, next and previous, matches
 // marked by ranges (the CSS Custom Highlight API where the browser has it,
-// <mark> text wrappers where it does not). Older pages are loaded on demand
+// <mark> text wrappers where it does not). Button labels (Copy, Show more) are
+// not searched, except a file path in a reply: its label is words of the reply.
+// Older pages are loaded on demand
 // while it searches, with a visible Stop. Text hidden inside a closed row is
 // not searched until it is opened.
 import { el, fmt, ICONS, icon, type Translate } from "./dom.js";
@@ -54,7 +56,7 @@ function textNodes(root: HTMLElement): Text[] {
       const parent = node.parentElement;
       if (parent === null || node.nodeValue === "" || node.nodeValue === null)
         return NodeFilter.FILTER_REJECT;
-      if (parent.closest("[hidden], button, .ac-working, .ac-menu") !== null)
+      if (parent.closest("[hidden], button:not(.ac-path), .ac-working, .ac-menu") !== null)
         return NodeFilter.FILTER_REJECT;
       return NodeFilter.FILTER_ACCEPT;
     },

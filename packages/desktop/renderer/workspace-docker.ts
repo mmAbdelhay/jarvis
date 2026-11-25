@@ -1,5 +1,7 @@
 import type { DockerRow, DockerView, GitViewResult } from "../src/ipc.js";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
+import { loadLinks } from "./terminal-addons.js";
+import { openTerminalLink } from "./terminal-links.js";
 import { onTerminalFontSize, terminalFontSize } from "./terminal-font.js";
 import { TERMINAL_FONT } from "./terminal-theme.js";
 import { FitAddon } from "./vendor/addon-fit.mjs";
@@ -144,7 +146,7 @@ function getPane(tabId: string): Pane {
  *  read-only: no terminal.onData wiring, because there is nothing to type
  *  into a log. Without the addon the log would render at xterm's default
  *  80×24 inside a pane that grows with the window, and would never reflow. */
-function ensureTerminal(pane: Pane): Terminal {
+function ensureTerminal(pane: Pane, project: string): Terminal {
   if (pane.terminal !== undefined) return pane.terminal;
   // The placeholder and the terminal are the same slot: whichever the pane
   // is showing, it is showing exactly one.
@@ -161,6 +163,11 @@ function ensureTerminal(pane: Pane): Terminal {
   const fit = new FitAddon();
   terminal.loadAddon(fit);
   terminal.open(pane.logHost);
+  try {
+    loadLinks(terminal, (url) => openTerminalLink(project, url));
+  } catch {
+    // Links are an enhancement; the log stays readable without them.
+  }
   pane.terminal = terminal;
   pane.fit = fit;
   refit(pane);
@@ -197,7 +204,7 @@ function selectRow(host: HTMLElement, tabId: string, project: string, row: Docke
   // The main process already unfollows whatever this tab was following
   // before — a second dockerFollow call replaces the first, it does not
   // stack with it.
-  ensureTerminal(pane).clear();
+  ensureTerminal(pane, project).clear();
   void window.jarvis.dockerFollow(tabId, project, row.container);
 
   for (const element of host.querySelectorAll(".workspace-docker-row")) {

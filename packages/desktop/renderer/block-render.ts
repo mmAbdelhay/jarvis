@@ -148,11 +148,13 @@ function paint(terminal: Terminal, element: HTMLElement): void {
   element.replaceChildren();
   const buffer = terminal.buffer.active;
   const lastRow = lastWrittenRow(buffer);
+  const wrapped: boolean[] = [];
 
   for (let y = 0; y <= lastRow; y += 1) {
     const line = buffer.getLine(y);
     const row = document.createElement("div");
     row.className = "block-line";
+    wrapped.push(line?.isWrapped === true);
     if (line === undefined) {
       element.append(row);
       continue;
@@ -178,6 +180,124 @@ function paint(terminal: Terminal, element: HTMLElement): void {
     trimTrailingSpaces(row);
     element.append(row);
   }
+  // Cheap gate first: most output has no URL, and a large one must not pay
+  // for a scan it cannot use.
+  if ((element.textContent ?? "").includes("http")) {
+    try {
+      linkifyRows([...element.children] as HTMLElement[], wrapped);
+    } catch {
+      // Unlinked text is still correct text.
+    }
+  }
+}
+
+const URL_PATTERN = /https?:\/\/[^\s<>"'`\\^|{}]+/g;
+const TRAILING_PUNCTUATION = /[.,;:!?'"*~]$/;
+const BRACKETS: Record<string, string> = { ")": "(", "]": "[" };
+
+/** The URL at the start of `raw` with trailing punctuation and closing
+ *  brackets that have no opener inside the URL taken off — "(see https://a.b)"
+ *  links https://a.b, and https://a.b/w_(v) keeps its own pair. */
+function trimUrl(raw: string): string {
+  let url = raw;
+  for (;;) {
+    const last = url.at(-1) ?? "";
+    if (TRAILING_PUNCTUATION.test(url)) {
+      url = url.slice(0, -1);
+      continue;
+    }
+    const opener = BRACKETS[last];
+    if (opener !== undefined) {
+      const opens = url.split(opener).length - 1;
+      const closes = url.split(last).length - 1;
+      if (closes > opens) {
+        url = url.slice(0, -1);
+        continue;
+      }
+    }
+    return url;
+  }
+}
+
+/**
+ * Wraps http(s) URLs in `.block-link` spans, in place. Rows that soft-wrapped
+ * into each other are searched as one string so a wrapped URL is found whole;
+ * each row's piece of it is a link to the full URL. Only the existing spans
+ * are split (cloned without children, so colour and weight come along) and
+ * every piece's text is set through textContent — the text, its order and so
+ * what is copied or searched are unchanged.
+ */
+function linkifyRows(rows: HTMLElement[], wrapped: boolean[]): void {
+  let start = 0;
+  while (start < rows.length) {
+    let end = start + 1;
+    while (end < rows.length && wrapped[end] === true) end += 1;
+    linkifyGroup(rows.slice(start, end));
+    start = end;
+  }
+}
+
+function linkifyGroup(rows: HTMLElement[]): void {
+  const text = rows.map((row) => row.textContent ?? "").join("");
+  if (!text.includes("http")) return;
+  const found: { from: number; to: number; url: string }[] = [];
+  for (const match of text.matchAll(URL_PATTERN)) {
+    const url = trimUrl(match[0]);
+    if (/^https?:\/\/$/.test(url)) continue;
+    found.push({ from: match.index, to: match.index + url.length, url });
+  }
+  if (found.length === 0) return;
+
+  let offset = 0;
+  for (const row of rows) {
+    for (const span of [...row.children] as HTMLElement[]) {
+      const own = span.textContent ?? "";
+      const spanFrom = offset;
+      const spanTo = offset + own.length;
+      offset = spanTo;
+      const hits = found.filter((hit) => hit.from < spanTo && hit.to > spanFrom);
+      if (hits.length === 0) continue;
+
+      const pieces: HTMLElement[] = [];
+      let cursor = spanFrom;
+      const piece = (from: number, to: number, url: string | undefined): void => {
+        if (to <= from) return;
+        const node = span.cloneNode(false) as HTMLElement;
+        node.textContent = own.slice(from - spanFrom, to - spanFrom);
+        if (url !== undefined) {
+          node.classList.add("block-link");
+          node.dataset["url"] = url;
+        }
+        pieces.push(node);
+      };
+      for (const hit of hits) {
+        const from = Math.max(hit.from, spanFrom);
+        const to = Math.min(hit.to, spanTo);
+        piece(cursor, from, undefined);
+        piece(from, to, hit.url);
+        cursor = to;
+      }
+      piece(cursor, spanTo, undefined);
+      span.replaceWith(...pieces);
+    }
+  }
+}
+
+/**
+ * One click handler for every block in `list`: a plain click on a link opens
+ * it through `openLink`. A click that ends a drag-selection is the user
+ * copying text, not following a link, so it is left alone.
+ */
+export function attachBlockLinks(list: HTMLElement, openLink: (url: string) => void): void {
+  list.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const link = target.closest<HTMLElement>(".block-link");
+    const url = link?.dataset["url"];
+    if (url === undefined || !/^https?:\/\//i.test(url)) return;
+    if (window.getSelection()?.isCollapsed === false) return;
+    openLink(url);
+  });
 }
 
 /** Rows past the last one the program wrote are padding, not output. */
