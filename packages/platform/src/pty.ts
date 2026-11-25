@@ -103,6 +103,17 @@ const INHERITED_AGENT_MARKERS = [
 const BILLING_OVERRIDE = "ANTHROPIC_API_KEY";
 
 /**
+ * What the AppImage runtime exports for its own mount (updater.ts strips the
+ * same set for its swap script). ARGV0 is the one that bites: zsh uses an
+ * exported ARGV0 as argv[0] of every command it runs, so an agent typed into
+ * a pane showed in `ps` as the .AppImage path, the process scan never
+ * matched it, and the pane's Chat | Term switch never appeared on Linux.
+ * Only removed when APPIMAGE says the runtime set them, so a user's own
+ * ARGV0 elsewhere is left alone.
+ */
+const APPIMAGE_RUNTIME_ENV = ["APPIMAGE", "APPDIR", "ARGV0", "OWD"];
+
+/**
  * The args an agent is launched with: whatever the config specifies, plus
  * `--model` when the config names one and `--session-id` with the id
  * SessionManager already minted for this session.
@@ -206,9 +217,10 @@ export function resolveEnv(source: EnvSource): NodeJS.ProcessEnv {
 }
 
 /**
- * A copy of `env` with the two classes of variable above removed: the
- * markers a Claude Code session leaves for its children, and the ambient
- * API key that would outrank an account wrapper's own credentials.
+ * A copy of `env` with the classes of variable above removed: the markers
+ * a Claude Code session leaves for its children, the ambient API key that
+ * would outrank an account wrapper's own credentials, and the AppImage
+ * runtime's own variables.
  *
  * Shared by the agent spawner and the Terminal tab's shell spawner
  * (shell.ts), because the reasoning is identical for both: a shell the user
@@ -220,6 +232,9 @@ export function sanitizedShellEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const clean: NodeJS.ProcessEnv = { ...env };
   for (const marker of INHERITED_AGENT_MARKERS) delete clean[marker];
   delete clean[BILLING_OVERRIDE];
+  if (env["APPIMAGE"] !== undefined) {
+    for (const name of APPIMAGE_RUNTIME_ENV) delete clean[name];
+  }
   return clean;
 }
 
