@@ -8,6 +8,8 @@ version and the downloads. This file is the index.
 
 ## Unreleased
 
+## [0.1.16] — 2026-11-25
+
 - Terminal: the Chat view shows a quiet one-row status under the composer for Claude Code,
   Codex and Copilot: the account and branch on the left, each usage limit as a small meter and
   percent on the right (amber with its reset time from 80%, red from 95%, with words for screen
