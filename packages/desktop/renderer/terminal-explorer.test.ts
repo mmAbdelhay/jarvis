@@ -516,13 +516,20 @@ describe("the terminal explorer's writes", () => {
       "«explorerOpenInEditor»",
       "«explorerNewFile»",
       "«explorerNewFolder»",
+      "«explorerCopyPath»",
+      "«explorerCopyRelativePath»",
       "«explorerRename»",
       "«explorerTrash»",
     ]);
 
     // A file has no folder to open.
     rightClick(view.element.querySelector('[data-path="/proj/read me.md"]'));
-    expect(menuItems()).toEqual(["«explorerRename»", "«explorerTrash»"]);
+    expect(menuItems()).toEqual([
+      "«explorerCopyPath»",
+      "«explorerCopyRelativePath»",
+      "«explorerRename»",
+      "«explorerTrash»",
+    ]);
 
     rightClick(view.element.querySelector(".file-tree"));
     expect(menuItems()).toEqual([
@@ -590,7 +597,7 @@ describe("the terminal explorer's writes", () => {
     rightClick(view.element.querySelector('[data-path="/proj/read me.md"]'));
     const rename = [
       ...document.querySelectorAll<HTMLButtonElement>(".terminal-explorer-menu-item"),
-    ][0];
+    ].find((item) => item.textContent === "«explorerRename»");
     rename?.click();
     typeName("src");
     await settle();
@@ -600,6 +607,41 @@ describe("the terminal explorer's writes", () => {
       "«explorerErrorExists»",
     );
     view.dispose();
+  });
+
+  // For pasting a path into an agent running in that shell: the absolute
+  // path, or the path relative to the sidebar's root — the shell's cwd.
+  it("copies a row's absolute or relative path to the clipboard", async () => {
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    try {
+      const { view } = build();
+      view.setRoot("tab-1", "/proj");
+      await settle();
+      view.element.querySelector<HTMLElement>('[data-path="/proj/src"]')?.click();
+      await settle();
+
+      const pick = (label: string) =>
+        [...document.querySelectorAll<HTMLButtonElement>(".terminal-explorer-menu-item")]
+          .find((item) => item.textContent === label)
+          ?.click();
+
+      rightClick(view.element.querySelector('[data-path="/proj/src/main.ts"]'));
+      pick("«explorerCopyPath»");
+      expect(writeText).toHaveBeenLastCalledWith("/proj/src/main.ts");
+      expect(document.querySelector(".terminal-explorer-menu")).toBeNull();
+
+      rightClick(view.element.querySelector('[data-path="/proj/src/main.ts"]'));
+      pick("«explorerCopyRelativePath»");
+      expect(writeText).toHaveBeenLastCalledWith("src/main.ts");
+
+      rightClick(view.element.querySelector('[data-path="/proj/read me.md"]'));
+      pick("«explorerCopyRelativePath»");
+      expect(writeText).toHaveBeenLastCalledWith("read me.md");
+      view.dispose();
+    } finally {
+      Reflect.deleteProperty(navigator, "clipboard");
+    }
   });
 
   it("moves a row to the trash without asking, then re-reads", async () => {

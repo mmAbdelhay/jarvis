@@ -210,6 +210,19 @@ export function createTerminalExplorer(
     });
   }
 
+  /** Puts a row's path on the clipboard — for pasting into an agent
+   *  running in that shell. Relative is to the sidebar's root, which is the
+   *  shell's own cwd: the same base the agent resolves paths against. */
+  function copyPath(path: string, relative: boolean): void {
+    const root = rooted?.path;
+    let text = path;
+    if (relative && root !== undefined) {
+      const prefix = root.endsWith("/") ? root : `${root}/`;
+      if (path.startsWith(prefix)) text = path.slice(prefix.length);
+    }
+    attempt(() => void navigator.clipboard?.writeText(text).catch(() => {}));
+  }
+
   function trash(path: string): void {
     if (writes === undefined) return;
     void perform((paneKey) => writes.trash(paneKey, path));
@@ -233,6 +246,8 @@ export function createTerminalExplorer(
       items.push(["explorerNewFolder", () => create(folder, "directory")]);
     }
     if (target !== undefined) {
+      items.push(["explorerCopyPath", () => copyPath(target.path, false)]);
+      items.push(["explorerCopyRelativePath", () => copyPath(target.path, true)]);
       items.push(["explorerRename", () => rename(target.path)]);
       items.push(["explorerTrash", () => trash(target.path)]);
     }
