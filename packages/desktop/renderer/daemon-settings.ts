@@ -157,7 +157,7 @@ async function change(run: () => Promise<ChangeResult>): Promise<void> {
 /** Once, at app start (initSettings): the labels and the listeners. */
 export function initDaemonSettings(): void {
   const language = PRIMARY_LANGUAGE;
-  $("settings-general-title").textContent = MESSAGES.daemonGeneral(language).toUpperCase();
+  $("settings-general-title").textContent = MESSAGES.daemonGeneral(language);
   const nav = document.getElementById("settings-nav-general");
   if (nav) nav.textContent = MESSAGES.daemonGeneral(language);
   $("settings-daemon-label").textContent = MESSAGES.daemonTitle(language);

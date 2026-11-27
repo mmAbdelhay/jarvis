@@ -738,31 +738,45 @@
            last clicked; :target alone can't carry that (it only ever
            matches the section, never the link that pointed at it). -->
       <nav class="settings-nav" aria-label="Settings sections">
-        <a id="settings-nav-general" class="settings-nav-link" href="#settings-section-general">General</a>
-        <a class="settings-nav-link settings-nav-link--on" href="#settings-section-agents">Agents</a>
+        <!-- Group headings: bilingual, so settings.ts (wireSettingsNav) sets
+             their text from MESSAGES. -->
+        <div id="settings-nav-group-app" class="settings-nav-group"></div>
+        <a id="settings-nav-general" class="settings-nav-link settings-nav-link--on" href="#settings-section-general">General</a>
+        <a class="settings-nav-link" href="#settings-section-terminal">Terminal</a>
+        <a class="settings-nav-link" href="#settings-section-browser">Browser</a>
+        <a id="settings-nav-awake" class="settings-nav-link" href="#settings-section-awake">Keep awake</a>
+        <a id="settings-nav-header" class="settings-nav-link" href="#settings-section-header">Header</a>
+        <div id="settings-nav-group-agents" class="settings-nav-group"></div>
+        <a class="settings-nav-link" href="#settings-section-agents">Agents</a>
         <a class="settings-nav-link" href="#settings-section-routing">Routing</a>
+        <a class="settings-nav-link" href="#settings-section-brain">Brain</a>
+        <div id="settings-nav-group-projects" class="settings-nav-group"></div>
         <a class="settings-nav-link" href="#settings-section-projects">Projects</a>
         <a class="settings-nav-link" href="#settings-section-databases">Databases</a>
         <a class="settings-nav-link" href="#settings-section-editors">Editor roots</a>
         <a class="settings-nav-link" href="#settings-section-docker">Docker</a>
         <a class="settings-nav-link" href="#settings-section-chat">Chat</a>
         <a id="settings-nav-reviews" class="settings-nav-link" href="#settings-section-reviews">Reviews</a>
-        <a id="settings-nav-awake" class="settings-nav-link" href="#settings-section-awake">Keep awake</a>
-        <a class="settings-nav-link" href="#settings-section-brain">Brain</a>
+        <div id="settings-nav-group-voice" class="settings-nav-group"></div>
         <a class="settings-nav-link" href="#settings-section-voice">Voice</a>
-        <a id="settings-nav-header" class="settings-nav-link" href="#settings-section-header">Header</a>
-        <a class="settings-nav-link" href="#settings-section-terminal">Terminal</a>
-        <a class="settings-nav-link" href="#settings-section-browser">Browser</a>
         <a class="settings-nav-link" href="#settings-section-whisper">Whisper</a>
+        <div id="settings-nav-group-devices" class="settings-nav-group"></div>
         <a id="settings-nav-remote" class="settings-nav-link" href="#settings-section-remote">Remote access</a>
       </nav>
       <div class="spacer"></div>
       <div class="settings-head-actions">
         <button id="settings-tools" class="workspace-nav" type="button">Tools…</button>
-        <button id="settings-restart" class="workspace-nav" type="button" hidden>Restart Jarvis</button>
-        <button id="settings-save" class="workspace-nav workspace-nav--primary" type="button">Save</button>
       </div>
-      <span id="settings-status" class="mono"></span>
+    </div>
+
+    <!-- What the last change did, and the way back from it. Above the
+         section rather than at the foot of the nav: it is read right after
+         an edit, so it sits where the eye already is. -->
+    <div class="settings-bar">
+      <span id="settings-status" role="status" aria-live="polite"></span>
+      <div class="spacer"></div>
+      <button id="settings-restart" class="settings-add settings-add--primary" type="button" hidden>Restart Jarvis</button>
+      <button id="settings-undo" class="settings-add" type="button" disabled></button>
     </div>
 
     <div class="settings-body">
@@ -827,7 +841,7 @@
 
       <section class="settings-section" id="settings-section-agents">
         <div class="settings-section-head">
-          <div class="lbl">AGENTS</div>
+          <div class="lbl">Agents</div>
           <button id="settings-agent-add" class="settings-add" type="button">+ Add agent</button>
         </div>
         <div id="settings-agents" class="settings-rows"></div>
@@ -835,7 +849,7 @@
 
       <section class="settings-section" id="settings-section-routing">
         <div class="settings-section-head">
-          <div class="lbl">ROUTING</div>
+          <div class="lbl">Routing</div>
           <button id="settings-routing-add" class="settings-add" type="button">+ Add rule</button>
         </div>
         <div id="settings-routing" class="settings-rows"></div>
@@ -843,7 +857,7 @@
 
       <section class="settings-section" id="settings-section-projects">
         <div class="settings-section-head">
-          <div class="lbl">PROJECTS</div>
+          <div class="lbl">Projects</div>
           <button id="settings-project-add" class="settings-add" type="button">+ Add project</button>
         </div>
         <div id="settings-projects" class="settings-rows"></div>
@@ -851,7 +865,7 @@
 
       <section class="settings-section" id="settings-section-databases">
         <div class="settings-section-head">
-          <div class="lbl">DATABASES</div>
+          <div class="lbl">Databases</div>
           <button id="settings-database-add" class="settings-add" type="button">+ Add connection</button>
         </div>
         <div id="settings-databases" class="settings-rows"></div>
@@ -859,7 +873,7 @@
 
       <section class="settings-section" id="settings-section-editors">
         <div class="settings-section-head">
-          <div class="lbl">EDITOR ROOTS</div>
+          <div class="lbl">Editor roots</div>
           <button id="settings-editor-add" class="settings-add" type="button">+ Add root</button>
         </div>
         <div id="settings-editors" class="settings-rows"></div>
@@ -867,7 +881,7 @@
 
       <section class="settings-section" id="settings-section-docker">
         <div class="settings-section-head">
-          <div class="lbl">DOCKER</div>
+          <div class="lbl">Docker</div>
           <button id="settings-docker-autopopulate" class="settings-add" type="button">
             Auto-populate
           </button>
@@ -879,7 +893,7 @@
 
       <section class="settings-section" id="settings-section-chat">
         <div class="settings-section-head">
-          <div class="lbl">CHAT</div>
+          <div class="lbl">Chat</div>
           <button id="settings-chat-add" class="settings-add" type="button">+ Add chat</button>
         </div>
         <div id="settings-chat" class="settings-rows"></div>
@@ -899,9 +913,9 @@
       </section>
 
       <section class="settings-section" id="settings-section-brain">
-        <div class="lbl">BRAIN</div>
+        <div class="lbl">Brain</div>
         <div class="settings-field">
-          <label for="settings-brain-cwd">cwd</label>
+          <label for="settings-brain-cwd">working directory</label>
           <input id="settings-brain-cwd" type="text" class="mono" autocomplete="off" />
         </div>
         <div class="settings-field">
@@ -915,7 +929,7 @@
       </section>
 
       <section class="settings-section" id="settings-section-voice">
-        <div class="lbl">VOICE</div>
+        <div class="lbl">Voice</div>
         <div class="settings-field">
           <label for="settings-voice-en">english voice</label>
           <div class="settings-voice-pick">
@@ -994,8 +1008,8 @@
       </section>
 
       <section class="settings-section" id="settings-section-terminal">
-        <div class="lbl">TERMINAL</div>
-        <!-- Applies to every open terminal the moment Save is pressed —
+        <div class="lbl">Terminal</div>
+        <!-- Applies to every open terminal the moment it is changed —
              renderer/terminal-font.ts. The range matches config.ts's. -->
         <div class="settings-field">
           <label for="settings-terminal-font-size">font size</label>
@@ -1005,7 +1019,7 @@
       </section>
 
       <section class="settings-section" id="settings-section-browser">
-        <div class="lbl">BROWSER</div>
+        <div class="lbl">Browser</div>
         <!-- A page's window.open popup — a sign-in window, a Meet window —
              opens as a real window that can still talk to the page that
              opened it. Off, popups open as ordinary tabs instead, which
@@ -1036,13 +1050,13 @@
       </section>
 
       <section class="settings-section" id="settings-section-whisper">
-        <div class="lbl">WHISPER</div>
+        <div class="lbl">Whisper</div>
         <div class="settings-field">
-          <label for="settings-whisper-binary">binary path</label>
+          <label for="settings-whisper-binary">whisper binary</label>
           <input id="settings-whisper-binary" type="text" class="mono" autocomplete="off" />
         </div>
         <div class="settings-field">
-          <label for="settings-whisper-model">model path</label>
+          <label for="settings-whisper-model">model file</label>
           <input id="settings-whisper-model" type="text" class="mono" autocomplete="off" />
         </div>
       </section>

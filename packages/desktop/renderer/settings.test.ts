@@ -4,7 +4,13 @@ import { parseConfig, type JarvisConfig } from "../src/config.js";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 import { PERSONAL_PROJECT } from "../src/personal.js";
 import type { BindChoice, RemoteStatus } from "@jarvis/remote";
-import { initSettings, openSettings, savePrayerSettings, saveSettings } from "./settings.js";
+import {
+  initSettings,
+  openSettings,
+  relativeToProject,
+  savePrayerSettings,
+  saveSettings,
+} from "./settings.js";
 import { initKeepAwake } from "./keep-awake.js";
 import { setTerminalFontBase, terminalFontSize } from "./terminal-font.js";
 import { encodeQr, qrToCanvas } from "./vendor/qr.js";
@@ -115,7 +121,7 @@ function harness(config: JarvisConfig = sample()): { calls: Recorded[]; config: 
     <div id="settings-status"></div>
     <button id="settings-restart" hidden></button>
     <button id="settings-tools"></button>
-    <button id="settings-save"></button>
+    <button id="settings-undo"></button>
     <button id="settings-agent-add"></button>
     <div id="settings-agents"></div>
     <button id="settings-routing-add"></button>
@@ -348,6 +354,23 @@ function flush(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+const jarvisApi = (): Record<string, unknown> =>
+  (window as unknown as { jarvis: Record<string, unknown> }).jarvis;
+
+let nudges = 0;
+
+/** Settings writes a change as it is committed and writes nothing when
+ *  nothing changed, so a test that wants to see what the draft holds makes
+ *  one unrelated edit — a browser home page, which no startup service reads
+ *  — and looks at the write that follows. */
+async function nudge(): Promise<void> {
+  const field = document.getElementById("settings-browser-homepage") as HTMLInputElement;
+  nudges += 1;
+  field.value = `https://nudge.test/${nudges}`;
+  change(field);
+  await flush();
+}
+
 beforeEach(() => {
   harness();
   initSettings();
@@ -433,12 +456,11 @@ describe("settings row editing", () => {
 
     commandInput.value = "claude-main-renamed-command";
     commandInput.dispatchEvent(new Event("input", { bubbles: true }));
-    document.getElementById("settings-save")?.click();
-    await Promise.resolve();
+    await nudge();
 
     // The edit is not committed yet — only "input" fired, not "change" —
-    // so the draft actually sent to Save still has the original value.
-    const saved = calls.find((entry) => entry.call === "saveSettings");
+    // so the draft the next write sends still has the original value.
+    const saved = calls.findLast((entry) => entry.call === "saveSettings");
     const sent = saved?.args[0] as JarvisConfig | undefined;
     expect(sent?.registry.agents["claude-main"]?.command).toBe("claude-main");
   });
@@ -516,7 +538,6 @@ describe("settings row editing", () => {
 
     nameInput.value = "acme-renamed";
     change(nameInput);
-    document.getElementById("settings-save")?.click();
     await Promise.resolve();
   });
 });
@@ -567,23 +588,81 @@ describe("Test button", () => {
 });
 
 describe("Save and live apply", () => {
-  it("sends the whole draft on Save", async () => {
+  it("writes nothing when Settings is opened and left alone", async () => {
+    const { calls } = harness();
+    initSettings();
+    await openSettings();
+    await flush();
+
+    expect(calls.filter((entry) => entry.call === "saveSettings")).toHaveLength(0);
+  });
+
+  it("sends the whole draft as soon as a change is committed, with no Save press", async () => {
     const { calls } = harness();
     initSettings();
     await openSettings();
 
-    document.getElementById("settings-save")?.click();
-    await Promise.resolve();
+    await nudge();
 
-    expect(calls).toHaveLength(1);
-    expect(calls[0]?.call).toBe("saveSettings");
+    const saves = calls.filter((entry) => entry.call === "saveSettings");
+    expect(saves).toHaveLength(1);
+    expect(savedConfig(saves[0]).browser.homePage).toBe(`https://nudge.test/${nudges}`);
+    expect(savedConfig(saves[0]).registry.agents["claude-main"]?.command).toBe("claude-main");
+  });
+
+  it("writes once for several edits made in the same turn", async () => {
+    const { calls } = harness();
+    initSettings();
+    await openSettings();
+
+    const cwd = document.getElementById("settings-brain-cwd") as HTMLInputElement;
+    cwd.value = "/new/cwd";
+    change(cwd);
+    await nudge();
+
+    const saves = calls.filter((entry) => entry.call === "saveSettings");
+    expect(saves).toHaveLength(1);
+    expect(savedConfig(saves[0]).brain.cwd).toBe("/new/cwd");
+  });
+
+  // The write that is in flight was built from the draft as it stood then;
+  // an edit made before it answers must still reach the file.
+  it("saves again when an edit lands while a write is in flight", async () => {
+    const { calls } = harness();
+    initSettings();
+    let release: (() => void) | undefined;
+    const sent: JarvisConfig[] = [];
+    jarvisApi()["saveSettings"] = (draft: JarvisConfig) => {
+      sent.push(structuredClone(draft));
+      return new Promise((resolve) => {
+        release = () => resolve({ ok: true });
+      });
+    };
+    await openSettings();
+
+    const cwd = document.getElementById("settings-brain-cwd") as HTMLInputElement;
+    cwd.value = "/first";
+    change(cwd);
+    await flush();
+    cwd.value = "/second";
+    change(cwd);
+    await flush();
+    expect(sent.map((config) => config.brain.cwd)).toEqual(["/first"]);
+
+    release?.();
+    await flush();
+    expect(sent.map((config) => config.brain.cwd)).toEqual(["/first", "/second"]);
+    expect(calls).toHaveLength(0);
+    // Let the second write answer too: the module outlives this test, and a
+    // write left in flight would hold back every save after it.
+    release?.();
+    await flush();
   });
 
   it("shows live apply status without a restart prompt after a successful save", async () => {
     await openSettings();
 
-    document.getElementById("settings-save")?.click();
-    await Promise.resolve();
+    await nudge();
 
     expect((document.getElementById("settings-restart") as HTMLElement).hidden).toBe(true);
     expect(document.getElementById("settings-status")?.textContent).toBe(
@@ -596,12 +675,41 @@ describe("Save and live apply", () => {
     const cwd = document.getElementById("settings-brain-cwd") as HTMLInputElement;
     cwd.value = "/new/cwd";
     change(cwd);
-    document.getElementById("settings-save")?.click();
-    await Promise.resolve();
+    await flush();
     expect((document.getElementById("settings-restart") as HTMLElement).hidden).toBe(false);
     expect(document.getElementById("settings-status")?.textContent).toBe(
       MESSAGES.settingsSavedRestart(PRIMARY_LANGUAGE),
     );
+  });
+
+  // The old button vanished on the next edit, so a restart that was still
+  // owed stopped being offered the moment anything else was touched.
+  it("keeps offering the restart through later edits and a reopen, until the change is undone", async () => {
+    await openSettings();
+    const restart = () => (document.getElementById("settings-restart") as HTMLElement).hidden;
+    const cwd = document.getElementById("settings-brain-cwd") as HTMLInputElement;
+    const original = cwd.value;
+    cwd.value = "/new/cwd";
+    change(cwd);
+    await flush();
+    expect(restart()).toBe(false);
+
+    await nudge();
+    expect(restart()).toBe(false);
+
+    (window as unknown as { jarvis: Record<string, unknown> }).jarvis["getSettings"] = () => {
+      const config = sample();
+      config.brain.cwd = "/new/cwd";
+      return Promise.resolve(config);
+    };
+    await openSettings();
+    expect(restart()).toBe(false);
+
+    const again = document.getElementById("settings-brain-cwd") as HTMLInputElement;
+    again.value = original;
+    change(again);
+    await flush();
+    expect(restart()).toBe(true);
   });
 
   it("saves a new terminal font size and applies it live, without a restart prompt", async () => {
@@ -613,10 +721,9 @@ describe("Save and live apply", () => {
 
     input.value = "16";
     change(input);
-    document.getElementById("settings-save")?.click();
-    await Promise.resolve();
+    await flush();
 
-    const saved = savedConfig(calls.find((entry) => entry.call === "saveSettings"));
+    const saved = savedConfig(calls.findLast((entry) => entry.call === "saveSettings"));
     expect(saved.terminal.fontSize).toBe(16);
     expect(terminalFontSize()).toBe(16);
     expect((document.getElementById("settings-restart") as HTMLElement).hidden).toBe(true);
@@ -639,7 +746,7 @@ describe("Save and live apply", () => {
   it("shows the headline and technical detail on a failed save, without a restart prompt", async () => {
     harness();
     initSettings();
-    (window as unknown as { jarvis: Record<string, unknown> }).jarvis["saveSettings"] = () =>
+    jarvisApi()["saveSettings"] = () =>
       Promise.resolve({
         ok: false,
         text: "Couldn't save settings — see below.",
@@ -648,8 +755,7 @@ describe("Save and live apply", () => {
       });
     await openSettings();
 
-    document.getElementById("settings-save")?.click();
-    await Promise.resolve();
+    await nudge();
 
     const status = document.getElementById("settings-status");
     expect(status?.textContent).toContain("Couldn't save settings");
@@ -657,12 +763,51 @@ describe("Save and live apply", () => {
     expect((document.getElementById("settings-restart") as HTMLElement).hidden).toBe(true);
   });
 
+  // A refused write changed nothing on disk, so the edit is still unsaved:
+  // it stays on screen and goes out again with the next change.
+  it("keeps a refused edit in the draft and sends it again with the next change", async () => {
+    harness();
+    initSettings();
+    const sent: JarvisConfig[] = [];
+    let accept = false;
+    jarvisApi()["saveSettings"] = (draft: JarvisConfig) => {
+      sent.push(structuredClone(draft));
+      return Promise.resolve(
+        accept ? { ok: true } : { ok: false, text: "No.", detail: "bad", language: "en" },
+      );
+    };
+    await openSettings();
+    const cwd = document.getElementById("settings-brain-cwd") as HTMLInputElement;
+    cwd.value = "/kept";
+    change(cwd);
+    await flush();
+    expect((document.getElementById("settings-undo") as HTMLButtonElement).disabled).toBe(true);
+
+    accept = true;
+    await nudge();
+    expect(sent.at(-1)?.brain.cwd).toBe("/kept");
+    expect(document.getElementById("settings-status")?.textContent).toBe(
+      MESSAGES.settingsSavedRestart(PRIMARY_LANGUAGE),
+    );
+  });
+
+  it("reports a write that threw as a failed save", async () => {
+    harness();
+    initSettings();
+    jarvisApi()["saveSettings"] = () => Promise.reject(new Error("socket closed"));
+    await openSettings();
+
+    await nudge();
+
+    const status = document.getElementById("settings-status");
+    expect(status?.textContent).toContain(MESSAGES.settingsSaveFailed(PRIMARY_LANGUAGE));
+    expect(status?.textContent).toContain("socket closed");
+  });
+
   it("calls restartApp when the restart button is clicked", async () => {
     const { calls } = harness();
     initSettings();
     await openSettings();
-    document.getElementById("settings-save")?.click();
-    await Promise.resolve();
 
     document.getElementById("settings-restart")?.click();
     await Promise.resolve();
@@ -672,8 +817,7 @@ describe("Save and live apply", () => {
 
   it("clears a stale save status when a field is edited again", async () => {
     await openSettings();
-    document.getElementById("settings-save")?.click();
-    await Promise.resolve();
+    await nudge();
     expect(document.getElementById("settings-status")?.textContent).toBe(
       MESSAGES.settingsSavedLive(PRIMARY_LANGUAGE),
     );
@@ -682,21 +826,115 @@ describe("Save and live apply", () => {
     cwd.value = "/new/cwd";
     change(cwd);
 
+    // Before the write this edit queued has answered.
     expect(document.getElementById("settings-status")?.textContent).toBe("");
-    expect((document.getElementById("settings-restart") as HTMLElement).hidden).toBe(true);
   });
 
-  it("keeps prayer edits in the draft until Save writes them", async () => {
+  it("writes prayer edits as they are made", async () => {
     const { calls } = harness();
     initSettings();
     await openSettings();
 
     await savePrayerSettings({ enabled: true });
-    expect(calls).toHaveLength(0);
+    await flush();
 
-    document.getElementById("settings-save")?.click();
-    await Promise.resolve();
-    expect(savedConfig(calls[0]).prayer).toEqual({ enabled: true });
+    expect(savedConfig(calls.findLast((entry) => entry.call === "saveSettings")).prayer).toEqual({
+      enabled: true,
+    });
+  });
+});
+
+describe("Undo", () => {
+  const undo = () => document.getElementById("settings-undo") as HTMLButtonElement;
+  const cwd = () => document.getElementById("settings-brain-cwd") as HTMLInputElement;
+
+  async function edit(value: string): Promise<void> {
+    cwd().value = value;
+    change(cwd());
+    await flush();
+  }
+
+  it("is off until something has been changed", async () => {
+    await openSettings();
+    expect(undo().disabled).toBe(true);
+    expect(undo().textContent).toBe(MESSAGES.settingsUndo(PRIMARY_LANGUAGE));
+
+    await edit("/one");
+    expect(undo().disabled).toBe(false);
+  });
+
+  it("puts the previous value back, on screen and in the file, one change at a time", async () => {
+    const { calls } = harness();
+    initSettings();
+    await openSettings();
+    const original = cwd().value;
+    await edit("/one");
+    await edit("/two");
+
+    undo().click();
+    await flush();
+    expect(cwd().value).toBe("/one");
+    expect(savedConfig(calls.findLast((entry) => entry.call === "saveSettings")).brain.cwd).toBe(
+      "/one",
+    );
+
+    undo().click();
+    await flush();
+    expect(document.getElementById("settings-status")?.textContent).toBe(
+      MESSAGES.settingsUndone(PRIMARY_LANGUAGE),
+    );
+    expect(cwd().value).toBe(original);
+    expect(savedConfig(calls.findLast((entry) => entry.call === "saveSettings")).brain.cwd).toBe(
+      original,
+    );
+    // Undoing is not itself a step to go back to.
+    expect(undo().disabled).toBe(true);
+  });
+
+  it("brings back a removed row", async () => {
+    await openSettings();
+    const rows = () => document.querySelectorAll("#settings-agents .settings-row").length;
+    const before = rows();
+
+    // The second agent: no routing rule points at it, so removing it leaves
+    // nothing half-filled and the removal is written at once.
+    document.querySelectorAll<HTMLElement>("#settings-agents .settings-row-remove")[1]?.click();
+    await flush();
+    expect(rows()).toBe(before - 1);
+
+    undo().click();
+    await flush();
+    expect(rows()).toBe(before);
+  });
+
+  // `remote` is also written by pairing and the Tailscale switch, so a
+  // snapshot's copy can be stale: restoring it could turn the bridge on.
+  it("never restores remote access from the snapshot", async () => {
+    const { calls } = harness();
+    initSettings();
+    await openSettings();
+    await edit("/one");
+
+    const port = document.getElementById("settings-remote-port") as HTMLInputElement;
+    port.value = "7799";
+    change(port);
+    await flush();
+    await edit("/two");
+
+    undo().click();
+    await flush();
+    const written = savedConfig(calls.findLast((entry) => entry.call === "saveSettings"));
+    expect(written.brain.cwd).toBe("/one");
+    expect(written.remote.port).toBe(7799);
+  });
+
+  it("forgets its steps when Settings is reopened", async () => {
+    await openSettings();
+    await edit("/one");
+    expect(undo().disabled).toBe(false);
+
+    await openSettings();
+    expect(undo().disabled).toBe(true);
   });
 });
 
@@ -737,10 +975,9 @@ describe("databases section", () => {
     )!;
     host.value = "db.internal";
     change(host);
-    document.getElementById("settings-save")?.click();
     await Promise.resolve();
 
-    const saved = calls.find((entry) => entry.call === "saveSettings")?.args[0] as JarvisConfig;
+    const saved = calls.findLast((entry) => entry.call === "saveSettings")?.args[0] as JarvisConfig;
     expect(saved.databases["acme"]?.[0]?.host).toBe("db.internal");
   });
 
@@ -756,10 +993,9 @@ describe("databases section", () => {
     change(port);
     port.value = "not a port";
     change(port);
-    document.getElementById("settings-save")?.click();
     await Promise.resolve();
 
-    const saved = calls.find((entry) => entry.call === "saveSettings")?.args[0] as JarvisConfig;
+    const saved = calls.findLast((entry) => entry.call === "saveSettings")?.args[0] as JarvisConfig;
     expect(saved.databases["acme"]?.[0]?.port).toBe(3307);
   });
 
@@ -807,10 +1043,9 @@ describe("databases section", () => {
     const select = document.querySelector<HTMLSelectElement>("#settings-databases select")!;
     select.value = "storefront";
     change(select);
-    document.getElementById("settings-save")?.click();
     await Promise.resolve();
 
-    const saved = calls.find((entry) => entry.call === "saveSettings")?.args[0] as JarvisConfig;
+    const saved = calls.findLast((entry) => entry.call === "saveSettings")?.args[0] as JarvisConfig;
     expect(saved.databases["acme"]).toBeUndefined();
     expect(saved.databases["storefront"]?.[0]?.id).toBe("main");
   });
@@ -823,10 +1058,9 @@ describe("databases section", () => {
     await openSettings();
 
     document.querySelector<HTMLElement>("#settings-projects .settings-row-remove")?.click();
-    document.getElementById("settings-save")?.click();
     await Promise.resolve();
 
-    const saved = calls.find((entry) => entry.call === "saveSettings")?.args[0] as JarvisConfig;
+    const saved = calls.findLast((entry) => entry.call === "saveSettings")?.args[0] as JarvisConfig;
     expect(saved.databases["acme"]).toBeUndefined();
   });
 
@@ -838,10 +1072,9 @@ describe("databases section", () => {
     const nameInput = document.querySelector<HTMLInputElement>("#settings-projects input")!;
     nameInput.value = "acme-2";
     change(nameInput);
-    document.getElementById("settings-save")?.click();
     await Promise.resolve();
 
-    const saved = calls.find((entry) => entry.call === "saveSettings")?.args[0] as JarvisConfig;
+    const saved = calls.findLast((entry) => entry.call === "saveSettings")?.args[0] as JarvisConfig;
     expect(saved.databases["acme"]).toBeUndefined();
     expect(saved.databases["acme-2"]?.[0]?.id).toBe("main");
   });
@@ -856,9 +1089,8 @@ describe("editor roots section", () => {
   }
 
   async function saved(calls: Recorded[]): Promise<JarvisConfig> {
-    document.getElementById("settings-save")?.click();
-    await Promise.resolve();
-    return calls.find((entry) => entry.call === "saveSettings")?.args[0] as JarvisConfig;
+    await nudge();
+    return calls.findLast((entry) => entry.call === "saveSettings")?.args[0] as JarvisConfig;
   }
 
   it("renders one row per root", async () => {
@@ -1119,10 +1351,9 @@ describe("voice section", () => {
     toggle.checked = false;
     change(toggle);
 
-    document.getElementById("settings-save")?.click();
     await Promise.resolve();
 
-    const saved = calls.find((entry) => entry.call === "saveSettings")?.args[0] as JarvisConfig;
+    const saved = calls.findLast((entry) => entry.call === "saveSettings")?.args[0] as JarvisConfig;
     expect(saved.voice.speakGreeting).toBe(false);
     // Silencing it must not touch the greeting itself.
     expect(saved.voice.greeting.en).not.toBe("");
@@ -1149,10 +1380,9 @@ describe("voice section", () => {
     toggle.checked = false;
     change(toggle);
 
-    document.getElementById("settings-save")?.click();
     await Promise.resolve();
 
-    const saved = calls.find((entry) => entry.call === "saveSettings")?.args[0] as JarvisConfig;
+    const saved = calls.findLast((entry) => entry.call === "saveSettings")?.args[0] as JarvisConfig;
     expect(saved.browser.allowPopups).toBe(false);
   });
 
@@ -1167,10 +1397,9 @@ describe("voice section", () => {
     toggle.checked = false;
     change(toggle);
 
-    document.getElementById("settings-save")?.click();
     await Promise.resolve();
 
-    const saved = calls.find((entry) => entry.call === "saveSettings")?.args[0] as JarvisConfig;
+    const saved = calls.findLast((entry) => entry.call === "saveSettings")?.args[0] as JarvisConfig;
     expect(saved.browser.openTerminalLinksInternally).toBe(false);
   });
 
@@ -1183,15 +1412,13 @@ describe("voice section", () => {
     const input = document.getElementById("settings-browser-homepage") as HTMLInputElement;
     input.value = "https://example.com";
     change(input);
-    document.getElementById("settings-save")?.click();
     await Promise.resolve();
 
-    let saved = calls.find((entry) => entry.call === "saveSettings")?.args[0] as JarvisConfig;
+    let saved = calls.findLast((entry) => entry.call === "saveSettings")?.args[0] as JarvisConfig;
     expect(saved.browser.homePage).toBe("https://example.com");
 
     input.value = "  ";
     change(input);
-    document.getElementById("settings-save")?.click();
     await Promise.resolve();
 
     const saves = calls.filter((entry) => entry.call === "saveSettings");
@@ -1212,10 +1439,9 @@ describe("voice section", () => {
     greeting.value = "Evening, boss.";
     change(greeting);
 
-    document.getElementById("settings-save")?.click();
     await Promise.resolve();
 
-    const saved = calls.find((entry) => entry.call === "saveSettings")?.args[0] as JarvisConfig;
+    const saved = calls.findLast((entry) => entry.call === "saveSettings")?.args[0] as JarvisConfig;
     expect(saved.voice.englishVoice).toBe("Daniel (Enhanced)");
     expect(saved.voice.greeting.en).toBe("Evening, boss.");
   });
@@ -1237,10 +1463,9 @@ describe("choosing the engine by choosing a voice", () => {
     const select = document.getElementById("settings-voice-en") as HTMLSelectElement;
     select.value = "Alan (neural)";
     change(select);
-    document.getElementById("settings-save")?.click();
     await Promise.resolve();
 
-    const saved = calls.find((entry) => entry.call === "saveSettings")?.args[0] as JarvisConfig;
+    const saved = calls.findLast((entry) => entry.call === "saveSettings")?.args[0] as JarvisConfig;
     expect(saved.voice.engine).toBe("piper");
   });
 
@@ -1255,10 +1480,9 @@ describe("choosing the engine by choosing a voice", () => {
     const select = document.getElementById("settings-voice-en") as HTMLSelectElement;
     select.value = "Samantha";
     change(select);
-    document.getElementById("settings-save")?.click();
     await Promise.resolve();
 
-    const saved = calls.find((entry) => entry.call === "saveSettings")?.args[0] as JarvisConfig;
+    const saved = calls.findLast((entry) => entry.call === "saveSettings")?.args[0] as JarvisConfig;
     expect(saved.voice.engine).toBe("say");
     expect(saved.voice.englishVoice).toBe("Samantha");
   });
@@ -1274,6 +1498,164 @@ describe("choosing the engine by choosing a voice", () => {
     expect((document.getElementById("settings-voice-en") as HTMLSelectElement).value).toBe(
       "Alan (neural)",
     );
+  });
+});
+
+describe("Browse beside a path field", () => {
+  /** Answers the next picker call, and records what it was asked. */
+  function picker(paths: string[]): { asked: unknown[] } {
+    const asked: unknown[] = [];
+    jarvisApi()["pickFiles"] = (options: unknown) => {
+      asked.push(options);
+      return Promise.resolve(paths);
+    };
+    return { asked };
+  }
+
+  const browseIn = (selector: string): HTMLButtonElement =>
+    document.querySelector<HTMLButtonElement>(`${selector} .settings-browse`)!;
+
+  it("picks a folder for a project, starting from its current path, and saves it", async () => {
+    const { calls } = harness();
+    initSettings();
+    const { asked } = picker(["/x/projects/moved"]);
+    await openSettings();
+
+    const button = browseIn("#settings-projects");
+    expect(button.textContent).toBe(MESSAGES.settingsBrowse(PRIMARY_LANGUAGE));
+    button.click();
+    await flush();
+
+    expect(asked).toEqual([{ directory: true, defaultPath: "/x/projects/acme" }]);
+    expect(
+      savedConfig(calls.findLast((entry) => entry.call === "saveSettings")).projects["acme"],
+    ).toBe("/x/projects/moved");
+  });
+
+  it("changes nothing when the dialog is cancelled", async () => {
+    const { calls } = harness();
+    initSettings();
+    picker([]);
+    await openSettings();
+
+    browseIn("#settings-projects").click();
+    await flush();
+
+    expect(calls.some((entry) => entry.call === "saveSettings")).toBe(false);
+  });
+
+  it("picks a file, not a folder, for the Whisper binary", async () => {
+    const { calls } = harness();
+    initSettings();
+    const { asked } = picker(["/opt/whisper/whisper-cli"]);
+    await openSettings();
+
+    const input = document.getElementById("settings-whisper-binary") as HTMLInputElement;
+    document
+      .querySelector<HTMLButtonElement>(
+        ".settings-path:has(#settings-whisper-binary) .settings-browse",
+      )!
+      .click();
+    await flush();
+
+    expect((asked[0] as { directory: boolean }).directory).toBe(false);
+    expect(input.value).toBe("/opt/whisper/whisper-cli");
+    expect(
+      savedConfig(calls.findLast((entry) => entry.call === "saveSettings")).whisper.binaryPath,
+    ).toBe("/opt/whisper/whisper-cli");
+  });
+
+  // parseConfig refuses an absolute editor root, and the dialog only ever
+  // answers with one.
+  it("stores an editor root relative to its project", async () => {
+    const config = sample();
+    config.editors = { acme: [{ name: "portal-vue", path: "portal-vue" }] };
+    const { calls } = harness(config);
+    initSettings();
+    const { asked } = picker(["/x/projects/acme/apps/web"]);
+    await openSettings();
+
+    browseIn("#settings-editors").click();
+    await flush();
+
+    expect(asked).toEqual([{ directory: true, defaultPath: "/x/projects/acme" }]);
+    expect(
+      savedConfig(calls.findLast((entry) => entry.call === "saveSettings")).editors["acme"]?.[0]
+        ?.path,
+    ).toBe("apps/web");
+  });
+
+  it("refuses an editor root outside its project, and says which project", async () => {
+    const config = sample();
+    config.editors = { acme: [{ name: "portal-vue", path: "portal-vue" }] };
+    const { calls } = harness(config);
+    initSettings();
+    picker(["/x/projects/acme-old/web"]);
+    await openSettings();
+
+    browseIn("#settings-editors").click();
+    await flush();
+
+    expect(calls.some((entry) => entry.call === "saveSettings")).toBe(false);
+    expect(document.getElementById("settings-status")?.textContent).toBe(
+      MESSAGES.settingsBrowseOutsideProject("acme", PRIMARY_LANGUAGE),
+    );
+  });
+
+  it("relativeToProject is separator-aware on both platforms", () => {
+    expect(relativeToProject("/p/acme", "/p/acme")).toBe(".");
+    expect(relativeToProject("/p/acme/", "/p/acme")).toBe(".");
+    expect(relativeToProject("/p/acme/a/b", "/p/acme/")).toBe("a/b");
+    expect(relativeToProject("/p/acme-old", "/p/acme")).toBeUndefined();
+    expect(relativeToProject("C:\\p\\acme\\web", "C:\\p\\acme")).toBe("web");
+    expect(relativeToProject("/elsewhere", "")).toBeUndefined();
+  });
+});
+
+describe("the section nav", () => {
+  function withNav(): void {
+    harness();
+    document.body.insertAdjacentHTML(
+      "beforeend",
+      `<nav>
+         <div id="settings-nav-group-app"></div>
+         <a class="settings-nav-link settings-nav-link--on" href="#one">One</a>
+         <a class="settings-nav-link" href="#two">Two</a>
+       </nav>
+       <section class="settings-section" id="one"></section>
+       <section class="settings-section" id="two"></section>`,
+    );
+    initSettings();
+  }
+
+  const shown = (): string[] =>
+    [...document.querySelectorAll(".settings-section--on")].map((section) => section.id);
+
+  it("shows the section whose link starts on, and only that one", () => {
+    withNav();
+    expect(shown()).toEqual(["one"]);
+  });
+
+  it("names each group of links in the app's language", () => {
+    withNav();
+    expect(document.getElementById("settings-nav-group-app")?.textContent).toBe(
+      MESSAGES.settingsNavGroup("app", PRIMARY_LANGUAGE),
+    );
+    for (const group of ["app", "agents", "projects", "voice", "devices"] as const) {
+      expect(MESSAGES.settingsNavGroup(group, "ar")).not.toBe(
+        MESSAGES.settingsNavGroup(group, "en"),
+      );
+    }
+  });
+
+  it("swaps to the section a link names, and marks that link current", () => {
+    withNav();
+    const two = document.querySelector<HTMLAnchorElement>('a[href="#two"]')!;
+    two.click();
+
+    expect(shown()).toEqual(["two"]);
+    expect(two.getAttribute("aria-current")).toBe("page");
+    expect(document.querySelector('a[href="#one"]')?.hasAttribute("aria-current")).toBe(false);
   });
 });
 
@@ -1300,6 +1682,99 @@ describe("settings docker section", () => {
     expect(boxes.map((box) => box.checked)).toEqual([true, false]);
   });
 
+  // The old picker filed every unmatched container under the first project,
+  // so one project and twenty unrelated containers read as twenty of its own.
+  it("gives a container outside every project no project at all", async () => {
+    await openSettings();
+
+    document.getElementById("settings-docker-autopopulate")?.click();
+    await flush();
+
+    const selects = [
+      ...document.querySelectorAll("#settings-docker-picker select"),
+    ] as HTMLSelectElement[];
+    expect(selects.map((select) => select.value)).toEqual(["acme", ""]);
+    expect(selects[1]?.selectedOptions[0]?.textContent).toBe(
+      MESSAGES.settingsDockerChooseProject(PRIMARY_LANGUAGE),
+    );
+  });
+
+  it("does not offer a container Settings already lists", async () => {
+    const config = sample();
+    config.docker = { acme: [{ name: "app", container: "acme-app-1" }] };
+    harness(config);
+    initSettings();
+    await openSettings();
+
+    document.getElementById("settings-docker-autopopulate")?.click();
+    await flush();
+
+    const names = [...document.querySelectorAll(".settings-docker-pick-name")].map(
+      (name) => name.textContent,
+    );
+    expect(names).toEqual(["other-app-1"]);
+  });
+
+  it("refuses a ticked container that has no project, and keeps the checklist open", async () => {
+    const config = sample();
+    config.projects = { acme: "/x/projects/acme", extra: "/x/projects/extra" };
+    const { calls } = harness(config);
+    initSettings();
+    await openSettings();
+
+    document.getElementById("settings-docker-autopopulate")?.click();
+    await flush();
+    const boxes = [
+      ...document.querySelectorAll("#settings-docker-picker input[type=checkbox]"),
+    ] as HTMLInputElement[];
+    boxes[1]!.checked = true;
+    change(boxes[1]!);
+    document.getElementById("settings-docker-confirm")?.click();
+    await flush();
+
+    expect((document.getElementById("settings-docker-picker") as HTMLElement).hidden).toBe(false);
+    expect(
+      document.querySelector("#settings-docker-picker .settings-note--warning")?.textContent,
+    ).toBe(MESSAGES.settingsDockerNeedsProject(["other-app-1"], PRIMARY_LANGUAGE));
+    expect(calls.some((entry) => entry.call === "saveSettings")).toBe(false);
+  });
+
+  it("picking a project ticks the row", async () => {
+    const { calls } = harness();
+    initSettings();
+    await openSettings();
+
+    document.getElementById("settings-docker-autopopulate")?.click();
+    await flush();
+    const select = [
+      ...document.querySelectorAll("#settings-docker-picker select"),
+    ][1] as HTMLSelectElement;
+    select.value = "acme";
+    change(select);
+    document.getElementById("settings-docker-confirm")?.click();
+    await flush();
+
+    expect(
+      savedConfig(calls.findLast((entry) => entry.call === "saveSettings")).docker["acme"]?.map(
+        (entry) => entry.container,
+      ),
+    ).toEqual(["acme-app-1", "other-app-1"]);
+  });
+
+  it("Cancel closes the checklist and adds nothing", async () => {
+    const { calls } = harness();
+    initSettings();
+    await openSettings();
+
+    document.getElementById("settings-docker-autopopulate")?.click();
+    await flush();
+    document.getElementById("settings-docker-cancel")?.click();
+    await flush();
+
+    expect((document.getElementById("settings-docker-picker") as HTMLElement).hidden).toBe(true);
+    expect(calls.some((entry) => entry.call === "saveSettings")).toBe(false);
+  });
+
   it("changes nothing until the checklist is confirmed", async () => {
     const { calls } = harness();
     initSettings();
@@ -1307,10 +1782,9 @@ describe("settings docker section", () => {
 
     document.getElementById("settings-docker-autopopulate")?.click();
     await flush();
-    document.getElementById("settings-save")?.click();
-    await flush();
+    await nudge();
 
-    const saved = calls.find((entry) => entry.call === "saveSettings");
+    const saved = calls.findLast((entry) => entry.call === "saveSettings");
     expect(savedConfig(saved).docker).toEqual({});
   });
 
@@ -1322,10 +1796,9 @@ describe("settings docker section", () => {
     document.getElementById("settings-docker-autopopulate")?.click();
     await flush();
     document.getElementById("settings-docker-confirm")?.click();
-    document.getElementById("settings-save")?.click();
     await flush();
 
-    const saved = calls.find((entry) => entry.call === "saveSettings");
+    const saved = calls.findLast((entry) => entry.call === "saveSettings");
     expect(savedConfig(saved).docker).toEqual({
       acme: [{ name: "app", container: "acme-app-1" }],
     });
@@ -1349,10 +1822,9 @@ describe("settings docker section", () => {
     change(boxes[1]!);
 
     document.getElementById("settings-docker-confirm")?.click();
-    document.getElementById("settings-save")?.click();
     await flush();
 
-    const saved = calls.find((entry) => entry.call === "saveSettings");
+    const saved = calls.findLast((entry) => entry.call === "saveSettings");
     expect(savedConfig(saved).docker).toEqual({
       acme: [
         { name: "app", container: "acme-app-1" },
@@ -1361,30 +1833,72 @@ describe("settings docker section", () => {
     });
   });
 
-  // "+ Add container" used to seed an empty `container`, which parseConfig
-  // refuses — Add then Save failed with a raw parser message.
-  it("adds a row that is already saveable before it is filled in", async () => {
+  // The row "Add by name" creates carries a placeholder; writing that would
+  // put a container that does not exist into the Docker tab. It is held
+  // until a real container name is typed, then written.
+  it("holds a row added by name until its container is filled in", async () => {
     const { calls } = harness();
     initSettings();
     await openSettings();
 
     document.getElementById("settings-docker-add")?.click();
-    document.getElementById("settings-save")?.click();
+    await flush();
+    expect(calls.some((entry) => entry.call === "saveSettings")).toBe(false);
+    const status = document.getElementById("settings-status");
+    expect(status?.textContent).toBe(MESSAGES.settingsUnfinishedRow(PRIMARY_LANGUAGE));
+    expect(status?.classList.contains("settings-status--error")).toBe(false);
+
+    const container = document.querySelector<HTMLInputElement>(
+      '#settings-docker input[data-field="container"]',
+    )!;
+    container.value = "acme-db-1";
+    change(container);
     await flush();
 
-    const saved = calls.find((entry) => entry.call === "saveSettings");
-    expect(savedConfig(saved).docker).toEqual({
-      acme: [{ name: "container-1", container: "container-1" }],
-    });
-    // The thing that actually matters: parseConfig accepts it.
+    const saved = savedConfig(calls.findLast((entry) => entry.call === "saveSettings"));
+    expect(saved.docker).toEqual({ acme: [{ name: "container-1", container: "acme-db-1" }] });
     expect(() =>
       parseConfig({
         agents: { a: { command: "a" } },
         projects: { acme: "/x/projects/acme" },
         brain: { cwd: "/x/brain" },
-        docker: savedConfig(saved).docker,
+        docker: saved.docker,
       }),
     ).not.toThrow();
+  });
+
+  it.each([
+    ["agent", "settings-agent-add"],
+    ["project", "settings-project-add"],
+    ["routing rule", "settings-routing-add"],
+  ])("does not write a new %s before it is filled in", async (_name, button) => {
+    const { calls } = harness();
+    initSettings();
+    await openSettings();
+
+    document.getElementById(button)?.click();
+    await flush();
+
+    expect(calls.some((entry) => entry.call === "saveSettings")).toBe(false);
+    expect(document.getElementById("settings-status")?.textContent).toBe(
+      MESSAGES.settingsUnfinishedRow(PRIMARY_LANGUAGE),
+    );
+  });
+
+  // Removing an agent blanks the rules that pointed at it; the parser would
+  // refuse that file, so it is held rather than failed.
+  it("holds the write when removing an agent leaves a routing rule without one", async () => {
+    const { calls } = harness();
+    initSettings();
+    await openSettings();
+
+    document.querySelector<HTMLElement>("#settings-agents .settings-row-remove")?.click();
+    await flush();
+
+    expect(calls.some((entry) => entry.call === "saveSettings")).toBe(false);
+    expect(document.getElementById("settings-status")?.textContent).toBe(
+      MESSAGES.settingsUnfinishedRow(PRIMARY_LANGUAGE),
+    );
   });
 
   it("keeps a configured container Docker no longer has", async () => {
@@ -1397,10 +1911,9 @@ describe("settings docker section", () => {
     document.getElementById("settings-docker-autopopulate")?.click();
     await flush();
     document.getElementById("settings-docker-confirm")?.click();
-    document.getElementById("settings-save")?.click();
     await flush();
 
-    const saved = calls.find((entry) => entry.call === "saveSettings");
+    const saved = calls.findLast((entry) => entry.call === "saveSettings");
     expect(savedConfig(saved).docker["acme"]).toContainEqual({
       name: "gone",
       container: "acme-gone-1",
@@ -1424,8 +1937,8 @@ describe("settings docker section", () => {
       ...document.querySelectorAll("#settings-docker-picker input[type=checkbox]"),
     ] as HTMLInputElement[];
     // other-app-1 (the second container) matches no configured project's
-    // directory, so it starts unticked with the row defaulting to the
-    // first project — the user must move it explicitly.
+    // directory, so it starts unticked with no project — the user files it
+    // explicitly.
     boxes[1]!.checked = true;
     boxes[1]!.dispatchEvent(new Event("change", { bubbles: true }));
 
@@ -1436,10 +1949,9 @@ describe("settings docker section", () => {
     selects[1]!.dispatchEvent(new Event("change", { bubbles: true }));
 
     document.getElementById("settings-docker-confirm")?.click();
-    document.getElementById("settings-save")?.click();
     await flush();
 
-    const saved = savedConfig(calls.find((entry) => entry.call === "saveSettings")).docker;
+    const saved = savedConfig(calls.findLast((entry) => entry.call === "saveSettings")).docker;
     expect(saved["extra"]).toContainEqual({ name: "app", container: "other-app-1" });
     expect(saved["acme"]?.some((entry) => entry.container === "other-app-1")).toBe(false);
   });
@@ -1454,9 +1966,8 @@ describe("settings chat section", () => {
   }
 
   async function saved(calls: Recorded[]): Promise<JarvisConfig> {
-    document.getElementById("settings-save")?.click();
-    await Promise.resolve();
-    return calls.find((entry) => entry.call === "saveSettings")?.args[0] as JarvisConfig;
+    await nudge();
+    return calls.findLast((entry) => entry.call === "saveSettings")?.args[0] as JarvisConfig;
   }
 
   it("renders one row per configured chat", async () => {
@@ -1646,8 +2157,7 @@ describe("remote access section", () => {
 
   /** Clicks Save and returns what the most recent save carried. */
   async function save(calls: Recorded[]): Promise<JarvisConfig> {
-    document.getElementById("settings-save")?.click();
-    await Promise.resolve();
+    await nudge();
     return savedConfig(calls.filter((entry) => entry.call === "saveSettings").at(-1));
   }
 
@@ -3365,9 +3875,8 @@ describe("reviews section", () => {
   }
 
   async function saved(calls: Recorded[]): Promise<JarvisConfig> {
-    document.getElementById("settings-save")?.click();
-    await Promise.resolve();
-    return savedConfig(calls.find((entry) => entry.call === "saveSettings"));
+    await nudge();
+    return savedConfig(calls.findLast((entry) => entry.call === "saveSettings"));
   }
 
   it("saves reviews.authors as an array from a change event", async () => {
@@ -3460,9 +3969,8 @@ describe("keep awake section", () => {
   }
 
   async function saved(calls: Recorded[]): Promise<JarvisConfig> {
-    document.getElementById("settings-save")?.click();
-    await Promise.resolve();
-    return savedConfig(calls.find((entry) => entry.call === "saveSettings"));
+    await nudge();
+    return savedConfig(calls.findLast((entry) => entry.call === "saveSettings"));
   }
 
   it("draws the mode, the fallback switch and the idle seconds from the draft", async () => {
@@ -3762,15 +4270,14 @@ describe("Tailscale access", () => {
       expect(el("settings-remote-tailnet-confirm").hidden).toBe(true);
     });
 
-    it("never writes the relay choice into the draft a Save would send", async () => {
+    it("never writes the relay choice into the draft a save sends", async () => {
       const calls = await open();
       relay().checked = true;
       change(relay());
 
-      el("settings-save").click();
-      await flush();
+      await nudge();
 
-      const saved = savedConfig(calls.find((c) => c.call === "saveSettings"));
+      const saved = savedConfig(calls.findLast((c) => c.call === "saveSettings"));
       expect(saved.remote.tailnet).toEqual({ enabled: false, relay: false });
     });
 
@@ -3900,7 +4407,7 @@ describe("Tailscale access", () => {
       );
     });
 
-    it("on success re-reads remote from the file, and keeps other unsaved edits", async () => {
+    it("on success re-reads remote from the file, and keeps an edit made just before it", async () => {
       const config = configWith({});
       const after = configWith({
         enabled: true,
@@ -3912,7 +4419,7 @@ describe("Tailscale access", () => {
       const calls = await open(config);
       jarvis()["getSettings"] = () => Promise.resolve(after);
       const brain = el<HTMLTextAreaElement>("settings-brain-prompt");
-      brain.value = "typed, not saved";
+      brain.value = "typed just before";
       change(brain);
 
       flip(true);
@@ -3923,44 +4430,57 @@ describe("Tailscale access", () => {
       expect(el<HTMLInputElement>("settings-remote-enabled").checked).toBe(true);
       expect(el<HTMLInputElement>("settings-remote-web").checked).toBe(true);
 
-      el("settings-save").click();
-      await flush();
-      const saved = savedConfig(calls.find((c) => c.call === "saveSettings"));
+      await nudge();
+      const saved = savedConfig(calls.findLast((c) => c.call === "saveSettings"));
       expect(saved.remote.tailnet).toEqual({ enabled: true, relay: false });
       expect(saved.remote.bindAddress).toBe("100.84.17.203");
-      expect(saved.brain.systemPrompt).toBe("typed, not saved");
+      expect(saved.brain.systemPrompt).toBe("typed just before");
     });
   });
 
-  describe("Save, while a change is in flight", () => {
-    const save = () => el<HTMLButtonElement>("settings-save");
+  describe("saving, while a change is in flight", () => {
+    const saves = (calls: Recorded[]): number =>
+      calls.filter((c) => c.call === "saveSettings").length;
+
+    /** An unrelated edit, committed but not waited on. */
+    function edit(): void {
+      const field = el<HTMLInputElement>("settings-browser-homepage");
+      field.value = "https://held.test/";
+      change(field);
+    }
 
     it.each([
       ["disable", "tailnetDisable", true],
       ["enable", "tailnetEnable", false],
-    ] as const)("during a %s, sends nothing", async (_name, channel, on) => {
-      const calls = await open(configWith({ tailnet: { enabled: on, relay: false } }));
-      let finish: (value: unknown) => void = () => {};
-      jarvis()[channel] = () =>
-        new Promise((resolve) => {
-          finish = resolve;
-        });
+    ] as const)(
+      "during a %s, holds an edit and writes it once the change answers",
+      async (_name, channel, on) => {
+        const calls = await open(configWith({ tailnet: { enabled: on, relay: false } }));
+        let finish: (value: unknown) => void = () => {};
+        jarvis()[channel] = () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          });
 
-      flip(!on);
+        flip(!on);
+        edit();
+        await flush();
+        // Not only the automatic write: any other route to the same function.
+        await saveSettings();
+        expect(saves(calls)).toBe(0);
 
-      expect(save().disabled).toBe(true);
-      // Not only the button: any other route to the same function.
-      await saveSettings();
-      expect(calls.some((c) => c.call === "saveSettings")).toBe(false);
+        finish({ ok: true, commands: [] });
+        await flush();
+        await flush();
+        expect(saves(calls)).toBe(1);
+        expect(savedConfig(calls.findLast((c) => c.call === "saveSettings")).browser.homePage).toBe(
+          "https://held.test/",
+        );
+      },
+    );
 
-      finish({ ok: true, commands: [] });
-      await flush();
-      await flush();
-      expect(save().disabled).toBe(false);
-    });
-
-    it("stays disabled until the re-read has answered", async () => {
-      await open(configWith({ tailnet: { enabled: true, relay: false } }));
+    it("holds an edit until the re-read has answered", async () => {
+      const calls = await open(configWith({ tailnet: { enabled: true, relay: false } }));
       let answer: (value: JarvisConfig) => void = () => {};
       jarvis()["getSettings"] = () =>
         new Promise((resolve) => {
@@ -3969,22 +4489,26 @@ describe("Tailscale access", () => {
 
       flip(false);
       await flush();
+      edit();
+      await flush();
 
-      expect(save().disabled).toBe(true);
+      expect(saves(calls)).toBe(0);
       answer(configWith({ tailnet: { enabled: false, relay: false } }));
       await flush();
-      expect(save().disabled).toBe(false);
+      expect(saves(calls)).toBe(1);
     });
 
-    it("comes back after a refusal", async () => {
-      await open();
+    it("saves again after a refusal", async () => {
+      const calls = await open();
       jarvis()["tailnetEnable"] = () =>
         Promise.resolve({ ok: false, text: "No", language: "en", commands: [] });
 
       flip(true);
       await flush();
+      edit();
+      await flush();
 
-      expect(save().disabled).toBe(false);
+      expect(saves(calls)).toBe(1);
     });
   });
 
@@ -4015,7 +4539,7 @@ describe("Tailscale access", () => {
       );
     });
 
-    it("Save stays off until a re-read succeeds: the draft's address and certificate are old", async () => {
+    it("writes nothing until a re-read succeeds, and says so: the draft's address and certificate are old", async () => {
       const calls = await open();
       rereadFails();
 
@@ -4023,25 +4547,23 @@ describe("Tailscale access", () => {
       await flush();
       await flush();
 
-      const save = el<HTMLButtonElement>("settings-save");
-      expect(save.disabled).toBe(true);
+      await nudge();
       await saveSettings();
       expect(calls.some((c) => c.call === "saveSettings")).toBe(false);
+      expect(el("settings-status").textContent).toBe(MESSAGES.settingsSavePaused(PRIMARY_LANGUAGE));
 
       const after = configWith({ bindAddress: "100.84.17.203", tls: CERT });
       jarvis()["getSettings"] = () => Promise.resolve(after);
       await openSettings();
       await flush();
 
-      expect(save.disabled).toBe(false);
-      save.click();
-      await flush();
-      const saved = savedConfig(calls.find((c) => c.call === "saveSettings"));
+      await nudge();
+      const saved = savedConfig(calls.findLast((c) => c.call === "saveSettings"));
       expect(saved.remote.bindAddress).toBe("100.84.17.203");
     });
 
-    it("a later change whose re-read succeeds gives Save back too", async () => {
-      await open();
+    it("a later change whose re-read succeeds lets edits be written again", async () => {
+      const calls = await open();
       rereadFails();
       flip(true);
       await flush();
@@ -4053,11 +4575,12 @@ describe("Tailscale access", () => {
       await flush();
       await flush();
 
-      expect(el<HTMLButtonElement>("settings-save").disabled).toBe(false);
+      await nudge();
+      expect(calls.some((c) => c.call === "saveSettings")).toBe(true);
     });
 
-    it("a reopen whose read fails too keeps Save off", async () => {
-      await open();
+    it("a reopen whose read fails too still writes nothing", async () => {
+      const calls = await open();
       rereadFails();
       flip(true);
       await flush();
@@ -4066,7 +4589,8 @@ describe("Tailscale access", () => {
       await openSettings().catch(() => {});
       await flush();
 
-      expect(el<HTMLButtonElement>("settings-save").disabled).toBe(true);
+      await nudge();
+      expect(calls.some((c) => c.call === "saveSettings")).toBe(false);
 
       jarvis()["getSettings"] = () => Promise.resolve(configWith({}));
       await openSettings();

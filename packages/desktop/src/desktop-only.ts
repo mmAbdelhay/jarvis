@@ -318,12 +318,32 @@ export function registerDesktopOnly(deps: DesktopOnlyDeps): void {
   deps.handle("workspace:pip", (_event, tabId) => {
     if (typeof tabId === "string") deps.views.requestPictureInPicture(tabId);
   });
-  // A native picker, for a multipart file field and for importing a
-  // collection. Cancelling returns [] — it is not a failure.
+  // A native picker, for a multipart file field, for importing a
+  // collection, and for Settings' path fields. Cancelling returns [] — it is
+  // not a failure. `directory` picks a folder instead of a file; it never
+  // combines with `multiple`, because every caller that wants a folder wants
+  // exactly one. `defaultPath` is where the dialog opens, so Browse beside a
+  // field that already holds a path starts there rather than wherever the
+  // last dialog was left.
   deps.handle("dialog:pickFiles", async (_event, options) => {
-    const multiple = (options as { multiple?: boolean } | undefined)?.multiple === true;
+    const given = (options ?? {}) as {
+      multiple?: unknown;
+      directory?: unknown;
+      defaultPath?: unknown;
+    };
+    const directory = given.directory === true;
+    const multiple = !directory && given.multiple === true;
+    const defaultPath =
+      typeof given.defaultPath === "string" && given.defaultPath !== ""
+        ? given.defaultPath
+        : undefined;
     const result = await deps.dialog.showOpenDialog(deps.window, {
-      properties: multiple ? ["openFile", "multiSelections"] : ["openFile"],
+      properties: directory
+        ? ["openDirectory", "createDirectory"]
+        : multiple
+          ? ["openFile", "multiSelections"]
+          : ["openFile"],
+      ...(defaultPath === undefined ? {} : { defaultPath }),
     });
     return result.canceled ? [] : result.filePaths;
   });

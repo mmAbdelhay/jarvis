@@ -944,8 +944,13 @@ export type RendererApi = {
    *  rather than by guessing what it sounds like. */
   previewVoice(name: string, language: "ar" | "en"): Promise<void>;
   /** Opens a native file picker. Returns the chosen paths, or [] if the user
-   *  cancelled — cancelling is not a failure. */
-  pickFiles(options?: { multiple?: boolean }): Promise<string[]>;
+   *  cancelled — cancelling is not a failure. `directory` picks one folder
+   *  instead; `defaultPath` is where the dialog opens. */
+  pickFiles(options?: {
+    multiple?: boolean;
+    directory?: boolean;
+    defaultPath?: string;
+  }): Promise<string[]>;
   /** Reads a JSON file the user picked, for importing a collection. */
   readJsonFile(path: string): Promise<GitViewResult<unknown>>;
   /** Decodes a file this same device already staged with `remote:

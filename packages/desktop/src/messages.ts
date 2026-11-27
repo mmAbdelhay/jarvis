@@ -665,7 +665,7 @@ export const MESSAGES = {
     language === "ar" ? "إلغاء الربط" : "Unlink",
   // Keep awake (Task 18): Settings' section and the topbar button.
   awakeSettingsTitle: (language: "ar" | "en"): string =>
-    language === "ar" ? "إبقاء الجهاز مستيقظًا" : "KEEP AWAKE",
+    language === "ar" ? "إبقاء الجهاز مستيقظًا" : "Keep awake",
   awakeSettingsMode: (language: "ar" | "en"): string =>
     language === "ar" ? "إبقاء الشاشة والجهاز يعملان" : "keep the screen and machine on",
   awakeModeName: (mode: AwakeStatus["mode"], language: "ar" | "en"): string => {
@@ -688,7 +688,7 @@ export const MESSAGES = {
   awakeSettingsIdle: (language: "ar" | "en"): string =>
     language === "ar" ? "ثواني الخمول قبل الضغط" : "idle seconds before the press",
   awakeSettingsIdleNote: (language: "ar" | "en"): string =>
-    language === "ar" ? "من 60 إلى 3600. يُطبَّق عند الحفظ." : "60 to 3600. Applied on Save.",
+    language === "ar" ? "من 60 إلى 3600." : "60 to 3600.",
   awakeSettingsStatus: (status: AwakeStatus, language: "ar" | "en"): string => {
     const ar = language === "ar";
     let line: string;
@@ -776,7 +776,7 @@ export const MESSAGES = {
       ? `البطارية ${percent}%${charging ? " — قيد الشحن" : ""}`
       : `Battery ${percent}%${charging ? " — charging" : ""}`,
   reviewsSettingsTitle: (language: "ar" | "en"): string =>
-    language === "ar" ? "المراجعات" : "REVIEWS",
+    language === "ar" ? "المراجعات" : "Reviews",
   reviewsSettingsGhLabel: (language: "ar" | "en"): string =>
     language === "ar" ? "حساب GitHub" : "GitHub login",
   reviewsSettingsGhState: (
@@ -1671,6 +1671,76 @@ export const MESSAGES = {
     language === "ar"
       ? "تعذّر حفظ الإعدادات — التفاصيل أدناه."
       : "Couldn't save settings — see below.",
+  // Settings' path fields: the button that opens the native folder or file
+  // picker, and the one refusal it can raise before anything is saved.
+  settingsBrowse: (language: "ar" | "en"): string => (language === "ar" ? "استعراض…" : "Browse…"),
+  settingsBrowseOutsideProject: (project: string, language: "ar" | "en"): string =>
+    language === "ar"
+      ? `اختر مجلدًا داخل المشروع ${project}.`
+      : `Choose a folder inside the ${project} project.`,
+  // Settings → Docker. The checklist offers only containers Settings does
+  // not list yet, and files a container under a project only when its
+  // compose directory is inside that project or the user picked it.
+  settingsDockerFind: (language: "ar" | "en"): string =>
+    language === "ar" ? "+ إضافة من Docker" : "+ Add from Docker",
+  settingsDockerAddManually: (language: "ar" | "en"): string =>
+    language === "ar" ? "إضافة بالاسم" : "Add by name",
+  settingsDockerPickerHint: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "الحاويات الموجودة على هذا الجهاز وغير المضافة بعد. اختر لكل حاوية مشروعها."
+      : "Containers on this machine that aren't in Settings yet. Pick the project each one belongs to.",
+  settingsDockerPickerEmpty: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "كل الحاويات الموجودة على هذا الجهاز مضافة بالفعل."
+      : "Every container on this machine is already in Settings.",
+  settingsDockerChooseProject: (language: "ar" | "en"): string =>
+    language === "ar" ? "اختر مشروعًا…" : "Choose a project…",
+  settingsDockerPickerConfirm: (language: "ar" | "en"): string =>
+    language === "ar" ? "إضافة المحدَّد" : "Add selected",
+  settingsDockerPickerCancel: (language: "ar" | "en"): string =>
+    language === "ar" ? "إلغاء" : "Cancel",
+  settingsDockerNeedsProject: (names: readonly string[], language: "ar" | "en"): string =>
+    language === "ar"
+      ? `اختر مشروعًا لـ ${names.join("، ")}.`
+      : `Choose a project for ${names.join(", ")}.`,
+  settingsUndo: (language: "ar" | "en"): string =>
+    language === "ar" ? "تراجع عن آخر تغيير" : "Undo last change",
+  // The headings over each group of links in Settings' own nav.
+  settingsNavGroup: (
+    group: "app" | "agents" | "projects" | "voice" | "devices",
+    language: "ar" | "en",
+  ): string => {
+    const names = {
+      app: { ar: "التطبيق", en: "App" },
+      agents: { ar: "الوكلاء", en: "Agents" },
+      projects: { ar: "المشاريع", en: "Projects" },
+      voice: { ar: "الصوت", en: "Voice" },
+      devices: { ar: "الأجهزة", en: "Devices" },
+    } as const;
+    return names[group][language];
+  },
+  settingsUnfinishedRow: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "لم يُحفظ بعد: هناك صف ينقصه حقل مطلوب. أكمله ليُحفظ."
+      : "Not saved yet: a row is missing a required value. Fill it in and it saves.",
+  // The few config keys that would read as code if shown as they are. Any
+  // other key is shown unchanged, so this answers undefined for it.
+  settingsFieldCaption: (field: string, language: "ar" | "en"): string | undefined => {
+    const captions: Record<string, { ar: string; en: string }> = {
+      id: { ar: "المعرّف", en: "ID" },
+      args: { ar: "المعطيات", en: "arguments" },
+      configDir: { ar: "مجلد الإعدادات", en: "config directory" },
+      passwordEnv: { ar: "متغيّر كلمة المرور", en: "password variable" },
+      default: { ar: "الافتراضي", en: "Default" },
+    };
+    return Object.hasOwn(captions, field) ? captions[field]?.[language] : undefined;
+  },
+  settingsUndone: (language: "ar" | "en"): string =>
+    language === "ar" ? "تم التراجع عن التغيير." : "Change undone.",
+  settingsSavePaused: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "لم يُحفظ هذا التغيير: تعذّر تحديث هذه الصفحة. أعد فتح الإعدادات."
+      : "This change is not saved: this page could not refresh. Reopen Settings.",
   settingsSaved: (language: "ar" | "en"): string => (language === "ar" ? "تم الحفظ." : "Saved."),
   settingsSavedLive: (language: "ar" | "en"): string =>
     language === "ar" ? "تم الحفظ. التغييرات مفعّلة الآن." : "Saved. Changes are active now.",
@@ -1799,7 +1869,7 @@ export const MESSAGES = {
   deleteBlockTitle: (language: "ar" | "en"): string =>
     language === "ar" ? "احذف هذه الكتلة" : "Delete this block",
   prayerHeading: (language: "ar" | "en"): string =>
-    language === "ar" ? "مواقيت الصلاة" : "PRAYER TIMES",
+    language === "ar" ? "مواقيت الصلاة" : "Prayer times",
   prayerShow: (language: "ar" | "en"): string =>
     language === "ar" ? "اعرض الصلاة القادمة في الرأس" : "show next prayer in header",
   prayerLatitude: (language: "ar" | "en"): string => (language === "ar" ? "خط العرض" : "latitude"),
@@ -2180,7 +2250,7 @@ export const MESSAGES = {
   // and its warning is the one sentence in Settings that must never exist in
   // only one language.
   remoteTitle: (language: "ar" | "en"): string =>
-    language === "ar" ? "الوصول عن بُعد" : "REMOTE ACCESS",
+    language === "ar" ? "الوصول عن بُعد" : "Remote access",
   remoteEnabledLabel: (language: "ar" | "en"): string =>
     language === "ar" ? "السماح بالوصول عن بُعد" : "allow remote access",
   remoteState: (enabled: boolean, language: "ar" | "en"): string =>
@@ -2293,8 +2363,8 @@ export const MESSAGES = {
   // above is off — turn it on and Save first.
   remotePairSaveFirst: (language: "ar" | "en"): string =>
     language === "ar"
-      ? "فعّل الوصول عن بُعد واحفظ التغييرات أولًا لإقران جهاز."
-      : "Turn on remote access and save first to pair a device.",
+      ? "فعّل الوصول عن بُعد أولًا لإقران جهاز."
+      : "Turn on remote access first to pair a device.",
   remotePairInstructions: (language: "ar" | "en"): string =>
     language === "ar"
       ? "افتح تطبيق Jarvis على هاتفك وامسح أو الصق هذا الرابط قبل انتهاء صلاحيته."
@@ -2990,8 +3060,8 @@ export const MESSAGES = {
     language === "ar" ? "تعذّر إتمام التغيير." : "The change could not be made.",
   remoteTailnetNotRefreshed: (language: "ar" | "en"): string =>
     language === "ar"
-      ? "تم التغيير، لكن تعذّر تحديث هذه الصفحة. أعد فتح الإعدادات لتتمكن من الحفظ."
-      : "The change was made, but this page could not refresh. Reopen Settings to save.",
+      ? "تم التغيير، لكن تعذّر تحديث هذه الصفحة. أعد فتح الإعدادات لمتابعة التعديل."
+      : "The change was made, but this page could not refresh. Reopen Settings to keep editing.",
 
   // M10 Task 3: the push notification catalogue — the only text a
   // notification's title/body carry, built in the *device's* registered

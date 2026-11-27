@@ -117,13 +117,22 @@ the **Office**, a floor plan of every tab and agent.
 ## Settings
 
 Every key of `jarvis.yaml`, edited in place: agents, routing, projects,
-databases, editor roots, the brain, voice and Whisper. One **Save** for the whole file, one
-validation pass, and a **Restart Jarvis** button afterwards — nothing is
-applied live, because a save can change which agent answers and killing a
-running session to apply it would be the wrong kind of helpful.
+databases, editor roots, the brain, voice and Whisper. There is no Save
+button: a change is written when you commit it (leave the field, press
+Enter, flip a switch), the status line says so, and **Undo last change**
+puts the previous value back. A change the file refuses is not written; the
+reason is shown and the edit stays on screen to be corrected.
 
-A per-agent **Test** button runs the health probe against the *draft* command
-before it is ever saved.
+Most changes apply at once. The brain, voice, Whisper and terminal services
+are built at startup, so after changing one of those a **Restart Jarvis**
+button stays until you restart — restarting is left to you, because it ends
+running sessions.
+
+Path fields have a **Browse…** button that opens the system's folder or
+file picker; a path can still be typed or pasted.
+
+A per-agent **Test** button runs the health probe against the command as it
+is shown.
 
 **Updates**, under General, shows the version you are running, when Jarvis
 last asked GitHub for a newer one, and — when there is one — its notes and an

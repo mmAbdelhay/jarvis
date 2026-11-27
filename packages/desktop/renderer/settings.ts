@@ -27,7 +27,14 @@ import { isTerminalFontSize } from "../src/terminal-font-size.js";
 // Settings' own route. One in-memory draft, edited in place and re-rendered
 // wholesale on every mutation — every field commits on "change" (blur or
 // Enter), never on "input", so a full re-render never steals focus out from
-// under a keystroke in progress. No innerHTML anywhere in this file, same
+// under a keystroke in progress.
+//
+// There is no Save button. A change is written the moment it is committed
+// (scheduleAutosave), the status line says so, and Undo puts the previous
+// config back. The page used to be two systems at once — most fields waited
+// in a draft for a Save that nothing reminded you to press, while the
+// remote and background switches applied on touch — and the only way to
+// back out of an edit was to leave the page. No innerHTML anywhere in this file, same
 // discipline as every other renderer module: config values are locally
 // authored, but there is no reason to be the one file that breaks the rule.
 
@@ -38,7 +45,27 @@ const $ = (id: string): HTMLElement => {
 };
 
 let draft: JarvisConfig | undefined;
+/** What the file holds as far as this page knows: the last config read or
+ *  successfully saved. The draft differing from it is what "unsaved" means. */
 let savedBaseline: JarvisConfig | undefined;
+/** The config as it stood when Settings was first opened in this run of the
+ *  app — what the services built at startup are still running on. Restart is
+ *  offered while a startup-only key differs from it, and stops being offered
+ *  if the change is undone. */
+let restartBaseline: JarvisConfig | undefined;
+/** Configs to go back to, oldest first: the baseline as it stood before each
+ *  save made from this visit. Emptied when Settings is reopened, because a
+ *  snapshot from an earlier visit may predate a change made elsewhere. */
+let undoStack: JarvisConfig[] = [];
+/** True while the save in flight is an Undo, which must not become a step
+ *  Undo can itself go back to. */
+let undoing = false;
+let autosaveQueued = false;
+let saveInFlight = false;
+/** A change arrived while a save was in flight; save once more after it. */
+let saveAgain = false;
+/** One listener for the app's lifetime, however often initSettings runs. */
+let autosaveWired = false;
 
 /** The bridge's own status, distinct from `draft.remote` (the config the
  *  user is editing): this is what it is actually doing right now — closed
@@ -105,22 +132,63 @@ function fingerprintTailFromUri(uri: string): string | undefined {
  *  (below) only ever fetches and renders; it is called every time the
  *  Settings nav button is clicked, and must never re-attach listeners to
  *  elements that already have them. */
-/** The section nav (board 5): plain anchors, so a click still jumps the
- *  scroller with no JS at all if this never runs — this only adds the
- *  active-link highlight `:target` can't give the *link* (it matches the
- *  section, never the anchor that pointed at it). */
+/** The section nav: one section is on screen at a time, the one whose link
+ *  was last chosen. The links stay real anchors to their sections, so each
+ *  names what it shows; the click is handled here rather than followed,
+ *  because there is no longer one long page to jump within. */
 function wireSettingsNav(): void {
-  const links = document.querySelectorAll<HTMLAnchorElement>(".settings-nav-link");
+  // Looked up without `$()`: the test harness lays down sections without the
+  // nav around them, and a missing heading must not stop the page.
+  for (const group of ["app", "agents", "projects", "voice", "devices"] as const) {
+    const heading = document.getElementById(`settings-nav-group-${group}`);
+    if (heading !== null) {
+      heading.textContent = MESSAGES.settingsNavGroup(group, PRIMARY_LANGUAGE);
+    }
+  }
+  const links = [...document.querySelectorAll<HTMLAnchorElement>(".settings-nav-link")];
+  const show = (link: HTMLAnchorElement): void => {
+    const target = link.getAttribute("href")?.slice(1);
+    for (const other of links) {
+      const on = other === link;
+      other.classList.toggle("settings-nav-link--on", on);
+      if (on) other.setAttribute("aria-current", "page");
+      else other.removeAttribute("aria-current");
+    }
+    for (const section of document.querySelectorAll<HTMLElement>(".settings-section")) {
+      section.classList.toggle("settings-section--on", section.id === target);
+    }
+    document.querySelector(".settings-body")?.scrollTo?.(0, 0);
+  };
   for (const link of links) {
-    link.addEventListener("click", () => {
-      for (const other of links) other.classList.toggle("settings-nav-link--on", other === link);
+    link.addEventListener("click", (event) => {
+      event.preventDefault();
+      show(link);
     });
   }
+  const first = links.find((link) => link.classList.contains("settings-nav-link--on")) ?? links[0];
+  if (first !== undefined) show(first);
 }
 
 export function initSettings(): void {
   wireStaticFields();
   wireSettingsNav();
+  restartBaseline = undefined;
+  // Every committed edit raises `change` or is a click (add, remove, a
+  // checklist's confirm), and each field's own listener has already updated
+  // the draft by the time the event bubbles here. One listener therefore
+  // covers every control on the page, including ones added later; a draft
+  // that turns out equal to what is saved is not written.
+  if (!autosaveWired) {
+    autosaveWired = true;
+    for (const type of ["change", "click"]) {
+      document.addEventListener(type, (event) => {
+        const view = document.getElementById("view-settings");
+        if (view === null || (event.target instanceof Node && view.contains(event.target))) {
+          scheduleAutosave();
+        }
+      });
+    }
+  }
   // Keep awake: the topbar button or a phone may change the mode while
   // Settings is open. A field the user has not touched follows it, so a
   // later Save does not put the old value back; the status line redraws.
@@ -162,6 +230,9 @@ export async function openSettings(): Promise<void> {
   draft = await window.jarvis.getSettings();
   tailnetDraftStale = false;
   savedBaseline = structuredClone(draft);
+  restartBaseline ??= structuredClone(draft);
+  undoStack = [];
+  renderSaveState();
   ownerFormOpen = false;
   ownerBusy = false;
   ownerMessage = undefined;
@@ -696,15 +767,36 @@ async function runGhAuthLogin(): Promise<void> {
   }
 }
 
+/** Called by every edit: the last save's outcome no longer describes the
+ *  page, and the edit itself is queued to be written. */
 function clearSaveStatus(): void {
   const status = $("settings-status");
   status.textContent = "";
   status.classList.remove("settings-status--error");
-  ($("settings-restart") as HTMLElement).hidden = true;
+  scheduleAutosave();
+}
+
+/** Writes the draft once the event that changed it has finished — a
+ *  microtask, so a handler that mutates in several steps is saved whole,
+ *  and several edits in one turn are one write. */
+function scheduleAutosave(): void {
+  if (autosaveQueued) return;
+  autosaveQueued = true;
+  queueMicrotask(() => {
+    autosaveQueued = false;
+    void saveSettings();
+  });
 }
 
 /** One labelled text field, committing on change (blur/Enter), not on
  *  every keystroke. */
+/** What a field is called on screen: its config key, except where the key
+ *  would read as code (MESSAGES.settingsFieldCaption). The stylesheet
+ *  capitalises the first letter; `data-field` keeps the key either way. */
+function captionFor(field: string): string {
+  return MESSAGES.settingsFieldCaption(field, PRIMARY_LANGUAGE) ?? field;
+}
+
 function fieldInput(
   labelText: string,
   value: string,
@@ -715,7 +807,7 @@ function fieldInput(
   // more width than a port without knowing anything about either.
   label.dataset["field"] = labelText;
   const caption = document.createElement("span");
-  caption.textContent = labelText;
+  caption.textContent = captionFor(labelText);
   label.append(caption);
   const input = document.createElement("input");
   input.type = "text";
@@ -731,6 +823,94 @@ function fieldInput(
   return label;
 }
 
+/** What a path field's Browse button should pick. */
+type PathKind = "directory" | "file";
+
+/** The Browse button beside a path input: opens the native picker (a folder
+ *  or a file, as the field needs) starting from whatever the field already
+ *  holds, and commits the choice exactly as typing it would have. The text
+ *  input stays — a path can still be pasted, and a remote or not-yet-created
+ *  one has to be. Cancelling the dialog changes nothing. */
+function browseButton(
+  kind: PathKind,
+  current: () => string,
+  onPick: (path: string) => void,
+): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "settings-add settings-browse";
+  button.textContent = MESSAGES.settingsBrowse(PRIMARY_LANGUAGE);
+  button.addEventListener("click", () => {
+    const start = current();
+    void window.jarvis
+      .pickFiles({
+        directory: kind === "directory",
+        ...(start === "" ? {} : { defaultPath: start }),
+      })
+      .then((paths) => {
+        const picked = paths[0];
+        if (picked !== undefined) onPick(picked);
+      })
+      .catch((error: unknown) => {
+        console.error(`settings: browse failed: ${String(error)}`);
+      });
+  });
+  return button;
+}
+
+/** fieldInput for a path: the same labelled input, with Browse beside it.
+ *  `toValue` turns the picked absolute path into what the field stores (an
+ *  editor root is project-relative) or refuses it by returning undefined. */
+function fieldPath(
+  labelText: string,
+  value: string,
+  kind: PathKind,
+  onChange: (value: string) => void,
+  options: { start?: () => string; toValue?: (picked: string) => string | undefined } = {},
+): HTMLElement {
+  const label = fieldInput(labelText, value, onChange);
+  const input = label.querySelector("input") as HTMLInputElement;
+  const wrap = document.createElement("span");
+  wrap.className = "settings-path";
+  input.replaceWith(wrap);
+  wrap.append(
+    input,
+    browseButton(
+      kind,
+      () => options.start?.() ?? input.value,
+      (picked) => {
+        const next = options.toValue === undefined ? picked : options.toValue(picked);
+        if (next === undefined) return;
+        input.value = next;
+        // The same event typing-then-blur raises, so the field's own
+        // listener commits it and nothing here duplicates that path.
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+      },
+    ),
+  );
+  return label;
+}
+
+/** Browse for a field that lives in index.html rather than in a rendered
+ *  row: the button is inserted after the input, once. */
+function attachBrowse(inputId: string, kind: PathKind): void {
+  const input = $(inputId) as HTMLInputElement;
+  const wrap = document.createElement("span");
+  wrap.className = "settings-path";
+  input.replaceWith(wrap);
+  wrap.append(
+    input,
+    browseButton(
+      kind,
+      () => input.value,
+      (picked) => {
+        input.value = picked;
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+      },
+    ),
+  );
+}
+
 /** One labelled `<select>`, committing on change — fieldInput's sibling. */
 function fieldSelect(
   labelText: string,
@@ -741,7 +921,7 @@ function fieldSelect(
   const label = document.createElement("label");
   label.dataset["field"] = labelText;
   const caption = document.createElement("span");
-  caption.textContent = labelText;
+  caption.textContent = captionFor(labelText);
   label.append(caption);
   const select = document.createElement("select");
   select.dataset["field"] = labelText;
@@ -807,7 +987,7 @@ function renderAgentRow(id: string, agent: Omit<AgentConfig, "id">): HTMLElement
   const modelField = fieldInput("model", agent.model ?? "", (value) =>
     updateAgent(id, { model: value === "" ? undefined : value }),
   );
-  const configDirField = fieldInput("configDir", agent.configDir ?? "", (value) =>
+  const configDirField = fieldPath("configDir", agent.configDir ?? "", "directory", (value) =>
     updateAgent(id, { configDir: value === "" ? undefined : value }),
   );
 
@@ -819,10 +999,13 @@ function renderAgentRow(id: string, agent: Omit<AgentConfig, "id">): HTMLElement
     updateAgent(id, { default: defaultCheckbox.checked ? true : undefined });
     clearSaveStatus();
   });
-  defaultLabel.append(defaultCheckbox, document.createTextNode("default"));
+  defaultLabel.append(defaultCheckbox, document.createTextNode(captionFor("default")));
 
   const vendorLabel = document.createElement("label");
-  vendorLabel.textContent = "vendor";
+  // In a span, as fieldInput's caption is, so the two are styled as one.
+  const vendorCaption = document.createElement("span");
+  vendorCaption.textContent = "vendor";
+  vendorLabel.append(vendorCaption);
   const vendorSelect = document.createElement("select");
   const noneOption = document.createElement("option");
   noneOption.value = "";
@@ -954,7 +1137,10 @@ function renderRoutingRow(rule: RoutingRule, index: number): HTMLElement {
   );
 
   const agentLabel = document.createElement("label");
-  agentLabel.textContent = "agent";
+  // In a span, as fieldInput's caption is, so the two are styled as one.
+  const agentCaption = document.createElement("span");
+  agentCaption.textContent = "agent";
+  agentLabel.append(agentCaption);
   const agentSelect = document.createElement("select");
   const placeholder = document.createElement("option");
   placeholder.value = "";
@@ -1023,7 +1209,7 @@ function renderProjectRow(name: string, path: string): HTMLElement {
   const row = document.createElement("div");
   row.className = "settings-row";
   const nameField = fieldInput("name", name, (value) => renameProject(name, value));
-  const pathField = fieldInput("path", path, (value) => updateProject(name, value));
+  const pathField = fieldPath("path", path, "directory", (value) => updateProject(name, value));
   row.append(
     nameField,
     pathField,
@@ -1271,9 +1457,28 @@ function renderEditorRootRow(project: string, index: number, root: EditorRoot): 
   });
   // Relative to the project directory, always — parseConfig refuses an
   // absolute or climbing path, so a draft with one cannot be saved.
-  const pathField = fieldInput("path", root.path, (value) => {
-    if (value !== "") updateEditorRoot(project, index, { path: value });
-  });
+  const projectPath = draft.projects[project] ?? "";
+  const pathField = fieldPath(
+    "path",
+    root.path,
+    "directory",
+    (value) => {
+      if (value !== "") updateEditorRoot(project, index, { path: value });
+    },
+    {
+      // The dialog opens in the project, since that is the only place a
+      // valid answer can be, and hands back an absolute path the config
+      // would refuse — so it is rewritten relative to the project here.
+      start: () => projectPath,
+      toValue: (picked) => {
+        const relative = relativeToProject(picked, projectPath);
+        if (relative === undefined) {
+          showSettingsError(MESSAGES.settingsBrowseOutsideProject(project, PRIMARY_LANGUAGE));
+        }
+        return relative;
+      },
+    },
+  );
 
   row.append(
     projectField,
@@ -1283,6 +1488,29 @@ function renderEditorRootRow(project: string, index: number, root: EditorRoot): 
     removeControl(() => removeEditorRoot(project, index)),
   );
   return row;
+}
+
+/** `picked` as a path relative to the project directory — "." for the
+ *  directory itself — or undefined when it lies outside it. Separator-aware,
+ *  so "/p/acme-old" is not inside "/p/acme"; both separators are accepted
+ *  because the picker answers in the host's own. */
+export function relativeToProject(picked: string, projectPath: string): string | undefined {
+  const trim = (path: string): string => path.replace(/[\\/]+$/, "");
+  const base = trim(projectPath);
+  const target = trim(picked);
+  if (base === "") return undefined;
+  if (target === base) return ".";
+  for (const separator of ["/", "\\"]) {
+    if (target.startsWith(`${base}${separator}`)) return target.slice(base.length + 1);
+  }
+  return undefined;
+}
+
+/** A refusal that never reached a save: shown where a failed save would be. */
+function showSettingsError(text: string): void {
+  const status = $("settings-status");
+  status.textContent = text;
+  status.classList.add("settings-status--error");
 }
 
 function updateEditorRoot(project: string, index: number, patch: Partial<EditorRoot>): void {
@@ -1435,11 +1663,16 @@ function uniqueDockerName(existing: readonly DockerEntry[], base: string): strin
   return `${base}-${n}`;
 }
 
-/** One container offered by Auto-populate, paired with the project it would
- *  be filed under if ticked. */
+/** One container offered by the picker. `project` is "" until the container
+ *  is matched to a project by its compose directory or the user picks one —
+ *  never a guess: on a machine with one configured project and twenty
+ *  unrelated containers, defaulting the select to "the first project" drew
+ *  every one of them as if it belonged there. */
 type DockerPickerEntry = { facts: ContainerFacts; project: string; checked: boolean };
 
 let dockerPicker: DockerPickerEntry[] | undefined;
+/** The picker's own refusal line (a ticked row with no project). */
+let dockerPickerProblem: string | undefined;
 
 /** True when `dir` is `base` itself or a path under it — a trailing-
  *  separator-aware prefix test, so "/p/acme-old" does not match
@@ -1459,26 +1692,43 @@ function projectForContainer(facts: ContainerFacts): string | undefined {
   return undefined;
 }
 
-/** Fetches every container on the machine and opens the checklist, ticking
- *  the ones that live inside a configured project's directory. Changes
- *  nothing until the checklist is confirmed. */
+/** Every container name Settings already lists, under any project. */
+function configuredContainers(): Set<string> {
+  const names = new Set<string>();
+  for (const entries of Object.values(draft?.docker ?? {})) {
+    for (const entry of entries) names.add(entry.container);
+  }
+  return names;
+}
+
+/** Fetches the machine's containers and opens the checklist. Only the ones
+ *  Settings does not list yet are offered; those that live inside a
+ *  configured project's directory come first, ticked and filed under it, and
+ *  the rest follow unticked with no project. Changes nothing until the
+ *  checklist is confirmed. */
 async function autopopulateDocker(): Promise<void> {
   const result = await window.jarvis.dockerContainers();
   if (!result.ok) {
-    const status = $("settings-status");
-    status.textContent = result.text;
-    status.classList.add("settings-status--error");
+    showSettingsError(result.text);
     return;
   }
   if (draft === undefined) return;
-  dockerPicker = result.value.map((facts) => {
-    const matched = projectForContainer(facts);
-    return {
-      facts,
-      project: matched ?? Object.keys(draft?.projects ?? {})[0] ?? "",
-      checked: matched !== undefined,
-    };
-  });
+  const configured = configuredContainers();
+  const entries = result.value
+    .filter((facts) => !configured.has(facts.name))
+    .map((facts): DockerPickerEntry => {
+      const matched = projectForContainer(facts);
+      return { facts, project: matched ?? "", checked: matched !== undefined };
+    });
+  // Matched first, each group in Docker's own order (sort is stable).
+  dockerPicker = entries.sort((a, b) => Number(b.checked) - Number(a.checked));
+  dockerPickerProblem = undefined;
+  renderDockerPicker();
+}
+
+function closeDockerPicker(): void {
+  dockerPicker = undefined;
+  dockerPickerProblem = undefined;
   renderDockerPicker();
 }
 
@@ -1491,42 +1741,91 @@ function renderDockerPicker(): void {
     return;
   }
   container.hidden = false;
+  const projects = Object.keys(draft.projects);
+
+  const heading = document.createElement("div");
+  heading.className = "settings-note";
+  heading.textContent =
+    dockerPicker.length === 0
+      ? MESSAGES.settingsDockerPickerEmpty(PRIMARY_LANGUAGE)
+      : MESSAGES.settingsDockerPickerHint(PRIMARY_LANGUAGE);
+  container.append(heading);
 
   for (const entry of dockerPicker) {
     // A plain row, not a <label>: the project <select> below must not be
     // nested inside a control whose implicit click target is the checkbox.
     const row = document.createElement("div");
-    row.className = "settings-row";
+    row.className = "settings-row settings-docker-pick";
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
     checkbox.checked = entry.checked;
+    checkbox.setAttribute("aria-label", entry.facts.name);
+    const select = document.createElement("select");
+    select.dataset["field"] = "project";
+    const none = document.createElement("option");
+    none.value = "";
+    none.textContent = MESSAGES.settingsDockerChooseProject(PRIMARY_LANGUAGE);
+    select.append(none);
+    for (const project of projects) {
+      const option = document.createElement("option");
+      option.value = project;
+      option.textContent = project;
+      select.append(option);
+    }
+    select.value = entry.project;
     checkbox.addEventListener("change", () => {
       entry.checked = checkbox.checked;
+      // With one project there is nothing to choose, so ticking is enough.
+      if (entry.checked && entry.project === "" && projects.length === 1) {
+        entry.project = projects[0] ?? "";
+        select.value = entry.project;
+      }
+    });
+    // Visible and editable, never a silent default: a container with no
+    // matching project directory needs a project the user picked. Picking
+    // one is also saying "add this", so it ticks the row.
+    select.addEventListener("change", () => {
+      entry.project = select.value;
+      if (entry.project !== "") {
+        entry.checked = true;
+        checkbox.checked = true;
+      }
     });
     const name = document.createElement("span");
+    name.className = "settings-docker-pick-name";
     name.textContent = entry.facts.name;
-    // Visible and editable, never a silent default: a container with no
-    // matching project directory still needs a project the user picked,
-    // not one guessed on their behalf.
-    const projectField = fieldSelect(
-      "project",
-      entry.project,
-      Object.keys(draft.projects),
-      (value) => {
-        entry.project = value;
-      },
-    );
-    row.append(checkbox, name, projectField);
+    const status = document.createElement("span");
+    status.className = "settings-note settings-docker-pick-status";
+    status.textContent = entry.facts.status === "" ? entry.facts.state : entry.facts.status;
+    row.append(checkbox, name, status, select);
     container.append(row);
   }
 
-  const confirm = document.createElement("button");
-  confirm.type = "button";
-  confirm.id = "settings-docker-confirm";
-  confirm.className = "settings-add";
-  confirm.textContent = "Confirm";
-  confirm.addEventListener("click", () => confirmDockerPicker());
-  container.append(confirm);
+  const problem = document.createElement("div");
+  problem.className = "settings-note settings-note--warning";
+  problem.hidden = dockerPickerProblem === undefined;
+  problem.textContent = dockerPickerProblem ?? "";
+  container.append(problem);
+
+  const actions = document.createElement("div");
+  actions.className = "settings-docker-pick-actions";
+  if (dockerPicker.length > 0) {
+    const confirm = document.createElement("button");
+    confirm.type = "button";
+    confirm.id = "settings-docker-confirm";
+    confirm.className = "settings-add settings-add--primary";
+    confirm.textContent = MESSAGES.settingsDockerPickerConfirm(PRIMARY_LANGUAGE);
+    confirm.addEventListener("click", () => confirmDockerPicker());
+    actions.append(confirm);
+  }
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.id = "settings-docker-cancel";
+  cancel.className = "settings-add";
+  cancel.textContent = MESSAGES.settingsDockerPickerCancel(PRIMARY_LANGUAGE);
+  cancel.addEventListener("click", () => closeDockerPicker());
+  actions.append(cancel);
+  container.append(actions);
 }
 
 /** Replaces each ticked container's project entry with the union of what
@@ -1538,15 +1837,28 @@ function renderDockerPicker(): void {
  *  overwritten. */
 function confirmDockerPicker(): void {
   if (draft === undefined || dockerPicker === undefined) return;
+  // A ticked row with no project is refused out loud, with the checklist
+  // left open — skipping it silently would read as "added" and not be.
+  const unfiled = dockerPicker.filter(
+    (entry) => entry.checked && draft?.projects[entry.project] === undefined,
+  );
+  if (unfiled.length > 0) {
+    dockerPickerProblem = MESSAGES.settingsDockerNeedsProject(
+      unfiled.map((entry) => entry.facts.name),
+      PRIMARY_LANGUAGE,
+    );
+    renderDockerPicker();
+    return;
+  }
   for (const entry of dockerPicker) {
     if (!entry.checked) continue;
-    if (entry.project === "" || draft.projects[entry.project] === undefined) continue;
     const existing = draft.docker[entry.project] ?? [];
     if (existing.some((row) => row.container === entry.facts.name)) continue;
     const name = uniqueDockerName(existing, entry.facts.composeService ?? entry.facts.name);
     draft.docker[entry.project] = [...existing, { name, container: entry.facts.name }];
   }
   dockerPicker = undefined;
+  dockerPickerProblem = undefined;
   clearSaveStatus();
   renderSettings();
 }
@@ -1935,9 +2247,11 @@ let tailnetDraftStale = false;
  *  the Enable switch: not on without an owner password, but always off. The
  *  relay is settled before enabling: while on it is not a live choice. */
 function renderTailnetSwitch(): void {
-  // The draft's `remote` is out of date until the change answers, and Save
+  // The draft's `remote` is out of date until the change answers, and a save
   // would write its address and certificate over the ones the change wrote.
-  ($("settings-save") as HTMLButtonElement).disabled = tailnetBusy || tailnetDraftStale;
+  // saveSettings holds back while either is set; an edit made meanwhile is
+  // written as soon as the change has answered.
+  if (!tailnetBusy && !tailnetDraftStale) scheduleAutosave();
   if (draft === undefined) return;
   const on = draft.remote.tailnet.enabled;
   const toggle = $("settings-remote-tailnet") as HTMLInputElement;
@@ -1997,7 +2311,8 @@ function tailnetEnableReplacesPairing(remote: JarvisConfig["remote"]): boolean {
 }
 
 /** Runs one enable or disable. The channel wrote the file, so `remote` is
- *  read back from it; the rest of the draft may hold unsaved edits and stays.
+ *  read back from it; the rest of the draft may hold an edit whose write is
+ *  being held back (saveSettings) and stays.
  *  A refusal changed nothing, and the switch redraws from the draft. A failed
  *  read-back changed nothing either, of what the channel already did: the
  *  switch then shows `outcome`, the part of the file this call knows. */
@@ -2684,13 +2999,17 @@ function clearRemoteCertError(): void {
  *  the user hunt for Tailscale/Wi-Fi behind Advanced… — see
  *  proposedBindAddress for why an enabled loopback bind is left alone.
  *  Called only once per open, right after a fresh bindChoiceList arrives
- *  (see loadBindChoices). Nothing here reaches jarvis.yaml on its own — like
- *  every other field in this file, it only changes what Save would write. */
+ *  (see loadBindChoices). Nothing here reaches jarvis.yaml on its own: the
+ *  proposal goes into the baseline as well as the draft, so it is not an
+ *  edit and does not trigger a write. It is written alongside the next
+ *  change the user actually makes — what pressing Save used to do. */
 function applyDefaultBindSelection(): void {
   if (draft === undefined || savedBaseline === undefined) return;
   if (draft.remote.bindAddress !== DEFAULT_BIND_ADDRESS) return;
   const proposed = proposedBindAddress(savedBaseline.remote, DEFAULT_BIND_ADDRESS, bindChoiceList);
-  if (proposed !== undefined) draft.remote.bindAddress = proposed;
+  if (proposed === undefined) return;
+  draft.remote.bindAddress = proposed;
+  savedBaseline.remote.bindAddress = proposed;
 }
 
 function renderBindChoices(): void {
@@ -3111,55 +3430,169 @@ function ipv4ToHextets(dotted: string): [string, string] | undefined {
 
 // --------------------------------------------------------- Save / restart
 
+// These services are constructed at startup. Their running instances cannot
+// safely be swapped by mutating the config object, so the restart affordance
+// is kept only while one of their inputs actually differs.
+const RESTART_KEYS = [
+  "brain",
+  "voice",
+  "whisper",
+  "terminal",
+  "performance",
+  "sessions",
+  "headlamp",
+] as const;
+// Keys inside those sections that apply live (`terminal.fontSize`:
+// terminal-font.ts), so changing only them must not ask for a restart.
+const LIVE_KEYS: Partial<Record<(typeof RESTART_KEYS)[number], readonly string[]>> = {
+  terminal: ["fontSize"],
+};
+
+function restartView(config: JarvisConfig, key: (typeof RESTART_KEYS)[number]): unknown {
+  const live = LIVE_KEYS[key];
+  if (live === undefined) return config[key];
+  return Object.fromEntries(Object.entries(config[key]).filter(([name]) => !live.includes(name)));
+}
+
+/** Whether what is saved differs, in a startup-only key, from what the
+ *  running services were built from. */
+function restartRequired(): boolean {
+  const running = restartBaseline;
+  const saved = savedBaseline;
+  if (running === undefined || saved === undefined) return false;
+  return RESTART_KEYS.some(
+    (key) => JSON.stringify(restartView(running, key)) !== JSON.stringify(restartView(saved, key)),
+  );
+}
+
+/** `remote` and `daemon` are written by their own channels as well as by a
+ *  save (pairing, the Tailscale switch, the background toggle), so a
+ *  snapshot's copy of them can be stale. Undo never restores either, and a
+ *  change to them alone is not a step Undo goes back to. */
+function withoutLiveSections(config: JarvisConfig): string {
+  const { remote: _remote, daemon: _daemon, ...rest } = config;
+  return JSON.stringify(rest);
+}
+
+/** Undo and Restart, from the state above. Restart stays for as long as it
+ *  is true, not just until the next edit. */
+function renderSaveState(): void {
+  const undo = $("settings-undo") as HTMLButtonElement;
+  undo.textContent = MESSAGES.settingsUndo(PRIMARY_LANGUAGE);
+  undo.disabled = undoStack.length === 0;
+  ($("settings-restart") as HTMLElement).hidden = !restartRequired();
+}
+
+/** Whether the draft holds a row that still lacks the one thing that makes
+ *  it mean something: an agent's command, a project's path, a routing
+ *  rule's agent (blank on a new rule, and blanked when its agent is
+ *  removed), or a Docker row still carrying the placeholder "+ Add" seeded
+ *  it with. */
+function hasUnfinishedRow(config: JarvisConfig): boolean {
+  if (Object.values(config.registry.agents).some((agent) => agent.command.trim() === "")) {
+    return true;
+  }
+  if (Object.values(config.projects).some((path) => path.trim() === "")) return true;
+  if ((config.registry.routing ?? []).some((rule) => rule.agent === "")) return true;
+  return Object.values(config.docker).some((entries) =>
+    entries.some((entry) => entry.name === entry.container && /^container-\d+$/.test(entry.name)),
+  );
+}
+
 export async function saveSettings(): Promise<void> {
-  if (draft === undefined || tailnetBusy || tailnetDraftStale) return;
-  // These services are constructed at startup. Their running instances cannot
-  // safely be swapped by mutating the config object, so keep the restart
-  // affordance only when one of their inputs actually changed.
-  const restartKeys = [
-    "brain",
-    "voice",
-    "whisper",
-    "terminal",
-    "performance",
-    "sessions",
-    "headlamp",
-  ] as const;
-  // Keys inside those sections that apply live (`terminal.fontSize`:
-  // terminal-font.ts), so changing only them must not ask for a restart.
-  const liveKeys: Partial<Record<(typeof restartKeys)[number], readonly string[]>> = {
-    terminal: ["fontSize"],
-  };
-  const restartView = (config: JarvisConfig, key: (typeof restartKeys)[number]): unknown => {
-    const live = liveKeys[key];
-    if (live === undefined) return config[key];
-    return Object.fromEntries(Object.entries(config[key]).filter(([name]) => !live.includes(name)));
-  };
-  const baseline = savedBaseline;
-  const current = draft;
-  const restartRequired =
-    baseline !== undefined &&
-    restartKeys.some(
-      (key) =>
-        JSON.stringify(restartView(baseline, key)) !== JSON.stringify(restartView(current, key)),
-    );
-  const result = await window.jarvis.saveSettings(draft);
-  const status = $("settings-status");
-  if (!result.ok) {
-    status.textContent = `${result.text} ${result.detail}`;
-    status.classList.add("settings-status--error");
+  if (draft === undefined) return;
+  if (savedBaseline !== undefined && JSON.stringify(draft) === JSON.stringify(savedBaseline)) {
     return;
   }
-  status.textContent = restartRequired
-    ? MESSAGES.settingsSavedRestart(PRIMARY_LANGUAGE)
-    : MESSAGES.settingsSavedLive(PRIMARY_LANGUAGE);
-  status.classList.remove("settings-status--error");
-  ($("settings-restart") as HTMLElement).hidden = !restartRequired;
-  // Every open terminal, now. The same size as before is a no-op, so saving
-  // some other section leaves a session zoom alone.
-  setTerminalFontBase(current.terminal.fontSize);
-  savedBaseline = structuredClone(draft);
-  window.dispatchEvent(new Event("jarvis:settings-saved"));
+  // A row just added and not filled in yet is not written: an agent with no
+  // command or a project with no path would either be refused by the parser
+  // or, worse, be applied. Said in the status line, in the ordinary colour —
+  // it is a step in progress, not a failure.
+  if (hasUnfinishedRow(draft)) {
+    const status = $("settings-status");
+    status.textContent = MESSAGES.settingsUnfinishedRow(PRIMARY_LANGUAGE);
+    status.classList.remove("settings-status--error");
+    return;
+  }
+  // The draft's `remote` is out of date until a Tailscale change answers
+  // (busy) or until Settings re-reads the file (stale); writing it would put
+  // the old address and certificate back. Busy passes on its own, and
+  // renderTailnetSwitch queues the write again when it does. Stale does
+  // not, so it is said out loud rather than leaving an edit silently
+  // unwritten.
+  if (tailnetBusy) return;
+  if (tailnetDraftStale) {
+    showSettingsError(MESSAGES.settingsSavePaused(PRIMARY_LANGUAGE));
+    return;
+  }
+  if (saveInFlight) {
+    saveAgain = true;
+    return;
+  }
+  saveInFlight = true;
+  // A copy: the draft can be edited again before this write answers, and
+  // the baseline must become exactly what was sent, not what it grew into.
+  const sent = structuredClone(draft);
+  const before = savedBaseline;
+  const wasUndo = undoing;
+  undoing = false;
+  let result: Awaited<ReturnType<typeof window.jarvis.saveSettings>>;
+  try {
+    result = await window.jarvis.saveSettings(sent);
+  } catch (error: unknown) {
+    result = {
+      ok: false,
+      text: MESSAGES.settingsSaveFailed(PRIMARY_LANGUAGE),
+      detail: String(error),
+      language: PRIMARY_LANGUAGE,
+    };
+  }
+  saveInFlight = false;
+  const status = $("settings-status");
+  if (!result.ok) {
+    // The draft keeps the edit, so it is still on screen to be corrected;
+    // the next change tries the write again.
+    status.textContent = `${result.text} ${result.detail}`;
+    status.classList.add("settings-status--error");
+  } else {
+    savedBaseline = sent;
+    if (
+      !wasUndo &&
+      before !== undefined &&
+      withoutLiveSections(before) !== withoutLiveSections(sent)
+    ) {
+      undoStack.push(before);
+    }
+    status.textContent = restartRequired()
+      ? MESSAGES.settingsSavedRestart(PRIMARY_LANGUAGE)
+      : wasUndo
+        ? MESSAGES.settingsUndone(PRIMARY_LANGUAGE)
+        : MESSAGES.settingsSavedLive(PRIMARY_LANGUAGE);
+    status.classList.remove("settings-status--error");
+    // Every open terminal, now. The same size as before is a no-op, so saving
+    // some other section leaves a session zoom alone.
+    setTerminalFontBase(sent.terminal.fontSize);
+    window.dispatchEvent(new Event("jarvis:settings-saved"));
+  }
+  renderSaveState();
+  if (saveAgain) {
+    saveAgain = false;
+    scheduleAutosave();
+  }
+}
+
+/** Puts back the config as it stood before the last saved change, and
+ *  writes it. `remote` and `daemon` stay as they are now (see
+ *  withoutLiveSections). */
+export function undoSettings(): void {
+  if (draft === undefined) return;
+  const previous = undoStack.pop();
+  if (previous === undefined) return;
+  draft = { ...structuredClone(previous), remote: draft.remote, daemon: draft.daemon };
+  undoing = true;
+  renderSettings();
+  renderSaveState();
+  scheduleAutosave();
 }
 
 export async function savePrayerSettings(prayer: JarvisConfig["prayer"]): Promise<void> {
@@ -3172,6 +3605,9 @@ export async function savePrayerSettings(prayer: JarvisConfig["prayer"]): Promis
 // single fields and the section's own add buttons, not rebuilt per render
 // the way each section's rows are.
 function wireStaticFields(): void {
+  attachBrowse("settings-brain-cwd", "directory");
+  attachBrowse("settings-whisper-binary", "file");
+  attachBrowse("settings-whisper-model", "file");
   $("settings-brain-cwd").addEventListener("change", () => {
     if (draft === undefined) return;
     draft.brain.cwd = ($("settings-brain-cwd") as HTMLInputElement).value;
@@ -3420,12 +3856,14 @@ function wireStaticFields(): void {
     addDockerEntry();
     clearSaveStatus();
   });
+  $("settings-docker-autopopulate").textContent = MESSAGES.settingsDockerFind(PRIMARY_LANGUAGE);
+  $("settings-docker-add").textContent = MESSAGES.settingsDockerAddManually(PRIMARY_LANGUAGE);
   $("settings-docker-autopopulate").addEventListener("click", () => void autopopulateDocker());
   $("settings-chat-add").addEventListener("click", () => {
     addChatEntry();
     clearSaveStatus();
   });
 
-  $("settings-save").addEventListener("click", () => void saveSettings());
+  $("settings-undo").addEventListener("click", () => undoSettings());
   $("settings-restart").addEventListener("click", () => void window.jarvis.restartApp());
 }

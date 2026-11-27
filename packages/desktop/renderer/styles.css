@@ -3294,6 +3294,20 @@
   .settings-rows { display: flex; flex-direction: column; gap: var(--s2); }
   .settings-rows[hidden] { display: none; }
 
+  /* A path input and its Browse button, as one control: the input takes the
+     room and the button keeps its own width, in a row and in a field alike. */
+  .settings-path { display: flex; align-items: center; gap: var(--s2); min-width: 0; flex: 1 1 auto; }
+  .settings-path input { flex: 1 1 auto; min-width: 0; }
+  .settings-path .settings-browse { flex: 0 0 auto; }
+
+  /* The Docker checklist: tick, name, what Docker says of it, its project. */
+  .settings-docker-pick { align-items: center; flex-wrap: nowrap; }
+  .settings-docker-pick input[type="checkbox"] { flex: 0 0 auto; accent-color: var(--accent); }
+  .settings-docker-pick-name { flex: 1 1 200px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: var(--text); }
+  .settings-docker-pick-status { flex: 0 1 190px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .settings-docker-pick select { flex: 0 0 190px; width: 190px; }
+  .settings-docker-pick-actions { display: flex; gap: var(--s2); }
+
   .settings-row {
     display: flex;
     align-items: flex-end;
@@ -5427,6 +5441,110 @@
 .settings-add--primary:hover { background: var(--accent-text); border-color: var(--accent-text); }
 .settings-add--danger { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 35%, transparent); }
 .settings-add--danger:hover { border-color: var(--bad); }
+
+/* Settings, one section at a time. The nav picks the section (settings.ts,
+   wireSettingsNav); the bar above it carries what the last change did and
+   the way back from it. Two sizes of text do all the work on this page —
+   13px for anything you read or edit, 12px for the notes under it — in the
+   UI face throughout. Mono is kept for output: a log line, a command to
+   copy, a pairing code. */
+.main--settings { grid-template-rows: auto minmax(0, 1fr); }
+.settings-head { grid-row: 1 / span 2; overflow-y: auto; }
+.settings-bar {
+  grid-column: 2;
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  min-height: 52px;
+  padding: 8px 32px;
+  border-block-end: 1px solid var(--hairline-soft);
+}
+.settings-bar .spacer { flex: 1; }
+.settings-bar .settings-add { padding: 6px 12px; font-size: 12px; }
+.settings-bar .settings-add[hidden] { display: none; }
+#settings-status { align-self: center; padding: 0; font-family: var(--font-ui); font-size: 12px; color: var(--text-secondary); min-width: 0; }
+#settings-status.settings-status--error { color: var(--bad); }
+.settings-body { grid-row: 2; font-size: 13px; }
+.settings-inner { max-width: 860px; }
+/* A heading over each group of links. It has to read as a heading at a
+   glance, so it differs from a link in three ways at once — small capitals,
+   the accent colour, and a rule above it — and the links sit indented under
+   it. Muted 11px text alone was lost among the links. */
+.settings-nav-group {
+  margin-block-start: 12px;
+  padding: 14px 10px 6px;
+  border-block-start: 1px solid var(--hairline);
+  color: var(--accent-text);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+.settings-nav-group:first-child { margin-block-start: 0; padding-block-start: 2px; border-block-start: 0; }
+.settings-nav-group ~ .settings-nav-link { padding-inline-start: 18px; }
+.settings-nav-group:empty { display: none; }
+
+.settings-section { display: none; gap: var(--s3); padding: 20px 22px 22px; }
+.settings-section.settings-section--on { display: flex; }
+.settings-section > .lbl:first-child,
+.settings-section-head > .lbl { font-size: 18px; font-weight: 700; }
+.settings-section-head { margin-block-end: 2px; }
+/* A heading inside a section (Remote access's own parts). */
+.settings-section .lbl:not(:first-child) { color: var(--text); font-size: 13px; font-weight: 700; letter-spacing: 0; text-transform: none; }
+.settings-section-head > .lbl:not(:first-child) { font-size: 18px; }
+
+/* One caption style for every field, whichever element a section happened
+   to build it from: a <label> in the markup, a bare <span> in the sections
+   drawn by script. Same size, same colour, same column. */
+.settings-field { gap: 14px; padding: 5px 0; min-height: 36px; }
+.settings-field > label:first-child,
+.settings-field > span:first-child:not(.settings-switch) {
+  flex: 0 0 210px;
+  width: 210px;
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--text);
+}
+.settings-field > label:first-child::first-letter,
+.settings-field > span:first-child:not(.settings-switch)::first-letter,
+.settings-row label > span:first-child::first-letter { text-transform: uppercase; }
+.settings-field--wide > label:first-child { padding-block-start: 9px; }
+.settings-field input[type="text"],
+.settings-field input[type="number"],
+.settings-field input[type="password"],
+.settings-field select,
+.settings-field textarea,
+.settings-row input[type="text"],
+.settings-row input[type="number"],
+.settings-row select {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  min-height: 34px;
+  padding: 6px 10px;
+  border-color: var(--border);
+  border-radius: var(--r-control);
+  background: var(--ground);
+}
+.settings-field input.mono, .settings-field textarea.mono { font-family: var(--font-ui); }
+.settings-field textarea { line-height: 1.5; }
+.settings-field .settings-path { max-width: 480px; }
+.settings-row label { font-size: 12px; color: var(--text-secondary); }
+.settings-row { padding: 14px; border: 1px solid var(--hairline-soft); }
+.settings-note { font-size: 12px; line-height: 1.55; color: var(--text-muted); max-width: 70ch; }
+.settings-add { font-family: var(--font-ui); font-size: 12px; }
+.settings-reviews-gh-state { font-family: var(--font-ui); font-size: 13px; }
+.settings-reviews-inline { font-size: 13px; }
+.settings-awake-status { font-size: 12px; }
+/* A count of minutes or seconds does not need a path's width. */
+.settings-field input[type="number"] { max-width: 120px; }
+.settings-row label:has(input[type="checkbox"]) { color: var(--text); font-size: 13px; min-height: 34px; }
+
+/* The Docker checklist reads as one list, not a card per container. */
+#settings-docker-picker { gap: 0; padding: 14px; border: 1px solid var(--hairline-soft); border-radius: var(--r-control); background: var(--surface-raised); }
+#settings-docker-picker > .settings-note { margin-block-end: 8px; }
+#settings-docker-picker .settings-docker-pick { padding: 6px 0; border: 0; border-block-start: 1px solid var(--hairline-soft); border-radius: 0; background: transparent; }
+#settings-docker-picker .settings-docker-pick-actions { margin-block-start: 12px; }
 
 /* Plan review stays a self-contained side panel so Task 7 can add block
    editing without coupling it to the workspace renderer. */

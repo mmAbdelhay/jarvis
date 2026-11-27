@@ -114,7 +114,7 @@ items 76–86 cover M12.
 
 ## Pairing on a LAN
 
-Desktop: **Settings → Remote access → On**, bind an address, **Save**, then
+Desktop: **Settings → Remote access → On**, bind an address, then
 **New code** — a QR appears beside the link text, with the certificate's
 fingerprint tail (last 4 hex characters) printed beside it.
 

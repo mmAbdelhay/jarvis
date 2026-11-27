@@ -111,6 +111,40 @@ describe("desktop-only registrations", () => {
     });
   });
 
+  it("dialog:pickFiles picks one folder when asked, opening at defaultPath", async () => {
+    const handle = vi.fn();
+    const dialog = {
+      showOpenDialog: vi.fn(async (..._args: unknown[]) => ({
+        canceled: false,
+        filePaths: ["/projects/acme"],
+      })),
+    };
+    registerDesktopOnly({ ...fakeDesktopDeps(), handle, dialog });
+    const listener = handle.mock.calls.find(([c]) => c === "dialog:pickFiles")![1];
+    // `multiple` is ignored beside `directory`: a folder field holds one path.
+    expect(
+      await listener({}, { directory: true, multiple: true, defaultPath: "/projects" }),
+    ).toEqual(["/projects/acme"]);
+    expect(dialog.showOpenDialog.mock.calls[0]![1]).toEqual({
+      properties: ["openDirectory", "createDirectory"],
+      defaultPath: "/projects",
+    });
+  });
+
+  it("dialog:pickFiles ignores a defaultPath that is not a non-empty string", async () => {
+    const handle = vi.fn();
+    const dialog = {
+      showOpenDialog: vi.fn(async (..._args: unknown[]) => ({ canceled: true, filePaths: [] })),
+    };
+    registerDesktopOnly({ ...fakeDesktopDeps(), handle, dialog });
+    const listener = handle.mock.calls.find(([c]) => c === "dialog:pickFiles")![1];
+    await listener({}, { defaultPath: 7 });
+    await listener({}, { defaultPath: "" });
+    for (const call of dialog.showOpenDialog.mock.calls) {
+      expect(call[1]).toEqual({ properties: ["openFile"] });
+    }
+  });
+
   // The page controls moved here from the dispatch table when the tab state
   // moved into the core (Task 18): they act on a view, which only the
   // Electron host has.
