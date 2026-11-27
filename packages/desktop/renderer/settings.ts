@@ -132,17 +132,41 @@ function fingerprintTailFromUri(uri: string): string | undefined {
  *  (below) only ever fetches and renders; it is called every time the
  *  Settings nav button is clicked, and must never re-attach listeners to
  *  elements that already have them. */
-/** The section nav (board 5): plain anchors, so a click still jumps the
- *  scroller with no JS at all if this never runs — this only adds the
- *  active-link highlight `:target` can't give the *link* (it matches the
- *  section, never the anchor that pointed at it). */
+/** The section nav: one section is on screen at a time, the one whose link
+ *  was last chosen. The links stay real anchors to their sections, so each
+ *  names what it shows; the click is handled here rather than followed,
+ *  because there is no longer one long page to jump within. */
 function wireSettingsNav(): void {
-  const links = document.querySelectorAll<HTMLAnchorElement>(".settings-nav-link");
+  // Looked up without `$()`: the test harness lays down sections without the
+  // nav around them, and a missing heading must not stop the page.
+  for (const group of ["app", "agents", "projects", "voice", "devices"] as const) {
+    const heading = document.getElementById(`settings-nav-group-${group}`);
+    if (heading !== null) {
+      heading.textContent = MESSAGES.settingsNavGroup(group, PRIMARY_LANGUAGE);
+    }
+  }
+  const links = [...document.querySelectorAll<HTMLAnchorElement>(".settings-nav-link")];
+  const show = (link: HTMLAnchorElement): void => {
+    const target = link.getAttribute("href")?.slice(1);
+    for (const other of links) {
+      const on = other === link;
+      other.classList.toggle("settings-nav-link--on", on);
+      if (on) other.setAttribute("aria-current", "page");
+      else other.removeAttribute("aria-current");
+    }
+    for (const section of document.querySelectorAll<HTMLElement>(".settings-section")) {
+      section.classList.toggle("settings-section--on", section.id === target);
+    }
+    document.querySelector(".settings-body")?.scrollTo?.(0, 0);
+  };
   for (const link of links) {
-    link.addEventListener("click", () => {
-      for (const other of links) other.classList.toggle("settings-nav-link--on", other === link);
+    link.addEventListener("click", (event) => {
+      event.preventDefault();
+      show(link);
     });
   }
+  const first = links.find((link) => link.classList.contains("settings-nav-link--on")) ?? links[0];
+  if (first !== undefined) show(first);
 }
 
 export function initSettings(): void {
@@ -766,6 +790,13 @@ function scheduleAutosave(): void {
 
 /** One labelled text field, committing on change (blur/Enter), not on
  *  every keystroke. */
+/** What a field is called on screen: its config key, except where the key
+ *  would read as code (MESSAGES.settingsFieldCaption). The stylesheet
+ *  capitalises the first letter; `data-field` keeps the key either way. */
+function captionFor(field: string): string {
+  return MESSAGES.settingsFieldCaption(field, PRIMARY_LANGUAGE) ?? field;
+}
+
 function fieldInput(
   labelText: string,
   value: string,
@@ -776,7 +807,7 @@ function fieldInput(
   // more width than a port without knowing anything about either.
   label.dataset["field"] = labelText;
   const caption = document.createElement("span");
-  caption.textContent = labelText;
+  caption.textContent = captionFor(labelText);
   label.append(caption);
   const input = document.createElement("input");
   input.type = "text";
@@ -890,7 +921,7 @@ function fieldSelect(
   const label = document.createElement("label");
   label.dataset["field"] = labelText;
   const caption = document.createElement("span");
-  caption.textContent = labelText;
+  caption.textContent = captionFor(labelText);
   label.append(caption);
   const select = document.createElement("select");
   select.dataset["field"] = labelText;
@@ -968,10 +999,13 @@ function renderAgentRow(id: string, agent: Omit<AgentConfig, "id">): HTMLElement
     updateAgent(id, { default: defaultCheckbox.checked ? true : undefined });
     clearSaveStatus();
   });
-  defaultLabel.append(defaultCheckbox, document.createTextNode("default"));
+  defaultLabel.append(defaultCheckbox, document.createTextNode(captionFor("default")));
 
   const vendorLabel = document.createElement("label");
-  vendorLabel.textContent = "vendor";
+  // In a span, as fieldInput's caption is, so the two are styled as one.
+  const vendorCaption = document.createElement("span");
+  vendorCaption.textContent = "vendor";
+  vendorLabel.append(vendorCaption);
   const vendorSelect = document.createElement("select");
   const noneOption = document.createElement("option");
   noneOption.value = "";
@@ -1103,7 +1137,10 @@ function renderRoutingRow(rule: RoutingRule, index: number): HTMLElement {
   );
 
   const agentLabel = document.createElement("label");
-  agentLabel.textContent = "agent";
+  // In a span, as fieldInput's caption is, so the two are styled as one.
+  const agentCaption = document.createElement("span");
+  agentCaption.textContent = "agent";
+  agentLabel.append(agentCaption);
   const agentSelect = document.createElement("select");
   const placeholder = document.createElement("option");
   placeholder.value = "";

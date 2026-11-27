@@ -665,7 +665,7 @@ export const MESSAGES = {
     language === "ar" ? "إلغاء الربط" : "Unlink",
   // Keep awake (Task 18): Settings' section and the topbar button.
   awakeSettingsTitle: (language: "ar" | "en"): string =>
-    language === "ar" ? "إبقاء الجهاز مستيقظًا" : "KEEP AWAKE",
+    language === "ar" ? "إبقاء الجهاز مستيقظًا" : "Keep awake",
   awakeSettingsMode: (language: "ar" | "en"): string =>
     language === "ar" ? "إبقاء الشاشة والجهاز يعملان" : "keep the screen and machine on",
   awakeModeName: (mode: AwakeStatus["mode"], language: "ar" | "en"): string => {
@@ -776,7 +776,7 @@ export const MESSAGES = {
       ? `البطارية ${percent}%${charging ? " — قيد الشحن" : ""}`
       : `Battery ${percent}%${charging ? " — charging" : ""}`,
   reviewsSettingsTitle: (language: "ar" | "en"): string =>
-    language === "ar" ? "المراجعات" : "REVIEWS",
+    language === "ar" ? "المراجعات" : "Reviews",
   reviewsSettingsGhLabel: (language: "ar" | "en"): string =>
     language === "ar" ? "حساب GitHub" : "GitHub login",
   reviewsSettingsGhState: (
@@ -1705,10 +1705,36 @@ export const MESSAGES = {
       : `Choose a project for ${names.join(", ")}.`,
   settingsUndo: (language: "ar" | "en"): string =>
     language === "ar" ? "تراجع عن آخر تغيير" : "Undo last change",
+  // The headings over each group of links in Settings' own nav.
+  settingsNavGroup: (
+    group: "app" | "agents" | "projects" | "voice" | "devices",
+    language: "ar" | "en",
+  ): string => {
+    const names = {
+      app: { ar: "التطبيق", en: "App" },
+      agents: { ar: "الوكلاء", en: "Agents" },
+      projects: { ar: "المشاريع", en: "Projects" },
+      voice: { ar: "الصوت", en: "Voice" },
+      devices: { ar: "الأجهزة", en: "Devices" },
+    } as const;
+    return names[group][language];
+  },
   settingsUnfinishedRow: (language: "ar" | "en"): string =>
     language === "ar"
       ? "لم يُحفظ بعد: هناك صف ينقصه حقل مطلوب. أكمله ليُحفظ."
       : "Not saved yet: a row is missing a required value. Fill it in and it saves.",
+  // The few config keys that would read as code if shown as they are. Any
+  // other key is shown unchanged, so this answers undefined for it.
+  settingsFieldCaption: (field: string, language: "ar" | "en"): string | undefined => {
+    const captions: Record<string, { ar: string; en: string }> = {
+      id: { ar: "المعرّف", en: "ID" },
+      args: { ar: "المعطيات", en: "arguments" },
+      configDir: { ar: "مجلد الإعدادات", en: "config directory" },
+      passwordEnv: { ar: "متغيّر كلمة المرور", en: "password variable" },
+      default: { ar: "الافتراضي", en: "Default" },
+    };
+    return Object.hasOwn(captions, field) ? captions[field]?.[language] : undefined;
+  },
   settingsUndone: (language: "ar" | "en"): string =>
     language === "ar" ? "تم التراجع عن التغيير." : "Change undone.",
   settingsSavePaused: (language: "ar" | "en"): string =>
@@ -1843,7 +1869,7 @@ export const MESSAGES = {
   deleteBlockTitle: (language: "ar" | "en"): string =>
     language === "ar" ? "احذف هذه الكتلة" : "Delete this block",
   prayerHeading: (language: "ar" | "en"): string =>
-    language === "ar" ? "مواقيت الصلاة" : "PRAYER TIMES",
+    language === "ar" ? "مواقيت الصلاة" : "Prayer times",
   prayerShow: (language: "ar" | "en"): string =>
     language === "ar" ? "اعرض الصلاة القادمة في الرأس" : "show next prayer in header",
   prayerLatitude: (language: "ar" | "en"): string => (language === "ar" ? "خط العرض" : "latitude"),
@@ -2224,7 +2250,7 @@ export const MESSAGES = {
   // and its warning is the one sentence in Settings that must never exist in
   // only one language.
   remoteTitle: (language: "ar" | "en"): string =>
-    language === "ar" ? "الوصول عن بُعد" : "REMOTE ACCESS",
+    language === "ar" ? "الوصول عن بُعد" : "Remote access",
   remoteEnabledLabel: (language: "ar" | "en"): string =>
     language === "ar" ? "السماح بالوصول عن بُعد" : "allow remote access",
   remoteState: (enabled: boolean, language: "ar" | "en"): string =>

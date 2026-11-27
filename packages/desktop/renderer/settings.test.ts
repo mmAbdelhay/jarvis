@@ -1612,6 +1612,53 @@ describe("Browse beside a path field", () => {
   });
 });
 
+describe("the section nav", () => {
+  function withNav(): void {
+    harness();
+    document.body.insertAdjacentHTML(
+      "beforeend",
+      `<nav>
+         <div id="settings-nav-group-app"></div>
+         <a class="settings-nav-link settings-nav-link--on" href="#one">One</a>
+         <a class="settings-nav-link" href="#two">Two</a>
+       </nav>
+       <section class="settings-section" id="one"></section>
+       <section class="settings-section" id="two"></section>`,
+    );
+    initSettings();
+  }
+
+  const shown = (): string[] =>
+    [...document.querySelectorAll(".settings-section--on")].map((section) => section.id);
+
+  it("shows the section whose link starts on, and only that one", () => {
+    withNav();
+    expect(shown()).toEqual(["one"]);
+  });
+
+  it("names each group of links in the app's language", () => {
+    withNav();
+    expect(document.getElementById("settings-nav-group-app")?.textContent).toBe(
+      MESSAGES.settingsNavGroup("app", PRIMARY_LANGUAGE),
+    );
+    for (const group of ["app", "agents", "projects", "voice", "devices"] as const) {
+      expect(MESSAGES.settingsNavGroup(group, "ar")).not.toBe(
+        MESSAGES.settingsNavGroup(group, "en"),
+      );
+    }
+  });
+
+  it("swaps to the section a link names, and marks that link current", () => {
+    withNav();
+    const two = document.querySelector<HTMLAnchorElement>('a[href="#two"]')!;
+    two.click();
+
+    expect(shown()).toEqual(["two"]);
+    expect(two.getAttribute("aria-current")).toBe("page");
+    expect(document.querySelector('a[href="#one"]')?.hasAttribute("aria-current")).toBe(false);
+  });
+});
+
 describe("settings docker section", () => {
   it("draws one row per configured container", async () => {
     const config = sample();
