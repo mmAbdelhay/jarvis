@@ -688,7 +688,7 @@ export const MESSAGES = {
   awakeSettingsIdle: (language: "ar" | "en"): string =>
     language === "ar" ? "ثواني الخمول قبل الضغط" : "idle seconds before the press",
   awakeSettingsIdleNote: (language: "ar" | "en"): string =>
-    language === "ar" ? "من 60 إلى 3600. يُطبَّق عند الحفظ." : "60 to 3600. Applied on Save.",
+    language === "ar" ? "من 60 إلى 3600." : "60 to 3600.",
   awakeSettingsStatus: (status: AwakeStatus, language: "ar" | "en"): string => {
     const ar = language === "ar";
     let line: string;
@@ -1671,6 +1671,18 @@ export const MESSAGES = {
     language === "ar"
       ? "تعذّر حفظ الإعدادات — التفاصيل أدناه."
       : "Couldn't save settings — see below.",
+  settingsUndo: (language: "ar" | "en"): string =>
+    language === "ar" ? "تراجع عن آخر تغيير" : "Undo last change",
+  settingsUnfinishedRow: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "لم يُحفظ بعد: هناك صف ينقصه حقل مطلوب. أكمله ليُحفظ."
+      : "Not saved yet: a row is missing a required value. Fill it in and it saves.",
+  settingsUndone: (language: "ar" | "en"): string =>
+    language === "ar" ? "تم التراجع عن التغيير." : "Change undone.",
+  settingsSavePaused: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "لم يُحفظ هذا التغيير: تعذّر تحديث هذه الصفحة. أعد فتح الإعدادات."
+      : "This change is not saved: this page could not refresh. Reopen Settings.",
   settingsSaved: (language: "ar" | "en"): string => (language === "ar" ? "تم الحفظ." : "Saved."),
   settingsSavedLive: (language: "ar" | "en"): string =>
     language === "ar" ? "تم الحفظ. التغييرات مفعّلة الآن." : "Saved. Changes are active now.",
@@ -2293,8 +2305,8 @@ export const MESSAGES = {
   // above is off — turn it on and Save first.
   remotePairSaveFirst: (language: "ar" | "en"): string =>
     language === "ar"
-      ? "فعّل الوصول عن بُعد واحفظ التغييرات أولًا لإقران جهاز."
-      : "Turn on remote access and save first to pair a device.",
+      ? "فعّل الوصول عن بُعد أولًا لإقران جهاز."
+      : "Turn on remote access first to pair a device.",
   remotePairInstructions: (language: "ar" | "en"): string =>
     language === "ar"
       ? "افتح تطبيق Jarvis على هاتفك وامسح أو الصق هذا الرابط قبل انتهاء صلاحيته."
@@ -2990,8 +3002,8 @@ export const MESSAGES = {
     language === "ar" ? "تعذّر إتمام التغيير." : "The change could not be made.",
   remoteTailnetNotRefreshed: (language: "ar" | "en"): string =>
     language === "ar"
-      ? "تم التغيير، لكن تعذّر تحديث هذه الصفحة. أعد فتح الإعدادات لتتمكن من الحفظ."
-      : "The change was made, but this page could not refresh. Reopen Settings to save.",
+      ? "تم التغيير، لكن تعذّر تحديث هذه الصفحة. أعد فتح الإعدادات لمتابعة التعديل."
+      : "The change was made, but this page could not refresh. Reopen Settings to keep editing.",
 
   // M10 Task 3: the push notification catalogue — the only text a
   // notification's title/body carry, built in the *device's* registered

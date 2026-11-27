@@ -276,7 +276,7 @@ the tailnet address and let Tailscale forward to it. `tailscaled` is signed
 by Tailscale, so the firewall lets its connections through:
 
 1. In **Settings → Remote access → Reachable on**, open **Advanced…** and
-   pick **This machine only** (`127.0.0.1`), then save. Set this in
+   pick **This machine only** (`127.0.0.1`). Set this in
    Settings, not by hand-editing `jarvis.yaml` while Settings is open:
    Settings keeps its own copy of the file, and its next save writes that
    copy back over your edit. A hand edit is also not applied until Jarvis

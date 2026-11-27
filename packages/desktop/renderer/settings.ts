@@ -27,7 +27,14 @@ import { isTerminalFontSize } from "../src/terminal-font-size.js";
 // Settings' own route. One in-memory draft, edited in place and re-rendered
 // wholesale on every mutation — every field commits on "change" (blur or
 // Enter), never on "input", so a full re-render never steals focus out from
-// under a keystroke in progress. No innerHTML anywhere in this file, same
+// under a keystroke in progress.
+//
+// There is no Save button. A change is written the moment it is committed
+// (scheduleAutosave), the status line says so, and Undo puts the previous
+// config back. The page used to be two systems at once — most fields waited
+// in a draft for a Save that nothing reminded you to press, while the
+// remote and background switches applied on touch — and the only way to
+// back out of an edit was to leave the page. No innerHTML anywhere in this file, same
 // discipline as every other renderer module: config values are locally
 // authored, but there is no reason to be the one file that breaks the rule.
 
@@ -38,7 +45,27 @@ const $ = (id: string): HTMLElement => {
 };
 
 let draft: JarvisConfig | undefined;
+/** What the file holds as far as this page knows: the last config read or
+ *  successfully saved. The draft differing from it is what "unsaved" means. */
 let savedBaseline: JarvisConfig | undefined;
+/** The config as it stood when Settings was first opened in this run of the
+ *  app — what the services built at startup are still running on. Restart is
+ *  offered while a startup-only key differs from it, and stops being offered
+ *  if the change is undone. */
+let restartBaseline: JarvisConfig | undefined;
+/** Configs to go back to, oldest first: the baseline as it stood before each
+ *  save made from this visit. Emptied when Settings is reopened, because a
+ *  snapshot from an earlier visit may predate a change made elsewhere. */
+let undoStack: JarvisConfig[] = [];
+/** True while the save in flight is an Undo, which must not become a step
+ *  Undo can itself go back to. */
+let undoing = false;
+let autosaveQueued = false;
+let saveInFlight = false;
+/** A change arrived while a save was in flight; save once more after it. */
+let saveAgain = false;
+/** One listener for the app's lifetime, however often initSettings runs. */
+let autosaveWired = false;
 
 /** The bridge's own status, distinct from `draft.remote` (the config the
  *  user is editing): this is what it is actually doing right now — closed
@@ -121,6 +148,23 @@ function wireSettingsNav(): void {
 export function initSettings(): void {
   wireStaticFields();
   wireSettingsNav();
+  restartBaseline = undefined;
+  // Every committed edit raises `change` or is a click (add, remove, a
+  // checklist's confirm), and each field's own listener has already updated
+  // the draft by the time the event bubbles here. One listener therefore
+  // covers every control on the page, including ones added later; a draft
+  // that turns out equal to what is saved is not written.
+  if (!autosaveWired) {
+    autosaveWired = true;
+    for (const type of ["change", "click"]) {
+      document.addEventListener(type, (event) => {
+        const view = document.getElementById("view-settings");
+        if (view === null || (event.target instanceof Node && view.contains(event.target))) {
+          scheduleAutosave();
+        }
+      });
+    }
+  }
   // Keep awake: the topbar button or a phone may change the mode while
   // Settings is open. A field the user has not touched follows it, so a
   // later Save does not put the old value back; the status line redraws.
@@ -162,6 +206,9 @@ export async function openSettings(): Promise<void> {
   draft = await window.jarvis.getSettings();
   tailnetDraftStale = false;
   savedBaseline = structuredClone(draft);
+  restartBaseline ??= structuredClone(draft);
+  undoStack = [];
+  renderSaveState();
   ownerFormOpen = false;
   ownerBusy = false;
   ownerMessage = undefined;
@@ -696,11 +743,25 @@ async function runGhAuthLogin(): Promise<void> {
   }
 }
 
+/** Called by every edit: the last save's outcome no longer describes the
+ *  page, and the edit itself is queued to be written. */
 function clearSaveStatus(): void {
   const status = $("settings-status");
   status.textContent = "";
   status.classList.remove("settings-status--error");
-  ($("settings-restart") as HTMLElement).hidden = true;
+  scheduleAutosave();
+}
+
+/** Writes the draft once the event that changed it has finished — a
+ *  microtask, so a handler that mutates in several steps is saved whole,
+ *  and several edits in one turn are one write. */
+function scheduleAutosave(): void {
+  if (autosaveQueued) return;
+  autosaveQueued = true;
+  queueMicrotask(() => {
+    autosaveQueued = false;
+    void saveSettings();
+  });
 }
 
 /** One labelled text field, committing on change (blur/Enter), not on
@@ -1283,6 +1344,13 @@ function renderEditorRootRow(project: string, index: number, root: EditorRoot): 
     removeControl(() => removeEditorRoot(project, index)),
   );
   return row;
+}
+
+/** A refusal that never reached a save: shown where a failed save would be. */
+function showSettingsError(text: string): void {
+  const status = $("settings-status");
+  status.textContent = text;
+  status.classList.add("settings-status--error");
 }
 
 function updateEditorRoot(project: string, index: number, patch: Partial<EditorRoot>): void {
@@ -1935,9 +2003,11 @@ let tailnetDraftStale = false;
  *  the Enable switch: not on without an owner password, but always off. The
  *  relay is settled before enabling: while on it is not a live choice. */
 function renderTailnetSwitch(): void {
-  // The draft's `remote` is out of date until the change answers, and Save
+  // The draft's `remote` is out of date until the change answers, and a save
   // would write its address and certificate over the ones the change wrote.
-  ($("settings-save") as HTMLButtonElement).disabled = tailnetBusy || tailnetDraftStale;
+  // saveSettings holds back while either is set; an edit made meanwhile is
+  // written as soon as the change has answered.
+  if (!tailnetBusy && !tailnetDraftStale) scheduleAutosave();
   if (draft === undefined) return;
   const on = draft.remote.tailnet.enabled;
   const toggle = $("settings-remote-tailnet") as HTMLInputElement;
@@ -1997,7 +2067,8 @@ function tailnetEnableReplacesPairing(remote: JarvisConfig["remote"]): boolean {
 }
 
 /** Runs one enable or disable. The channel wrote the file, so `remote` is
- *  read back from it; the rest of the draft may hold unsaved edits and stays.
+ *  read back from it; the rest of the draft may hold an edit whose write is
+ *  being held back (saveSettings) and stays.
  *  A refusal changed nothing, and the switch redraws from the draft. A failed
  *  read-back changed nothing either, of what the channel already did: the
  *  switch then shows `outcome`, the part of the file this call knows. */
@@ -2684,13 +2755,17 @@ function clearRemoteCertError(): void {
  *  the user hunt for Tailscale/Wi-Fi behind Advanced… — see
  *  proposedBindAddress for why an enabled loopback bind is left alone.
  *  Called only once per open, right after a fresh bindChoiceList arrives
- *  (see loadBindChoices). Nothing here reaches jarvis.yaml on its own — like
- *  every other field in this file, it only changes what Save would write. */
+ *  (see loadBindChoices). Nothing here reaches jarvis.yaml on its own: the
+ *  proposal goes into the baseline as well as the draft, so it is not an
+ *  edit and does not trigger a write. It is written alongside the next
+ *  change the user actually makes — what pressing Save used to do. */
 function applyDefaultBindSelection(): void {
   if (draft === undefined || savedBaseline === undefined) return;
   if (draft.remote.bindAddress !== DEFAULT_BIND_ADDRESS) return;
   const proposed = proposedBindAddress(savedBaseline.remote, DEFAULT_BIND_ADDRESS, bindChoiceList);
-  if (proposed !== undefined) draft.remote.bindAddress = proposed;
+  if (proposed === undefined) return;
+  draft.remote.bindAddress = proposed;
+  savedBaseline.remote.bindAddress = proposed;
 }
 
 function renderBindChoices(): void {
@@ -3111,55 +3186,169 @@ function ipv4ToHextets(dotted: string): [string, string] | undefined {
 
 // --------------------------------------------------------- Save / restart
 
+// These services are constructed at startup. Their running instances cannot
+// safely be swapped by mutating the config object, so the restart affordance
+// is kept only while one of their inputs actually differs.
+const RESTART_KEYS = [
+  "brain",
+  "voice",
+  "whisper",
+  "terminal",
+  "performance",
+  "sessions",
+  "headlamp",
+] as const;
+// Keys inside those sections that apply live (`terminal.fontSize`:
+// terminal-font.ts), so changing only them must not ask for a restart.
+const LIVE_KEYS: Partial<Record<(typeof RESTART_KEYS)[number], readonly string[]>> = {
+  terminal: ["fontSize"],
+};
+
+function restartView(config: JarvisConfig, key: (typeof RESTART_KEYS)[number]): unknown {
+  const live = LIVE_KEYS[key];
+  if (live === undefined) return config[key];
+  return Object.fromEntries(Object.entries(config[key]).filter(([name]) => !live.includes(name)));
+}
+
+/** Whether what is saved differs, in a startup-only key, from what the
+ *  running services were built from. */
+function restartRequired(): boolean {
+  const running = restartBaseline;
+  const saved = savedBaseline;
+  if (running === undefined || saved === undefined) return false;
+  return RESTART_KEYS.some(
+    (key) => JSON.stringify(restartView(running, key)) !== JSON.stringify(restartView(saved, key)),
+  );
+}
+
+/** `remote` and `daemon` are written by their own channels as well as by a
+ *  save (pairing, the Tailscale switch, the background toggle), so a
+ *  snapshot's copy of them can be stale. Undo never restores either, and a
+ *  change to them alone is not a step Undo goes back to. */
+function withoutLiveSections(config: JarvisConfig): string {
+  const { remote: _remote, daemon: _daemon, ...rest } = config;
+  return JSON.stringify(rest);
+}
+
+/** Undo and Restart, from the state above. Restart stays for as long as it
+ *  is true, not just until the next edit. */
+function renderSaveState(): void {
+  const undo = $("settings-undo") as HTMLButtonElement;
+  undo.textContent = MESSAGES.settingsUndo(PRIMARY_LANGUAGE);
+  undo.disabled = undoStack.length === 0;
+  ($("settings-restart") as HTMLElement).hidden = !restartRequired();
+}
+
+/** Whether the draft holds a row that still lacks the one thing that makes
+ *  it mean something: an agent's command, a project's path, a routing
+ *  rule's agent (blank on a new rule, and blanked when its agent is
+ *  removed), or a Docker row still carrying the placeholder "+ Add" seeded
+ *  it with. */
+function hasUnfinishedRow(config: JarvisConfig): boolean {
+  if (Object.values(config.registry.agents).some((agent) => agent.command.trim() === "")) {
+    return true;
+  }
+  if (Object.values(config.projects).some((path) => path.trim() === "")) return true;
+  if ((config.registry.routing ?? []).some((rule) => rule.agent === "")) return true;
+  return Object.values(config.docker).some((entries) =>
+    entries.some((entry) => entry.name === entry.container && /^container-\d+$/.test(entry.name)),
+  );
+}
+
 export async function saveSettings(): Promise<void> {
-  if (draft === undefined || tailnetBusy || tailnetDraftStale) return;
-  // These services are constructed at startup. Their running instances cannot
-  // safely be swapped by mutating the config object, so keep the restart
-  // affordance only when one of their inputs actually changed.
-  const restartKeys = [
-    "brain",
-    "voice",
-    "whisper",
-    "terminal",
-    "performance",
-    "sessions",
-    "headlamp",
-  ] as const;
-  // Keys inside those sections that apply live (`terminal.fontSize`:
-  // terminal-font.ts), so changing only them must not ask for a restart.
-  const liveKeys: Partial<Record<(typeof restartKeys)[number], readonly string[]>> = {
-    terminal: ["fontSize"],
-  };
-  const restartView = (config: JarvisConfig, key: (typeof restartKeys)[number]): unknown => {
-    const live = liveKeys[key];
-    if (live === undefined) return config[key];
-    return Object.fromEntries(Object.entries(config[key]).filter(([name]) => !live.includes(name)));
-  };
-  const baseline = savedBaseline;
-  const current = draft;
-  const restartRequired =
-    baseline !== undefined &&
-    restartKeys.some(
-      (key) =>
-        JSON.stringify(restartView(baseline, key)) !== JSON.stringify(restartView(current, key)),
-    );
-  const result = await window.jarvis.saveSettings(draft);
-  const status = $("settings-status");
-  if (!result.ok) {
-    status.textContent = `${result.text} ${result.detail}`;
-    status.classList.add("settings-status--error");
+  if (draft === undefined) return;
+  if (savedBaseline !== undefined && JSON.stringify(draft) === JSON.stringify(savedBaseline)) {
     return;
   }
-  status.textContent = restartRequired
-    ? MESSAGES.settingsSavedRestart(PRIMARY_LANGUAGE)
-    : MESSAGES.settingsSavedLive(PRIMARY_LANGUAGE);
-  status.classList.remove("settings-status--error");
-  ($("settings-restart") as HTMLElement).hidden = !restartRequired;
-  // Every open terminal, now. The same size as before is a no-op, so saving
-  // some other section leaves a session zoom alone.
-  setTerminalFontBase(current.terminal.fontSize);
-  savedBaseline = structuredClone(draft);
-  window.dispatchEvent(new Event("jarvis:settings-saved"));
+  // A row just added and not filled in yet is not written: an agent with no
+  // command or a project with no path would either be refused by the parser
+  // or, worse, be applied. Said in the status line, in the ordinary colour —
+  // it is a step in progress, not a failure.
+  if (hasUnfinishedRow(draft)) {
+    const status = $("settings-status");
+    status.textContent = MESSAGES.settingsUnfinishedRow(PRIMARY_LANGUAGE);
+    status.classList.remove("settings-status--error");
+    return;
+  }
+  // The draft's `remote` is out of date until a Tailscale change answers
+  // (busy) or until Settings re-reads the file (stale); writing it would put
+  // the old address and certificate back. Busy passes on its own, and
+  // renderTailnetSwitch queues the write again when it does. Stale does
+  // not, so it is said out loud rather than leaving an edit silently
+  // unwritten.
+  if (tailnetBusy) return;
+  if (tailnetDraftStale) {
+    showSettingsError(MESSAGES.settingsSavePaused(PRIMARY_LANGUAGE));
+    return;
+  }
+  if (saveInFlight) {
+    saveAgain = true;
+    return;
+  }
+  saveInFlight = true;
+  // A copy: the draft can be edited again before this write answers, and
+  // the baseline must become exactly what was sent, not what it grew into.
+  const sent = structuredClone(draft);
+  const before = savedBaseline;
+  const wasUndo = undoing;
+  undoing = false;
+  let result: Awaited<ReturnType<typeof window.jarvis.saveSettings>>;
+  try {
+    result = await window.jarvis.saveSettings(sent);
+  } catch (error: unknown) {
+    result = {
+      ok: false,
+      text: MESSAGES.settingsSaveFailed(PRIMARY_LANGUAGE),
+      detail: String(error),
+      language: PRIMARY_LANGUAGE,
+    };
+  }
+  saveInFlight = false;
+  const status = $("settings-status");
+  if (!result.ok) {
+    // The draft keeps the edit, so it is still on screen to be corrected;
+    // the next change tries the write again.
+    status.textContent = `${result.text} ${result.detail}`;
+    status.classList.add("settings-status--error");
+  } else {
+    savedBaseline = sent;
+    if (
+      !wasUndo &&
+      before !== undefined &&
+      withoutLiveSections(before) !== withoutLiveSections(sent)
+    ) {
+      undoStack.push(before);
+    }
+    status.textContent = restartRequired()
+      ? MESSAGES.settingsSavedRestart(PRIMARY_LANGUAGE)
+      : wasUndo
+        ? MESSAGES.settingsUndone(PRIMARY_LANGUAGE)
+        : MESSAGES.settingsSavedLive(PRIMARY_LANGUAGE);
+    status.classList.remove("settings-status--error");
+    // Every open terminal, now. The same size as before is a no-op, so saving
+    // some other section leaves a session zoom alone.
+    setTerminalFontBase(sent.terminal.fontSize);
+    window.dispatchEvent(new Event("jarvis:settings-saved"));
+  }
+  renderSaveState();
+  if (saveAgain) {
+    saveAgain = false;
+    scheduleAutosave();
+  }
+}
+
+/** Puts back the config as it stood before the last saved change, and
+ *  writes it. `remote` and `daemon` stay as they are now (see
+ *  withoutLiveSections). */
+export function undoSettings(): void {
+  if (draft === undefined) return;
+  const previous = undoStack.pop();
+  if (previous === undefined) return;
+  draft = { ...structuredClone(previous), remote: draft.remote, daemon: draft.daemon };
+  undoing = true;
+  renderSettings();
+  renderSaveState();
+  scheduleAutosave();
 }
 
 export async function savePrayerSettings(prayer: JarvisConfig["prayer"]): Promise<void> {
@@ -3426,6 +3615,6 @@ function wireStaticFields(): void {
     clearSaveStatus();
   });
 
-  $("settings-save").addEventListener("click", () => void saveSettings());
+  $("settings-undo").addEventListener("click", () => undoSettings());
   $("settings-restart").addEventListener("click", () => void window.jarvis.restartApp());
 }

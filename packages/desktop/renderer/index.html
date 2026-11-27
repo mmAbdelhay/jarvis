@@ -760,7 +760,7 @@
       <div class="settings-head-actions">
         <button id="settings-tools" class="workspace-nav" type="button">Tools…</button>
         <button id="settings-restart" class="workspace-nav" type="button" hidden>Restart Jarvis</button>
-        <button id="settings-save" class="workspace-nav workspace-nav--primary" type="button">Save</button>
+        <button id="settings-undo" class="workspace-nav" type="button" disabled></button>
       </div>
       <span id="settings-status" class="mono"></span>
     </div>
@@ -995,7 +995,7 @@
 
       <section class="settings-section" id="settings-section-terminal">
         <div class="lbl">TERMINAL</div>
-        <!-- Applies to every open terminal the moment Save is pressed —
+        <!-- Applies to every open terminal the moment it is changed —
              renderer/terminal-font.ts. The range matches config.ts's. -->
         <div class="settings-field">
           <label for="settings-terminal-font-size">font size</label>
