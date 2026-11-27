@@ -1626,11 +1626,16 @@ function uniqueDockerName(existing: readonly DockerEntry[], base: string): strin
   return `${base}-${n}`;
 }
 
-/** One container offered by Auto-populate, paired with the project it would
- *  be filed under if ticked. */
+/** One container offered by the picker. `project` is "" until the container
+ *  is matched to a project by its compose directory or the user picks one —
+ *  never a guess: on a machine with one configured project and twenty
+ *  unrelated containers, defaulting the select to "the first project" drew
+ *  every one of them as if it belonged there. */
 type DockerPickerEntry = { facts: ContainerFacts; project: string; checked: boolean };
 
 let dockerPicker: DockerPickerEntry[] | undefined;
+/** The picker's own refusal line (a ticked row with no project). */
+let dockerPickerProblem: string | undefined;
 
 /** True when `dir` is `base` itself or a path under it — a trailing-
  *  separator-aware prefix test, so "/p/acme-old" does not match
@@ -1650,26 +1655,43 @@ function projectForContainer(facts: ContainerFacts): string | undefined {
   return undefined;
 }
 
-/** Fetches every container on the machine and opens the checklist, ticking
- *  the ones that live inside a configured project's directory. Changes
- *  nothing until the checklist is confirmed. */
+/** Every container name Settings already lists, under any project. */
+function configuredContainers(): Set<string> {
+  const names = new Set<string>();
+  for (const entries of Object.values(draft?.docker ?? {})) {
+    for (const entry of entries) names.add(entry.container);
+  }
+  return names;
+}
+
+/** Fetches the machine's containers and opens the checklist. Only the ones
+ *  Settings does not list yet are offered; those that live inside a
+ *  configured project's directory come first, ticked and filed under it, and
+ *  the rest follow unticked with no project. Changes nothing until the
+ *  checklist is confirmed. */
 async function autopopulateDocker(): Promise<void> {
   const result = await window.jarvis.dockerContainers();
   if (!result.ok) {
-    const status = $("settings-status");
-    status.textContent = result.text;
-    status.classList.add("settings-status--error");
+    showSettingsError(result.text);
     return;
   }
   if (draft === undefined) return;
-  dockerPicker = result.value.map((facts) => {
-    const matched = projectForContainer(facts);
-    return {
-      facts,
-      project: matched ?? Object.keys(draft?.projects ?? {})[0] ?? "",
-      checked: matched !== undefined,
-    };
-  });
+  const configured = configuredContainers();
+  const entries = result.value
+    .filter((facts) => !configured.has(facts.name))
+    .map((facts): DockerPickerEntry => {
+      const matched = projectForContainer(facts);
+      return { facts, project: matched ?? "", checked: matched !== undefined };
+    });
+  // Matched first, each group in Docker's own order (sort is stable).
+  dockerPicker = entries.sort((a, b) => Number(b.checked) - Number(a.checked));
+  dockerPickerProblem = undefined;
+  renderDockerPicker();
+}
+
+function closeDockerPicker(): void {
+  dockerPicker = undefined;
+  dockerPickerProblem = undefined;
   renderDockerPicker();
 }
 
@@ -1682,42 +1704,91 @@ function renderDockerPicker(): void {
     return;
   }
   container.hidden = false;
+  const projects = Object.keys(draft.projects);
+
+  const heading = document.createElement("div");
+  heading.className = "settings-note";
+  heading.textContent =
+    dockerPicker.length === 0
+      ? MESSAGES.settingsDockerPickerEmpty(PRIMARY_LANGUAGE)
+      : MESSAGES.settingsDockerPickerHint(PRIMARY_LANGUAGE);
+  container.append(heading);
 
   for (const entry of dockerPicker) {
     // A plain row, not a <label>: the project <select> below must not be
     // nested inside a control whose implicit click target is the checkbox.
     const row = document.createElement("div");
-    row.className = "settings-row";
+    row.className = "settings-row settings-docker-pick";
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
     checkbox.checked = entry.checked;
+    checkbox.setAttribute("aria-label", entry.facts.name);
+    const select = document.createElement("select");
+    select.dataset["field"] = "project";
+    const none = document.createElement("option");
+    none.value = "";
+    none.textContent = MESSAGES.settingsDockerChooseProject(PRIMARY_LANGUAGE);
+    select.append(none);
+    for (const project of projects) {
+      const option = document.createElement("option");
+      option.value = project;
+      option.textContent = project;
+      select.append(option);
+    }
+    select.value = entry.project;
     checkbox.addEventListener("change", () => {
       entry.checked = checkbox.checked;
+      // With one project there is nothing to choose, so ticking is enough.
+      if (entry.checked && entry.project === "" && projects.length === 1) {
+        entry.project = projects[0] ?? "";
+        select.value = entry.project;
+      }
+    });
+    // Visible and editable, never a silent default: a container with no
+    // matching project directory needs a project the user picked. Picking
+    // one is also saying "add this", so it ticks the row.
+    select.addEventListener("change", () => {
+      entry.project = select.value;
+      if (entry.project !== "") {
+        entry.checked = true;
+        checkbox.checked = true;
+      }
     });
     const name = document.createElement("span");
+    name.className = "settings-docker-pick-name";
     name.textContent = entry.facts.name;
-    // Visible and editable, never a silent default: a container with no
-    // matching project directory still needs a project the user picked,
-    // not one guessed on their behalf.
-    const projectField = fieldSelect(
-      "project",
-      entry.project,
-      Object.keys(draft.projects),
-      (value) => {
-        entry.project = value;
-      },
-    );
-    row.append(checkbox, name, projectField);
+    const status = document.createElement("span");
+    status.className = "settings-note settings-docker-pick-status";
+    status.textContent = entry.facts.status === "" ? entry.facts.state : entry.facts.status;
+    row.append(checkbox, name, status, select);
     container.append(row);
   }
 
-  const confirm = document.createElement("button");
-  confirm.type = "button";
-  confirm.id = "settings-docker-confirm";
-  confirm.className = "settings-add";
-  confirm.textContent = "Confirm";
-  confirm.addEventListener("click", () => confirmDockerPicker());
-  container.append(confirm);
+  const problem = document.createElement("div");
+  problem.className = "settings-note settings-note--warning";
+  problem.hidden = dockerPickerProblem === undefined;
+  problem.textContent = dockerPickerProblem ?? "";
+  container.append(problem);
+
+  const actions = document.createElement("div");
+  actions.className = "settings-docker-pick-actions";
+  if (dockerPicker.length > 0) {
+    const confirm = document.createElement("button");
+    confirm.type = "button";
+    confirm.id = "settings-docker-confirm";
+    confirm.className = "settings-add settings-add--primary";
+    confirm.textContent = MESSAGES.settingsDockerPickerConfirm(PRIMARY_LANGUAGE);
+    confirm.addEventListener("click", () => confirmDockerPicker());
+    actions.append(confirm);
+  }
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.id = "settings-docker-cancel";
+  cancel.className = "settings-add";
+  cancel.textContent = MESSAGES.settingsDockerPickerCancel(PRIMARY_LANGUAGE);
+  cancel.addEventListener("click", () => closeDockerPicker());
+  actions.append(cancel);
+  container.append(actions);
 }
 
 /** Replaces each ticked container's project entry with the union of what
@@ -1729,15 +1800,28 @@ function renderDockerPicker(): void {
  *  overwritten. */
 function confirmDockerPicker(): void {
   if (draft === undefined || dockerPicker === undefined) return;
+  // A ticked row with no project is refused out loud, with the checklist
+  // left open — skipping it silently would read as "added" and not be.
+  const unfiled = dockerPicker.filter(
+    (entry) => entry.checked && draft?.projects[entry.project] === undefined,
+  );
+  if (unfiled.length > 0) {
+    dockerPickerProblem = MESSAGES.settingsDockerNeedsProject(
+      unfiled.map((entry) => entry.facts.name),
+      PRIMARY_LANGUAGE,
+    );
+    renderDockerPicker();
+    return;
+  }
   for (const entry of dockerPicker) {
     if (!entry.checked) continue;
-    if (entry.project === "" || draft.projects[entry.project] === undefined) continue;
     const existing = draft.docker[entry.project] ?? [];
     if (existing.some((row) => row.container === entry.facts.name)) continue;
     const name = uniqueDockerName(existing, entry.facts.composeService ?? entry.facts.name);
     draft.docker[entry.project] = [...existing, { name, container: entry.facts.name }];
   }
   dockerPicker = undefined;
+  dockerPickerProblem = undefined;
   clearSaveStatus();
   renderSettings();
 }
@@ -3735,6 +3819,8 @@ function wireStaticFields(): void {
     addDockerEntry();
     clearSaveStatus();
   });
+  $("settings-docker-autopopulate").textContent = MESSAGES.settingsDockerFind(PRIMARY_LANGUAGE);
+  $("settings-docker-add").textContent = MESSAGES.settingsDockerAddManually(PRIMARY_LANGUAGE);
   $("settings-docker-autopopulate").addEventListener("click", () => void autopopulateDocker());
   $("settings-chat-add").addEventListener("click", () => {
     addChatEntry();

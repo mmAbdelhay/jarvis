@@ -112,7 +112,7 @@ open; check it, finish or retry the login by hand, then click Cluster again.
 
 The project declares no containers. That is the only thing the button can know
 without running `docker` on every project switch, so it is the only reason it
-ever shows. Settings will fill the section in for you — Docker → Auto-populate.
+ever shows. Settings will fill the section in for you — Docker → Add from Docker.
 
 ## The Docker tab says Docker is not installed, or that the daemon is down
 

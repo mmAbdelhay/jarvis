@@ -1635,6 +1635,99 @@ describe("settings docker section", () => {
     expect(boxes.map((box) => box.checked)).toEqual([true, false]);
   });
 
+  // The old picker filed every unmatched container under the first project,
+  // so one project and twenty unrelated containers read as twenty of its own.
+  it("gives a container outside every project no project at all", async () => {
+    await openSettings();
+
+    document.getElementById("settings-docker-autopopulate")?.click();
+    await flush();
+
+    const selects = [
+      ...document.querySelectorAll("#settings-docker-picker select"),
+    ] as HTMLSelectElement[];
+    expect(selects.map((select) => select.value)).toEqual(["acme", ""]);
+    expect(selects[1]?.selectedOptions[0]?.textContent).toBe(
+      MESSAGES.settingsDockerChooseProject(PRIMARY_LANGUAGE),
+    );
+  });
+
+  it("does not offer a container Settings already lists", async () => {
+    const config = sample();
+    config.docker = { acme: [{ name: "app", container: "acme-app-1" }] };
+    harness(config);
+    initSettings();
+    await openSettings();
+
+    document.getElementById("settings-docker-autopopulate")?.click();
+    await flush();
+
+    const names = [...document.querySelectorAll(".settings-docker-pick-name")].map(
+      (name) => name.textContent,
+    );
+    expect(names).toEqual(["other-app-1"]);
+  });
+
+  it("refuses a ticked container that has no project, and keeps the checklist open", async () => {
+    const config = sample();
+    config.projects = { acme: "/x/projects/acme", extra: "/x/projects/extra" };
+    const { calls } = harness(config);
+    initSettings();
+    await openSettings();
+
+    document.getElementById("settings-docker-autopopulate")?.click();
+    await flush();
+    const boxes = [
+      ...document.querySelectorAll("#settings-docker-picker input[type=checkbox]"),
+    ] as HTMLInputElement[];
+    boxes[1]!.checked = true;
+    change(boxes[1]!);
+    document.getElementById("settings-docker-confirm")?.click();
+    await flush();
+
+    expect((document.getElementById("settings-docker-picker") as HTMLElement).hidden).toBe(false);
+    expect(
+      document.querySelector("#settings-docker-picker .settings-note--warning")?.textContent,
+    ).toBe(MESSAGES.settingsDockerNeedsProject(["other-app-1"], PRIMARY_LANGUAGE));
+    expect(calls.some((entry) => entry.call === "saveSettings")).toBe(false);
+  });
+
+  it("picking a project ticks the row", async () => {
+    const { calls } = harness();
+    initSettings();
+    await openSettings();
+
+    document.getElementById("settings-docker-autopopulate")?.click();
+    await flush();
+    const select = [
+      ...document.querySelectorAll("#settings-docker-picker select"),
+    ][1] as HTMLSelectElement;
+    select.value = "acme";
+    change(select);
+    document.getElementById("settings-docker-confirm")?.click();
+    await flush();
+
+    expect(
+      savedConfig(calls.findLast((entry) => entry.call === "saveSettings")).docker["acme"]?.map(
+        (entry) => entry.container,
+      ),
+    ).toEqual(["acme-app-1", "other-app-1"]);
+  });
+
+  it("Cancel closes the checklist and adds nothing", async () => {
+    const { calls } = harness();
+    initSettings();
+    await openSettings();
+
+    document.getElementById("settings-docker-autopopulate")?.click();
+    await flush();
+    document.getElementById("settings-docker-cancel")?.click();
+    await flush();
+
+    expect((document.getElementById("settings-docker-picker") as HTMLElement).hidden).toBe(true);
+    expect(calls.some((entry) => entry.call === "saveSettings")).toBe(false);
+  });
+
   it("changes nothing until the checklist is confirmed", async () => {
     const { calls } = harness();
     initSettings();
@@ -1797,8 +1890,8 @@ describe("settings docker section", () => {
       ...document.querySelectorAll("#settings-docker-picker input[type=checkbox]"),
     ] as HTMLInputElement[];
     // other-app-1 (the second container) matches no configured project's
-    // directory, so it starts unticked with the row defaulting to the
-    // first project — the user must move it explicitly.
+    // directory, so it starts unticked with no project — the user files it
+    // explicitly.
     boxes[1]!.checked = true;
     boxes[1]!.dispatchEvent(new Event("change", { bubbles: true }));
 

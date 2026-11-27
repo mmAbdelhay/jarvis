@@ -3300,6 +3300,14 @@
   .settings-path input { flex: 1 1 auto; min-width: 0; }
   .settings-path .settings-browse { flex: 0 0 auto; }
 
+  /* The Docker checklist: tick, name, what Docker says of it, its project. */
+  .settings-docker-pick { align-items: center; flex-wrap: nowrap; }
+  .settings-docker-pick input[type="checkbox"] { flex: 0 0 auto; accent-color: var(--accent); }
+  .settings-docker-pick-name { flex: 1 1 200px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: var(--text); }
+  .settings-docker-pick-status { flex: 0 1 190px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .settings-docker-pick select { flex: 0 0 190px; width: 190px; }
+  .settings-docker-pick-actions { display: flex; gap: var(--s2); }
+
   .settings-row {
     display: flex;
     align-items: flex-end;

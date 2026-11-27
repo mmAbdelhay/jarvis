@@ -1678,6 +1678,31 @@ export const MESSAGES = {
     language === "ar"
       ? `اختر مجلدًا داخل المشروع ${project}.`
       : `Choose a folder inside the ${project} project.`,
+  // Settings → Docker. The checklist offers only containers Settings does
+  // not list yet, and files a container under a project only when its
+  // compose directory is inside that project or the user picked it.
+  settingsDockerFind: (language: "ar" | "en"): string =>
+    language === "ar" ? "+ إضافة من Docker" : "+ Add from Docker",
+  settingsDockerAddManually: (language: "ar" | "en"): string =>
+    language === "ar" ? "إضافة بالاسم" : "Add by name",
+  settingsDockerPickerHint: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "الحاويات الموجودة على هذا الجهاز وغير المضافة بعد. اختر لكل حاوية مشروعها."
+      : "Containers on this machine that aren't in Settings yet. Pick the project each one belongs to.",
+  settingsDockerPickerEmpty: (language: "ar" | "en"): string =>
+    language === "ar"
+      ? "كل الحاويات الموجودة على هذا الجهاز مضافة بالفعل."
+      : "Every container on this machine is already in Settings.",
+  settingsDockerChooseProject: (language: "ar" | "en"): string =>
+    language === "ar" ? "اختر مشروعًا…" : "Choose a project…",
+  settingsDockerPickerConfirm: (language: "ar" | "en"): string =>
+    language === "ar" ? "إضافة المحدَّد" : "Add selected",
+  settingsDockerPickerCancel: (language: "ar" | "en"): string =>
+    language === "ar" ? "إلغاء" : "Cancel",
+  settingsDockerNeedsProject: (names: readonly string[], language: "ar" | "en"): string =>
+    language === "ar"
+      ? `اختر مشروعًا لـ ${names.join("، ")}.`
+      : `Choose a project for ${names.join(", ")}.`,
   settingsUndo: (language: "ar" | "en"): string =>
     language === "ar" ? "تراجع عن آخر تغيير" : "Undo last change",
   settingsUnfinishedRow: (language: "ar" | "en"): string =>
