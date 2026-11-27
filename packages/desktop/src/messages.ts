@@ -1671,6 +1671,13 @@ export const MESSAGES = {
     language === "ar"
       ? "تعذّر حفظ الإعدادات — التفاصيل أدناه."
       : "Couldn't save settings — see below.",
+  // Settings' path fields: the button that opens the native folder or file
+  // picker, and the one refusal it can raise before anything is saved.
+  settingsBrowse: (language: "ar" | "en"): string => (language === "ar" ? "استعراض…" : "Browse…"),
+  settingsBrowseOutsideProject: (project: string, language: "ar" | "en"): string =>
+    language === "ar"
+      ? `اختر مجلدًا داخل المشروع ${project}.`
+      : `Choose a folder inside the ${project} project.`,
   settingsUndo: (language: "ar" | "en"): string =>
     language === "ar" ? "تراجع عن آخر تغيير" : "Undo last change",
   settingsUnfinishedRow: (language: "ar" | "en"): string =>

@@ -4,7 +4,13 @@ import { parseConfig, type JarvisConfig } from "../src/config.js";
 import { MESSAGES, PRIMARY_LANGUAGE } from "../src/messages.js";
 import { PERSONAL_PROJECT } from "../src/personal.js";
 import type { BindChoice, RemoteStatus } from "@jarvis/remote";
-import { initSettings, openSettings, savePrayerSettings, saveSettings } from "./settings.js";
+import {
+  initSettings,
+  openSettings,
+  relativeToProject,
+  savePrayerSettings,
+  saveSettings,
+} from "./settings.js";
 import { initKeepAwake } from "./keep-awake.js";
 import { setTerminalFontBase, terminalFontSize } from "./terminal-font.js";
 import { encodeQr, qrToCanvas } from "./vendor/qr.js";
@@ -1492,6 +1498,117 @@ describe("choosing the engine by choosing a voice", () => {
     expect((document.getElementById("settings-voice-en") as HTMLSelectElement).value).toBe(
       "Alan (neural)",
     );
+  });
+});
+
+describe("Browse beside a path field", () => {
+  /** Answers the next picker call, and records what it was asked. */
+  function picker(paths: string[]): { asked: unknown[] } {
+    const asked: unknown[] = [];
+    jarvisApi()["pickFiles"] = (options: unknown) => {
+      asked.push(options);
+      return Promise.resolve(paths);
+    };
+    return { asked };
+  }
+
+  const browseIn = (selector: string): HTMLButtonElement =>
+    document.querySelector<HTMLButtonElement>(`${selector} .settings-browse`)!;
+
+  it("picks a folder for a project, starting from its current path, and saves it", async () => {
+    const { calls } = harness();
+    initSettings();
+    const { asked } = picker(["/x/projects/moved"]);
+    await openSettings();
+
+    const button = browseIn("#settings-projects");
+    expect(button.textContent).toBe(MESSAGES.settingsBrowse(PRIMARY_LANGUAGE));
+    button.click();
+    await flush();
+
+    expect(asked).toEqual([{ directory: true, defaultPath: "/x/projects/acme" }]);
+    expect(
+      savedConfig(calls.findLast((entry) => entry.call === "saveSettings")).projects["acme"],
+    ).toBe("/x/projects/moved");
+  });
+
+  it("changes nothing when the dialog is cancelled", async () => {
+    const { calls } = harness();
+    initSettings();
+    picker([]);
+    await openSettings();
+
+    browseIn("#settings-projects").click();
+    await flush();
+
+    expect(calls.some((entry) => entry.call === "saveSettings")).toBe(false);
+  });
+
+  it("picks a file, not a folder, for the Whisper binary", async () => {
+    const { calls } = harness();
+    initSettings();
+    const { asked } = picker(["/opt/whisper/whisper-cli"]);
+    await openSettings();
+
+    const input = document.getElementById("settings-whisper-binary") as HTMLInputElement;
+    document
+      .querySelector<HTMLButtonElement>(
+        ".settings-path:has(#settings-whisper-binary) .settings-browse",
+      )!
+      .click();
+    await flush();
+
+    expect((asked[0] as { directory: boolean }).directory).toBe(false);
+    expect(input.value).toBe("/opt/whisper/whisper-cli");
+    expect(
+      savedConfig(calls.findLast((entry) => entry.call === "saveSettings")).whisper.binaryPath,
+    ).toBe("/opt/whisper/whisper-cli");
+  });
+
+  // parseConfig refuses an absolute editor root, and the dialog only ever
+  // answers with one.
+  it("stores an editor root relative to its project", async () => {
+    const config = sample();
+    config.editors = { acme: [{ name: "portal-vue", path: "portal-vue" }] };
+    const { calls } = harness(config);
+    initSettings();
+    const { asked } = picker(["/x/projects/acme/apps/web"]);
+    await openSettings();
+
+    browseIn("#settings-editors").click();
+    await flush();
+
+    expect(asked).toEqual([{ directory: true, defaultPath: "/x/projects/acme" }]);
+    expect(
+      savedConfig(calls.findLast((entry) => entry.call === "saveSettings")).editors["acme"]?.[0]
+        ?.path,
+    ).toBe("apps/web");
+  });
+
+  it("refuses an editor root outside its project, and says which project", async () => {
+    const config = sample();
+    config.editors = { acme: [{ name: "portal-vue", path: "portal-vue" }] };
+    const { calls } = harness(config);
+    initSettings();
+    picker(["/x/projects/acme-old/web"]);
+    await openSettings();
+
+    browseIn("#settings-editors").click();
+    await flush();
+
+    expect(calls.some((entry) => entry.call === "saveSettings")).toBe(false);
+    expect(document.getElementById("settings-status")?.textContent).toBe(
+      MESSAGES.settingsBrowseOutsideProject("acme", PRIMARY_LANGUAGE),
+    );
+  });
+
+  it("relativeToProject is separator-aware on both platforms", () => {
+    expect(relativeToProject("/p/acme", "/p/acme")).toBe(".");
+    expect(relativeToProject("/p/acme/", "/p/acme")).toBe(".");
+    expect(relativeToProject("/p/acme/a/b", "/p/acme/")).toBe("a/b");
+    expect(relativeToProject("/p/acme-old", "/p/acme")).toBeUndefined();
+    expect(relativeToProject("C:\\p\\acme\\web", "C:\\p\\acme")).toBe("web");
+    expect(relativeToProject("/elsewhere", "")).toBeUndefined();
   });
 });
 

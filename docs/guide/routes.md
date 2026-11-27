@@ -128,6 +128,9 @@ are built at startup, so after changing one of those a **Restart Jarvis**
 button stays until you restart — restarting is left to you, because it ends
 running sessions.
 
+Path fields have a **Browse…** button that opens the system's folder or
+file picker; a path can still be typed or pasted.
+
 A per-agent **Test** button runs the health probe against the command as it
 is shown.
 

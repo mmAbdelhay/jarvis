@@ -792,6 +792,94 @@ function fieldInput(
   return label;
 }
 
+/** What a path field's Browse button should pick. */
+type PathKind = "directory" | "file";
+
+/** The Browse button beside a path input: opens the native picker (a folder
+ *  or a file, as the field needs) starting from whatever the field already
+ *  holds, and commits the choice exactly as typing it would have. The text
+ *  input stays — a path can still be pasted, and a remote or not-yet-created
+ *  one has to be. Cancelling the dialog changes nothing. */
+function browseButton(
+  kind: PathKind,
+  current: () => string,
+  onPick: (path: string) => void,
+): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "settings-add settings-browse";
+  button.textContent = MESSAGES.settingsBrowse(PRIMARY_LANGUAGE);
+  button.addEventListener("click", () => {
+    const start = current();
+    void window.jarvis
+      .pickFiles({
+        directory: kind === "directory",
+        ...(start === "" ? {} : { defaultPath: start }),
+      })
+      .then((paths) => {
+        const picked = paths[0];
+        if (picked !== undefined) onPick(picked);
+      })
+      .catch((error: unknown) => {
+        console.error(`settings: browse failed: ${String(error)}`);
+      });
+  });
+  return button;
+}
+
+/** fieldInput for a path: the same labelled input, with Browse beside it.
+ *  `toValue` turns the picked absolute path into what the field stores (an
+ *  editor root is project-relative) or refuses it by returning undefined. */
+function fieldPath(
+  labelText: string,
+  value: string,
+  kind: PathKind,
+  onChange: (value: string) => void,
+  options: { start?: () => string; toValue?: (picked: string) => string | undefined } = {},
+): HTMLElement {
+  const label = fieldInput(labelText, value, onChange);
+  const input = label.querySelector("input") as HTMLInputElement;
+  const wrap = document.createElement("span");
+  wrap.className = "settings-path";
+  input.replaceWith(wrap);
+  wrap.append(
+    input,
+    browseButton(
+      kind,
+      () => options.start?.() ?? input.value,
+      (picked) => {
+        const next = options.toValue === undefined ? picked : options.toValue(picked);
+        if (next === undefined) return;
+        input.value = next;
+        // The same event typing-then-blur raises, so the field's own
+        // listener commits it and nothing here duplicates that path.
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+      },
+    ),
+  );
+  return label;
+}
+
+/** Browse for a field that lives in index.html rather than in a rendered
+ *  row: the button is inserted after the input, once. */
+function attachBrowse(inputId: string, kind: PathKind): void {
+  const input = $(inputId) as HTMLInputElement;
+  const wrap = document.createElement("span");
+  wrap.className = "settings-path";
+  input.replaceWith(wrap);
+  wrap.append(
+    input,
+    browseButton(
+      kind,
+      () => input.value,
+      (picked) => {
+        input.value = picked;
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+      },
+    ),
+  );
+}
+
 /** One labelled `<select>`, committing on change — fieldInput's sibling. */
 function fieldSelect(
   labelText: string,
@@ -868,7 +956,7 @@ function renderAgentRow(id: string, agent: Omit<AgentConfig, "id">): HTMLElement
   const modelField = fieldInput("model", agent.model ?? "", (value) =>
     updateAgent(id, { model: value === "" ? undefined : value }),
   );
-  const configDirField = fieldInput("configDir", agent.configDir ?? "", (value) =>
+  const configDirField = fieldPath("configDir", agent.configDir ?? "", "directory", (value) =>
     updateAgent(id, { configDir: value === "" ? undefined : value }),
   );
 
@@ -1084,7 +1172,7 @@ function renderProjectRow(name: string, path: string): HTMLElement {
   const row = document.createElement("div");
   row.className = "settings-row";
   const nameField = fieldInput("name", name, (value) => renameProject(name, value));
-  const pathField = fieldInput("path", path, (value) => updateProject(name, value));
+  const pathField = fieldPath("path", path, "directory", (value) => updateProject(name, value));
   row.append(
     nameField,
     pathField,
@@ -1332,9 +1420,28 @@ function renderEditorRootRow(project: string, index: number, root: EditorRoot): 
   });
   // Relative to the project directory, always — parseConfig refuses an
   // absolute or climbing path, so a draft with one cannot be saved.
-  const pathField = fieldInput("path", root.path, (value) => {
-    if (value !== "") updateEditorRoot(project, index, { path: value });
-  });
+  const projectPath = draft.projects[project] ?? "";
+  const pathField = fieldPath(
+    "path",
+    root.path,
+    "directory",
+    (value) => {
+      if (value !== "") updateEditorRoot(project, index, { path: value });
+    },
+    {
+      // The dialog opens in the project, since that is the only place a
+      // valid answer can be, and hands back an absolute path the config
+      // would refuse — so it is rewritten relative to the project here.
+      start: () => projectPath,
+      toValue: (picked) => {
+        const relative = relativeToProject(picked, projectPath);
+        if (relative === undefined) {
+          showSettingsError(MESSAGES.settingsBrowseOutsideProject(project, PRIMARY_LANGUAGE));
+        }
+        return relative;
+      },
+    },
+  );
 
   row.append(
     projectField,
@@ -1344,6 +1451,22 @@ function renderEditorRootRow(project: string, index: number, root: EditorRoot): 
     removeControl(() => removeEditorRoot(project, index)),
   );
   return row;
+}
+
+/** `picked` as a path relative to the project directory — "." for the
+ *  directory itself — or undefined when it lies outside it. Separator-aware,
+ *  so "/p/acme-old" is not inside "/p/acme"; both separators are accepted
+ *  because the picker answers in the host's own. */
+export function relativeToProject(picked: string, projectPath: string): string | undefined {
+  const trim = (path: string): string => path.replace(/[\\/]+$/, "");
+  const base = trim(projectPath);
+  const target = trim(picked);
+  if (base === "") return undefined;
+  if (target === base) return ".";
+  for (const separator of ["/", "\\"]) {
+    if (target.startsWith(`${base}${separator}`)) return target.slice(base.length + 1);
+  }
+  return undefined;
 }
 
 /** A refusal that never reached a save: shown where a failed save would be. */
@@ -3361,6 +3484,9 @@ export async function savePrayerSettings(prayer: JarvisConfig["prayer"]): Promis
 // single fields and the section's own add buttons, not rebuilt per render
 // the way each section's rows are.
 function wireStaticFields(): void {
+  attachBrowse("settings-brain-cwd", "directory");
+  attachBrowse("settings-whisper-binary", "file");
+  attachBrowse("settings-whisper-model", "file");
   $("settings-brain-cwd").addEventListener("change", () => {
     if (draft === undefined) return;
     draft.brain.cwd = ($("settings-brain-cwd") as HTMLInputElement).value;

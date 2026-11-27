@@ -3294,6 +3294,12 @@
   .settings-rows { display: flex; flex-direction: column; gap: var(--s2); }
   .settings-rows[hidden] { display: none; }
 
+  /* A path input and its Browse button, as one control: the input takes the
+     room and the button keeps its own width, in a row and in a field alike. */
+  .settings-path { display: flex; align-items: center; gap: var(--s2); min-width: 0; flex: 1 1 auto; }
+  .settings-path input { flex: 1 1 auto; min-width: 0; }
+  .settings-path .settings-browse { flex: 0 0 auto; }
+
   .settings-row {
     display: flex;
     align-items: flex-end;
